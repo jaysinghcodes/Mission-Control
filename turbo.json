@@ -1,13 +1,49 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // Turbo 2 runs tasks in STRICT env mode: a task only sees env vars that are
+  // declared below (plus a few system ones like PATH/HOME). Without these
+  // lists `npm run dev` silently dropped DATABASE_URL / PORT / … and the api
+  // fell back to localhost defaults. `passThroughEnv` = available at runtime
+  // but NOT part of the cache hash (right for dev servers and DB-backed tests);
+  // `env` = available AND hashed (right for values baked into build output).
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      // Vite inlines VITE_* into the web bundle, so they must bust the cache.
+      "env": ["VITE_*"]
     },
+    // `npm run dev` → api `dev` (nest start --watch) + web `dev` (vite) in
+    // parallel. Both workspaces MUST define a `dev` script or turbo skips them.
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "PORT",
+        "HOST",
+        "WEB_ORIGIN",
+        "INGEST_TOKEN",
+        "SOCKET_TOKEN",
+        "GITHUB_TOKEN",
+        "DEEPSEEK_API_KEY",
+        "ZAI_API_KEY",
+        "HEALTH_TICK_MS",
+        "NODE_ENV",
+        "VITE_*"
+      ]
+    },
+    // `npm test` → every workspace that has a `test` script (today: api jest
+    // unit tests — no database needed). Workspaces without one are skipped.
+    // No build artifacts to cache (coverage only appears with test:cov).
+    "test": {
+      "outputs": []
+    },
+    // `npm run test:e2e` → api e2e against a real, migrated Postgres at
+    // DATABASE_URL. Never cached: the result depends on live DB state.
+    "test:e2e": {
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL"]
     },
     "lint": {}
   }
