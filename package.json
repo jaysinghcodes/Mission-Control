@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint"
   },
   "devDependencies": {

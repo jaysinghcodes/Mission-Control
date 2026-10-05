@@ -1,9 +1,19 @@
-import { useState } from 'react'
-import { useApi, apiPost } from '../hooks/useApi'
+import { useEffect, useRef, useState } from 'react'
+import { useApi, apiSend } from '../hooks/useApi'
 import { Card, Chip, PillButton } from '../components/ui'
+import { ticketCreateQueue } from '../lib/serialQueue'
 
 /**
  * Backlog — real backlog tickets from the API, ranked table with create CTA.
+ * - Create sends status: "backlog" so items land here. (Since PR #20 that is
+ *   also the API default — DEFAULT_CREATE_STATUS — but we send it explicitly
+ *   so this page keeps working if product flips the default again.)
+ * - Each row has a "→ To-Do" button that PATCHes the ticket onto the kanban
+ *   board — the Backlog → To-Do move had no control before PR #20 (Atlas:
+ *   every move must be a button; drag-and-drop is a separate follow-up).
+ * - Write failures show a gentle inline notice; the list always re-syncs
+ *   with the server afterwards.
+ * - Creates are QUEUED, never dropped (QA-1 #1): see create().
  */
 
 interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; createdAt: string }
@@ -15,19 +25,112 @@ const PRIO: Record<string, { bg: string; fg: string }> = {
   low: { bg: 'var(--mc-inner)', fg: 'var(--mc-sub)' },
 }
 
+/** How long an inline notice stays up before fading on its own. */
+const NOTICE_MS = 6000
+
 export default function Backlog() {
-  const { data, refetch } = useApi<TicketsResp>('/tickets?status=backlog', { pollMs: 15000 })
+  const { data, refetch, mutate } = useApi<TicketsResp>('/tickets?status=backlog', { pollMs: 15000 })
   const [title, setTitle] = useState('')
-  const [busy, setBusy] = useState(false)
+  // How many of THIS page's creates are queued or in flight. Display-only
+  // (drives the "Saving…" button label) — it NEVER gates a submit. The old
+  // `busy` flag did (`if (!title || busy) return`), which is how a second
+  // create ~1 s after the first was silently dropped (QA-1 #1).
+  const [saving, setSaving] = useState(0)
+  // Row ids with a "→ To-Do" move in flight (disables that row's button so a
+  // double-click doesn't fire two identical PATCHes).
+  const [moving, setMoving] = useState<Set<string>>(new Set())
+  // Inline notice: success ("MC-151 moved to To-Do") or a gentle error.
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Titles whose create failed and that the current notice is reporting.
+  // Accumulated so a burst of failures (API down with several creates
+  // queued) names EVERY lost title instead of each failure overwriting the
+  // last one's notice a few ms later. Reset when the notice goes away.
+  const failedCreates = useRef<string[]>([])
   const rows = data?.tickets ?? []
 
-  async function create() {
+  /** Hide the notice and forget the failed-create titles it was listing. */
+  function clearNotice() {
+    setNotice(null)
+    failedCreates.current = []
+  }
+
+  function showNotice(text: string, tone: 'ok' | 'warn') {
+    setNotice({ text, tone })
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(clearNotice, NOTICE_MS)
+  }
+  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
+
+  /**
+   * "+ New ticket" (button or Enter). QA-1 #1 fix — every submit is either
+   * SAVED or shows a VISIBLE error; nothing is dropped silently.
+   * (Same logic as Tickets.tsx create(); the full rationale lives there.)
+   *
+   * Old bug: `if (!t || busy) return` silently ignored a submit made while
+   * the previous POST was in flight, and that POST's `setTitle('')` then
+   * wiped the title typed for the next ticket.
+   *
+   * Now:
+   *   - Snapshot + clear the input at submit time → clears exactly the title
+   *     being submitted, frees the input for the next one, and makes a
+   *     double-Enter harmless (2nd press sees an empty input → `!t`).
+   *   - POST goes through the shared ticketCreateQueue: one create at a
+   *     time, in submit order (count-based MC-N keys on the API, see
+   *     serialQueue.ts) — queued, never ignored.
+   *   - Failure → warn notice naming the title + server reason, and the title
+   *     goes back into the input only if the input is still empty.
+   */
+  function create() {
     const t = title.trim()
-    if (!t || busy) return
-    setBusy(true)
-    await apiPost('/tickets', { title: t, priority: 'med' })
-    setTitle('')
-    setBusy(false)
+    if (!t) return
+    setTitle('') // clear ONLY what we're submitting
+    setSaving((n) => n + 1)
+    // Explicit status: 'backlog' — matches today's API default, but stays
+    // correct even if DEFAULT_CREATE_STATUS changes (see header comment).
+    // apiSend never throws, so the queued job always resolves; branch on r.ok.
+    void ticketCreateQueue
+      .run(() => apiSend<{ ticket: Ticket }>('POST', '/tickets', { title: t, priority: 'med', status: 'backlog' }))
+      .then((r) => {
+        if (r.ok) return
+        failedCreates.current.push(t)
+        const names = failedCreates.current.map((x) => `"${x}"`).join(', ')
+        showNotice(`Couldn't create ${names} — ${r.error}`, 'warn')
+        // Never clobber a title typed while this create was queued/in flight.
+        setTitle((cur) => (cur.trim() ? cur : t))
+      })
+      .finally(() => {
+        setSaving((n) => n - 1)
+        void refetch() // re-sync with what the server committed
+      })
+  }
+
+  /**
+   * Backlog → To-Do via PATCH /tickets/:id { status: 'todo' }.
+   * On success the row is removed locally right away (the server confirmed it
+   * is no longer `backlog`), then we refetch so the list matches the server.
+   * On failure (404 = already deleted/moved elsewhere, 400, offline) we show
+   * why and refetch — no optimistic guessing.
+   */
+  async function moveToTodo(row: Ticket) {
+    if (moving.has(row.id)) return
+    setMoving((s) => new Set(s).add(row.id))
+    const r = await apiSend<{ ticket: Ticket }>('PATCH', `/tickets/${row.id}`, { status: 'todo' })
+    const label = row.key ?? row.id.slice(0, 8)
+    if (r.ok) {
+      mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.filter((t) => t.id !== row.id) } : prev))
+      showNotice(`${label} moved to To-Do — find it on the Tickets board.`, 'ok')
+    } else {
+      showNotice(
+        r.status === 404 ? `${label} no longer exists — the list has been refreshed.` : `Couldn't move ${label} to To-Do — ${r.error}`,
+        'warn',
+      )
+    }
+    setMoving((s) => {
+      const next = new Set(s)
+      next.delete(row.id)
+      return next
+    })
     void refetch()
   }
 
@@ -42,17 +145,33 @@ export default function Backlog() {
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void create()}
+            onKeyDown={(e) => e.key === 'Enter' && create()}
             placeholder="New backlog item…"
             className="h-9 w-64 rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
           />
-          <PillButton label="+  New ticket" on onClick={() => void create()} />
+          {/* Label-only progress hint (same pattern as the row's "Moving…"); the
+              button stays clickable — extra submits queue, never dropped. */}
+          <PillButton label={saving > 0 ? 'Saving…' : '+  New ticket'} on onClick={create} />
         </div>
       </div>
 
+      {notice && (
+        <div
+          role="status"
+          className={`mt-4 flex items-center justify-between rounded-[10px] px-4 py-2 text-[12.5px] ${
+            notice.tone === 'ok' ? 'bg-mc-greenbg text-mc-greentext' : 'bg-mc-orangebg text-mc-orangetext'
+          }`}
+        >
+          <span>{notice.text}</span>
+          <button type="button" onClick={clearNotice} className="ml-4 text-[11px] font-semibold hover:opacity-80">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <Card className="mt-8 rounded-2xl px-0 pb-2 overflow-hidden">
         <div className="flex px-[18px] pt-4 pb-2">
-          {['TICKET', 'TITLE', 'PRIORITY', 'STATUS', 'CREATED'].map((h) => (
+          {['TICKET', 'TITLE', 'PRIORITY', 'STATUS', 'CREATED', 'ACTIONS'].map((h) => (
             <div key={h} className="text-[11px] font-semibold uppercase tracking-[0.1em] text-mc-faint" style={{ width: h === 'TITLE' ? 320 : 140 }}>
               {h}
             </div>
@@ -72,6 +191,17 @@ export default function Backlog() {
             </div>
             <div className="text-[12px] text-mc-sub" style={{ width: 140 }}>{row.status}</div>
             <div className="text-[12px] text-mc-faint" style={{ width: 140 }}>{new Date(row.createdAt).toLocaleDateString()}</div>
+            {/* Backlog → To-Do: the only way onto the kanban board from here. */}
+            <div style={{ width: 140 }}>
+              <button
+                type="button"
+                onClick={() => void moveToTodo(row)}
+                disabled={moving.has(row.id)}
+                className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+              >
+                {moving.has(row.id) ? 'Moving…' : '→ To-Do'}
+              </button>
+            </div>
           </div>
         ))}
       </Card>
