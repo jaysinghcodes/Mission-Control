@@ -91,7 +91,7 @@
 <rect x="262" y="306" width="34" height="34" rx="9" fill="#e8f1fd" opacity="1"/>
 <text x="278" y="328" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0071e3" text-anchor="start" opacity="1">⧉</text>
 <text x="312" y="320" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#0071e3" text-anchor="start" opacity="1" letter-spacing="0.06em">Device pairing</text>
-<text x="312" y="338" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#1d1d1f" text-anchor="start" opacity="1">New device: iPhone (Jays iPhone 15) requests operator access</text>
+<text x="312" y="338" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#1d1d1f" text-anchor="start" opacity="1">New device: iPhone (Operator iPhone 15) requests operator access</text>
 <text x="850" y="320" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#aeaeb2" text-anchor="end" opacity="1">11 min ago</text>
 <rect x="828" y="330" width="76" height="28" rx="14.0" fill="#34c759" stroke="none" stroke-width="1" opacity="1"/>
 <text x="866.0" y="348.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#ffffff" text-anchor="middle" opacity="1">Approve</text>

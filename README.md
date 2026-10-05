@@ -32,7 +32,7 @@ Prereqs: Docker + Docker Compose, Node 20.17+ (or 22.9+), npm, git.
 git clone https://github.com/jaysinghcodes/mission-control.git
 cd mission-control
 npm ci
-cp .env.example .env          # set INGEST_TOKEN (or leave blank → compose uses dev-ingest-token)
+cp .env.example .env          # replace INGEST_TOKEN=change-me with your own (blank → compose uses dev-ingest-token)
 docker compose up --build     # Postgres :5432, API :3000, web :5173
 npm run seed:demo             # optional but recommended — sample agents/tickets/calendar
 ```
