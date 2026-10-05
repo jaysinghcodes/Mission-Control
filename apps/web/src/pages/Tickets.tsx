@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
-import { Card, Chip, Inner, PillButton, SectionLabel } from '../components/ui'
-import { AgentAvatar } from '../components/AgentAvatar'
+import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, Banner, SearchInput } from '../components/shell'
 import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { rosterDisplayName } from '../data/roster'
 import { ticketCreateQueue } from '../lib/serialQueue'
@@ -28,12 +27,6 @@ import { ticketCreateQueue } from '../lib/serialQueue'
 
 interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; projectId: string | null; createdAt: string }
 interface TicketsResp { tickets: Ticket[] }
-
-const PRIO: Record<string, { bg: string; fg: string }> = {
-  high: { bg: 'var(--mc-redbg)', fg: 'var(--mc-redtext)' },
-  med: { bg: 'var(--mc-orangebg)', fg: 'var(--mc-orangetext)' },
-  low: { bg: 'var(--mc-inner)', fg: 'var(--mc-sub)' },
-}
 
 /** Option B columns (MC-214, locked): `inprogress` is a legacy alias for Build. */
 const COLUMNS = [
@@ -130,7 +123,23 @@ export default function Tickets() {
   // activity event — belt and braces.)
   const movingRef = useRef(new Set<string>())
   const [moving, setMoving] = useState<ReadonlySet<string>>(new Set())
+  const [showDone, setShowDone] = useState(false)
+  const [query, setQuery] = useState('')
   const tickets = data?.tickets ?? []
+  const approvalsQ = useApi<{ approvals: { desc: string; tag: string }[] }>('/approvals', { pollMs: 15000 })
+
+  function needsYou(t: Ticket): boolean {
+    const blob = (approvalsQ.data?.approvals ?? []).map((a) => `${a.tag} ${a.desc}`).join(' ').toLowerCase()
+    if (!blob) return false
+    const key = (t.key ?? '').toLowerCase()
+    return (!!key && blob.includes(key.toLowerCase())) || blob.includes(t.title.toLowerCase())
+  }
+
+  function openBacklog() {
+    const next = new URLSearchParams(params)
+    next.set('view', 'backlog')
+    setParams(next, { replace: true })
+  }
 
   /** Hide the notice and forget the failed-create titles it was listing. */
   function clearNotice() {
@@ -314,72 +323,80 @@ export default function Tickets() {
     return opts
   }
 
-  const metrics = [
-    { label: 'To-Do', value: String(tickets.filter((t) => inColumn(t, COLUMNS[0])).length) },
-    { label: 'Build', value: String(tickets.filter((t) => inColumn(t, COLUMNS[1])).length) },
-    { label: 'QA', value: String(tickets.filter((t) => inColumn(t, COLUMNS[2])).length) },
-    { label: 'Review', value: String(tickets.filter((t) => inColumn(t, COLUMNS[3])).length) },
-    { label: 'Done', value: String(tickets.filter((t) => inColumn(t, COLUMNS[4])).length) },
-  ]
+  const shown = tickets.filter((t) => {
+    const q = query.trim().toLowerCase()
+    if (!q) return true
+    return t.title.toLowerCase().includes(q) || (t.key ?? '').toLowerCase().includes(q) || (t.assignee ?? '').toLowerCase().includes(q)
+  })
+  const openCols = COLUMNS.filter((c) => c.status !== 'done')
+  const doneRows = shown.filter((t) => inColumn(t, COLUMNS[4]))
+  const openCount = shown.filter((t) => !inColumn(t, COLUMNS[4]) && t.status !== 'backlog').length
+  const needs = shown.filter((t) => needsYou(t)).length
+  const summary = !data
+    ? (loading && !loadError ? 'Loading the board…' : 'Board not loaded')
+    : `${openCount} open${needs ? ` · ${needs} needs you` : ''} · ${doneRows.length} done`
+
+  const DOT: Record<string, string> = { todo: 'var(--mc-gray)', build: 'var(--mc-blue)', qa: 'var(--mc-orange)', review: 'var(--mc-teal)', done: 'var(--mc-green)' }
+
+  function projectControl(t: Ticket) {
+    const current = allProjects.find((p) => p.id === t.projectId) ?? null
+    if (t.projectId && !projectsQ.data) {
+      return <div className="text-[12px] text-mc-sub">Loading project…</div>
+    }
+    if (t.projectId && (current?.archivedAt || !current)) {
+      const label = current ? `${current.name} (archived)` : 'Archived project'
+      return (
+        <div className="text-[12px] text-mc-sub" aria-readonly="true" title="This project is archived. Unarchive it on Projects before reassigning.">
+          {label}
+        </div>
+      )
+    }
+    return (
+      <select
+        aria-label={`Project for ${t.key ?? t.title}`}
+        value={t.projectId ?? ''}
+        disabled={moving.has(t.id)}
+        onChange={(e) => void assignProject(t.id, e.target.value || null)}
+        className="h-7 max-w-full rounded-lg bg-mc-ctl px-2 text-[11px] text-mc-text outline-none disabled:opacity-50"
+      >
+        <option value="">No project</option>
+        {optionsFor(t.projectId).filter((p) => !p.label.endsWith('(archived)')).map((p) => (
+          <option key={p.id} value={p.id}>{p.label}</option>
+        ))}
+      </select>
+    )
+  }
 
   return (
-    <div className="p-6">
-      {/* Header wraps at ~768px (sidebar 220px leaves ~548px). The create
-          controls drop to the next line instead of being clipped off the right. */}
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0 max-w-xl">
-          <div className="text-[22px] font-semibold">Tickets</div>
-          <div className="mt-1 text-[13px] text-mc-sub">Kanban — create a ticket, then move it To-Do → Build → QA → Review → Done.</div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && create()}
-            placeholder="New ticket title…"
-            className="h-9 w-64 max-w-full rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
-          />
-          {/* Label-only progress hint (same pattern as Backlog's "Moving…"); the
-              button stays clickable — extra submits queue, they're never dropped.
-              shrink-0: a narrow row must not squash the label. */}
-          <PillButton label={saving > 0 ? 'Saving…' : '+ New ticket'} on onClick={create} className="shrink-0" />
-        </div>
-      </div>
+    <div>
+      <PageHeader
+        title="Tasks"
+        summary={summary}
+        tools={
+          <>
+            <Segmented labels={['Board', 'Backlog']} active={0} onChange={(i) => { if (i === 1) openBacklog() }} ariaLabel="Tasks view" />
+            <SearchInput value={query} onChange={setQuery} placeholder="Search" label="Search tasks" />
+            <Btn kind="primary" onClick={create}>{saving > 0 ? 'Saving…' : 'New task'}</Btn>
+          </>
+        }
+      />
 
-      {/* Load failure (QA-1 polish item 1). useApi keeps the last good board
-          on a failed refresh, so we must SAY it is not current — otherwise a
-          dead API looks like a quiet board. Same notice styling as the write
-          errors below; no new design. Clears itself on the next good load. */}
-      {loadError && (
-        <div role="alert" className="mt-4 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-          {/* Reason in parentheses: server messages may carry their own "?"/"." */}
-          Couldn't load tickets ({loadError}).{' '}
-          {data ? 'Showing the last loaded board; retrying automatically.' : 'Retrying automatically.'}
-        </div>
-      )}
-
-      {notice && (
-        <div
-          role="status"
-          className="mt-4 flex items-center justify-between rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext"
-        >
-          <span>{notice}</span>
-          <button type="button" onClick={clearNotice} className="ml-4 text-[11px] font-semibold hover:opacity-80">
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Project filter. The value is the hash query (`?project=`), so a
-          refresh shows the same slice. "All projects" clears it. */}
-      <div className="mt-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && create()}
+          placeholder="New task title…"
+          aria-label="New task title"
+          className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
+        />
         <label className="flex items-center gap-2 text-[12.5px] text-mc-sub">
           Project
           <select
             aria-label="Filter by project"
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
-            className="h-9 max-w-full rounded-full border border-mc-border bg-mc-card px-3 text-[13px] text-mc-text outline-none focus:border-mc-primary"
+            className="h-8 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] text-mc-text outline-none"
           >
             <option value="">All projects</option>
             {activeProjects.map((p) => (
@@ -391,187 +408,109 @@ export default function Tickets() {
           </select>
         </label>
         {selectedProject && (
-          <Link to={`/projects/${selectedProject.id}`} className="text-[12px] font-semibold text-mc-primary hover:underline">
-            {selectedProject.doneCount} of {selectedProject.ticketCount} done · open project
+          <Link to={`/projects/${selectedProject.id}`} className="text-[12px] font-semibold text-mc-accent">
+            {selectedProject.doneCount} of {selectedProject.ticketCount} done
           </Link>
         )}
-        {projectFilter && !selectedProject && projectsQ.data && (
-          <span className="text-[12px] text-mc-faint">That project is not on the list. The board below is filtered anyway.</span>
-        )}
       </div>
 
-      {/* Five columns are a fixed 260px each (w-max row), same idea as the
-          Backlog's min-width table. A CSS grid with minmax(0, 1fr) let the
-          columns shrink to the sidebar's leftover width at ~768px: titles
-          clipped ("TO-…"), move buttons spilled past the card, assignees
-          collapsed to a letter, and ids wrapped. The row is wider than a
-          768 or 1024 content area, so the board scrolls sideways and each
-          column stays readable. Layout only — create/move is unchanged. */}
-      <div className="mt-6 min-w-0 overflow-x-auto pb-1">
+      {loadError && (
+        <Banner>
+          Couldn't load tickets ({loadError}). {data ? 'Showing the last loaded board; retrying automatically.' : 'Retrying automatically.'}
+        </Banner>
+      )}
+      {notice && <Banner onDismiss={clearNotice}>{notice}</Banner>}
+
+      <div className="overflow-x-auto pb-2">
         <div className="flex w-max gap-4">
-        {COLUMNS.map((col) => {
-          const rows = tickets.filter((t) => inColumn(t, col))
-          return (
-            <Card key={col.title} className="w-[260px] shrink-0 px-3.5 py-3 min-h-[380px]">
-              <div className="flex items-center justify-between gap-2 px-1">
-                <SectionLabel className="whitespace-nowrap">{col.title}</SectionLabel>
-                <span className="text-[11px] font-semibold text-mc-sub">{rows.length}</span>
+          {openCols.map((col) => {
+            const rows = shown.filter((t) => inColumn(t, col))
+            return (
+              <div key={col.title} className="w-[260px] shrink-0">
+                <div className="mb-3 flex items-center gap-2 px-1">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: DOT[col.status] }} />
+                  <span className="whitespace-nowrap text-[15px] font-semibold">{col.title}</span>
+                  <span className="text-[13px] text-mc-sub">{rows.length}</span>
+                </div>
+                <div className="space-y-3">
+                  {rows.length === 0 && (
+                    <div className="px-1 py-4 text-[12px] text-mc-sub">
+                      {!data ? (loading && !loadError ? 'Loading…' : 'Not loaded — see the notice above.') : `Nothing in ${col.title} yet.`}
+                    </div>
+                  )}
+                  {rows.map((t) => {
+                    const face = assigneeFace(t.assignee, roster)
+                    const flagged = needsYou(t)
+                    return (
+                      <SoftCard key={t.id} className="px-3.5 py-3">
+                        {flagged && <StatusChip label="Needs you" tone="red" className="mb-2" />}
+                        <div className="text-[14px] font-semibold leading-snug break-words">{t.title}</div>
+                        <div className="mt-2">{projectControl(t)}</div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <Face agent={face.agent} agents={face.agents} px={28} />
+                          <span className="min-w-0 flex-1">
+                            <AgentName name={face.agent.name} role={'role' in face.agent ? face.agent.role : null} />
+                          </span>
+                          <span className="whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? t.id.slice(0, 8)}</span>
+                        </div>
+                        <div className="mt-2.5 flex max-w-full flex-wrap items-center gap-2">
+                          {t.status === 'todo' && (
+                            <>
+                              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">Start</button>
+                              <button type="button" onClick={() => void move(t.id, 'backlog')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">Backlog</button>
+                            </>
+                          )}
+                          {(t.status === 'build' || t.status === 'inprogress') && (
+                            <>
+                              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">QA</button>
+                              <button type="button" onClick={() => void move(t.id, 'todo')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">To-Do</button>
+                            </>
+                          )}
+                          {t.status === 'qa' && (
+                            <>
+                              <button type="button" onClick={() => void move(t.id, 'review')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-orangebg px-3 text-[10.5px] font-semibold text-mc-orangetext disabled:opacity-50">Review</button>
+                              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">Build</button>
+                            </>
+                          )}
+                          {t.status === 'review' && (
+                            <>
+                              <button type="button" onClick={() => void move(t.id, 'done')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-greenbg px-3 text-[10.5px] font-semibold text-mc-greentext disabled:opacity-50">Done</button>
+                              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">QA</button>
+                            </>
+                          )}
+                        </div>
+                      </SoftCard>
+                    )
+                  })}
+                </div>
               </div>
-              <div className="mt-3 space-y-3">
-                {rows.length === 0 && (
-                  <div className="text-[12px] text-mc-faint px-1 py-4">
-                    {/* Before the first good load there is NO board to describe:
-                        say "Loading…" (or point at the error) rather than claim
-                        the column is empty (QA-1 polish item 1). */}
-                    {!data ? (loading && !loadError ? 'Loading…' : 'Not loaded — see the notice above.') : col.title === 'Done' ? 'Nothing shipped yet.' : col.title === 'To-Do' ? 'Empty — create a ticket above.' : `Nothing in ${col.title} yet.`}
-                  </div>
-                )}
-                {rows.map((t) => (
-                  <Inner key={t.id} className="rounded-[10px] px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] font-semibold text-mc-faint whitespace-nowrap">{t.key ?? t.id.slice(0, 8)}</span>
-                      <Chip label={t.priority.toUpperCase()} bg={PRIO[t.priority]?.bg ?? PRIO.med.bg} fg={PRIO[t.priority]?.fg ?? PRIO.med.fg} h={18} fs="text-[10px]" />
-                    </div>
-                    {/* Full title, wrapped — never ellipsized. break-words keeps a
-                        long unbroken token inside the column. */}
-                    <div className="mt-1.5 text-[13px] font-semibold leading-snug break-words">{t.title}</div>
-                    {/* One project per ticket. Value "" is unassigned (API null).
-                        Disabled while a move or another assign is in flight. */}
-                    <label className="mt-2 block">
-                      <span className="sr-only">Project for {t.key ?? t.title}</span>
-                      <select
-                        aria-label={`Project for ${t.key ?? t.title}`}
-                        value={t.projectId ?? ''}
-                        disabled={moving.has(t.id)}
-                        onChange={(e) => void assignProject(t.id, e.target.value || null)}
-                        className="h-7 w-full rounded-lg border border-mc-border bg-mc-card px-2 text-[11px] text-mc-text outline-none focus:border-mc-primary disabled:opacity-50"
-                      >
-                        <option value="">No project</option>
-                        {optionsFor(t.projectId).map((p) => (
-                          <option key={p.id} value={p.id}>{p.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="mt-2.5 flex items-center gap-2">
-                      {/* Same sticker as Team / Office / Live Activity — not the generic bot. */}
-                      <AgentAvatar {...assigneeFace(t.assignee, roster)} size={0.75} />
-                      {/* Wrap on spaces inside the fixed column. break-words in a shrunk
-                          column was collapsing the name to a single letter. */}
-                      <span className="min-w-0 text-[11px] text-mc-sub">{t.assignee ?? 'unassigned'}</span>
-                    </div>
-                    {/* Pipeline actions — full movement through all 5 columns (MC-214).
-                        Every move button is disabled while this card has a PATCH
-                        in flight (item 2; same disabled:opacity-50 look as
-                        Backlog's "Moving…" button — no new styles).
-                        flex-wrap + shrink-0: at a narrow column the second button
-                        drops to the next line whole, it is not cut in half. */}
-                    <div className="mt-2.5 flex max-w-full flex-wrap items-center gap-2">
-                      {t.status === 'todo' && (
-                        <>
-                          {/* Start sends the canonical `build` (MC-214); the API
-                              still accepts legacy `inprogress` from older clients. */}
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'build')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ▶ Start
-                          </button>
-                          {/* Symmetric with Backlog's "→ To-Do": every move has a button. */}
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'backlog')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ↺ Backlog
-                          </button>
-                        </>
-                      )}
-                      {(t.status === 'build' || t.status === 'inprogress') && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'qa')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ✓ QA
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'todo')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ↺ To-Do
-                          </button>
-                        </>
-                      )}
-                      {t.status === 'qa' && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'review')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-orangebg text-mc-orangetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ✓ Review
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'build')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ↺ Build
-                          </button>
-                        </>
-                      )}
-                      {t.status === 'review' && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'done')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-greenbg text-mc-greentext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ✓ Done
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void move(t.id, 'qa')}
-                            disabled={moving.has(t.id)}
-                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
-                          >
-                            ↺ QA
-                          </button>
-                        </>
-                      )}
-                      {t.status === 'done' && (
-                        <span className="text-[10.5px] text-mc-greentext font-semibold">✓ shipped</span>
-                      )}
-                    </div>
-                  </Inner>
+            )
+          })}
+          <div className="w-[168px] shrink-0">
+            <div className="mb-3 flex items-center gap-2 px-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-mc-green" />
+              <span className="text-[15px] font-semibold">Done</span>
+              <span className="text-[13px] text-mc-sub">{doneRows.length}</span>
+            </div>
+            <SoftCard className="px-3 py-4 text-center">
+              <div className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-mc-greenbg text-mc-greentext">✓</div>
+              <div className="mt-2 text-[12px] text-mc-sub2">{doneRows.length} done</div>
+              <button type="button" onClick={() => setShowDone((v) => !v)} className="mt-2 text-[13px] font-semibold text-mc-accent">
+                {showDone ? 'Hide' : 'Show all'}
+              </button>
+            </SoftCard>
+            {showDone && (
+              <div className="mt-3 space-y-2">
+                {doneRows.map((t) => (
+                  <SoftCard key={t.id} className="px-3 py-2">
+                    <div className="text-[13px] font-semibold break-words">{t.title}</div>
+                    <div className="mt-1 whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? ''}</div>
+                  </SoftCard>
                 ))}
               </div>
-            </Card>
-          )
-        })}
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* Same idea as the board: five tiles scroll instead of squashing labels. */}
-      <div className="mt-6 min-w-0 overflow-x-auto pb-1">
-      <div className="flex w-max gap-4">
-        {metrics.map((m) => (
-          <Card key={m.label} className="w-[140px] shrink-0 px-3 py-2">
-            <div className="text-[18px] font-semibold">{m.value}</div>
-            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-mc-faint">{m.label}</div>
-          </Card>
-        ))}
-      </div>
       </div>
     </div>
   )

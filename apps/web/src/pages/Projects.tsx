@@ -1,64 +1,74 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
-import { Card, PillButton } from '../components/ui'
-import type { Project, ProjectsResp } from '../types'
+import type { Agent, AgentsResp, Project, ProjectsResp } from '../types'
+import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, EmptyState, Banner, Toast, FieldError } from '../components/shell'
+import { agentCaption } from '../data/roster'
 
 /**
- * Projects list — /#/projects (ticket 4).
- *
- * Create, rename, archive. The API's default list hides archived projects;
- * this page asks for `archived=all` so the archived ones can sit in a
- * collapsed section instead of vanishing with no way back. The open list
- * is still only the active projects.
- *
- * Blank and duplicate names are NOT caught here. The request goes to the
- * API, which answers 400 / 409, and that message is what the notice shows.
+ * Projects — ticket 4, drawn as the Apple list.
+ * Name errors stay in the field and show inline. A success toast replaces
+ * the error banner. Archive is on the row (hover on a finished project).
  */
 
-const NOTICE_MS = 6000
+const TOAST_MS = 4000
 
-/** "1 of 2" — the done count over every ticket on the project. */
-function progress(p: Project): string {
-  return `${p.doneCount} of ${p.ticketCount}`
+function lead(project: Project, ticketsNote: string | undefined, roster: Agent[]): Agent | { id: string; name: string; role: string | null; status: string } {
+  const hint = (ticketsNote ?? project.name).toLowerCase()
+  const hit = roster.find((a) => hint.includes(a.name.toLowerCase()) || hint.includes(agentCaption(a.name, a.role).name.toLowerCase()))
+  return hit ?? roster[0] ?? { id: project.id, name: 'Agent', role: null, status: 'idle' }
 }
 
 export default function Projects() {
-  // archived=all so Unarchive has something to show. The visible list below
-  // still drops archived rows — that is the default list.
   const { data, loading, errorMessage: loadError, refetch } = useApi<ProjectsResp>('/projects?archived=all', { pollMs: 15000 })
+  const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const roster = rosterQ.data?.agents ?? []
+  const [filter, setFilter] = useState(0)
+  const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
+  const [nameError, setNameError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
-  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [draftError, setDraftError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const projects = data?.projects ?? []
   const active = projects.filter((p) => !p.archivedAt)
   const archived = projects.filter((p) => p.archivedAt)
+  const rows = filter === 1 ? archived : filter === 2 ? projects : active
+  const done = active.reduce((s, p) => s + p.doneCount, 0)
+  const total = active.reduce((s, p) => s + p.ticketCount, 0)
+  const summary = data ? `${active.length} active · ${done} of ${total} tasks done` : 'Loading projects…'
 
-  function showNotice(msg: string) {
-    setNotice(msg)
-    if (noticeTimer.current) clearTimeout(noticeTimer.current)
-    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS)
+  function succeed(msg: string) {
+    setBanner(null)
+    setNameError(null)
+    setDraftError(null)
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), TOAST_MS)
   }
-  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
 
   async function create() {
     if (saving) return
     setSaving(true)
-    // Send the name as typed, including whitespace. The API trims and
-    // returns 400 when nothing is left — we do not pre-empt that, so the
-    // notice is the server's message.
     const r = await apiSend<{ project: Project }>('POST', '/projects', { name })
     setSaving(false)
     if (!r.ok) {
-      showNotice(r.error ?? 'Could not create the project')
+      const msg = r.error ?? 'Could not create the project'
+      setNameError(msg)
+      setBanner(msg)
       return
     }
+    const created = name.trim()
     setName('')
+    setCreating(false)
+    succeed(`Created “${created || r.data?.project.name || 'project'}”.`)
     void refetch()
   }
 
@@ -68,180 +78,155 @@ export default function Projects() {
     const r = await apiSend<{ project: Project }>('PATCH', `/projects/${id}`, { name: draft })
     setBusyId(null)
     if (!r.ok) {
-      showNotice(r.error ?? 'Could not rename the project')
+      const msg = r.error ?? 'Could not rename the project'
+      setDraftError(msg)
+      setBanner(msg)
       return
     }
     setEditingId(null)
+    succeed(`Renamed to “${draft.trim()}”.`)
     void refetch()
   }
 
-  async function setArchived(id: string, archivedFlag: boolean) {
+  async function setArchived(id: string, archivedFlag: boolean, label: string) {
     if (busyId) return
     setBusyId(id)
     const r = await apiSend<{ project: Project }>('PATCH', `/projects/${id}`, { archived: archivedFlag })
     setBusyId(null)
     if (!r.ok) {
-      showNotice(r.error ?? 'Could not update the project')
+      setBanner(r.error ?? 'Could not update the project')
       return
     }
+    succeed(archivedFlag ? `Archived “${label}”.` : `Unarchived “${label}”.`)
     void refetch()
   }
 
   return (
-    <div className="p-6">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0 max-w-xl">
-          <div className="text-[22px] font-semibold">Projects</div>
-          <div className="mt-1 text-[13px] text-mc-sub">
-            Group tickets. A ticket sits in one project, or in none. Archiving hides a project here and leaves its tickets on the board.
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void create()}
-            placeholder="New project name…"
-            aria-label="New project name"
-            className="h-9 w-64 max-w-full rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
-          />
-          <PillButton label={saving ? 'Saving…' : '+ New project'} on onClick={() => void create()} className="shrink-0" />
-        </div>
-      </div>
+    <div>
+      <PageHeader
+        title="Projects"
+        summary={summary}
+        tools={
+          <>
+            <Segmented labels={['Active', 'Archived', 'All']} active={filter} onChange={setFilter} ariaLabel="Project filter" />
+            <Btn kind="primary" onClick={() => { setCreating(true); setNameError(null) }}>New project</Btn>
+          </>
+        }
+      />
 
       {loadError && (
-        <div role="alert" className="mt-4 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-          Couldn't load projects ({loadError}).{' '}
-          {data ? 'Showing the last loaded list; retrying automatically.' : 'Retrying automatically.'}
-        </div>
+        <Banner>Couldn't load projects ({loadError}). {data ? 'Showing the last loaded list; retrying automatically.' : 'Retrying automatically.'}</Banner>
       )}
+      {banner && <Banner onDismiss={() => setBanner(null)}>{banner}</Banner>}
 
-      {notice && (
-        <div role="status" className="mt-4 flex items-center justify-between rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)} className="ml-4 text-[11px] font-semibold hover:opacity-80">
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      <div className="mt-6 space-y-3">
-        {active.length === 0 && (
-          <Card className="px-5 py-8">
-            <div className="text-[13px] text-mc-faint">
-              {!data
-                ? loading && !loadError
-                  ? 'Loading…'
-                  : 'Not loaded — see the notice above.'
-                : 'No projects yet. Name one above — tickets can be attached from the Tickets board.'}
-            </div>
-          </Card>
-        )}
-        {active.map((p) => (
-          <ProjectRow
-            key={p.id}
-            project={p}
-            editing={editingId === p.id}
-            draft={draft}
-            busy={busyId === p.id}
-            onDraft={setDraft}
-            onStartEdit={() => { setEditingId(p.id); setDraft(p.name) }}
-            onCancelEdit={() => setEditingId(null)}
-            onRename={() => void rename(p.id)}
-            onArchive={() => void setArchived(p.id, true)}
-          />
-        ))}
-      </div>
-
-      {archived.length > 0 && (
-        <details className="mt-8">
-          <summary className="cursor-pointer text-[12px] font-semibold uppercase tracking-[0.08em] text-mc-faint">
-            Archived ({archived.length})
-          </summary>
-          <p className="mt-2 text-[12.5px] text-mc-sub">
-            Hidden from this list until you open this section. Their tickets were not deleted.
-          </p>
-          <div className="mt-3 space-y-3">
-            {archived.map((p) => (
-              <Card key={p.id} className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <Link to={`/projects/${p.id}`} className="text-[14px] font-semibold hover:underline">
-                    {p.name}
-                  </Link>
-                  <div className="mt-1 text-[12px] text-mc-sub">{progress(p)} done</div>
-                </div>
-                <button
-                  type="button"
-                  disabled={busyId === p.id}
-                  onClick={() => void setArchived(p.id, false)}
-                  className="h-7 px-3 rounded-full bg-mc-inner text-mc-sub text-[11px] font-semibold hover:opacity-80 disabled:opacity-50"
-                >
-                  {busyId === p.id ? 'Saving…' : 'Unarchive'}
-                </button>
-              </Card>
-            ))}
+      {creating && (
+        <SoftCard className="mb-4 px-4 py-4">
+          <label className="block text-[13px] font-semibold">
+            Project name
+            <input
+              value={name}
+              onChange={(e) => { setName(e.target.value); setNameError(null) }}
+              onKeyDown={(e) => e.key === 'Enter' && void create()}
+              placeholder="Name"
+              aria-label="New project name"
+              aria-invalid={!!nameError}
+              className="mt-2 h-9 w-full max-w-md rounded-lg bg-mc-ctl px-3 text-[13px] font-normal outline-none"
+            />
+          </label>
+          {nameError && <FieldError>{nameError}</FieldError>}
+          <div className="mt-3 flex gap-2">
+            <Btn kind="primary" disabled={saving} onClick={() => void create()}>{saving ? 'Saving…' : 'Create'}</Btn>
+            <Btn kind="plain" onClick={() => { setCreating(false); setNameError(null) }}>Cancel</Btn>
           </div>
-        </details>
+        </SoftCard>
       )}
-    </div>
-  )
-}
 
-function ProjectRow({
-  project, editing, draft, busy, onDraft, onStartEdit, onCancelEdit, onRename, onArchive,
-}: {
-  project: Project
-  editing: boolean
-  draft: string
-  busy: boolean
-  onDraft: (v: string) => void
-  onStartEdit: () => void
-  onCancelEdit: () => void
-  onRename: () => void
-  onArchive: () => void
-}) {
-  return (
-    <Card className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-      <div className="min-w-0">
-        {editing ? (
-          <input
-            value={draft}
-            onChange={(e) => onDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onRename()
-              if (e.key === 'Escape') onCancelEdit()
-            }}
-            aria-label={`Rename ${project.name}`}
-            className="h-8 w-64 max-w-full rounded-full border border-mc-border bg-mc-card px-3 text-[13px] text-mc-text outline-none focus:border-mc-primary"
-          />
-        ) : (
-          <Link to={`/projects/${project.id}`} className="text-[15px] font-semibold hover:underline">
-            {project.name}
-          </Link>
-        )}
-        <div className="mt-1 text-[12px] text-mc-sub">{progress(project)} done</div>
+      {data && rows.length === 0 && (
+        <EmptyState
+          title={filter === 1 ? 'No archived projects' : 'No projects yet'}
+          body={filter === 1 ? 'Archive hides a project from the active list and leaves its tickets on the board.' : 'Name one with New project. Tickets can be attached from the Tasks board.'}
+        />
+      )}
+
+      <div className="space-y-3">
+        {rows.map((p) => {
+          const who = lead(p, undefined, roster)
+          const frac = p.ticketCount ? p.doneCount / p.ticketCount : 0
+          const finished = p.ticketCount > 0 && p.doneCount === p.ticketCount
+          const needs = /needs you|approval/i.test(p.name)
+          return (
+            <SoftCard key={p.id} className="group px-4 py-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <Face agent={who} agents={roster} px={52} />
+                <div className="min-w-[200px] flex-1">
+                  {editingId === p.id ? (
+                    <div>
+                      <input
+                        value={draft}
+                        onChange={(e) => { setDraft(e.target.value); setDraftError(null) }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void rename(p.id)
+                          if (e.key === 'Escape') { setEditingId(null); setDraftError(null) }
+                        }}
+                        aria-label={`Rename ${p.name}`}
+                        aria-invalid={!!draftError}
+                        className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[14px] outline-none"
+                      />
+                      {draftError && <FieldError>{draftError}</FieldError>}
+                    </div>
+                  ) : (
+                    <Link to={`/projects/${p.id}`} className="text-[16px] font-semibold">{p.name}</Link>
+                  )}
+                  <div className="mt-0.5 text-[13px] text-mc-sub">
+                    {p.archivedAt ? 'Archived · tickets stay on the board' : 'Open the project to see its tasks'}
+                  </div>
+                </div>
+                <div className="w-[240px] max-w-full">
+                  <div className="flex justify-between text-[13px]">
+                    <span className="font-semibold">{p.doneCount} of {p.ticketCount} done</span>
+                    <span className="text-mc-sub">{p.ticketCount ? `${Math.round(frac * 100)}%` : '—'}</span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-mc-track">
+                    <div className="h-full rounded-full" style={{ width: `${Math.round(frac * 100)}%`, background: finished ? 'var(--mc-green)' : 'var(--mc-accent)' }} />
+                  </div>
+                </div>
+                <div className="flex min-w-[140px] items-center justify-end gap-2">
+                  {editingId === p.id ? (
+                    <>
+                      <Btn kind="primary" disabled={busyId === p.id} onClick={() => void rename(p.id)}>{busyId === p.id ? 'Saving…' : 'Save'}</Btn>
+                      <Btn kind="plain" onClick={() => { setEditingId(null); setDraftError(null) }}>Cancel</Btn>
+                    </>
+                  ) : p.archivedAt ? (
+                    <Btn kind="plain" disabled={busyId === p.id} onClick={() => void setArchived(p.id, false, p.name)}>Unarchive</Btn>
+                  ) : (
+                    <>
+                      {needs && <StatusChip label="Needs you" tone="red" />}
+                      <button type="button" className="text-[12px] font-semibold text-mc-sub" onClick={() => { setEditingId(p.id); setDraft(p.name); setDraftError(null) }}>Rename</button>
+                      <button
+                        type="button"
+                        disabled={busyId === p.id}
+                        onClick={() => void setArchived(p.id, true, p.name)}
+                        className={`text-[12px] font-semibold text-mc-sub ${finished ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}`}
+                      >
+                        {busyId === p.id ? 'Saving…' : 'Archive'}
+                      </button>
+                      {!needs && <AgentName name={who.name} role={who.role} />}
+                    </>
+                  )}
+                </div>
+              </div>
+            </SoftCard>
+          )
+        })}
       </div>
-      <div className="flex items-center gap-2">
-        {editing ? (
-          <>
-            <button type="button" disabled={busy} onClick={onRename} className="h-7 px-3 rounded-full bg-mc-primary text-white text-[11px] font-semibold disabled:opacity-50">
-              {busy ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" onClick={onCancelEdit} className="h-7 px-3 rounded-full bg-mc-inner text-mc-sub text-[11px] font-semibold">
-              Cancel
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" onClick={onStartEdit} className="h-7 px-3 rounded-full bg-mc-inner text-mc-sub text-[11px] font-semibold hover:opacity-80">
-              Rename
-            </button>
-            <button type="button" disabled={busy} onClick={onArchive} className="h-7 px-3 rounded-full bg-mc-inner text-mc-sub text-[11px] font-semibold hover:opacity-80 disabled:opacity-50">
-              {busy ? 'Saving…' : 'Archive'}
-            </button>
-          </>
-        )}
-      </div>
-    </Card>
+
+      {filter === 0 && archived.length > 0 && (
+        <button type="button" onClick={() => setFilter(1)} className="mt-4 text-[13px] text-mc-sub">
+          {archived.length} archived project{archived.length === 1 ? '' : 's'} <span className="font-semibold text-mc-accent">Show</span>
+        </button>
+      )}
+      {loading && !data && <p className="text-[13px] text-mc-sub">Loading…</p>}
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+    </div>
   )
 }

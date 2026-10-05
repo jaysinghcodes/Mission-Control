@@ -14,7 +14,7 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
   openclaw sessions --all-agents --json → sessions.snapshot
   openclaw cron list --all --json     →   calendar.snapshot
                                           + run.* for job-state changes
-  (derived from sessions token counts) →  usage.snapshot
+  (derived from sessions token counts) →  usage.snapshot × 3 (24h, 7d, month)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
 
 Design rules (why the code looks the way it does):
@@ -372,9 +372,30 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
     return events
 
 
-def usage_from_sessions(sessions: List[Dict[str, Any]], now_ms: int) -> Dict[str, Any]:
-    """24h usage rolled up from per-session token/cost counters (when present)."""
-    day = [s for s in sessions if s["_updatedMs"] and now_ms - s["_updatedMs"] < 86_400_000]
+# Same rollup, three windows. Session counters are cumulative, so a long
+# session is counted in the window of its last activity (the UI says "estimated").
+USAGE_WINDOWS = (
+    ("24h", 86_400_000),
+    ("7d", 7 * 86_400_000),
+    ("month", 30 * 86_400_000),
+)
+
+
+def usage_from_sessions(
+    sessions: List[Dict[str, Any]],
+    now_ms: int,
+    period: str = "24h",
+    window_ms: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Usage rolled up from per-session token/cost counters.
+
+    `period` is the UsageSnapshot key (24h | 7d | month). `window_ms` defaults
+    to that period's window. Callers that only want the original 24h snapshot
+    can keep calling usage_from_sessions(sessions, now_ms).
+    """
+    if window_ms is None:
+        window_ms = dict(USAGE_WINDOWS).get(period, 86_400_000)
+    day = [s for s in sessions if s["_updatedMs"] and now_ms - s["_updatedMs"] < window_ms]
 
     def num(v: Any) -> float:
         try:
@@ -398,7 +419,7 @@ def usage_from_sessions(sessions: List[Dict[str, Any]], now_ms: int) -> Dict[str
         return model.split("/", 1)[0] if "/" in model else model
 
     return {
-        "period": "24h",
+        "period": period,
         "totalCost": round(sum(num(s["_cost"]) for s in day), 4),
         "tokensIn": int(sum(num(s["_in"]) for s in day)),
         "tokensOut": int(sum(num(s["_out"]) for s in day)),
@@ -480,7 +501,8 @@ def main() -> int:
         events.extend(cron_run_events(cron_rows, state))
 
     if sessions is not None:
-        events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms)))
+        for period, window_ms in USAGE_WINDOWS:
+            events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms, period, window_ms)))
 
     approvals_rows = as_list(src.approvals(), "approvals")
     if approvals_rows is not None:

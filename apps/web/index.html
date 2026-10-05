@@ -5,6 +5,19 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mission Control</title>
+    <script>
+      /* Ticket 13: system theme before first paint. Persisted override wins. */
+      (function () {
+        try {
+          var t = localStorage.getItem('mc-theme')
+          var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          var dark = t === 'dark' || ((t === 'system' || t === null || t === '') && systemDark)
+          if (t === 'light') dark = false
+          document.documentElement.classList.toggle('light', !dark)
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

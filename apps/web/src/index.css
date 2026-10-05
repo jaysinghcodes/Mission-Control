@@ -1,74 +1,109 @@
 @import "tailwindcss";
 
 /*
- * Mission Control design tokens — dark-first, light via .light class.
- *
- * Source of truth: wireframes/gen_wireframes.py (audited light + dark
- * palettes). Values are CSS vars so the topbar theme toggle can flip the
- * entire app at runtime (@theme inline → utilities resolve var(--mc-*)).
+ * Mission Control — Apple-app tokens (ticket 13).
+ * Source: design-refs/ticket-13 code/kit.tsx THEMES.
+ * Dark lives on :root (no class). Light is `.light` on <html>, so the
+ * robot sticker halo (AgentAvatar) still keys off "no .light class".
+ * System default is applied before paint by the script in index.html.
+ * A manual choice is persisted as mc-theme=light|dark|system.
  */
 
 :root {
-  /* Surfaces */
-  --mc-bg: #0E1114;        /* app background           */
-  --mc-sidebar: #14181D;   /* left rail                 */
-  --mc-sidebar2: #1B2026;  /* sidebar footer panel      */
-  --mc-sideborder: #262C33;
-  --mc-topbar: #15191D;    /* header bar                */
-  --mc-card: #1A1F25;      /* cards                     */
-  --mc-inner: #22282F;     /* nested panels / chips     */
-  --mc-border: #2E353D;
-  --mc-border2: #262C33;
-  --mc-track: #2E353D;     /* progress track            */
+  --mc-desk: #2a2c31;
+  --mc-win: #1c1c1e;
+  --mc-win-stroke: #ffffff1f;
+  --mc-bg: #151517;
+  --mc-sidebar: #252527;
+  --mc-sidebar2: #2c2c2e;
+  --mc-sideborder: #38383a;
+  --mc-topbar: #1c1c1e;
+  --mc-card: #2c2c2e;
+  --mc-card-stroke: #ffffff0d;
+  --mc-inner: #2c2c2e;
+  --mc-fill: #3a3a3c;
+  --mc-border: #3d3d40;
+  --mc-border2: #38383a;
+  --mc-track: #3a3a3c;
+  --mc-ctl: #2c2c2e;
+  --mc-thumb: #5b5b5f;
+  --mc-hover: #333336;
+  --mc-sep: #3d3d40;
+  --mc-sh: 0.35;
+  --mc-scroll-track: #252527;
+  --mc-scroll-thumb: #5b5b5f;
 
-  /* Text hierarchy */
-  --mc-text: #E6E9ED;
-  --mc-sub: #B6BEC7;
-  --mc-faint: #8A939E;
+  --mc-text: #f5f5f7;
+  --mc-sub: #98989d;
+  --mc-sub2: #aeaeb2;
+  --mc-faint: #98989d;
 
-  /* Primary actions (dark = brand blue per GLM MUST-3) */
-  --mc-primary: #2F81F7;
+  --mc-primary: #0a84ff;
+  --mc-accent: #0a84ff;
+  --mc-accent-tint: #0a84ff26;
+  --mc-sel: #0a84ff2e;
 
-  /* Status + zones */
-  --mc-green: #3FB950;  --mc-greenbg: #12301F;  --mc-greentext: #56D364;
-  --mc-red: #F85149;    --mc-redbg: #3A1D1D;    --mc-redtext: #FF7B72;
-  --mc-blue: #58A6FF;   --mc-bluebg: #142B4A;   --mc-bluetext: #79C0FF;
-  --mc-purple: #BC8CFF; --mc-purplebg: #2A1F3D; --mc-purpletext: #D2A8FF;
-  --mc-teal: #39C5CF;   --mc-tealbg: #12363B;   --mc-tealtext: #56D4DD;
-  --mc-orange: #D29922; --mc-orangebg: #332B15; --mc-orangetext: #E3B341;
-  --mc-yellow: #D29922; --mc-yellowbg: #332B15;
+  --mc-green: #30d158;  --mc-greenbg: #30d15833;  --mc-greentext: #4cd964;
+  --mc-red: #ff453a;    --mc-redbg: #ff453a33;    --mc-redtext: #ff6961;
+  --mc-blue: #0a84ff;   --mc-bluebg: #0a84ff33;   --mc-bluetext: #5eb0ff;
+  --mc-purple: #5e5ce6; --mc-purplebg: #5e5ce633; --mc-purpletext: #b4b2ff;
+  --mc-teal: #64d2ff;   --mc-tealbg: #64d2ff33;   --mc-tealtext: #7fdcff;
+  --mc-orange: #ff9f0a; --mc-orangebg: #ff9f0a33; --mc-orangetext: #ffb340;
+  --mc-yellow: #ff9f0a; --mc-yellowbg: #ff9f0a33;
+  --mc-gray: #98989d;
 
-  /* Agent accent colors (identical in both themes, from wireframes) */
-  --mc-henry: #6D28D9; --mc-ralph: #B45309; --mc-scout: #15803D;
-  --mc-echo: #A16207;  --mc-charlie: #1D4ED8; --mc-codex: #1D4ED8;
-  --mc-violet: #6D28D9; --mc-quill: #0F766E; --mc-pixel: #B91C1C;
+  --mc-henry: #8d5bff; --mc-ralph: #ff9f0a; --mc-scout: #30d158;
+  --mc-echo: #ffd60a;  --mc-charlie: #0a84ff; --mc-codex: #0a84ff;
+  --mc-violet: #bf5af2; --mc-quill: #64d2ff; --mc-pixel: #ff453a;
 }
 
 .light {
-  --mc-bg: #F2F4F6;
-  --mc-sidebar: #E4E6E8;
-  --mc-sidebar2: #D8DBDE;
-  --mc-sideborder: #D5D9DE;
-  --mc-topbar: #FFFFFF;
-  --mc-card: #FFFFFF;
-  --mc-inner: #EEF0F3;
-  --mc-border: #CDD3DA;
-  --mc-border2: #DDE1E6;
-  --mc-track: #D8DDE3;
+  --mc-desk: #dfe3ea;
+  --mc-win: #ffffff;
+  --mc-win-stroke: transparent;
+  --mc-bg: #f7f7f9;
+  --mc-sidebar: #f2f2f5;
+  --mc-sidebar2: #ffffff;
+  --mc-sideborder: #e3e3e8;
+  --mc-topbar: #ffffff;
+  --mc-card: #ffffff;
+  --mc-card-stroke: transparent;
+  --mc-inner: #f7f7f9;
+  --mc-fill: #f2f2f5;
+  --mc-border: #e5e5ea;
+  --mc-border2: #e5e5ea;
+  --mc-track: #e5e5ea;
+  --mc-ctl: #efeff2;
+  --mc-thumb: #ffffff;
+  --mc-hover: #f2f2f7;
+  --mc-sep: #e5e5ea;
+  --mc-sh: 0.07;
+  --mc-scroll-track: #f2f2f5;
+  --mc-scroll-thumb: #c7c7cc;
 
-  --mc-text: #161A1F;
-  --mc-sub: #3B4149;
-  --mc-faint: #57606B;
+  --mc-text: #1d1d1f;
+  /* #6e6e73 is the locked secondary — about 5.9:1 on white, AA. */
+  --mc-sub: #6e6e73;
+  --mc-sub2: #515154;
+  --mc-faint: #6e6e73;
 
-  --mc-primary: #161A1F;
+  --mc-primary: #007aff;
+  --mc-accent: #007aff;
+  --mc-accent-tint: #007aff14;
+  --mc-sel: #007aff12;
 
-  --mc-green: #15803D;  --mc-greenbg: #E2F1E7;  --mc-greentext: #157A3C;
-  --mc-red: #B91C1C;    --mc-redbg: #FBE4E4;    --mc-redtext: #B91C1C;
-  --mc-blue: #1D4ED8;   --mc-bluebg: #E4ECF8;   --mc-bluetext: #1D4ED8;
-  --mc-purple: #6D28D9; --mc-purplebg: #EDE7F9; --mc-purpletext: #6D28D9;
-  --mc-teal: #0F766E;   --mc-tealbg: #DFF0F0;   --mc-tealtext: #0F766E;
-  --mc-orange: #B45309; --mc-orangebg: #FBEEDD; --mc-orangetext: #9A4A0B;
-  --mc-yellow: #A16207; --mc-yellowbg: #F5EDD6;
+  --mc-green: #34c759;  --mc-greenbg: #34c75921;  --mc-greentext: #1e7e35;
+  --mc-red: #ff3b30;    --mc-redbg: #ff3b3021;    --mc-redtext: #d70015;
+  --mc-blue: #007aff;   --mc-bluebg: #007aff21;   --mc-bluetext: #0062d1;
+  --mc-purple: #5e5ce6; --mc-purplebg: #5e5ce621; --mc-purpletext: #5e5ce6;
+  --mc-teal: #5ac8fa;   --mc-tealbg: #5ac8fa24;   --mc-tealtext: #0a6f95;
+  --mc-orange: #ff9f0a; --mc-orangebg: #ff9f0a24; --mc-orangetext: #b35c00;
+  --mc-yellow: #ff9f0a; --mc-yellowbg: #ff9f0a24;
+  --mc-gray: #8e8e93;
+
+  --mc-henry: #6d28d9; --mc-ralph: #b45309; --mc-scout: #15803d;
+  --mc-echo: #a16207;  --mc-charlie: #1d4ed8; --mc-codex: #1d4ed8;
+  --mc-violet: #6d28d9; --mc-quill: #0f766e; --mc-pixel: #b91c1c;
 }
 
 @theme inline {
@@ -82,10 +117,17 @@
   --color-mc-border: var(--mc-border);
   --color-mc-border2: var(--mc-border2);
   --color-mc-track: var(--mc-track);
+  --color-mc-ctl: var(--mc-ctl);
+  --color-mc-fill: var(--mc-fill);
+  --color-mc-sep: var(--mc-sep);
+  --color-mc-thumb: var(--mc-thumb);
+  --color-mc-desk: var(--mc-desk);
   --color-mc-text: var(--mc-text);
   --color-mc-sub: var(--mc-sub);
+  --color-mc-sub2: var(--mc-sub2);
   --color-mc-faint: var(--mc-faint);
   --color-mc-primary: var(--mc-primary);
+  --color-mc-accent: var(--mc-accent);
   --color-mc-green: var(--mc-green);   --color-mc-greenbg: var(--mc-greenbg);   --color-mc-greentext: var(--mc-greentext);
   --color-mc-red: var(--mc-red);       --color-mc-redbg: var(--mc-redbg);       --color-mc-redtext: var(--mc-redtext);
   --color-mc-blue: var(--mc-blue);     --color-mc-bluebg: var(--mc-bluebg);     --color-mc-bluetext: var(--mc-bluetext);
@@ -93,15 +135,57 @@
   --color-mc-teal: var(--mc-teal);     --color-mc-tealbg: var(--mc-tealbg);     --color-mc-tealtext: var(--mc-tealtext);
   --color-mc-orange: var(--mc-orange); --color-mc-orangebg: var(--mc-orangebg); --color-mc-orangetext: var(--mc-orangetext);
   --color-mc-yellow: var(--mc-yellow); --color-mc-yellowbg: var(--mc-yellowbg);
+  --color-mc-gray: var(--mc-gray);
   --color-mc-henry: var(--mc-henry); --color-mc-ralph: var(--mc-ralph); --color-mc-scout: var(--mc-scout);
   --color-mc-echo: var(--mc-echo); --color-mc-charlie: var(--mc-charlie); --color-mc-codex: var(--mc-codex);
   --color-mc-violet: var(--mc-violet); --color-mc-quill: var(--mc-quill); --color-mc-pixel: var(--mc-pixel);
-
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
+html, body, #root {
+  height: 100%;
+}
+
 body {
-  background-color: var(--mc-bg);
+  background-color: var(--mc-desk);
   color: var(--mc-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Sidebar (and any mc-scroll region): the track follows the surface.
+   A native dark scrollbar was painting a bright white track. */
+.mc-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mc-scroll-thumb) var(--mc-scroll-track);
+}
+.mc-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.mc-scroll::-webkit-scrollbar-track {
+  background: var(--mc-scroll-track);
+}
+.mc-scroll::-webkit-scrollbar-thumb {
+  background: var(--mc-scroll-thumb);
+  border-radius: 8px;
+  border: 2px solid var(--mc-scroll-track);
+}
+
+.mc-card {
+  background: var(--mc-card);
+  border: 1px solid var(--mc-card-stroke);
+  box-shadow: 0 2px 12px rgb(0 0 0 / var(--mc-sh));
+  border-radius: 16px;
+}
+
+.mc-window {
+  background: var(--mc-win);
+  border: 1px solid var(--mc-win-stroke);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.16);
+  border-radius: 14px;
+}
+.light .mc-window {
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.12);
 }

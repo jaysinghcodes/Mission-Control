@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
-import { Card, Chip, PillButton } from '../components/ui'
+import { Card, Chip } from '../components/ui'
+import { Btn, PageHeader, Segmented, Banner } from '../components/shell'
 import { ticketCreateQueue } from '../lib/serialQueue'
 
 /**
@@ -29,6 +31,7 @@ const PRIO: Record<string, { bg: string; fg: string }> = {
 const NOTICE_MS = 6000
 
 export default function Backlog() {
+  const [params, setParams] = useSearchParams()
   // `loading`/`errorMessage` (QA-1 polish item 1): distinguish "not loaded yet"
   // and "load failed" from a genuinely empty backlog.
   const { data, loading, errorMessage: loadError, refetch, mutate } = useApi<TicketsResp>('/tickets?status=backlog', { pollMs: 15000 })
@@ -121,7 +124,7 @@ export default function Backlog() {
     const label = row.key ?? row.id.slice(0, 8)
     if (r.ok) {
       mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.filter((t) => t.id !== row.id) } : prev))
-      showNotice(`${label} moved to To-Do — find it on the Tickets board.`, 'ok')
+      showNotice(`${label} moved to To-Do — find it on the board.`, 'ok')
     } else {
       showNotice(
         r.status === 404 ? `${label} no longer exists — the list has been refreshed.` : `Couldn't move ${label} to To-Do — ${r.error}`,
@@ -136,28 +139,33 @@ export default function Backlog() {
     void refetch()
   }
 
+  function openBoard() {
+    const next = new URLSearchParams(params)
+    next.delete('view')
+    setParams(next, { replace: true })
+  }
+
   return (
-    <div className="p-6">
-      {/* Header wraps at ~768px so the create field and button stay on screen
-          instead of being clipped by the sidebar + padding. */}
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0 max-w-xl">
-          <div className="text-[22px] font-semibold">Backlog</div>
-          <div className="mt-1 text-[13px] text-mc-sub">Every ticket not yet started — ranked, tagged, ready to pull.</div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && create()}
-            placeholder="New backlog item…"
-            className="h-9 w-64 max-w-full rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
-          />
-          {/* Label-only progress hint (same pattern as the row's "Moving…"); the
-              button stays clickable — extra submits queue, never dropped.
-              shrink-0: the pill must not shrink below its label. */}
-          <PillButton label={saving > 0 ? 'Saving…' : '+  New ticket'} on onClick={create} className="shrink-0" />
-        </div>
+    <div>
+      <PageHeader
+        title="Tasks"
+        summary={data ? `${rows.length} not started` : 'Loading the backlog…'}
+        tools={
+          <>
+            <Segmented labels={['Board', 'Backlog']} active={1} onChange={(i) => { if (i === 0) openBoard() }} ariaLabel="Tasks view" />
+            <Btn kind="primary" onClick={create} className="shrink-0">{saving > 0 ? 'Saving…' : 'New task'}</Btn>
+          </>
+        }
+      />
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && create()}
+          placeholder="New backlog item…"
+          aria-label="New backlog item"
+          className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
+        />
       </div>
 
       {/* Load failure (QA-1 polish item 1). useApi keeps the last good board
@@ -165,25 +173,14 @@ export default function Backlog() {
           dead API looks like a quiet board. Same notice styling as the write
           notice below; no new design. Clears itself on the next good load. */}
       {loadError && (
-        <div role="alert" className="mt-4 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-          {/* Reason in parentheses: server messages may carry their own "?"/"." */}
+        <Banner>
           Couldn't load the backlog ({loadError}).{' '}
           {data ? 'Showing the last loaded list; retrying automatically.' : 'Retrying automatically.'}
-        </div>
+        </Banner>
       )}
 
       {notice && (
-        <div
-          role="status"
-          className={`mt-4 flex items-center justify-between rounded-[10px] px-4 py-2 text-[12.5px] ${
-            notice.tone === 'ok' ? 'bg-mc-greenbg text-mc-greentext' : 'bg-mc-orangebg text-mc-orangetext'
-          }`}
-        >
-          <span>{notice.text}</span>
-          <button type="button" onClick={clearNotice} className="ml-4 text-[11px] font-semibold hover:opacity-80">
-            Dismiss
-          </button>
-        </div>
+        <Banner tone={notice.tone === 'ok' ? 'ok' : 'warn'} onDismiss={clearNotice}>{notice.text}</Banner>
       )}
 
       {/* The row is ~1020px (fixed columns). A clipping card used to cut off

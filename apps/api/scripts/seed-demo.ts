@@ -4,7 +4,7 @@
  * Fills a fresh Mission Control database with SAMPLE data so a machine with
  * no OpenClaw still gets a clickable Board (/tickets), Calendar, Team, Office
  * and Activity feed:
- *   - 8 agents (one lead on top, seven sub-agents below — generic names)
+ *   - 12 agents (cool name · function: Speedy, Forge, Aegis, …)
  *   - 6 cron jobs (timed, weekly, and interval — exercises every Calendar lane)
  *   - 8 tickets spread across To-Do / Build / QA / Review / Done + 2 backlog
  *   - 3 projects (Onboarding 1 of 2 done, Pipeline 0 of 3, Ideas empty)
@@ -82,30 +82,39 @@ const url = process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhos
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
 
 // ── Sample data ─────────────────────────────────────────────────────────────
-// NAMES ARE DELIBERATELY GENERIC ("Demo …") so screenshots and first runs
-// show obviously-sample data. Demo agents carry no `channel`, and since
-// ticket 3 the web app has no hardcoded chat-server fallback, so
-// channelHref() returns null and the profile drawer simply hides the link.
+// Ticket 13: cool name · function, matching roster.ts and the 12 robots.
+// Roles are the lane keys robotAssign already understands, so each agent
+// wears the matching robot. Names are not generic placeholders, so the
+// cards show Speedy / Forge / Aegis rather than a mapped alias.
+// Demo agents carry no `channel` (ticket 3 — no hardcoded chat server).
 //
-// ROLES, on the other hand, intentionally reuse the roster lane keys
-// (development, qa, research, …) so that:
-//   - Team cards get a proper role title + robot avatar (matched by role),
-//   - Office places working agents at the right station (dev→Build, qa→QA).
-// Because the names are not "generic placeholders" in roster.ts terms
-// (main/subagent/agent…), the cards keep showing our "Demo …" names.
-//
-// `working` agents stand at their station in the Office; `idle` ones sit in
-// the Break Room. `parent` is a NAME, wired to an id in phase 2 below.
-const LEAD = 'Demo Lead';
+// LEGACY_AGENT_NAMES renames a previous seed ("Demo Builder" → Forge) when
+// the new name is free. Nothing is deleted: if both rows exist, both stay.
+const LEGACY_AGENT_NAMES: Record<string, string> = {
+  'Demo Lead': 'Speedy',
+  'Demo Planner': 'Atlas',
+  'Demo Builder': 'Forge',
+  'Demo Tester': 'Sentinel',
+  'Demo Researcher': 'Echo',
+  'Demo Designer': 'Pixel',
+  'Demo Writer': 'Quill',
+  'Demo Monitor': 'Aegis',
+};
+
+const LEAD = 'Speedy';
 const AGENTS = [
-  { name: LEAD, role: 'chief of staff', color: '#A371F7', status: 'working', parent: null, emoji: '🧭', currentTask: 'Triage the morning queue', tasksCompleted: 42, totalCost: 3.18, tags: ['strategist', 'daily', 'integrator'] },
-  { name: 'Demo Planner', role: 'scrum master', color: '#D29922', status: 'idle', parent: LEAD, emoji: '🗺️', currentTask: null, tasksCompleted: 17, totalCost: 0.64, tags: ['planner', 'cadence'] },
-  { name: 'Demo Builder', role: 'development', color: '#3FB950', status: 'working', parent: LEAD, emoji: '🛠️', currentTask: 'DEMO-3 · Wire calendar week view', tasksCompleted: 31, totalCost: 2.41, tags: ['builder', 'typescript'] },
-  { name: 'Demo Tester', role: 'qa', color: '#39C5CF', status: 'working', parent: LEAD, emoji: '🧪', currentTask: 'DEMO-4 · Regression pass on Tickets', tasksCompleted: 23, totalCost: 0.97, tags: ['tester', 'skeptic'] },
-  { name: 'Demo Researcher', role: 'research', color: '#58A6FF', status: 'idle', parent: LEAD, emoji: '📚', currentTask: null, tasksCompleted: 12, totalCost: 1.12, tags: ['curious', 'sources'] },
-  { name: 'Demo Designer', role: 'design', color: '#F78166', status: 'idle', parent: LEAD, emoji: '🎨', currentTask: null, tasksCompleted: 9, totalCost: 0.38, tags: ['visual', 'tokens'] },
-  { name: 'Demo Writer', role: 'summary', color: '#A371F7', status: 'idle', parent: LEAD, emoji: '✍️', currentTask: null, tasksCompleted: 28, totalCost: 0.55, tags: ['concise'] },
-  { name: 'Demo Monitor', role: 'alerts', color: '#D29922', status: 'idle', parent: LEAD, emoji: '🛡️', currentTask: null, tasksCompleted: 54, totalCost: 0.21, tags: ['watchful', 'on-call'] },
+  { name: LEAD, role: 'chief of staff', color: '#8d5bff', status: 'working', parent: null, emoji: null, currentTask: 'Running the build council', tasksCompleted: 42, totalCost: 3.18, tags: ['strategist', 'daily'] },
+  { name: 'Atlas', role: 'product', color: '#ffc531', status: 'idle', parent: LEAD, emoji: null, currentTask: null, tasksCompleted: 17, totalCost: 0.64, tags: ['planner'] },
+  { name: 'Forge', role: 'engineer', color: '#9bd434', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-3 · Wire calendar week view', tasksCompleted: 31, totalCost: 2.41, tags: ['builder'] },
+  { name: 'Sentinel', role: 'qa', color: '#36b3f5', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-4 · Regression pass on Tickets', tasksCompleted: 23, totalCost: 0.97, tags: ['tester'] },
+  { name: 'Echo', role: 'research', color: '#19c4b4', status: 'working', parent: LEAD, emoji: null, currentTask: 'Researching calendar patterns', tasksCompleted: 12, totalCost: 1.12, tags: ['curious'] },
+  { name: 'Pixel', role: 'designer', color: '#ff5fa6', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-2 · Dark-mode screenshots', tasksCompleted: 9, totalCost: 0.38, tags: ['visual'] },
+  { name: 'Bolt', role: 'ops', color: '#ff8a2b', status: 'idle', parent: LEAD, emoji: null, currentTask: null, tasksCompleted: 8, totalCost: 0.2, tags: ['ops'] },
+  { name: 'Ledger', role: 'data', color: '#4a6dff', status: 'idle', parent: LEAD, emoji: null, currentTask: null, tasksCompleted: 6, totalCost: 0.1, tags: ['data'] },
+  { name: 'Quill', role: 'writer', color: '#d257ef', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-5 · Release notes', tasksCompleted: 28, totalCost: 0.55, tags: ['concise'] },
+  { name: 'Aegis', role: 'security', color: '#ff4f5e', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-4 is waiting on your approval', tasksCompleted: 14, totalCost: 0.44, tags: ['security'] },
+  { name: 'Patch', role: 'support', color: '#2fc56f', status: 'working', parent: LEAD, emoji: null, currentTask: 'Answering setup questions', tasksCompleted: 11, totalCost: 0.12, tags: ['support'] },
+  { name: 'Scout', role: 'scout', color: '#dfe5f0', status: 'working', parent: LEAD, emoji: null, currentTask: 'Checking upstream OpenClaw changes', tasksCompleted: 19, totalCost: 0.33, tags: ['trends'] },
 ];
 
 // Calendar.tsx: day 0=Mon … 6=Sun, day=null repeats daily; time=null → all-day strip.
@@ -120,14 +129,14 @@ const CRON_JOBS = [
 
 // Statuses are the kanban columns in Tickets.tsx (todo/build/qa/review/done) + backlog.
 const TICKETS = [
-  { id: 'demo-ticket-1', key: 'DEMO-1', title: 'Draft onboarding checklist', status: 'todo', priority: 'med', assignee: 'Demo Planner', tags: ['docs'], points: 2 },
-  { id: 'demo-ticket-2', key: 'DEMO-2', title: 'Add dark-mode screenshots', status: 'todo', priority: 'low', assignee: 'Demo Designer', tags: ['design'], points: 1 },
-  { id: 'demo-ticket-3', key: 'DEMO-3', title: 'Wire calendar week view', status: 'build', priority: 'high', assignee: 'Demo Builder', tags: ['web'], points: 5 },
-  { id: 'demo-ticket-4', key: 'DEMO-4', title: 'Regression pass on Tickets', status: 'qa', priority: 'high', assignee: 'Demo Tester', tags: ['qa'], points: 3 },
-  { id: 'demo-ticket-5', key: 'DEMO-5', title: 'Summarize weekly activity', status: 'review', priority: 'med', assignee: 'Demo Writer', tags: ['summary'], points: 2 },
-  { id: 'demo-ticket-6', key: 'DEMO-6', title: 'Rotate demo ingest token', status: 'done', priority: 'med', assignee: 'Demo Monitor', tags: ['ops'], points: 1 },
-  { id: 'demo-ticket-7', key: 'DEMO-7', title: 'Research provider pricing', status: 'backlog', priority: 'low', assignee: 'Demo Researcher', tags: ['research'], points: 3 },
-  { id: 'demo-ticket-8', key: 'DEMO-8', title: 'Office floor ambient animations', status: 'backlog', priority: 'low', assignee: 'Demo Designer', tags: ['design'], points: 2 },
+  { id: 'demo-ticket-1', key: 'DEMO-1', title: 'Draft onboarding checklist', status: 'todo', priority: 'med', assignee: 'Atlas', tags: ['docs'], points: 2 },
+  { id: 'demo-ticket-2', key: 'DEMO-2', title: 'Add dark-mode screenshots', status: 'todo', priority: 'low', assignee: 'Pixel', tags: ['design'], points: 1 },
+  { id: 'demo-ticket-3', key: 'DEMO-3', title: 'Wire calendar week view', status: 'build', priority: 'high', assignee: 'Forge', tags: ['web'], points: 5 },
+  { id: 'demo-ticket-4', key: 'DEMO-4', title: 'Regression pass on Tickets', status: 'qa', priority: 'high', assignee: 'Sentinel', tags: ['qa'], points: 3 },
+  { id: 'demo-ticket-5', key: 'DEMO-5', title: 'Release notes for the next cut', status: 'review', priority: 'med', assignee: 'Quill', tags: ['summary'], points: 2 },
+  { id: 'demo-ticket-6', key: 'DEMO-6', title: 'Rotate demo ingest token', status: 'done', priority: 'med', assignee: 'Aegis', tags: ['ops'], points: 1 },
+  { id: 'demo-ticket-7', key: 'DEMO-7', title: 'Research provider pricing', status: 'backlog', priority: 'low', assignee: 'Echo', tags: ['research'], points: 3 },
+  { id: 'demo-ticket-8', key: 'DEMO-8', title: 'Office floor ambient animations', status: 'backlog', priority: 'low', assignee: 'Pixel', tags: ['design'], points: 2 },
 ];
 
 // Activity: `minsAgo` gives a believable spread on first insert. Types are
@@ -136,13 +145,13 @@ const ACTIVITY = [
   { id: 'demo-act-01', minsAgo: 95, type: 'run.started', payload: { name: 'Morning Brief', agent: LEAD } },
   { id: 'demo-act-02', minsAgo: 92, type: 'run.completed', payload: { name: 'Morning Brief', agent: LEAD, status: 'done' } },
   { id: 'demo-act-03', minsAgo: 70, type: 'run.queued', payload: { name: 'ticket DEMO-3', ticket: 'DEMO-3' } },
-  { id: 'demo-act-04', minsAgo: 64, type: 'run.running', payload: { name: 'ticket DEMO-3', ticket: 'DEMO-3', agent: 'Demo Builder' } },
-  { id: 'demo-act-05', minsAgo: 51, type: 'run.progress', payload: { name: 'ticket DEMO-3', agent: 'Demo Builder', progress: 60 } },
-  { id: 'demo-act-06', minsAgo: 40, type: 'run.running', payload: { name: 'ticket DEMO-4', ticket: 'DEMO-4', agent: 'Demo Tester' } },
-  { id: 'demo-act-07', minsAgo: 33, type: 'run.failed', payload: { name: 'Trend Radar', agent: 'Demo Researcher', status: 'failed', summary: 'demo: upstream timeout' } },
-  { id: 'demo-act-08', minsAgo: 21, type: 'approval.new', payload: { name: 'Deploy preview', kind: 'exec' } },
-  { id: 'demo-act-09', minsAgo: 12, type: 'run.done', payload: { name: 'ticket DEMO-6', ticket: 'DEMO-6', agent: 'Demo Monitor' } },
-  { id: 'demo-act-10', minsAgo: 4, type: 'run.completed', payload: { name: 'Inbox Poll', agent: 'Demo Monitor', status: 'done' } },
+  { id: 'demo-act-04', minsAgo: 64, type: 'run.running', payload: { name: 'ticket DEMO-3', ticket: 'DEMO-3', agent: 'Forge' } },
+  { id: 'demo-act-05', minsAgo: 51, type: 'run.progress', payload: { name: 'ticket DEMO-3', agent: 'Forge', progress: 60 } },
+  { id: 'demo-act-06', minsAgo: 40, type: 'run.running', payload: { name: 'ticket DEMO-4', ticket: 'DEMO-4', agent: 'Sentinel' } },
+  { id: 'demo-act-07', minsAgo: 33, type: 'run.failed', payload: { name: 'Trend Radar', agent: 'Scout', status: 'failed', summary: 'demo: upstream timeout' } },
+  { id: 'demo-act-08', minsAgo: 21, type: 'approval.new', payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis' } },
+  { id: 'demo-act-09', minsAgo: 12, type: 'run.done', payload: { name: 'ticket DEMO-6', ticket: 'DEMO-6', agent: 'Aegis' } },
+  { id: 'demo-act-10', minsAgo: 4, type: 'run.completed', payload: { name: 'Inbox Poll', agent: 'Patch', status: 'done' } },
 ];
 
 // One pending approval so the Approvals page (and the `approval.new` event
@@ -150,7 +159,54 @@ const ACTIVITY = [
 // Note: a later real `approvals.snapshot` from the bridge drops all PENDING
 // rows (snapshot contract), which is exactly what we want for demo data.
 const APPROVALS = [
-  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview', desc: 'Demo: allow the preview deploy script to run', status: 'pending' },
+  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending' },
+  { id: 'demo-approval-2', kind: 'pr', tag: 'Merge the roster update', desc: 'You approved. Sample decision so the Decided tab is not empty.', status: 'approved' },
+];
+
+// Usage snapshots for Today / This week / This month. Fixed by period.
+// update: {} so a real bridge snapshot is never overwritten by a re-seed.
+const USAGE = [
+  {
+    period: '24h',
+    totalCost: 0.84,
+    tokensIn: 400_000,
+    tokensOut: 200_000,
+    providers: [
+      { name: 'zai', model: 'glm-5.2', cost: 0.53, tokensIn: 250_000, tokensOut: 110_000, agents: ['Speedy', 'Atlas', 'Quill'] },
+      { name: 'deepseek', model: 'deepseek-v4-flash', cost: 0.31, tokensIn: 130_000, tokensOut: 80_000, agents: ['Forge', 'Sentinel', 'Pixel', 'Aegis'] },
+      { name: 'ollama', model: 'qwen3:8b', cost: 0, tokensIn: 20_000, tokensOut: 10_000, agents: ['Ledger', 'Bolt'] },
+    ],
+  },
+  {
+    period: '7d',
+    totalCost: 3.1,
+    tokensIn: 2_800_000,
+    tokensOut: 1_500_000,
+    providers: [
+      { name: 'zai', model: 'glm-5.2', cost: 2.05, tokensIn: 1_600_000, tokensOut: 800_000, agents: ['Speedy', 'Atlas', 'Quill'] },
+      { name: 'deepseek', model: 'deepseek-v4-flash', cost: 1.05, tokensIn: 1_000_000, tokensOut: 600_000, agents: ['Forge', 'Sentinel', 'Pixel', 'Aegis'] },
+      { name: 'ollama', model: 'qwen3:8b', cost: 0, tokensIn: 200_000, tokensOut: 100_000, agents: ['Ledger', 'Bolt'] },
+    ],
+  },
+  {
+    period: 'month',
+    totalCost: 12.4,
+    tokensIn: 12_000_000,
+    tokensOut: 6_600_000,
+    providers: [
+      { name: 'zai', model: 'glm-5.2', cost: 8.3, tokensIn: 4_200_000, tokensOut: 1_900_000, agents: ['Speedy', 'Atlas', 'Quill'] },
+      { name: 'deepseek', model: 'deepseek-v4-flash', cost: 4.1, tokensIn: 7_000_000, tokensOut: 4_200_000, agents: ['Forge', 'Sentinel', 'Pixel', 'Aegis'] },
+      { name: 'ollama', model: 'qwen3:8b', cost: 0, tokensIn: 800_000, tokensOut: 500_000, agents: ['Ledger', 'Bolt'] },
+    ],
+  },
+];
+
+const RUNS = [
+  { id: 'demo-run-1', name: 'Deploy preview build', agent: 'Aegis', status: 'needs_approval', progress: 80 },
+  { id: 'demo-run-2', name: 'Wire calendar week view', agent: 'Forge', status: 'running', progress: 40 },
+  { id: 'demo-run-3', name: 'Regression pass on Tickets', agent: 'Sentinel', status: 'running', progress: 55 },
+  { id: 'demo-run-4', name: 'Release notes for the next cut', agent: 'Quill', status: 'running', progress: 90 },
+  { id: 'demo-run-5', name: 'Morning Brief', agent: 'Speedy', status: 'done', progress: 100 },
 ];
 
 async function main(): Promise<void> {
@@ -167,7 +223,23 @@ async function main(): Promise<void> {
   // Pipeline "0 of 3", and an empty Ideas project. See demo-catalog.ts.
   assertDemoSeedProjects(TICKETS);
 
-  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0 };
+  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0 };
+
+  // Rename a previous demo roster in place when the cool name is free.
+  // If both rows already exist, leave both — the seed never deletes.
+  for (const [from, to] of Object.entries(LEGACY_AGENT_NAMES)) {
+    const old = await prisma.agent.findUnique({ where: { name: from }, select: { id: true } });
+    if (!old) continue;
+    const taken = await prisma.agent.findUnique({ where: { name: to }, select: { id: true } });
+    if (taken) continue;
+    await prisma.agent.update({ where: { name: from }, data: { name: to } });
+  }
+  for (const [from, to] of Object.entries(LEGACY_AGENT_NAMES)) {
+    await prisma.ticket.updateMany({
+      where: { assignee: from, id: { startsWith: 'demo-' } },
+      data: { assignee: to },
+    });
+  }
 
   // Projects BEFORE tickets: Ticket.projectId is a foreign key. Fixed ids
   // plus `update: {}` — a re-run does not rename or un-archive a project
@@ -246,11 +318,67 @@ async function main(): Promise<void> {
     await prisma.approval.upsert({ where: { id: a.id }, update: {}, create: a });
     if (!before) counts.approvals++;
   }
+  // The first seed's pending copy did not name DEMO-4, so the Tasks "Needs you"
+  // flag never lit. Only rewrite that exact demo sentence.
+  await prisma.approval.updateMany({
+    where: { id: 'demo-approval-1', desc: 'Demo: allow the preview deploy script to run' },
+    data: { tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.' },
+  });
+
+  // Usage windows. update: {} so a bridge snapshot already stored for that
+  // period is left alone. A fresh database gets today / week / month.
+  for (const u of USAGE) {
+    const before = await prisma.usageSnapshot.findUnique({ where: { period: u.period }, select: { id: true } });
+    await prisma.usageSnapshot.upsert({
+      where: { period: u.period },
+      update: {},
+      create: {
+        period: u.period,
+        totalCost: u.totalCost,
+        tokensIn: u.tokensIn,
+        tokensOut: u.tokensOut,
+        providers: u.providers,
+      },
+    });
+    if (!before) counts.usage++;
+  }
+
+  const runNow = new Date();
+  for (const r of RUNS) {
+    const before = await prisma.run.findUnique({ where: { id: r.id }, select: { id: true } });
+    await prisma.run.upsert({
+      where: { id: r.id },
+      update: {},
+      create: {
+        id: r.id,
+        name: r.name,
+        agent: r.agent,
+        status: r.status,
+        progress: r.progress,
+        startedAt: r.status === 'queued' ? null : runNow,
+        finishedAt: r.status === 'done' || r.status === 'failed' ? runNow : null,
+      },
+    });
+    if (!before) counts.runs++;
+  }
+
+  // Demo activity that still names a retired agent gets the cool name.
+  for (const e of ACTIVITY) {
+    const row = await prisma.activityEvent.findUnique({ where: { id: e.id }, select: { payload: true } });
+    const payload = row?.payload as { agent?: string } | null;
+    const next = payload?.agent ? LEGACY_AGENT_NAMES[payload.agent] : undefined;
+    if (payload && next) {
+      await prisma.activityEvent.update({
+        where: { id: e.id },
+        data: { payload: { ...payload, agent: next } },
+      });
+    }
+  }
 
   // What THIS run inserted (0 everywhere on a re-run = already seeded).
   console.log(
     `[seed:demo] inserted agents=${counts.agents} cronJobs=${counts.cronJobs} projects=${counts.projects} tickets=${counts.tickets} ` +
-      `activity=${counts.activity} approvals=${counts.approvals} (0 everywhere = already seeded; re-running is safe)`,
+      `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} (0 everywhere = already seeded; re-running is safe)`,
   );
 
   // Table totals AFTER the run — the idempotency check is simply "these

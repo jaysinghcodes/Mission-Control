@@ -1,75 +1,82 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { NAV_GROUPS } from '../data/mock'
-import { Glyph, type GlyphKind } from '../components/glyphs'
-import { Dot } from '../components/ui'
-import SearchBox from '../components/SearchBox'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useLiveActivity } from '../hooks/useLiveActivity'
-import { OPERATOR_NAME, operatorInitial } from '../config'
-import { API_URL, socketLabel } from '../lib/apiBase'
+import { useApi } from '../hooks/useApi'
+import { OPERATOR_NAME } from '../config'
+import { API_URL } from '../lib/apiBase'
 import { reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
 
 /**
- * AppLayout — the shell every screen shares (wireframe sidebar() + topbar()).
- * Sidebar: WORKSPACE / TEAM / OBSERVE groups, Settings footer w/ connection state.
- * Topbar: page title · search · Connected · theme toggle (sun/moon) · avatar.
- * Connection indicator (QA-1 polish item 7 / QA-3) — REAL status, no more
- * hardcoded "Connected · 74ms" / "ws://…:3000":
- *  - reachability comes from the shared apiStatus store (every request
- *    reports into it) plus a /health heartbeat that also measures latency;
- *  - the live-feed socket state says whether updates are pushed ("Connected")
- *    or only polled ("API only");
- *  - the endpoint label is derived from the configured API_URL.
- * When the API drops mid-session an inline notice says the page's data may
- * be stale, instead of silently showing old numbers.
+ * Shared Apple window: vibrancy sidebar, traffic lights, account chip.
+ * Connection text is one nowrap line in the sidebar (it used to wrap in the
+ * top bar at ~768px). Theme follows the system until a manual choice is saved.
  */
 
-/** Heartbeat cadence and per-beat ceiling (a hung API counts as down). */
 const HEARTBEAT_MS = 5000
 const HEARTBEAT_TIMEOUT_MS = 4000
-/** First beat waits a moment: lets StrictMode's throw-away mount be cleaned
- *  up BEFORE any request starts (so nothing is aborted — QA-3 ERR_ABORTED). */
 const FIRST_BEAT_DELAY_MS = 300
 
-function useTheme() {
-  const [light, setLight] = useState(() => localStorage.getItem('mc-theme') === 'light')
-  useEffect(() => {
-    document.documentElement.classList.toggle('light', light)
-    localStorage.setItem('mc-theme', light ? 'light' : 'dark')
-  }, [light])
-  return { light, toggle: () => setLight((v) => !v) }
+type ThemeChoice = 'system' | 'light' | 'dark'
+
+function readTheme(): ThemeChoice {
+  const s = localStorage.getItem('mc-theme')
+  if (s === 'light' || s === 'dark' || s === 'system') return s
+  return 'system'
 }
 
-const TITLES: Record<string, string> = {
-  '/': 'Overview',
-  '/tasks': 'Tasks',
-  '/tickets': 'Tickets',
-  '/projects': 'Projects',
-  '/backlog': 'Backlog',
-  '/calendar': 'Calendar',
-  '/approvals': 'Approvals',
-  '/team': 'Team',
-  '/agents': 'Team',
-  '/office': 'Office',
-  '/activity': 'Live Activity',
-  '/health': 'Health',
-  '/sessions': 'Sessions',
-  '/usage': 'Usage & Cost',
-  '/logs': 'Logs',
+function applyTheme(choice: ThemeChoice) {
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  const dark = choice === 'dark' || (choice === 'system' && systemDark)
+  document.documentElement.classList.toggle('light', !dark)
+  document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
 }
+
+function useTheme() {
+  const [choice, setChoice] = useState<ThemeChoice>(readTheme)
+  useEffect(() => {
+    applyTheme(choice)
+    localStorage.setItem('mc-theme', choice)
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => applyTheme(choice)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [choice])
+  return { choice, setChoice }
+}
+
+const NAV: { label: string; items: { label: string; path: string }[] }[] = [
+  {
+    label: 'Mission Control',
+    items: [
+      { label: 'Tasks', path: '/tasks' },
+      { label: 'Agents', path: '/agents' },
+      { label: 'Approvals', path: '/approvals' },
+      { label: 'Projects', path: '/projects' },
+      { label: 'Office', path: '/office' },
+      { label: 'Pipeline', path: '/pipeline' },
+    ],
+  },
+  {
+    label: 'Workspace',
+    items: [
+      { label: 'Calendar', path: '/calendar' },
+      { label: 'Memory', path: '/memory' },
+      { label: 'Docs', path: '/docs' },
+      { label: 'Team', path: '/team' },
+      { label: 'System', path: '/system' },
+    ],
+  },
+]
 
 export default function AppLayout() {
-  const { light, toggle } = useTheme()
+  const { choice, setChoice } = useTheme()
   const { connected } = useLiveActivity()
   const { pathname } = useLocation()
   const nav = useNavigate()
-  // /projects/:id is not a static key. The page itself prints the project name.
-  const title = pathname.startsWith('/projects/')
-    ? 'Project'
-    : (TITLES[pathname] ?? 'Mission Control')
   const [menuOpen, setMenuOpen] = useState(false)
+  const approvals = useApi<{ approvals: { id: string }[] }>('/approvals', { pollMs: 15000 })
+  const needs = approvals.data?.approvals.length ?? 0
 
-  // Close the avatar menu on outside click / Escape.
   useEffect(() => {
     if (!menuOpen) return
     const close = () => setMenuOpen(false)
@@ -82,24 +89,8 @@ export default function AppLayout() {
     }
   }, [menuOpen])
 
-  // Heartbeat + onboarding gate (QA-1 polish item 7 / QA-3).
-  //
-  // Old version: a one-shot /health fetch in an effect that depended on
-  // `nav`. react-router hands out a NEW navigate function on every location
-  // change, so the effect re-ran (aborting the in-flight request → the
-  // ERR_ABORTED QA saw on every page load) and never measured anything.
-  // Now: mount-once effect (navigate read through a ref), a repeating
-  // GET /health against the configured API_URL that
-  //   - reports latency / reachability to the shared apiStatus store,
-  //   - on the FIRST beat only, keeps the old gate: API unreachable → send
-  //     the user to /connect (explains the SSH tunnel) instead of an empty
-  //     shell. Later drops show the stale-data notice instead — yanking a
-  //     user to the setup guide mid-session would be worse.
-  // Our own aborts (unmount, StrictMode) are never reported as failures.
   const navRef = useRef(nav)
-  useEffect(() => {
-    navRef.current = nav
-  }, [nav])
+  useEffect(() => { navRef.current = nav }, [nav])
   useEffect(() => {
     let cancelled = false
     let first = true
@@ -122,11 +113,9 @@ export default function AppLayout() {
           reportLatency(performance.now() - t0)
           ok = true
         } else {
-          // Answered but unhappy (e.g. 500) = reachable; 502-504 = down.
           reportOutcome(res.status, `GET /health returned HTTP ${res.status}`)
         }
       } catch {
-        // Unmount/StrictMode abort: our doing, not an outage — report nothing.
         if (cancelled) return
         reportUnreachable(timedOut ? `no answer within ${HEARTBEAT_TIMEOUT_MS / 1000} s` : 'API unreachable — is the server running?')
       } finally {
@@ -150,178 +139,133 @@ export default function AppLayout() {
     }
   }, [])
 
-  // ── Status shown in the sidebar footer and the top bar (item 7) ────────
-  // Only existing tokens: green/red dot as before, faint while unknown.
   const api = useApiStatus()
   const ms = api.latencyMs !== null ? ` · ${api.latencyMs}ms` : ''
   const status =
     api.state === 'offline'
       ? { dot: 'var(--mc-red)', label: 'Offline', title: api.lastError ?? 'API unreachable' }
       : api.state === 'unknown'
-        ? { dot: 'var(--mc-faint)', label: 'Connecting…', title: `Contacting ${API_URL}` }
+        ? { dot: 'var(--mc-gray)', label: 'Connecting…', title: `Contacting ${API_URL}` }
         : connected
           ? { dot: 'var(--mc-green)', label: `Connected${ms}`, title: `API ${API_URL} · live feed connected` }
-          : // API answers but the websocket is down: data still refreshes by
-            // polling, just not instantly — say so rather than "Connected".
-            { dot: 'var(--mc-green)', label: `API only${ms}`, title: `API ${API_URL} · live feed reconnecting (pages refresh by polling)` }
+          : { dot: 'var(--mc-green)', label: `API only${ms}`, title: `API ${API_URL} · live feed reconnecting (pages refresh by polling)` }
+
+  const account = OPERATOR_NAME || 'Operator'
+  const onTasks = pathname === '/tasks' || pathname === '/tickets' || pathname === '/backlog'
 
   return (
-    <div className="flex h-screen bg-mc-bg text-mc-text">
-      {/* ── Sidebar (220px, wireframe sidebar()) ─────────────────────────── */}
-      <aside className="w-[220px] shrink-0 bg-mc-sidebar border-r border-mc-sideborder flex flex-col">
-        <div className="flex items-center gap-2.5 px-5 pt-[22px] pb-4">
-          <Link to="/" className="flex items-center gap-2.5" title="Back to Overview">
-            <img src="/logo.svg" alt="Mission Control" className="w-[26px] h-[26px] rounded-lg" />
-            <div className="text-[15px] font-semibold text-mc-text">Mission Control</div>
-          </Link>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto px-3">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.label} className="mb-2">
-              <div className="px-1.5 mt-6 mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-mc-faint">
-                {group.label}
-              </div>
-              <div className="space-y-0.5">
+    <div className="h-full bg-[var(--mc-desk)] p-3 sm:p-4">
+      <div className="mc-window flex h-full min-h-0 overflow-hidden">
+        <aside className="flex w-[230px] shrink-0 flex-col border-r border-mc-sideborder bg-mc-sidebar">
+          <div className="flex items-center gap-2 px-4 pt-4">
+            {['#ff5f57', '#febc2e', '#28c840'].map((c) => (
+              <span key={c} className="h-3 w-3 rounded-full" style={{ background: c }} aria-hidden />
+            ))}
+          </div>
+          <nav className="mc-scroll mt-4 flex-1 overflow-y-auto px-2.5 pb-3" aria-label="Primary">
+            {NAV.map((group) => (
+              <div key={group.label} className="mb-2">
+                <div className="px-2.5 pb-1.5 pt-3 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-mc-sub">
+                  {group.label}
+                </div>
                 {group.items.map((item) => (
                   <NavLink
-                    key={item.key}
+                    key={item.path}
                     to={item.path}
-                    end={item.path === '/'}
-                    className={({ isActive }) =>
-                      `flex items-center gap-2.5 h-[34px] px-2.5 rounded-lg text-[13.5px] transition-colors duration-150 ${
-                        isActive ? 'bg-mc-primary text-white font-semibold' : 'text-mc-text hover:bg-white/5'
+                    className={({ isActive }) => {
+                      const on = isActive || (item.path === '/tasks' && onTasks) || (item.path === '/system' && pathname.startsWith('/system'))
+                      return `mb-0.5 flex h-8 items-center rounded-lg px-3 text-[14px] ${
+                        on ? 'bg-mc-accent font-medium text-white' : 'text-mc-text hover:bg-black/5'
                       }`
-                    }
+                    }}
                   >
-                    <Glyph kind={item.key as GlyphKind} size={16} />
-                    {item.label}
+                    {({ isActive }) => {
+                      const on = isActive || (item.path === '/tasks' && onTasks) || (item.path === '/system' && pathname.startsWith('/system'))
+                      const badge = item.label === 'Approvals' && needs > 0 ? needs : 0
+                      return (
+                        <>
+                          <span className="flex-1">{item.label}</span>
+                          {badge > 0 && (
+                            <span
+                              className={`grid h-[18px] min-w-[20px] place-items-center rounded-full px-1.5 text-[11px] font-bold ${
+                                on ? 'bg-white text-mc-red' : 'bg-mc-red text-white'
+                              }`}
+                            >
+                              {badge}
+                            </span>
+                          )}
+                        </>
+                      )
+                    }}
                   </NavLink>
                 ))}
               </div>
-            </div>
-          ))}
-        </nav>
-
-        {/* Sidebar footer — Settings + connection (wireframe footer) */}
-        <div className="px-5 pb-5 pt-4 border-t border-mc-sideborder">
-          <div className="rounded-[10px] bg-mc-sidebar2 px-3 py-2.5">
-            <div className="text-[13px] font-medium text-mc-text">⚙ Settings</div>
-            <Link to="/connect" className="mt-1 block text-[11.5px] text-mc-sub hover:text-mc-text">
-              Setup guide · SSH tunnel
-            </Link>
-            <div className="flex items-center justify-between mt-1.5">
-              <span className="flex items-center gap-1.5 text-[11.5px] text-mc-sub" title={status.title}>
-                <Dot color={status.dot} size={5} />
-                {status.label}
-              </span>
-              {/* Derived from the configured API_URL — was hardcoded :3000. */}
-              <span className="text-[11px] text-mc-faint">{socketLabel()}</span>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      {/* ── Main column ───────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 shrink-0 bg-mc-topbar border-b border-mc-border2 flex items-center px-6 justify-between">
-          <div className="text-[17px] font-semibold">{title}</div>
-          <div className="flex items-center gap-4">
-            <SearchBox w={200} />
-            <span className="flex items-center gap-2 text-[12px] text-mc-sub" title={status.title}>
-              <Dot color={status.dot} size={5} />
-              {status.label}
-            </span>
-            <div className="w-px h-6 bg-mc-border2" />
-            {/* Theme toggle — sun in dark (click → light), moon in light */}
+            ))}
+          </nav>
+          <div className="relative border-t border-mc-sideborder px-3 py-3">
             <button
               type="button"
-              onClick={toggle}
-              aria-label="Toggle theme"
-              className="w-10 h-8 rounded-full bg-mc-inner border border-mc-border flex items-center justify-center text-mc-sub hover:text-mc-text"
+              aria-label="Account menu"
+              title={account}
+              onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v) }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-left hover:bg-black/5"
             >
-              {light ? (
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <circle cx="8" cy="8" r="4.6" stroke="currentColor" strokeWidth="1.7" />
-                  {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => {
-                    const r = (a * Math.PI) / 180
-                    return (
-                      <line
-                        key={a}
-                        x1={8 + 8.5 * Math.cos(r)} y1={8 + 8.5 * Math.sin(r)}
-                        x2={8 + 11.5 * Math.cos(r)} y2={8 + 11.5 * Math.sin(r)}
-                        stroke="currentColor" strokeWidth="1.7"
-                      />
-                    )
-                  })}
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <circle cx="6.5" cy="8" r="4.6" stroke="currentColor" strokeWidth="1.7" />
-                  <circle cx="9.5" cy="10.5" r="4.4" fill="var(--mc-inner)" stroke="none" />
-                </svg>
-              )}
+              <img src="/logo.svg" alt="" className="h-8 w-8 rounded-lg" />
+              <span className="min-w-0">
+                <span className="block truncate text-[13px] font-semibold">{account}</span>
+                <span className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-mc-sub" title={status.title}>
+                  <span className="h-[5px] w-[5px] shrink-0 rounded-full" style={{ background: status.dot }} />
+                  {status.label}
+                </span>
+              </span>
             </button>
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Account menu"
-                title={OPERATOR_NAME || 'Account'}
-                onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v) }}
-                className="w-8 h-8 rounded-full bg-mc-primary text-white flex items-center justify-center text-[13px] font-semibold ring-1 ring-mc-border hover:opacity-90 cursor-pointer"
+            {menuOpen && (
+              <div
+                className="absolute bottom-16 left-3 z-50 w-[200px] rounded-xl border border-mc-border bg-mc-card p-1.5 shadow-lg"
+                onClick={(e) => e.stopPropagation()}
               >
-                {/* Operator initial from VITE_OPERATOR_NAME; generic person
-                    glyph when unset (was a hardcoded "J" — ticket 3). */}
-                {operatorInitial() ?? (
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <circle cx="8" cy="5.5" r="3" stroke="currentColor" strokeWidth="1.6" />
-                    <path d="M2.5 14c.8-2.8 3-4.2 5.5-4.2s4.7 1.4 5.5 4.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                  </svg>
-                )}
-              </button>
-              {menuOpen && (
-                <div
-                  className="absolute right-0 top-10 z-50 w-48 rounded-xl border border-mc-border bg-mc-card shadow-lg py-1.5"
-                  onClick={(e) => e.stopPropagation()}
+                <div className="px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-mc-sub">Appearance</div>
+                {(['system', 'light', 'dark'] as const).map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => { setChoice(opt); setMenuOpen(false) }}
+                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[13px] ${choice === opt ? 'bg-mc-sel font-semibold' : 'hover:bg-mc-hover'}`}
+                  >
+                    {opt === 'system' ? 'System' : opt === 'light' ? 'Light' : 'Dark'}
+                    {choice === opt && <span className="text-mc-accent">✓</span>}
+                  </button>
+                ))}
+                <button type="button" onClick={() => { setMenuOpen(false); nav('/system/settings') }} className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-mc-hover">
+                  Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    localStorage.removeItem('mc-connected')
+                    nav('/connect')
+                  }}
+                  className="w-full rounded-lg px-2 py-1.5 text-left text-[13px] text-mc-red hover:bg-mc-hover"
                 >
-                  <button
-                    type="button"
-                    onClick={() => { setMenuOpen(false); nav('/settings') }}
-                    className="w-full text-left px-4 py-2 text-[13px] text-mc-text hover:bg-white/5 flex items-center gap-2"
-                  >
-                    ⚙ Settings
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      localStorage.removeItem('mc-connected')
-                      nav('/connect')
-                    }}
-                    className="w-full text-left px-4 py-2 text-[13px] text-mc-redtext hover:bg-white/5 flex items-center gap-2"
-                  >
-                    ⏻ Log out
-                  </button>
-                </div>
-              )}
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          {api.state === 'offline' && (
+            <div role="alert" className="mx-6 mt-4 shrink-0 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
+              Can't reach the API at {API_URL} ({api.lastError ?? 'no response'}). Data on this page may be out of date
+              {api.lastOkAt ? ` (last update ${new Date(api.lastOkAt).toLocaleTimeString()})` : ''}; retrying automatically.
             </div>
-          </div>
-        </header>
-
-        {/* API dropped mid-session (item 7): pages keep their last data, so
-            SAY it may be stale. Same notice look as the Tickets/Backlog
-            notices (orange bg/text) — no new design. Clears on next contact. */}
-        {api.state === 'offline' && (
-          <div role="alert" className="mx-6 mt-4 shrink-0 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-            {/* Reason in parentheses: messages may end in "?" or "." already. */}
-            Can't reach the API at {API_URL} ({api.lastError ?? 'no response'}). Data on this page may be out of date
-            {api.lastOkAt ? ` (last update ${new Date(api.lastOkAt).toLocaleTimeString()})` : ''}; retrying automatically.
-          </div>
-        )}
-
-        <main className="flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
+          )}
+          <main className="mc-scroll min-h-0 flex-1 overflow-y-auto px-7 py-6">
+            <Outlet />
+          </main>
+        </div>
       </div>
     </div>
   )

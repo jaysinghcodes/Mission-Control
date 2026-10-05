@@ -1,295 +1,242 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
-import { useLiveActivity } from '../hooks/useLiveActivity'
-import { Card, Chip, SectionLabel } from '../components/ui'
-import { AgentAvatar } from '../components/AgentAvatar'
+import { PageHeader, Segmented, SoftCard, Face, AgentName, SearchInput, EmptyState } from '../components/shell'
+import { agentCaption } from '../data/roster'
+import type { Agent, AgentsResp } from '../types'
 
 /**
- * Office — LIVE floor with REAL pipeline semantics (review fix #7).
- *
- * The five stations read as office rooms (the board as a floor plan):
- *  Break Room — team lounge & queue (idle agents rest, no active work)
- *  Build Room — compile & assemble: code written, artifacts produced
- *  QA Room    — testing & verification: find bugs before release
- *  Review Room— the gate: human/approvals review before anything ships
- *  Ship Room  — release/deploy to production
- *
- * Agents are placed by role: build/infra/eng → BUILD, qa/test/audit → QA,
- * review → REVIEW, else round-robin. When a real run.* event fires, a bot
- * PHYSICALLY moves along the walkway to its next stage while bobbing.
+ * Office — Build / QA / Ship / Deploy desks, Commons, Activity and Pipeline.
+ * Placement follows role. Idle agents in a desk room stay at the desk;
+ * chief, research, support and trends sit in the Commons.
  */
 
-interface Agent { id: string; name: string; role: string | null; color: string; status: string; parentId?: string | null }
-interface AgentsResp { agents: Agent[] }
-// `agent` is optional: bridge/seed run.* events carry it, API ticket moves may not.
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
 interface ActivityResp { events: EventApi[] }
+interface Ticket { status: string }
+interface TicketsResp { tickets: Ticket[] }
 
-const STATIONS = [
-  { label: 'Break Room', def: 'Team lounge & queue — idle agents rest here' },
-  { label: 'Build Room', def: 'Compile & assemble — code → artifacts' },
-  { label: 'QA Room', def: 'Test & verify — find bugs pre-release' },
-  { label: 'Review Room', def: 'The gate — human/approvals review' },
-  { label: 'Ship Room', def: 'Release & deploy — completed runs visit' },
+type Room = 'build' | 'qa' | 'ship' | 'deploy' | 'commons'
+
+const ROOMS: { id: Room; label: string; color: string }[] = [
+  { id: 'build', label: 'Build', color: 'var(--mc-blue)' },
+  { id: 'qa', label: 'QA', color: 'var(--mc-orange)' },
+  { id: 'ship', label: 'Ship', color: 'var(--mc-green)' },
+  { id: 'deploy', label: 'Deploy', color: 'var(--mc-teal)' },
 ]
-const STAGE_X = [2, 27, 45, 63, 81] // % left for each station
-/**
- * Vertical step for a second (third, …) agent in the SAME room. Taller than
- * avatar + desk line + name + role + status chip, so labels don't paint on
- * top of each other. The floor grows by this much per extra occupant.
- */
-const STACK_STEP = 108
 
-// MC-204 office chrome — one accent hue + door-plate monogram per room.
-const ROOM_ACCENT: Record<string, string> = {
-  'Break Room': 'var(--mc-border)', // neutral — lounge carries no hue
-  'Build Room': 'var(--mc-blue)',
-  'QA Room': 'var(--mc-green)',
-  'Review Room': 'var(--mc-purple)',
-  'Ship Room': 'var(--mc-teal)',
-}
-const ROOM_PLATE: Record<string, { bg: string; fg: string; mono: string }> = {
-  'Break Room': { bg: 'var(--mc-inner)', fg: 'var(--mc-faint)', mono: 'BR' },
-  'Build Room': { bg: 'var(--mc-bluebg)', fg: 'var(--mc-bluetext)', mono: 'BL' },
-  'QA Room': { bg: 'var(--mc-greenbg)', fg: 'var(--mc-greentext)', mono: 'QA' },
-  'Review Room': { bg: 'var(--mc-purplebg)', fg: 'var(--mc-purpletext)', mono: 'RV' },
-  'Ship Room': { bg: 'var(--mc-tealbg)', fg: 'var(--mc-tealtext)', mono: 'SH' },
+function blocked(agent: Agent): boolean {
+  return /approval|needs you|waiting on you/i.test(`${agent.currentTask ?? ''} ${agent.recentActivity ?? ''}`)
 }
 
-function stageForAgent(role: string | null, index: number): number {
-  const r = (role ?? '').toLowerCase()
-  if (r.includes('build') || r.includes('infra') || r.includes('eng') || r.includes('dev')) return 1 // BUILD
-  if (r.includes('qa') || r.includes('test') || r.includes('audit') || r.includes('scan')) return 2 // QA
-  if (r.includes('review') || r.includes('check')) return 3 // REVIEW
-  return 1 + (index % 3) // round-robin across BUILD/QA/REVIEW
+function roomFor(agent: Agent): Room {
+  const r = `${agent.role ?? ''} ${agent.name}`.toLowerCase()
+  if (/chief|research|support|scout|trend/.test(r)) return 'commons'
+  if (/qa|quality|security|alert/.test(r)) return 'qa'
+  if (/writer|summary|scribe|review/.test(r)) return 'ship'
+  if (/ops|data|deploy/.test(r)) return 'deploy'
+  if (/eng|dev|design|product/.test(r)) return 'build'
+  return agent.status === 'working' ? 'build' : 'commons'
+}
+
+function Desk() {
+  return (
+    <div className="pointer-events-none mx-auto -mt-3 w-[120px]" aria-hidden>
+      <div className="mx-auto h-8 w-14 rounded-md bg-[#1d1d1f] p-1">
+        <div className="h-full w-full rounded-sm bg-[#2c2c2e]">
+          <div className="ml-1 mt-1 h-0.5 w-6 rounded bg-mc-accent" />
+          <div className="ml-1 mt-1 h-0.5 w-8 rounded bg-[#636366]" />
+        </div>
+      </div>
+      <div className="mx-auto h-2.5 w-[88px] rounded-full bg-mc-fill" />
+    </div>
+  )
 }
 
 export default function Office() {
-  const agents = useApi<AgentsResp>('/agents', { pollMs: 30000 })
-  const history = useApi<ActivityResp>('/activity?limit=30', { pollMs: 15000 })
-  const { events } = useLiveActivity()
+  const agentsQ = useApi<AgentsResp>('/agents', { pollMs: 20000 })
+  const activityQ = useApi<ActivityResp>('/activity?limit=12', { pollMs: 15000 })
+  const ticketsQ = useApi<TicketsResp>('/tickets', { pollMs: 20000 })
+  const agents = agentsQ.data?.agents ?? []
+  const [filter, setFilter] = useState(0)
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<string | null>(null)
 
-  // agentId → station index. Recompute when the roster changes.
-  const [stations, setStations] = useState<Record<string, number>>({})
-  const [transit, setTransit] = useState<{ id: string; from: number; to: number } | null>(null)
-  const prevRoster = useRef('')
-
-  const roster = agents.data?.agents ?? []
-  const rosterKey = roster.map((a) => `${a.id}:${a.status}`).join('|')
-
-  useEffect(() => {
-    if (rosterKey !== prevRoster.current) {
-      prevRoster.current = rosterKey
-      const next: Record<string, number> = {}
-      roster.forEach((a, i) => {
-        // Review fix: idle agents hang out in the BREAK ROOM (station 0);
-        // only working agents stand at their role's station on the line.
-        next[a.id] = a.status === 'working' ? stageForAgent(a.role, i) : 0
-      })
-      setStations(next)
+  const placed = useMemo(() => {
+    const buckets: Record<Room, Agent[]> = { build: [], qa: [], ship: [], deploy: [], commons: [] }
+    const q = query.trim().toLowerCase()
+    for (const agent of agents) {
+      const cap = agentCaption(agent.name, agent.role)
+      if (q && !`${cap.name} ${cap.role} ${agent.currentTask ?? ''}`.toLowerCase().includes(q)) continue
+      const working = agent.status === 'working' || blocked(agent)
+      if (filter === 1 && !working) continue
+      if (filter === 3 && working) continue
+      buckets[roomFor(agent)].push(agent)
     }
-  }, [rosterKey, roster])
+    // Two desks per room. Overflow joins the Commons.
+    for (const id of ['build', 'qa', 'ship', 'deploy'] as Room[]) {
+      const extra = buckets[id].splice(2)
+      buckets.commons.push(...extra)
+    }
+    return buckets
+  }, [agents, filter, query])
 
-  // On run.* events: move a bot to the stage matching the event.
-  useEffect(() => {
-    const runEvents = events.filter((e) => e.type.startsWith('run.'))
-    if (runEvents.length === 0 || Object.keys(stations).length === 0) return
-    const ev = runEvents[0]
-    const target = ev.type === 'run.completed' ? 4 : ev.type === 'run.failed' ? 2 : ev.type === 'run.queued' ? 1 : 1 + (ev.type === 'run.progress' ? 1 : 0)
-    const candidates = roster.filter((a) => a.status === 'working' || a.status !== 'idle')
-    const mover = candidates[0] ?? roster[0]
-    if (!mover) return
-    const from = stations[mover.id] ?? 1
-    const to = Math.min(Math.max(target, 1), 4)
-    if (from === to) return
-    setStations((s) => ({ ...s, [mover.id]: to }))
-    setTransit({ id: mover.id, from, to })
-    const t = setTimeout(() => setTransit(null), 3000)
-    return () => clearTimeout(t)
-  }, [events, roster, stations])
+  const working = agents.filter((a) => a.status === 'working').length
+  const needs = agents.filter((a) => blocked(a)).length
+  const summary = agentsQ.data
+    ? agents.length === 0
+      ? 'The floor is empty'
+      : `${agents.length} agents · ${working} working${needs ? ` · ${needs} needs you` : ''}`
+    : 'Loading the floor…'
 
-  const working = roster.filter((a) => a.status === 'working')
-  const idle = roster.filter((a) => a.status !== 'working')
-
-  const buildLog = useMemo(() => {
-    const runEvents = (history.data?.events ?? []).filter((e) => e.type.startsWith('run.'))
-    return runEvents.slice(0, 6).map((e) => ({
-      tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
-      // Real agent from the event payload; 'system' when the producer didn't
-      // name one (was a hardcoded personal agent name — ticket 3).
-      agent: e.payload?.agent || 'system',
-      msg: `${e.type}${e.payload?.name ? ' · ' + e.payload.name : ''}`,
-      color: e.type.includes('fail') ? 'var(--mc-redtext)' : e.type.includes('complete') ? 'var(--mc-greentext)' : 'var(--mc-bluetext)',
-    }))
-  }, [history.data])
-
-  const stats = [
-    { label: 'Working', value: String(working.length) },
-    { label: 'Idle', value: String(idle.length) },
-    { label: 'Agents', value: String(roster.length) },
-    { label: 'Live Events', value: String(events.length) },
+  const tickets = ticketsQ.data?.tickets ?? []
+  const pipe = [
+    tickets.filter((t) => t.status === 'build' || t.status === 'inprogress').length,
+    tickets.filter((t) => t.status === 'qa').length,
+    tickets.filter((t) => t.status === 'review').length,
+    tickets.filter((t) => t.status === 'done').length,
   ]
+  const events = activityQ.data?.events ?? []
 
-  // Index within the room. Idle agents all share Break Room, and a shared
-  // left % stacked every name on one point. `i` is the drop, `n` is how
-  // many share the room (the floor height follows the busiest room).
-  const zonePlace = new Map<string, { i: number; n: number }>()
-  const zoneCounts = new Map<number, number>()
-  for (const a of roster) {
-    const st = stations[a.id] ?? 1
-    zoneCounts.set(st, (zoneCounts.get(st) ?? 0) + 1)
+  function taskLine(agent: Agent): string {
+    if (blocked(agent)) return agent.currentTask || 'Needs you'
+    return agent.currentTask || (agent.status === 'working' ? 'Working' : 'Idle')
   }
-  const seenInZone = new Map<number, number>()
-  for (const a of roster) {
-    const st = stations[a.id] ?? 1
-    const i = seenInZone.get(st) ?? 0
-    seenInZone.set(st, i + 1)
-    zonePlace.set(a.id, { i, n: zoneCounts.get(st) ?? 1 })
-  }
-  const maxStack = Math.max(1, ...zoneCounts.values())
-  // One occupant keeps the original 400px floor (layer 110px under the rooms).
-  // Each extra occupant in the busiest room adds STACK_STEP so the stack
-  // isn't clipped by the floor's overflow.
-  const layerH = 110 + (maxStack - 1) * STACK_STEP
-  const officeH = 290 + layerH
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-[22px] font-semibold">Office</div>
-          <div className="mt-1 text-[13px] text-mc-sub">Break Room → Build → QA → Review → Ship — the board as a floor plan. Agents move when runs fire.</div>
-        </div>
-        <div className="flex items-center gap-2" />
-      </div>
+    <div>
+      <PageHeader
+        title="Office"
+        summary={summary}
+        tools={
+          <>
+            <Segmented labels={['All working', 'Gather', 'Meeting', 'Break']} active={filter} onChange={setFilter} ariaLabel="Floor filter" />
+            <SearchInput value={query} onChange={setQuery} placeholder="Search" label="Search the floor" />
+          </>
+        }
+      />
 
-      <div className="relative mt-6 rounded-2xl border border-mc-border bg-mc-inner overflow-hidden" style={{ height: officeH }}>
-        <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(var(--mc-border) 1px, transparent 1px), linear-gradient(90deg, var(--mc-border) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-        <div className="absolute top-3 left-4 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-mc-faint">
-          OFFICE · LIVE <span className="ml-2 inline-block w-2 h-2 rounded-full bg-mc-green align-middle" />
-        </div>
-        <div className="absolute top-3 right-4 h-[22px] px-3 rounded-md bg-mc-primary text-white text-[10.5px] font-semibold flex items-center">
-          INCIDENTS · {events.filter((e) => e.type.includes('fail')).length}
-        </div>
+      {agentsQ.data && agents.length === 0 && (
+        <EmptyState title="Nobody is in the office" body="Run npm run seed:demo for the sample roster, or connect the OpenClaw bridge. The floor stays empty until agents exist." />
+      )}
 
-        <div className="absolute left-5 right-5 top-14 h-0.5 bg-mc-faint/40" />
-
-        {/* Rooms — five office room cards, one per board column. Each room is centered on
-            its stage lane (Break Room hugs the left wall) so the desks below work in front
-            of their own room. Occupancy pills count agents standing at each station (live). */}
-        <div className="absolute inset-x-4 top-[88px]">
-          {STATIONS.map((st, i) => {
-            const occupants = roster.filter((a) => (stations[a.id] ?? 1) === i).length
-            const plate = ROOM_PLATE[st.label]
-            return (
-              <div
-                key={st.label}
-                title={st.def}
-                className={i === 0 ? 'absolute left-0 top-0' : 'absolute top-0 -translate-x-1/2'}
-                style={{ width: 'min(170px, 16.5%)', left: i === 0 ? undefined : `${STAGE_X[i]}%` }}
-              >
-                <div className="flex h-[80px] w-full flex-col overflow-hidden rounded-xl border border-mc-border bg-mc-card">
-                  {/* accent strip — the room's only color field (Break Room stays neutral) */}
-                  <div className="h-[3px] w-full" style={{ backgroundColor: ROOM_ACCENT[st.label] }} />
-                  <div className="flex items-center gap-1.5 px-2.5 pt-1.5">
-                    {/* door plate — accent-bg/-text pair + 2-letter monogram */}
-                    <span
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[9px] font-bold"
-                      style={{ backgroundColor: plate.bg, color: plate.fg }}
-                    >
-                      {plate.mono}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-mc-text">{st.label}</span>
-                    <Chip label={String(occupants)} bg="var(--mc-inner)" fg="var(--mc-sub)" h={16} fs="text-[9.5px]" className="shrink-0" />
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="rounded-[18px] bg-mc-bg p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {ROOMS.map((room) => {
+              const crew = placed[room.id]
+              const busy = crew.filter((a) => a.status === 'working' || blocked(a)).length
+              return (
+                <SoftCard key={room.id} className="relative min-h-[460px] px-3 py-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: room.color }} />
+                      <span className="text-[15px] font-semibold">{room.label}</span>
+                    </div>
+                    <span className="text-[12px] text-mc-sub">{busy === 0 ? 'Idle' : busy === 1 ? '1 in progress' : `${busy} in progress`}</span>
                   </div>
-                  <div className="line-clamp-2 px-2.5 pt-[3px] text-[10px] leading-[1.35] text-mc-faint">{st.def}</div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+                  {crew.length === 0 && <p className="mt-8 text-center text-[12px] text-mc-sub">Empty</p>}
+                  {crew.map((agent) => {
+                    const cap = agentCaption(agent.name, agent.role)
+                    const on = selected === agent.id
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        onClick={() => setSelected(on ? null : agent.id)}
+                        className="relative mt-4 block w-full text-center"
+                      >
+                        <div className="flex justify-center">
+                          <Face agent={{ ...agent, status: blocked(agent) ? 'blocked' : agent.status }} agents={agents} px={84} />
+                        </div>
+                        <Desk />
+                        <div className="relative z-10 mt-2">
+                          <div className="text-[13.5px] font-semibold">{cap.name} <span className="font-medium text-mc-sub">· {cap.role}</span></div>
+                          <div className={`text-[12px] ${blocked(agent) ? 'text-mc-red' : 'text-mc-sub'}`}>{taskLine(agent)}</div>
+                          {on && <div className="mt-1 text-[12px] text-mc-accent">Open on Agents</div>}
+                        </div>
+                      </button>
+                    )
+                  })}
+                  {selected && crew.some((a) => a.id === selected) && (
+                    <Link to="/agents" className="mt-2 block text-center text-[12px] font-semibold text-mc-accent">See this agent</Link>
+                  )}
+                </SoftCard>
+              )
+            })}
+          </div>
 
-        {/* Walkway — dashed office path threading under the room cards */}
-        <div className="absolute left-8 right-8 top-[184px] border-t-2 border-dashed border-mc-border" />
-
-        {/* Agents at their desks — bobbing while working, physically moving on events */}
-        <div className="absolute inset-x-4 top-[206px]" style={{ height: layerH }}>
-          {roster.map((a) => {
-            const st = stations[a.id] ?? 1
-            const x = STAGE_X[st]
-            const place = zonePlace.get(a.id) ?? { i: 0, n: 1 }
-            const isWorking = a.status === 'working'
-            const isTransiting = transit?.id === a.id
-            return (
-              <div
-                key={a.id}
-                className="absolute flex w-[100px] flex-col items-center -translate-x-1/2"
-                style={{
-                  left: `${x}%`,
-                  // Drop down the room instead of sharing the station point.
-                  top: place.i * STACK_STEP,
-                  transition: 'left 2.5s ease-in-out, top 2.5s ease-in-out',
-                }}
-              >
-                {/* Ticket 12: hand-tuned robot (halo on the dark floor). The wrapper
-                    only adds the quick transit dash on run.* moves. */}
-                <div className={isTransiting ? 'animate-bob' : undefined} style={isTransiting ? { animationDuration: '0.6s' } : undefined}>
-                  <AgentAvatar agent={a} agents={roster} size={0.8} />
-                </div>
-                {/* desk line — static 44px bar under the avatar slot; the desk stays put while the agent works at it */}
-                <div className="mt-[3px] h-[3px] w-[44px] rounded-full border border-mc-border2 bg-mc-inner" />
-                <div className="mt-1 text-[11px] font-semibold truncate max-w-[110px]">{a.name}</div>
-                <div className="text-[9px] text-mc-sub truncate max-w-[110px]">{a.role ?? 'agent'}</div>
-                {isTransiting && (
-                  <Chip label={`→ ${STATIONS[transit!.to].label}`} bg="var(--mc-greenbg)" fg="var(--mc-greentext)" h={16} fs="text-[8.5px]" className="mt-1" />
-                )}
-                {!isTransiting && (
-                  <Chip
-                    label={isWorking ? 'WORKING' : 'IDLE'}
-                    bg={isWorking ? 'var(--mc-bluebg)' : 'var(--mc-inner)'}
-                    fg={isWorking ? 'var(--mc-bluetext)' : 'var(--mc-faint)'}
-                    h={16}
-                    fs="text-[8.5px]"
-                    className="mt-1"
-                  />
-                )}
-              </div>
-            )
-          })}
-          {roster.length === 0 && (
-            <div className="text-[12px] text-mc-faint pt-6 text-center">No agents synced yet — the bridge pushes the roster every few minutes.</div>
-          )}
-        </div>
-
-        {/* floor stats */}
-        <div className="absolute bottom-4 inset-x-4 flex justify-between px-1">
-          {stats.map((s) => (
-            <div key={s.label}>
-              <div className="text-[16px] font-semibold">{s.value}</div>
-              <div className="text-[9.5px] font-semibold uppercase tracking-[0.06em] text-mc-faint">{s.label}</div>
+          <SoftCard className="mt-4 px-4 py-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[15px] font-semibold">Commons</span>
+              <span className="text-[12px] text-mc-sub">{placed.commons.length} here</span>
             </div>
-          ))}
+            {placed.commons.length === 0 ? (
+              <p className="mt-3 text-[13px] text-mc-sub">The commons is empty.</p>
+            ) : (
+              <div className="mt-4 flex flex-wrap justify-center gap-6">
+                {placed.commons.map((agent) => {
+                  const cap = agentCaption(agent.name, agent.role)
+                  return (
+                    <button key={agent.id} type="button" onClick={() => setSelected(agent.id)} className="w-24 text-center">
+                      <div className="flex justify-center">
+                        <Face agent={agent} agents={agents} px={64} />
+                      </div>
+                      <div className="mt-1 text-[12px] font-semibold">{cap.name}</div>
+                      <div className="text-[11px] text-mc-sub">{cap.role}</div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </SoftCard>
         </div>
+
+        <aside>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[15px] font-semibold">Activity</span>
+            <span className="text-[12px] font-semibold text-mc-green">Live</span>
+          </div>
+          <div className="rounded-[14px] bg-mc-inner">
+            {events.length === 0 && <p className="px-4 py-6 text-[12.5px] text-mc-sub">No activity yet. Seed or the bridge fills this list.</p>}
+            {events.slice(0, 6).map((e, i) => {
+              const name = e.payload?.agent || 'system'
+              const hit = agents.find((a) => a.name.toLowerCase() === name.toLowerCase())
+              const who = hit ?? { id: name, name, role: null, status: 'idle' }
+              const text = e.payload?.name || e.payload?.summary || e.type
+              const red = /fail|approval/i.test(`${e.type} ${text}`)
+              return (
+                <div key={`${e.ts}-${i}`} className="flex gap-2 border-b border-mc-sep px-3 py-3 last:border-0">
+                  <Face agent={who} agents={agents} px={36} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex justify-between gap-2">
+                      <AgentName name={who.name} role={who.role} />
+                      <span className="whitespace-nowrap text-[11px] text-mc-sub">{new Date(e.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                    </div>
+                    <div className={`truncate text-[12px] ${red ? 'text-mc-red' : 'text-mc-sub2'}`}>{text}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mb-2 mt-5 flex items-center justify-between">
+            <span className="text-[15px] font-semibold">Pipeline</span>
+            <Link to="/pipeline" className="text-[12px] font-semibold text-mc-accent">Open</Link>
+          </div>
+          <div className="rounded-[14px] bg-mc-inner">
+            {ROOMS.map((room, i) => (
+              <div key={room.id} className="flex items-center justify-between border-b border-mc-sep px-4 py-3 last:border-0">
+                <span className="flex items-center gap-2 text-[13px]">
+                  <span className="h-2 w-2 rounded-full" style={{ background: room.color }} />
+                  {room.label}
+                </span>
+                <span className="text-[13px] font-semibold text-mc-sub2">{pipe[i]}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] text-mc-sub">Counts are tickets on the board.</p>
+        </aside>
       </div>
-
-      {/* Run log — real persisted run events */}
-      <Card className="mt-6 px-4 py-3">
-        <SectionLabel>Run Log</SectionLabel>
-        <div className="mt-2">
-          {buildLog.length === 0 && <div className="text-[12px] text-mc-faint py-2">No run events yet — they stream in live.</div>}
-          {buildLog.map((l, i) => (
-            <div key={i} className="flex items-center gap-2 py-[5px] font-mono text-[11px]">
-              <span className="text-mc-faint">{l.tm}</span>
-              <span className="font-semibold text-mc-text">{l.agent}</span>
-              <span style={{ color: l.color }}>{l.msg}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <style>{`@keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-        .animate-bob { animation: bob 1.4s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .animate-bob { animation: none; } }`}</style>
     </div>
   )
 }
