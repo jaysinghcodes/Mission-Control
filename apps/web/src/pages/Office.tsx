@@ -19,7 +19,7 @@ import { AgentAvatar } from '../components/AgentAvatar'
  * PHYSICALLY moves along the walkway to its next stage while bobbing.
  */
 
-interface Agent { id: string; name: string; role: string | null; color: string; status: string }
+interface Agent { id: string; name: string; role: string | null; color: string; status: string; parentId?: string | null }
 interface AgentsResp { agents: Agent[] }
 // `agent` is optional: bridge/seed run.* events carry it, API ticket moves may not.
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
@@ -33,6 +33,12 @@ const STATIONS = [
   { label: 'Ship Room', def: 'Release & deploy — completed runs visit' },
 ]
 const STAGE_X = [2, 27, 45, 63, 81] // % left for each station
+/**
+ * Vertical step for a second (third, …) agent in the SAME room. Taller than
+ * avatar + desk line + name + role + status chip, so labels don't paint on
+ * top of each other. The floor grows by this much per extra occupant.
+ */
+const STACK_STEP = 108
 
 // MC-204 office chrome — one accent hue + door-plate monogram per room.
 const ROOM_ACCENT: Record<string, string> = {
@@ -124,6 +130,29 @@ export default function Office() {
     { label: 'Live Events', value: String(events.length) },
   ]
 
+  // Index within the room. Idle agents all share Break Room, and a shared
+  // left % stacked every name on one point. `i` is the drop, `n` is how
+  // many share the room (the floor height follows the busiest room).
+  const zonePlace = new Map<string, { i: number; n: number }>()
+  const zoneCounts = new Map<number, number>()
+  for (const a of roster) {
+    const st = stations[a.id] ?? 1
+    zoneCounts.set(st, (zoneCounts.get(st) ?? 0) + 1)
+  }
+  const seenInZone = new Map<number, number>()
+  for (const a of roster) {
+    const st = stations[a.id] ?? 1
+    const i = seenInZone.get(st) ?? 0
+    seenInZone.set(st, i + 1)
+    zonePlace.set(a.id, { i, n: zoneCounts.get(st) ?? 1 })
+  }
+  const maxStack = Math.max(1, ...zoneCounts.values())
+  // One occupant keeps the original 400px floor (layer 110px under the rooms).
+  // Each extra occupant in the busiest room adds STACK_STEP so the stack
+  // isn't clipped by the floor's overflow.
+  const layerH = 110 + (maxStack - 1) * STACK_STEP
+  const officeH = 290 + layerH
+
   return (
     <div className="p-6">
       <div className="flex items-start justify-between">
@@ -134,7 +163,7 @@ export default function Office() {
         <div className="flex items-center gap-2" />
       </div>
 
-      <div className="relative mt-6 h-[400px] rounded-2xl border border-mc-border bg-mc-inner overflow-hidden">
+      <div className="relative mt-6 rounded-2xl border border-mc-border bg-mc-inner overflow-hidden" style={{ height: officeH }}>
         <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(var(--mc-border) 1px, transparent 1px), linear-gradient(90deg, var(--mc-border) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
         <div className="absolute top-3 left-4 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-mc-faint">
           OFFICE · LIVE <span className="ml-2 inline-block w-2 h-2 rounded-full bg-mc-green align-middle" />
@@ -184,22 +213,28 @@ export default function Office() {
         <div className="absolute left-8 right-8 top-[184px] border-t-2 border-dashed border-mc-border" />
 
         {/* Agents at their desks — bobbing while working, physically moving on events */}
-        <div className="absolute inset-x-4 top-[206px] h-[110px]">
+        <div className="absolute inset-x-4 top-[206px]" style={{ height: layerH }}>
           {roster.map((a) => {
             const st = stations[a.id] ?? 1
             const x = STAGE_X[st]
+            const place = zonePlace.get(a.id) ?? { i: 0, n: 1 }
             const isWorking = a.status === 'working'
             const isTransiting = transit?.id === a.id
             return (
               <div
                 key={a.id}
-                className="absolute flex flex-col items-center -translate-x-1/2"
-                style={{ left: `${x}%`, transition: 'left 2.5s ease-in-out' }}
+                className="absolute flex w-[100px] flex-col items-center -translate-x-1/2"
+                style={{
+                  left: `${x}%`,
+                  // Drop down the room instead of sharing the station point.
+                  top: place.i * STACK_STEP,
+                  transition: 'left 2.5s ease-in-out, top 2.5s ease-in-out',
+                }}
               >
-                {/* MC-211: Pixel's robot avatar (state-driven bob/glow per tokens.css);
-                    the outer wrapper only adds the quick transit dash on run.* moves. */}
+                {/* Ticket 12: hand-tuned robot (halo on the dark floor). The wrapper
+                    only adds the quick transit dash on run.* moves. */}
                 <div className={isTransiting ? 'animate-bob' : undefined} style={isTransiting ? { animationDuration: '0.6s' } : undefined}>
-                  <AgentAvatar agent={a} size={0.8} />
+                  <AgentAvatar agent={a} agents={roster} size={0.8} />
                 </div>
                 {/* desk line — static 44px bar under the avatar slot; the desk stays put while the agent works at it */}
                 <div className="mt-[3px] h-[3px] w-[44px] rounded-full border border-mc-border2 bg-mc-inner" />

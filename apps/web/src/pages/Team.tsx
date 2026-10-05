@@ -28,8 +28,9 @@ import { rosterDisplayName, rosterIdentity } from '../data/roster'
  * for that agent (AgentProfileDrawer) — name/role/status, personality tags,
  * current task, stats, recent activity, and the chat-channel deep link
  * (only when the bridge supplies one).
- * MC-211: AgentAvatar now renders Pixel's robot sprites (unique per roster
- * agent, live data-state) — see components/AgentAvatar.tsx + avatarAssets.ts.
+ * Ticket 12: AgentAvatar draws the 12 hand-tuned robots (robots.tsx).
+ * Past 12 agents, a child is a small numbered copy of its parent's robot —
+ * pass the full `agents` list so the picker can see the parent.
  */
 
 /** Status dot color — live honest semantics: working = green, otherwise faint. */
@@ -38,11 +39,14 @@ const statusColor = (status: string) => (status === 'working' ? 'var(--mc-green)
 /** Roster member card. Root (chief) variant gets the distinct org-header styling. */
 function MemberCard({
   agent,
+  agents,
   chief = false,
   parentName = null,
   onOpen,
 }: {
   agent: Agent
+  /** Whole roster — AgentAvatar needs it to number children past 12 robots. */
+  agents: Agent[]
   chief?: boolean
   parentName?: string | null
   onOpen?: (agent: Agent, e: ReactMouseEvent<HTMLButtonElement>) => void
@@ -64,7 +68,7 @@ function MemberCard({
         className="cursor-pointer rounded-xl bg-mc-card px-6 py-4 flex flex-col items-center gap-2 min-w-[220px] text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary transition-colors"
         style={{ border: '1px solid color-mix(in srgb, var(--mc-primary) 55%, transparent)' }}
       >
-        <AgentAvatar agent={agent} size={1.9} />
+        <AgentAvatar agent={agent} agents={agents} size={1.9} />
         <div>
           <div className="text-[15px] font-semibold leading-tight">{name}</div>
           <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-mc-primary">{roleTitle}</div>
@@ -84,7 +88,7 @@ function MemberCard({
       className="cursor-pointer rounded-xl border border-mc-border bg-mc-card px-3 py-2.5 min-w-[160px] w-[170px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary transition-colors hover:border-mc-primary/60"
     >
       <div className="flex items-center gap-2">
-        <AgentAvatar agent={agent} size={1} />
+        <AgentAvatar agent={agent} agents={agents} size={1} />
         <div className="min-w-0 flex-1">
           <div className="text-[12.5px] font-semibold leading-tight truncate">{name}</div>
           <div className="text-[11px] text-mc-sub truncate">{roleTitle}</div>
@@ -143,7 +147,7 @@ export default function Team() {
       {!error && chief && (
         <div className="mt-10 flex flex-col items-center">
           {/* Org-chart header — root agent (Chief of Staff) on top */}
-          <MemberCard agent={chief} chief onOpen={openProfile} />
+          <MemberCard agent={chief} agents={agents} chief onOpen={openProfile} />
           {team.length === 0 ? (
             <div className="mt-8 text-[12px] text-mc-faint text-center max-w-sm">
               No sub-agents running right now. Spawn one (sessions_spawn or a task) and it appears here live.
@@ -158,7 +162,7 @@ export default function Team() {
                 {team.map((a) => {
                   const parent = a.parentId ? agents.find((p) => p.id === a.parentId) : null
                   const parentName = parent && parent.id !== chief.id ? displayNameById.get(parent.id) ?? null : null
-                  return <MemberCard key={a.id} agent={a} parentName={parentName} onOpen={openProfile} />
+                  return <MemberCard key={a.id} agent={a} agents={agents} parentName={parentName} onOpen={openProfile} />
                 })}
               </div>
             </>
@@ -190,7 +194,7 @@ export default function Team() {
       )}
 
       {/* MC-202: profile drawer — rendered for the clicked agent only */}
-      {selected && <AgentProfileDrawer agent={selected} onClose={closeProfile} />}
+      {selected && <AgentProfileDrawer agent={selected} agents={agents} onClose={closeProfile} />}
     </div>
   )
 }

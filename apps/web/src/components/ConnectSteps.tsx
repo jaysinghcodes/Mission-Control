@@ -184,6 +184,7 @@ export const STEP_DATA: ConnectStep[] = [
       'Optional — skip without OpenClaw. The bridge ships in this repo: `bridge/mc-bridge-sync.py` (Python 3, stdlib only) reads OpenClaw via the `openclaw` CLI and POSTs agents/sessions/calendar/usage/approvals snapshots + `run.*` events to `http://127.0.0.1:3000/events`.',
       'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token`. Set it explicitly — the bridge refuses a blank token.',
       'Try `--dry-run` first, then a real sync, then schedule it every ~5 min (system cron or an OpenClaw cron job — see `bridge/README.md`). A 401 means the bridge and api disagree on the token (blank `INGEST_TOKEN` → compose uses `dev-ingest-token`).',
+      'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). Mission Control’s starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these — they cap OpenClaw fan-out.',
     ],
     commands: [
       { label: 'Preview, then sync once', cmd: 'python3 bridge/mc-bridge-sync.py --dry-run\npython3 bridge/mc-bridge-sync.py' },

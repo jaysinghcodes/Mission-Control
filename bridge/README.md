@@ -89,3 +89,18 @@ reads field names defensively (`identityName`/`name`/`id`, `key`/`id`, cron
 `schedule` as `{kind:"cron",expr}` / `{kind:"every",everyMs}` / a plain string).
 If a future OpenClaw changes shapes, fix the `map_*` functions — the event
 contract above is what Mission Control depends on, not the CLI output.
+
+## Starter OpenClaw defaults
+
+Mission Control ships a small starter for a fresh OpenClaw config. Merge
+[`openclaw.starter.json`](openclaw.starter.json) into `~/.openclaw/openclaw.json`
+(do not replace the rest of that file — this block only sets sub-agent limits):
+
+| Key | Value | Why |
+| --- | --- | --- |
+| `agents.defaults.subagents.maxChildrenPerAgent` | **3** | Each agent session may keep at most 3 active children. The dashboard draws agents past the 12 robot designs as a small numbered copy of the parent; 3 keeps that badge a single digit. |
+| `agents.defaults.subagents.maxConcurrent` | **4** | At most 4 child runs execute at once for a spawning session (OpenClaw's own default is 8). |
+
+OpenClaw's defaults are 5 children and 8 concurrent. These two are the Mission
+Control starter — gentler fan-out for a local dashboard. They are not read by
+the api; they belong in the operator's OpenClaw config.

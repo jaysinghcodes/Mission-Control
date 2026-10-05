@@ -1,74 +1,165 @@
+import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { AvatarSize, AvatarState } from './avatarAssets'
-import { resolveAvatar, spriteBodyFor, stateFor } from './avatarAssets'
+import { ROSTER, RobotAvatar, type RobotStatus } from './robots'
+import { robotFaces, slotForAgent, type AgentRobotRef } from './robotAssign'
 
 /**
- * Agent avatar — Pixel's robot sprites (MC-210) wired into the app (MC-211).
+ * AgentAvatar — the one robot renderer for Team, the profile drawer, Office
+ * and Live Activity (ticket 12).
  *
- * Single renderer shared by the Team roster cards + chief header (MC-201),
- * the profile drawer (MC-202) and the Office floor bots. Each roster agent
- * renders its UNIQUE robot (distinct silhouette + color identity + role cue)
- * from role-avatar-map.json; unknown/generic agents resolve through the map's
- * fallback rule (role-keyword archetype, tinted by a deterministic name hash)
- * so cloned instances render their own agents — never a crash, always a robot.
+ * It draws robots.tsx (ROSTER slots 0–11, RobotAvatar, slotForId). That file
+ * is the artwork source of truth: flat-vector robots, and a light sticker
+ * halo (SVG dilate of the robot's own color) so the navy outline stays
+ * readable on the dark UI. The halo is on when the app is in dark mode and
+ * off in light mode — a white bloom on a white card would hide the outline.
  *
- * Live status is mapped to the avatar's `data-state` (idle / working / error /
- * offline); tokens.css drives the subtle motion (idle bob, working pulse + tool
- * anims, error shake + red glow, offline grayscale) and kills every animation
- * under prefers-reduced-motion. No JS motion needed.
+ * There are 12 drawings, not 13. robotAssign hands out those slots. When the
+ * roster grows past 12, extra agents that have a parent render here as a
+ * smaller copy of the parent's robot with a numbered badge (1, 2, 3…).
  *
- * API stability: callers pass `agent` + optional numeric `size` multiplier
- * (Team: 1 / 1.9, drawer: 1.8). The component accepts any object exposing the
- * agent's name/role/status (the full API Agent or the Office page's subset).
+ * Callers keep the old props: `agent` plus an optional numeric `size`
+ * multiplier (Team member 1, chief 1.9, drawer 1.8, floor 0.8). Pass `agents`
+ * (the list this agent came from) so the past-12 numbering can see the parent.
+ * Without it, the agent is drawn as a single full robot.
  */
 
-/** Minimal agent shape this component consumes (structural — full Agent fits). */
+/** Minimal agent shape. The full API Agent satisfies this. */
 export interface AvatarAgentShape {
+  id?: string | null
   name?: string | null
   role?: string | null
   status?: string | null
+  parentId?: string | null
+  /** Passed through so seat order can use creation time when the wire has it. */
+  createdAt?: string | number | null
 }
 
-/** Map the legacy numeric multiplier to the token frame sizes in tokens.css. */
-const sizeToken = (size: number): AvatarSize => (size >= 2.5 ? 'lg' : size > 1 ? 'md' : 'sm')
+/**
+ * Legacy multiplier → pixels, lined up with the roster sheet's UI sizes
+ * (32px floor bot, 40px member card, 64px chief / profile).
+ * Overflow children are scaled down again — they are a copy, not a new seat.
+ */
+function avatarPx(size: number, child: boolean): number {
+  const base = size >= 1.7 ? 64 : size >= 1.2 ? 48 : size >= 0.95 ? 40 : 32
+  return child ? Math.max(22, Math.round(base * 0.62)) : base
+}
 
-/** Graceful emoji fallback (tiny rows) — mirrors the map's per-agent emoji. */
-function EmojiFallback({ emoji, size, label }: { emoji: string; size: number; label: string }) {
-  if (!emoji) return null
-  return (
-    <span
-      role="img"
-      aria-label={label}
-      className="shrink-0 flex items-center justify-center rounded-md bg-mc-inner"
-      style={{ width: 22 * size, height: 22 * size, fontSize: 13 * size, lineHeight: 1 }}
-    >
-      {emoji}
-    </span>
+/**
+ * Live status → RobotAvatar's pip.
+ * working / idle match the API. error-ish states use the robot's red
+ * "blocked" pip (the artwork has no separate "error" status). Anything we
+ * don't recognise stays offline rather than inventing a state. A missing
+ * status draws no pip — the surrounding card already has its own dot.
+ */
+function robotStatus(status: string | null | undefined): RobotStatus | undefined {
+  const s = (status ?? '').toLowerCase().trim()
+  if (!s) return undefined
+  if (s === 'working' || s === 'active' || s === 'busy') return 'working'
+  if (s === 'idle') return 'idle'
+  if (s === 'blocked' || s === 'error' || s === 'failed' || s === 'failure' || s === 'fault') return 'blocked'
+  if (s === 'offline') return 'offline'
+  return 'offline'
+}
+
+/**
+ * Dark UI = no `.light` class on <html> (see AppLayout's theme toggle).
+ * Default is dark, which is also the first paint before the effect runs.
+ */
+function useDarkUi(): boolean {
+  const [dark, setDark] = useState(() =>
+    typeof document === 'undefined' ? true : !document.documentElement.classList.contains('light'),
   )
+  useEffect(() => {
+    const root = document.documentElement
+    const sync = () => setDark(!root.classList.contains('light'))
+    sync()
+    const obs = new MutationObserver(sync)
+    obs.observe(root, { attributes: true, attributeFilter: ['class'] })
+    return () => obs.disconnect()
+  }, [])
+  return dark
 }
 
-export function AgentAvatar({ agent, size = 1 }: { agent: AvatarAgentShape; size?: number }) {
-  const resolved = resolveAvatar(agent.name, agent.role)
-  const state: AvatarState = stateFor(agent.status)
-  const name = agent.name?.trim() || 'agent'
-  const label = `${name} avatar`
-  const body = spriteBodyFor(resolved.sprite)
-
-  // No sprite body (asset missing) → graceful emoji fallback, never a crash.
-  if (!body) {
-    return <EmojiFallback emoji={resolved.emoji} size={size} label={label} />
+/** Stable id for the picker. API ids are unique; name is only a fallback. */
+function toRef(agent: AvatarAgentShape, index: number): AgentRobotRef {
+  return {
+    id: agent.id?.trim() || agent.name?.trim() || `agent-${index}`,
+    name: agent.name,
+    role: agent.role,
+    parentId: agent.parentId ?? null,
+    createdAt: agent.createdAt ?? null,
   }
+}
+
+export function AgentAvatar({
+  agent,
+  agents,
+  size = 1,
+}: {
+  agent: AvatarAgentShape
+  /** Full roster this agent belongs to. Needed for "past 12 → parent's robot". */
+  agents?: readonly AvatarAgentShape[]
+  size?: number
+}) {
+  const dark = useDarkUi()
+  const list = (agents && agents.length > 0 ? agents : [agent]).map(toRef)
+  const self = toRef(agent, 0)
+  // If the caller passed a list that doesn't include this agent (a detail
+  // view opened by id), still draw them — just without overflow numbering.
+  const faces = robotFaces(list.some((a) => a.id === self.id) ? list : [self, ...list])
+  const face = faces.get(self.id) ?? { slot: slotForAgent(self), childNumber: null }
+  const spec = ROSTER[face.slot]
+  const px = avatarPx(size, face.childNumber != null)
+  const name = agent.name?.trim() || 'agent'
+  const parent = face.childNumber != null
+    ? list.find((a) => a.id === (agent.parentId ?? ''))
+    : undefined
+  const parentName = parent?.name?.trim()
+  // The SVG's own <title> is the accessible name. The badge is aria-hidden
+  // so the number isn't read twice.
+  const label = face.childNumber != null
+    ? `${name}, child ${face.childNumber}${parentName ? ` of ${parentName}` : ''} — ${spec.role} robot`
+    : `${name} — ${spec.role} robot`
+  const status = robotStatus(agent.status)
+  // Badge diameter tracks the robot so a 22px copy still gets a readable digit.
+  const badge = Math.max(14, Math.round(px * 0.4))
 
   return (
-    <svg
-      className="mc-avatar"
-      data-state={state}
-      data-size={sizeToken(size)}
-      viewBox="0 0 48 48"
-      role="img"
-      aria-label={label}
-      style={{ '--avatar-accent': resolved.accent, '--avatar-accent-deep': resolved.accentDeep } as CSSProperties}
-      dangerouslySetInnerHTML={{ __html: body }}
-    />
+    <span className="relative inline-flex shrink-0" style={{ width: px, height: px }}>
+      {/* halo defaults on inside RobotAvatar; we pass it explicitly so light
+          mode can turn the sticker off. tile stays off — the dark UI uses the
+          halo, not the tinted card (tile is the ≤32px list-row option). */}
+      <RobotAvatar
+        slot={face.slot}
+        size={px}
+        status={status}
+        halo={dark}
+        tile={false}
+        title={label}
+      />
+      {face.childNumber != null && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute flex items-center justify-center rounded-full font-bold"
+          style={{
+            top: -2,
+            right: -2,
+            minWidth: badge,
+            height: badge,
+            padding: '0 2px',
+            fontSize: Math.max(9, Math.round(badge * 0.62)),
+            lineHeight: 1,
+            // The robot's own color, inked like the roster sheet (near-black
+            // digit, dark sticker edge) so it reads on both card surfaces.
+            background: spec.color,
+            color: '#0b0b10',
+            border: '2px solid #0b0b10',
+            boxShadow: '0 0 0 1px rgba(255,255,255,0.35)',
+          } as CSSProperties}
+        >
+          {face.childNumber}
+        </span>
+      )}
+    </span>
   )
 }

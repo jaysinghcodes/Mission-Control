@@ -12,7 +12,8 @@ const statusColor = (status: string) => (status === 'working' ? 'var(--mc-green)
  *
  * Right-side drawer opened by clicking a Team page card (MC-201 wired the
  * cards as <button>s). Renders the agent's profile from the real agent
- * object: robot avatar (MC-211 — per-agent sprite w/ live state), roster
+ * object: robot avatar (ticket 12 — one of 12 robots.tsx drawings, or a
+ * numbered copy of the parent past that cap), roster
  * display name + role title, live
  * status, personality tags, current task, tasks completed, total cost and
  * recent activity — every field nullable until the bridge pushes it, so all
@@ -28,7 +29,16 @@ const statusColor = (status: string) => (status === 'working' ? 'var(--mc-green)
  * close-button all close, focus returns to the triggering card (Team.tsx
  * keeps the trigger ref). Mobile: panel spans the full width.
  */
-export function AgentProfileDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+export function AgentProfileDrawer({
+  agent,
+  agents,
+  onClose,
+}: {
+  agent: Agent
+  /** Roster the card was opened from, so the avatar matches the grid (ticket 12). */
+  agents?: Agent[]
+  onClose: () => void
+}) {
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   // Identity display mirrors the Team cards (roster map, not guessed).
@@ -87,7 +97,7 @@ export function AgentProfileDrawer({ agent, onClose }: { agent: Agent; onClose: 
       >
         {/* Header: avatar + identity + status, close button */}
         <div className="flex items-start gap-3 border-b border-mc-border px-5 pb-4 pt-5">
-          <AgentAvatar agent={agent} size={1.8} />
+          <AgentAvatar agent={agent} agents={agents} size={1.8} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[16px] font-semibold leading-tight text-mc-text">{name}</div>
             <div className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${chief ? 'text-mc-primary' : 'text-mc-sub'}`}>
