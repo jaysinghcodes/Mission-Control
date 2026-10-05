@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="mc-avatar" data-state="idle" data-size="md" role="img" aria-label="Jarvis — Chief of Staff" style="--avatar-accent:#A78BFA;--avatar-accent-deep:#5B3FB8;--avatar-body:#2A2E36;--avatar-deep:#1B1F26;--avatar-line:#3A414B;--avatar-hi:#E6E9ED;--avatar-paper:#E7DFCE;--avatar-faint:#8A939E;--status-error:#F85149">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="mc-avatar" data-state="idle" data-size="md" role="img" aria-label="Lead — Chief of Staff" style="--avatar-accent:#A78BFA;--avatar-accent-deep:#5B3FB8;--avatar-body:#2A2E36;--avatar-deep:#1B1F26;--avatar-line:#3A414B;--avatar-hi:#E6E9ED;--avatar-paper:#E7DFCE;--avatar-faint:#8A939E;--status-error:#F85149">
   <g class="bob">
     <!-- crown horns -->
     <path d="M21.4 9.2 L19.6 3.6" stroke="var(--avatar-accent)" stroke-width="2" stroke-linecap="round" fill="none"/>

@@ -1,6 +1,7 @@
 # Mission Control — clone-and-run stack (postgres + api + web).
 # Usage: docker compose up --build
-# Then open http://localhost:5173 (web) — API on http://localhost:3000.
+# Then open http://localhost:5173/#/ (web, hash routes) — API on http://localhost:3000.
+# No OpenClaw? `npm run seed:demo` (from the host) fills sample data.
 # Loopback-first: no ports are exposed beyond localhost by default.
 services:
   db:
@@ -39,6 +40,8 @@ services:
       # so a fresh clone's dashboard socket works out of the box.
       SOCKET_TOKEN: ${SOCKET_TOKEN:-dev-socket-token}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Display-only: default assignee for new tickets/runs. Blank → "Operator".
+      OPERATOR_NAME: ${OPERATOR_NAME:-}
       NODE_ENV: production
     ports:
       - "127.0.0.1:3000:3000"
@@ -52,6 +55,12 @@ services:
         # SOCKET_TOKEN (same root .env value) or the socket guard rejects the
         # dashboard in production.
         VITE_SOCKET_TOKEN: ${SOCKET_TOKEN:-dev-socket-token}
+        # Display-only operator name (Overview greeting + avatar initial).
+        # Blank → neutral greeting. Same root .env value the api gets.
+        VITE_OPERATOR_NAME: ${OPERATOR_NAME:-}
+        # Optional: YOUR Discord server id — expands bare channel ids from the
+        # bridge into profile-drawer links. Blank → no link (no hardcoded server).
+        VITE_DISCORD_GUILD_ID: ${VITE_DISCORD_GUILD_ID:-}
     restart: unless-stopped
     depends_on:
       - api

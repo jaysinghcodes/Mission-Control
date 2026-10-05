@@ -5,7 +5,7 @@ import { Card, Chip, SectionLabel } from '../components/ui'
 import { AgentAvatar } from '../components/AgentAvatar'
 
 /**
- * Office — LIVE floor with REAL pipeline semantics (Jay fix #7).
+ * Office — LIVE floor with REAL pipeline semantics (review fix #7).
  *
  * The five stations read as office rooms (the board as a floor plan):
  *  Break Room — team lounge & queue (idle agents rest, no active work)
@@ -21,7 +21,8 @@ import { AgentAvatar } from '../components/AgentAvatar'
 
 interface Agent { id: string; name: string; role: string | null; color: string; status: string }
 interface AgentsResp { agents: Agent[] }
-interface EventApi { type: string; payload: { name?: string; summary?: string } | null; ts: string }
+// `agent` is optional: bridge/seed run.* events carry it, API ticket moves may not.
+interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
 interface ActivityResp { events: EventApi[] }
 
 const STATIONS = [
@@ -75,7 +76,7 @@ export default function Office() {
       prevRoster.current = rosterKey
       const next: Record<string, number> = {}
       roster.forEach((a, i) => {
-        // Jay fix: idle agents hang out in the BREAK ROOM (station 0);
+        // Review fix: idle agents hang out in the BREAK ROOM (station 0);
         // only working agents stand at their role's station on the line.
         next[a.id] = a.status === 'working' ? stageForAgent(a.role, i) : 0
       })
@@ -108,7 +109,9 @@ export default function Office() {
     const runEvents = (history.data?.events ?? []).filter((e) => e.type.startsWith('run.'))
     return runEvents.slice(0, 6).map((e) => ({
       tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
-      agent: 'jarvis',
+      // Real agent from the event payload; 'system' when the producer didn't
+      // name one (was a hardcoded personal agent name — ticket 3).
+      agent: e.payload?.agent || 'system',
       msg: `${e.type}${e.payload?.name ? ' · ' + e.payload.name : ''}`,
       color: e.type.includes('fail') ? 'var(--mc-redtext)' : e.type.includes('complete') ? 'var(--mc-greentext)' : 'var(--mc-bluetext)',
     }))

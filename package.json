@@ -1,6 +1,7 @@
 {
   "name": "mission-control",
   "private": true,
+  "license": "MIT",
   "packageManager": "npm@11.17.0",
   "workspaces": [
     "apps/*",

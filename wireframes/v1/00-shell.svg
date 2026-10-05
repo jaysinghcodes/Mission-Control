@@ -63,7 +63,7 @@
 <text x="1162" y="33" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#86868b" text-anchor="start" opacity="1">ws://127.0.0.1:18789</text>
 <rect x="1196" y="12" width="32" height="32" rx="16" fill="#d8d8dd" opacity="1"/>
 <text x="1212" y="33" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff" text-anchor="middle" opacity="1">J</text>
-<text x="244" y="92" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="22" font-weight="600" fill="#1d1d1f" text-anchor="start" opacity="1">Good evening, Jay</text>
+<text x="244" y="92" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="22" font-weight="600" fill="#1d1d1f" text-anchor="start" opacity="1">Good evening</text>
 <text x="244" y="114" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#86868b" text-anchor="start" opacity="1">Here's what your agents are up to.</text>
 <filter id="sd" x="-10%" y="-10%" width="130%" height="130%"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.05"/></filter>
 <rect x="244" y="136" width="780" height="84" rx="14" fill="#ffffff" stroke="#e5e5ea" stroke-width="1" opacity="1"/>

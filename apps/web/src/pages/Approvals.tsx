@@ -4,7 +4,7 @@ import { Card, Inner, PillButton } from '../components/ui'
 
 /**
  * Approvals — real pending approval requests (synced via approvals.snapshot).
- * - Tabs: All + PRs (exec/pairing/messages/sessions removed per Jay)
+ * - Tabs: All + PRs (exec/pairing/messages/sessions removed per owner review)
  * - PR rows expand to show details (repo, branch, GitHub link)
  * - Approving a PR merges it on GitHub automatically (API-side)
  */

@@ -12,6 +12,12 @@ ENV VITE_API_URL=$VITE_API_URL
 # same root .env value as a build arg; default dev-socket-token matches compose).
 ARG VITE_SOCKET_TOKEN=dev-socket-token
 ENV VITE_SOCKET_TOKEN=$VITE_SOCKET_TOKEN
+# Display-only operator name (greeting/avatar). Blank → neutral first run.
+ARG VITE_OPERATOR_NAME=
+ENV VITE_OPERATOR_NAME=$VITE_OPERATOR_NAME
+# Optional operator-owned Discord server id (channel deep links). Blank → none.
+ARG VITE_DISCORD_GUILD_ID=
+ENV VITE_DISCORD_GUILD_ID=$VITE_DISCORD_GUILD_ID
 RUN cd apps/web && npm run build
 
 FROM nginx:alpine

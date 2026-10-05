@@ -1,10 +1,10 @@
 {
   "name": "api",
   "version": "0.0.1",
-  "description": "",
+  "description": "Mission Control API — NestJS + Socket.IO + Prisma backend for the agent-orchestration dashboard",
   "author": "",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

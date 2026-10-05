@@ -216,7 +216,7 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
   it('GET /agents/:id returns one agent with its children (parentId relation)', async () => {
     const res = await seedSnapshot([
       {
-        name: 'Jarvis Singh',
+        name: 'Demo Lead',
         role: 'chief-of-staff',
         status: 'working',
         emoji: '🧑\u200d💼',
@@ -225,18 +225,18 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
         name: 'Nova',
         role: 'development',
         status: 'working',
-        parent: 'Jarvis Singh',
+        parent: 'Demo Lead',
       },
-      { name: 'Pixel', role: 'design', status: 'idle', parent: 'Jarvis Singh' },
+      { name: 'Pixel', role: 'design', status: 'idle', parent: 'Demo Lead' },
     ]);
     expect(res.status).toBe(202);
 
     // Lookup by stable name (ids rotate every snapshot) — returns the agent + children.
     const byName = await request(app.getHttpServer()).get(
-      '/agents/Jarvis%20Singh',
+      '/agents/Demo%20Lead',
     );
     expect(byName.status).toBe(200);
-    expect(byName.body.agent.name).toBe('Jarvis Singh');
+    expect(byName.body.agent.name).toBe('Demo Lead');
     const childNames = byName.body.agent.children
       .map((c: { name: string }) => c.name)
       .sort();
@@ -264,19 +264,19 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
     // parents first (GET /agents returns children first — re-ingesting that
     // order used to violate Agent_parentId_fkey).
     const res = await seedSnapshot([
-      { name: 'Pixel', role: 'design', status: 'idle', parent: 'Jarvis Singh' },
+      { name: 'Pixel', role: 'design', status: 'idle', parent: 'Demo Lead' },
       {
         name: 'Nova',
         role: 'development',
         status: 'working',
-        parent: 'Jarvis Singh',
+        parent: 'Demo Lead',
       },
-      { name: 'Jarvis Singh', role: 'chief-of-staff', status: 'working' },
+      { name: 'Demo Lead', role: 'chief-of-staff', status: 'working' },
     ]);
     expect(res.status).toBe(202);
 
     const byName = await request(app.getHttpServer()).get(
-      '/agents/Jarvis%20Singh',
+      '/agents/Demo%20Lead',
     );
     expect(byName.status).toBe(200);
     const childNames = byName.body.agent.children

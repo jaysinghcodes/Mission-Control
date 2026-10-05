@@ -73,12 +73,10 @@ const url = process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhos
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
 
 // ── Sample data ─────────────────────────────────────────────────────────────
-// NAMES ARE DELIBERATELY GENERIC ("Demo …"). They must NOT reuse the private
-// roster names in apps/web/src/data/roster.ts: those names key the static
-// chat-channel fallback map there, so a demo agent reusing one would render a
-// deep link into a real (private) chat server. "Demo …" names match no roster
-// `nameKeys`, so channelHref() returns null and the profile drawer simply
-// hides the link.
+// NAMES ARE DELIBERATELY GENERIC ("Demo …") so screenshots and first runs
+// show obviously-sample data. Demo agents carry no `channel`, and since
+// ticket 3 the web app has no hardcoded chat-server fallback, so
+// channelHref() returns null and the profile drawer simply hides the link.
 //
 // ROLES, on the other hand, intentionally reuse the roster lane keys
 // (development, qa, research, …) so that:

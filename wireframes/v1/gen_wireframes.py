@@ -398,7 +398,7 @@ def screen_approvals():
         x += len(lab) * 8 + 44
     rows = [
         ("exec", "Exec · gateway", "Henry wants to run: apt install nginx on gateway", "2 min ago", C["red"]),
-        ("pair", "Device pairing", "New device: iPhone (Jays iPhone 15) requests operator access", "11 min ago", C["blue"]),
+        ("pair", "Device pairing", "New device: iPhone (Operator iPhone 15) requests operator access", "11 min ago", C["blue"]),
         ("msg", "Message · discord", "Echo wants to post launch announcement in #announcements", "24 min ago", C["purple"]),
         ("exec", "Exec · sandbox", "Scout wants to run: npm install in /tmp/scan", "1 hr ago", C["red"]),
         ("sess", "Session fork", "Ralph wants to fork session 'wireframes' into 'wireframes-v2'", "2 hrs ago", C["teal"]),
@@ -625,7 +625,7 @@ def screen_shell():
     s = Svg()
     sidebar(s, "tasks")
     topbar(s, "Mission Control")
-    s.text(244, 92, "Good evening, Jay", 22, C["text"], "600")
+    s.text(244, 92, "Good evening", 22, C["text"], "600")
     s.text(244, 114, "Here's what your agents are up to.", 13, C["sub"], "400")
     # hero strip
     card(s, 244, 136, 780, 84, rx=14)

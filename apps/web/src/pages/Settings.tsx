@@ -3,7 +3,7 @@ import { useApi } from '../hooks/useApi'
 import { Card, PillButton, SectionLabel } from '../components/ui'
 
 /**
- * Settings — account & app controls (Jay fix: avatar menu → Settings).
+ * Settings — account & app controls (review fix: avatar menu → Settings).
  * Real, live content only: connection state from /health, theme from the
  * shared topbar toggle, and a Log out that clears the onboarding gate.
  */

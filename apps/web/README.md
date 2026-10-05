@@ -1,32 +1,40 @@
-# React + TypeScript + Vite
+# Mission Control — Web (`apps/web`)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + Vite 8 + Tailwind CSS v4 dashboard for [Mission Control](../../README.md). 15 pages: 14 dashboard routes (Overview, Tasks, Tickets, Backlog, Calendar, Approvals, Team, Office, Activity, Health, Sessions, Usage, Logs, Settings) plus the `/connect` onboarding runbook.
 
-Currently, two official plugins are available:
+**Hash routes:** the app uses `HashRouter`, so URLs look like `http://localhost:5173/#/tickets`. A plain `/tickets` (no `#`) shows Overview.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Data comes from the [API](../api/README.md) over REST (`useApi`) and Socket.IO (`useLiveActivity`).
 
-## React Compiler
+## Scripts
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Vite dev server on `http://localhost:5173/#/` |
+| `npm run build` | `tsc -b && vite build` → `dist/` |
+| `npm run preview` | Serve the production build |
+| `npm run lint` | oxlint |
 
-## Expanding the Oxlint configuration
+From the repo root: `npm run dev -w apps/web` (or `npm run dev` for api + web via turbo).
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Environment (build-time)
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+Vite inlines `VITE_*` variables at **build** time. In Docker, compose passes them as web build args (rebuild the image after changing them). For `npm run dev`, set them in the root `.env` (exported) or `apps/web/.env`.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `VITE_API_URL` | `http://localhost:3000` | API base URL (REST + socket). |
+| `VITE_SOCKET_TOKEN` | — | Must match the api's `SOCKET_TOKEN`. Compose defaults both to `dev-socket-token`. |
+| `VITE_OPERATOR_NAME` | blank | **Display only, not a secret.** Overview greeting (`Good evening, <name>`) and topbar avatar initial. Blank → neutral `Good evening` + generic avatar. Compose fills it from the root `OPERATOR_NAME`. See `src/config.ts`. |
+| `VITE_DISCORD_GUILD_ID` | blank | Optional: your own Discord server id, used only to expand bare channel ids pushed by the bridge into Team-drawer links. Blank → no link. |
+
+## Layout
+
 ```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+src/App.tsx            HashRouter + routes
+src/layout/AppLayout   sidebar + topbar shell
+src/pages/             one file per page
+src/config.ts          VITE_OPERATOR_NAME helpers
+src/data/roster.ts     Team display identities + channel links
+src/hooks/             useApi, useLiveActivity
+```

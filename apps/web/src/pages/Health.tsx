@@ -5,7 +5,7 @@ import { Card, Chip, Progress, SectionLabel } from '../components/ui'
 /**
  * Health — ONLY live, tangible data. Real OS metrics from GET /system
  * (measured on the OpenClaw host), real API state from GET /health, and the
- * provider balance from /usage. No hardcoded wireframe values (Jay fix #5).
+ * provider balance from /usage. No hardcoded wireframe values (review fix #5).
  * The OS shown is the host's; SSH setup steps adapt to YOUR machine below.
  */
 

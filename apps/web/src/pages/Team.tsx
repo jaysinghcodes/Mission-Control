@@ -10,15 +10,15 @@ import { rosterDisplayName, rosterIdentity } from '../data/roster'
 /**
  * Team (MC-201) — the roster as a *team*, not a list of processes.
  *
- * Org-chart header with Jarvis (Chief of Staff) on top and the rest of the
+ * Org-chart header with the root agent (Chief of Staff) on top and the rest of the
  * real OpenClaw roster as member cards below, fed by GET /agents (polled).
- * Nothing here is hardcoded: whoever the API reports is the team — Jarvis
- * (root, no parentId) becomes the org header, everyone else fills the roster
+ * Nothing here is hardcoded: whoever the API reports is the team — the root
+ * agent (no parentId) becomes the org header, everyone else fills the roster
  * grid. Status dots keep the honest working/idle semantics of the old Agents
  * page; movement/stage logic lives in Office and is untouched.
  *
  * Identity display (MC-201): agent names + roles read through the approved
- * roster map (data/roster.ts) — Jarvis → Chief of Staff, Atlas → Scrum Master,
+ * roster map (data/roster.ts) — Lead → Chief of Staff, Atlas → Scrum Master,
  * Nova → Development, … — so cards show human names and role titles. Unknown
  * agents render their real API name + role (fallback "agent" when role is
  * null). MC-200 profile fields (emoji, currentTask, …) are all optional on
@@ -26,7 +26,8 @@ import { rosterDisplayName, rosterIdentity } from '../data/roster'
  *
  * MC-202: each member card is a <button> wired to open the profile drawer
  * for that agent (AgentProfileDrawer) — name/role/status, personality tags,
- * current task, stats, recent activity, and the Discord deep link.
+ * current task, stats, recent activity, and the chat-channel deep link
+ * (only when the bridge supplies one).
  * MC-211: AgentAvatar now renders Pixel's robot sprites (unique per roster
  * agent, live data-state) — see components/AgentAvatar.tsx + avatarAssets.ts.
  */
@@ -102,7 +103,7 @@ function MemberCard({
 export default function Team() {
   const { data, error } = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const agents = data?.agents ?? []
-  // Org root: the agent with no parent (Jarvis). Shape-tolerant: if the API
+  // Org root: the agent with no parent. Shape-tolerant: if the API
   // ever reports a roster without a root, the first agent leads instead.
   const chief = agents.find((a) => !a.parentId) ?? agents[0]
   const team = chief ? agents.filter((a) => a.id !== chief.id) : []
@@ -141,7 +142,7 @@ export default function Team() {
 
       {!error && chief && (
         <div className="mt-10 flex flex-col items-center">
-          {/* Org-chart header — Jarvis (Chief of Staff) on top */}
+          {/* Org-chart header — root agent (Chief of Staff) on top */}
           <MemberCard agent={chief} chief onOpen={openProfile} />
           {team.length === 0 ? (
             <div className="mt-8 text-[12px] text-mc-faint text-center max-w-sm">

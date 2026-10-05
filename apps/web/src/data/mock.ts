@@ -114,7 +114,7 @@ export const TASK_GROUPS: TaskGroup[] = [
 
 export interface AgentNode { name: string; role: string; color: string; status: 'working' | 'idle'; sub?: string }
 
-export const AGENT_MAIN: AgentNode = { name: 'main', role: 'Operator · Jarvis', color: agentColor('main'), status: 'working' }
+export const AGENT_MAIN: AgentNode = { name: 'main', role: 'Operator · Lead', color: agentColor('main'), status: 'working' }
 export const AGENT_PARENTS: AgentNode[] = [
   { name: 'Henry', role: 'Build · Orchestrator', color: agentColor('Henry'), status: 'working', sub: '2 sub-agents' },
   { name: 'Ralph', role: 'QA Manager', color: agentColor('Ralph'), status: 'working', sub: '2 sub-agents' },
@@ -220,7 +220,7 @@ export const APPROVAL_FILTERS = ['All', 'Exec', 'Pairing', 'Messages', 'Sessions
 
 export const APPROVAL_ROWS: ApprovalRow[] = [
   { kind: 'exec', tag: 'Exec · gateway', desc: 'Henry wants to run: apt install nginx on gateway', ago: '2 min ago', color: 'var(--mc-red)' },
-  { kind: 'pair', tag: 'Device pairing', desc: 'New device: iPhone (Jays iPhone 15) requests operator access', ago: '11 min ago', color: 'var(--mc-blue)' },
+  { kind: 'pair', tag: 'Device pairing', desc: 'New device: iPhone 15 requests operator access', ago: '11 min ago', color: 'var(--mc-blue)' },
   { kind: 'msg', tag: 'Message · discord', desc: 'Echo wants to post launch announcement in #announcements', ago: '24 min ago', color: 'var(--mc-purple)' },
   { kind: 'exec', tag: 'Exec · sandbox', desc: 'Scout wants to run: npm install in /tmp/scan', ago: '1 hr ago', color: 'var(--mc-red)' },
   { kind: 'sess', tag: 'Session fork', desc: 'Ralph wants to fork session \'wireframes\' into \'wireframes-v2\'', ago: '2 hrs ago', color: 'var(--mc-teal)' },

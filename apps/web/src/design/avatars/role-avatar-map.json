@@ -8,7 +8,7 @@
   "agents": [
     {
       "key": "jarvis",
-      "name": "Jarvis",
+      "name": "Chief of Staff",
       "role": "Chief of Staff",
       "roleKey": "chief-of-staff",
       "archetype": "commander",

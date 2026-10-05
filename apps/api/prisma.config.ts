@@ -2,7 +2,7 @@ import { defineConfig } from 'prisma/config';
 
 /**
  * Prisma 7 config — connection details live here, not in schema.prisma.
- * URL comes from DATABASE_URL (see ~/.openclaw/.env / deploy env).
+ * URL comes from DATABASE_URL (see the repo-root .env / deploy env).
  *
  * Production refuses the localhost fallback (GLM review 🔴 #3): a missing
  * DATABASE_URL in production throws a clear error instead of silently

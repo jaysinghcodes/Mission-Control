@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { operatorName } from '../config/operator';
 import { KeyedMutex } from './keyed-mutex';
 import {
   CREATE_STATUSES,
@@ -100,8 +101,11 @@ export class TicketsController {
 
     // ── optional fields: type-check so junk cannot reach Prisma (→ 500) ──
     const priority = this.optionalString(body?.priority, 'priority') ?? 'med';
+    // Default assignee = the configured operator (OPERATOR_NAME env, neutral
+    // "Operator" fallback). Previously hardcoded to the original author's
+    // agent name, which leaked into every fresh clone (ticket 3).
     const assignee =
-      this.optionalString(body?.assignee, 'assignee') ?? 'Jarvis Singh';
+      this.optionalString(body?.assignee, 'assignee') ?? operatorName();
     const tags = this.optionalStringArray(body?.tags, 'tags') ?? [];
 
     const count = await this.prisma.ticket.count();

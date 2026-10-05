@@ -91,6 +91,37 @@ describe('TicketsController', () => {
       expect(ticket.status).toBe('backlog');
     });
 
+    // Ticket 3: the default assignee comes from OPERATOR_NAME, never a
+    // hardcoded personal name. Save/restore the env so tests stay isolated.
+    describe('default assignee (OPERATOR_NAME)', () => {
+      const saved = process.env.OPERATOR_NAME;
+      afterEach(() => {
+        if (saved === undefined) delete process.env.OPERATOR_NAME;
+        else process.env.OPERATOR_NAME = saved;
+      });
+
+      it('falls back to the neutral "Operator" when OPERATOR_NAME is unset', async () => {
+        delete process.env.OPERATOR_NAME;
+        const { controller } = makeController();
+        const { ticket } = await controller.create({ title: 'no assignee' });
+        expect(ticket.assignee).toBe('Operator');
+      });
+
+      it('uses OPERATOR_NAME when configured', async () => {
+        process.env.OPERATOR_NAME = 'Ada';
+        const { controller } = makeController();
+        const { ticket } = await controller.create({ title: 'no assignee' });
+        expect(ticket.assignee).toBe('Ada');
+      });
+
+      it('an explicit assignee still wins over the default', async () => {
+        process.env.OPERATOR_NAME = 'Ada';
+        const { controller } = makeController();
+        const { ticket } = await controller.create({ title: 't', assignee: 'Demo Builder' });
+        expect(ticket.assignee).toBe('Demo Builder');
+      });
+    });
+
     it.each(['todo', 'backlog', ' todo '])(
       'accepts create status %p',
       async (status) => {

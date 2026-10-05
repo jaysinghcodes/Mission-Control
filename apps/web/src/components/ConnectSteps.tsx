@@ -84,7 +84,9 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       'Node.js 20.17+ (or 22.9+) — the root `packageManager` is `npm@11.17.0`, which requires `^20.17 || >=22.9` — and git.',
       'Docker with the compose plugin (used for Postgres, and optionally the api + web containers).',
-      'Your OpenClaw instance running — this dashboard is useless without it; it is the data source.',
+      // Ticket 3: OpenClaw is the live data source but no longer a hard
+      // prerequisite — tickets work out of the box and seed:demo fills the rest.
+      'Optional: your OpenClaw instance running — it is the live data source (step 6). Without it, the tickets loop works and `npm run seed:demo` fills sample data.',
     ],
     commands: [
       {
@@ -101,9 +103,10 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'ON THE HOST',
     body: [
       'Clone the repo (replace `<repo-url>` with the URL you were given), then install dependencies.',
-      'Confirm `npm install` finished without errors.',
+      // `npm ci` (exact lockfile) mirrors ONBOARDING.md step 2.
+      'Confirm `npm ci` finished without errors.',
     ],
-    commands: [{ label: 'Clone + install', cmd: 'git clone <repo-url> mission-control && cd mission-control\nnpm install' }],
+    commands: [{ label: 'Clone + install', cmd: 'git clone <repo-url> mission-control && cd mission-control\nnpm ci' }],
     confirmable: true,
   },
   {
@@ -149,7 +152,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       'Wait for all three services to be up: db healthy, api, web. The first `--build` compiles the images, so it takes a while.',
       'Confirm the api is **not** crash-looping: `docker compose logs api` should end with the migrations applied and `mission-control api listening on 0.0.0.0:3000`.',
-      'Prefer no Docker? Postgres is still required — the two-terminal dev path (export the root `.env`, `npx prisma migrate deploy`, `npm run start:dev -w apps/api`) is in ONBOARDING.md step 4.',
+      'Prefer no Docker? Postgres is still required — the dev path (export the root `.env`, `npx prisma migrate deploy`, `npm run dev`) is in ONBOARDING.md step 4. No OpenClaw? `npm run seed:demo` fills sample data.',
     ],
     commands: [
       { label: 'Build + start', cmd: 'docker compose up -d --build' },
@@ -163,7 +166,7 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'verify',
     phaseLabel: 'VERIFY',
     body: [
-      'Open `http://localhost:5173` — the Overview loads and the topbar shows a green “Connected” dot (live socket).',
+      'Open `http://localhost:5173/#/` — the Overview loads and the topbar shows a green “Connected” dot (live socket).',
       '`/health` shows real uptime, client count, and database state; empty states show actions, never fake numbers.',
       'Dot stays red on the Docker path? The api is down, or the `SOCKET_TOKEN` baked into the web build doesn’t match the api’s — set it in `.env` and rebuild with `docker compose up -d --build`.',
     ],
@@ -175,12 +178,17 @@ export const STEP_DATA: ConnectStep[] = [
     title: 'Connect their OpenClaw (the bridge)',
     phase: 'verify',
     phaseLabel: 'VERIFY',
+    // Ticket 3: copy now points at the vendored `bridge/` (mc-bridge-sync.py)
+    // instead of a private per-machine cron script. Text-only change.
     body: [
-      'The dashboard is only as live as the data it receives: your OpenClaw instance must POST typed events to `http://127.0.0.1:3000/events` with header `x-ingest-token: <the INGEST_TOKEN from Step 3’s root .env>`.',
-      'Standard pattern: a cron bridge job in the OpenClaw workspace that pushes agents/sessions/calendar/usage/approvals snapshots + run events.',
-      'The Live Activity band should show real events within a minute. None? Check the bridge sends the **same** token compose sees — an unset `INGEST_TOKEN` silently falls back to `dev-ingest-token` and the bridge would get 401.',
+      'Optional — skip without OpenClaw. The bridge ships in this repo: `bridge/mc-bridge-sync.py` (Python 3, stdlib only) reads OpenClaw via the `openclaw` CLI and POSTs agents/sessions/calendar/usage/approvals snapshots + `run.*` events to `http://127.0.0.1:3000/events`.',
+      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token`. Set it explicitly — the bridge refuses a blank token.',
+      'Try `--dry-run` first, then a real sync, then schedule it every ~5 min (system cron or an OpenClaw cron job — see `bridge/README.md`). A 401 means the bridge and api disagree on the token (blank `INGEST_TOKEN` → compose uses `dev-ingest-token`).',
     ],
-    links: [{ label: 'README — Event flow', to: 'https://github.com/jaysinghcodes/mission-control#event-flow-the-live-activity-feed', external: true }],
+    commands: [
+      { label: 'Preview, then sync once', cmd: 'python3 bridge/mc-bridge-sync.py --dry-run\npython3 bridge/mc-bridge-sync.py' },
+    ],
+    links: [{ label: 'bridge/README.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/bridge/README.md', external: true }],
     confirmable: true,
   },
   {
@@ -200,11 +208,12 @@ export const STEP_DATA: ConnectStep[] = [
     title: 'Smoke test',
     phase: 'here',
     phaseLabel: 'YOU ARE HERE',
+    // Ticket 3: mirror ONBOARDING.md step 8 — say plainly what works with no
+    // OpenClaw vs what needs the step-6 bridge (no overclaiming).
     body: [
-      'Tickets: create one → it lands in To-Do; start it → it travels Build → QA → Review → Done and persists to the activity stream.',
-      'Calendar: all your OpenClaw cron jobs are listed — weekly grid, ‹ › week navigation works.',
-      'Office: agents physically move between rooms when a `run.*` event fires.',
-      'Live Activity: recently run tasks show up there.',
+      '**No OpenClaw needed:** Tickets — create one on Backlog → To-Do → Build → QA → Review → Done; every move persists and survives a refresh.',
+      '**No OpenClaw needed:** after `npm run seed:demo`, Calendar / Team / Office / Live Activity show labelled sample data.',
+      '**Needs the step-6 bridge:** your real cron jobs on Calendar, the real roster on Team, Office bots moving on real `run.*` events, and live agent activity.',
     ],
     links: [
       { label: 'Tickets', to: '/tickets' },

@@ -9,8 +9,8 @@ Execution log per vibe-dev-workflow (resume point after any session break).
 - ✅ Tailwind v4 wired via `@tailwindcss/vite`; design tokens in `index.css`
 - ✅ Overview shell: sidebar (WORKSPACE/TEAM/OBSERVE), topbar, KPI tiles, Live Activity band incl. Trend Radar
 - ✅ Builds clean: `tsc --noEmit` + `vite build` pass
-- ✅ Heavy comments added to App.tsx / index.css per Jay's rule
-- ✅ Rebased onto Jay's initial commit (README) — conflict resolved keeping his title
+- ✅ Heavy comments added to App.tsx / index.css per the maintainer's rule
+- ✅ Rebased onto the initial commit (README) — conflict resolved keeping his title
 
 ## 2026-08-07 — PR 2: API foundation (feat/2-api-foundation) — OPEN #2
 

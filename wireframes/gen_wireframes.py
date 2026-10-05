@@ -275,7 +275,7 @@ def screen_overview():
     s = Svg()
     sidebar(s, "overview")
     topbar(s, "Overview")
-    s.text(244, 112, "Good evening, Jay", 34, C["text"], "600")
+    s.text(244, 112, "Good evening", 34, C["text"], "600")
     s.text(244, 140, "Your agents are at work. Here's the state of things.", 14.5, C["sub"], "400")
     stats = [("3", "TASKS RUNNING"), ("5", "PENDING APPROVALS"), ("14", "SHIPPED TODAY"), ("$4.82", "SPEND · 24H")]
     x = 244
@@ -380,7 +380,7 @@ def screen_agents():
         s.line(kids[0], 318, kids[1], 318, C["faint"], 1.2)
         for k in kids:
             s.line(k, 318, k, 342, C["faint"], 1.2)
-    node(564, 138, 140, 50, "main", "Operator · Jarvis", C["black"], "working")
+    node(564, 138, 140, 50, "main", "Operator · Chief of Staff", C["black"], "working")
     node(330, 238, 140, 58, "Henry", "Build · Orchestrator", "#6D28D9", "working", "2 sub-agents")
     node(564, 238, 140, 58, "Ralph", "QA Manager", "#B45309", "working", "2 sub-agents")
     node(798, 238, 140, 58, "Echo", "Content · Social", "#A16207", "idle", "2 sub-agents")
@@ -541,7 +541,7 @@ def screen_approvals():
         x += len(lab) * 8 + 46
     rows = [
         ("exec", "Exec · gateway", "Henry wants to run: apt install nginx on gateway", "2 min ago", C["red"]),
-        ("pair", "Device pairing", "New device: iPhone (Jays iPhone 15) requests operator access", "11 min ago", C["blue"]),
+        ("pair", "Device pairing", "New device: iPhone (Operator iPhone 15) requests operator access", "11 min ago", C["blue"]),
         ("msg", "Message · discord", "Echo wants to post launch announcement in #announcements", "24 min ago", C["purple"]),
         ("exec", "Exec · sandbox", "Scout wants to run: npm install in /tmp/scan", "1 hr ago", C["red"]),
         ("sess", "Session fork", "Ralph wants to fork session 'wireframes' into 'wireframes-v2'", "2 hrs ago", C["teal"]),

@@ -3,7 +3,7 @@ import { useApi } from '../hooks/useApi'
 import { Card, PillButton, SectionLabel } from '../components/ui'
 
 /**
- * Calendar — Google-Calendar-style WEEK grid (Jay fix #8).
+ * Calendar — Google-Calendar-style WEEK grid (review fix #8).
  *  - Times down the left, days across the top
  *  - Every real cron job is shown: timed jobs (e.g. 01:00) as blocks in their
  *    hour slot on the matching days; recurring/daily jobs on every day;

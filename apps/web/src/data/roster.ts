@@ -1,8 +1,8 @@
 /**
  * Approved roster identity map — MC-201 (docs/p0-tickets.md, Epic MC-A).
  *
- * Jay-approved "Meet the Team" identities: the roster agents get human names
- * and role labels instead of process-y lane names. This file is the DISPLAY
+ * Built-in "Meet the Team" identities: roster agents get friendly names and
+ * role labels instead of process-y lane names. This file is the DISPLAY
  * layer only — it never decides *who* is on the team (that always comes from
  * GET /agents), it only decides how an agent's name/role reads on the Team
  * page. Matches are defensive (case/separator-insensitive) so whatever the
@@ -10,7 +10,7 @@
  * resolves to the same card identity.
  *
  * Roster (locked):
- *   Jarvis   → Chief of Staff (keeps name)
+ *   Lead     → Chief of Staff (root agent; was a personal agent name — ticket 3)
  *   Atlas    → Scrum Master   (scrummaster)
  *   Nova     → Development    (development)
  *   Nox      → QA             (qa)
@@ -24,7 +24,7 @@
  */
 
 export interface RosterIdentity {
-  /** Human-facing display name (Jarvis, Atlas, Nova, …). */
+  /** Human-facing display name (Lead, Atlas, Nova, …). */
   name: string
   /** Human-facing role label (Chief of Staff, Scrum Master, Development, …). */
   role: string
@@ -39,9 +39,16 @@ interface RosterEntry extends RosterIdentity {
 
 export const ROSTER: RosterEntry[] = [
   {
-    name: 'Jarvis', role: 'Chief of Staff',
+    // Neutral display name for the root agent. Only shown when the API name
+    // is generic (e.g. OpenClaw's default agent "main"); a real name pushed
+    // by the bridge always wins (see rosterDisplayName). Ticket 3 replaced a
+    // personal agent name here and dropped its name-match key — the role
+    // keys below already match any chief-of-staff/main agent. nameKeys stays
+    // EMPTY on purpose: a substring key like 'lead' would mis-tag agents such
+    // as "Lead Designer" as Chief of Staff.
+    name: 'Lead', role: 'Chief of Staff',
     roleKeys: ['chief of staff', 'chief-of-staff', 'main agent', 'operator', 'main'],
-    nameKeys: ['jarvis'],
+    nameKeys: [],
   },
   {
     name: 'Atlas', role: 'Scrum Master',
@@ -115,7 +122,7 @@ export function rosterIdentity(name: string | null | undefined, role: string | n
 /**
  * Human-facing display for a roster card: identity name when the API name is
  * generic (e.g. "Subagent · 94ce5523" in the development lane), otherwise the
- * agent's real API name (Jarvis Singh keeps his full name). Role label always
+ * agent's real API name (a named root agent keeps its full name). Role label always
  * comes from the identity when matched; callers fall back to `role ?? 'agent'`
  * when there is no match (MC-201 acceptance: role title fallback "agent").
  */
@@ -126,60 +133,50 @@ export function rosterDisplayName(name: string | null | undefined, role: string 
 }
 
 /* ------------------------------------------------------------------ */
-/* MC-202 — per-agent Discord deep link                                */
+/* MC-202 — per-agent chat-channel deep link                           */
 /* ------------------------------------------------------------------ */
 
-/**
- * Discord guild hosting the roster channels (Sage's deep-links research,
- * `research/deep-links-chat.md`). Canonical deep-link shape:
- * `https://discord.com/channels/<guild>/<channel>` — a thread's snowflake
- * goes in the same slot, so no shape change is ever needed for threads.
+/*
+ * Ticket 3 (OSS reposition): this section used to hardcode one private
+ * Discord server's guild id plus a name → channel-snowflake fallback map, so
+ * every fresh clone rendered "Open channel" buttons deep-linking into the
+ * original author's server. Both are gone. A link now renders ONLY when the
+ * operator's own data supplies one:
+ *   - the bridge pushes `agent.channel` as a full URL (any chat app), or
+ *   - the bridge pushes a bare Discord channel id AND the operator configured
+ *     their own server via VITE_DISCORD_GUILD_ID (build-time, optional).
+ * No configuration → no link (the drawer hides its footer). Never guessed.
  */
-export const DISCORD_GUILD = '1361917070358347967'
 
 /**
- * Static name → Discord channel snowflake fallback (MC-202 AC #4).
- *
- * Used ONLY while the OpenClaw bridge does not supply `agent.channel` — the
- * agent's own `channel` field always wins (AC #3). Snowflakes verified
- * 2026-09-02 against the live session keys in
- * `~/.openclaw/agents/main/sessions/sessions.json` (each Discord channel
- * session key is `agent:main:discord:channel:<snowflake>`; the trailing
- * segment is the channel id — Sage's research). Keys are normalized
- * (case/separator-insensitive) roster names + the chief's API name.
+ * Operator's Discord server (guild) id, used only to expand a bare channel
+ * snowflake from the bridge into a canonical
+ * `https://discord.com/channels/<guild>/<channel>` URL. Optional and empty by
+ * default; set VITE_DISCORD_GUILD_ID at build time to enable.
  */
-export const CHANNEL_FALLBACK: Record<string, string> = {
-  'jarvis': '1533634789901471805',      // #general
-  'jarvis singh': '1533634789901471805', // #general (chief's raw API name)
-  'atlas': '1544192564280950794',       // #scrummaster
-  'nova': '1535129332442341489',        // #development
-  'nox': '1543846101260697620',         // #qa
-  'sage': '1533676159106289675',        // #research
-  'pixel': '1534416808042299444',       // #design
-  'scribe': '1544194893423968376',      // #summary
-  'sentinel': '1533669990673285141',    // #alerts
-}
+export const DISCORD_GUILD: string = String(import.meta.env.VITE_DISCORD_GUILD_ID ?? '').trim()
+
+/** Discord snowflakes are 17–21 digit integers. */
+const SNOWFLAKE = /^\d{17,21}$/
 
 /**
- * Resolve an agent's canonical Discord channel URL, or null when the agent
- * has no reachable channel.
+ * Resolve an agent's chat-channel URL, or null when the agent has no
+ * reachable channel.
  *
- * Priority (Sage's research §3):
- *  1. `channel` — the bridge's source of truth. Accepts either the full
- *     canonical URL or a bare snowflake (both are wrapped/kept as-is).
- *  2. Otherwise the static CHANNEL_FALLBACK map (roster display name).
- *  3. Nothing usable → null: callers HIDE the link — never a dead link,
- *     never `<#id>` mentions, never a URL guessed from a channel name.
+ * Priority:
+ *  1. `channel` as a full http(s) URL — the bridge's source of truth, kept
+ *     as-is (works for Discord, Slack, Matrix, …).
+ *  2. `channel` as a bare Discord snowflake — expanded ONLY when the operator
+ *     configured DISCORD_GUILD (VITE_DISCORD_GUILD_ID); otherwise hidden.
+ *  3. Anything else (absent, `<#id>` mentions, junk) → null: callers HIDE the
+ *     link — never a dead link, never a URL guessed from a name.
+ *
+ * `_name` is kept for call-site compatibility (it used to key the removed
+ * static fallback map) and is intentionally unused.
  */
-export function channelHref(channel: string | null | undefined, name: string | null | undefined): string | null {
+export function channelHref(channel: string | null | undefined, _name?: string | null): string | null {
   const v = (channel ?? '').trim()
   if (/^https?:\/\//i.test(v)) return v // full canonical URL from the bridge
-  if (/^\d{17,21}$/.test(v)) return `https://discord.com/channels/${DISCORD_GUILD}/${v}` // bare snowflake
-  // A present-but-unusable channel (e.g. a <#id> mention) → hide, never fall
-  // back and never render a dead/broken link (Sage's research §3).
-  if (v) return null
-  // Absent → documented roster fallback keyed by the display name.
-  const n = norm(name)
-  const snowflake = n ? (CHANNEL_FALLBACK[n] ?? null) : null
-  return snowflake ? `https://discord.com/channels/${DISCORD_GUILD}/${snowflake}` : null
+  if (SNOWFLAKE.test(v) && DISCORD_GUILD) return `https://discord.com/channels/${DISCORD_GUILD}/${v}`
+  return null
 }

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { operatorName } from '../config/operator';
 
 /**
  * RunsController — Tasks screen backend. Runs are real work items:
@@ -33,7 +34,9 @@ export class RunsController {
       return { error: 'name is required' };
     }
     const run = await this.prisma.run.create({
-      data: { name, agent: body.agent ?? 'Jarvis Singh', status: 'queued' },
+      // Default agent = the configured operator (OPERATOR_NAME env, neutral
+      // "Operator" fallback) — no personal name baked into a fresh clone.
+      data: { name, agent: body.agent ?? operatorName(), status: 'queued' },
     });
     await this.persist('run.queued', { id: run.id, name: run.name });
     this.gateway.broadcast('run.queued', { id: run.id, name: run.name });
@@ -71,7 +74,7 @@ export class RunsController {
             : 'run.queued';
     const payload = { id: run.id, name: run.name, status, progress: run.progress };
     // Persist too — the Activity page / Office build log load history from the
-    // DB, so a run that moves fast must still leave a visible trail (Jay's fix #3/#6).
+    // DB, so a run that moves fast must still leave a visible trail (review fix #3/#6).
     await this.persist(eventType, payload);
     this.gateway.broadcast(eventType, payload);
     return { run, ts: Date.now() };

@@ -29,6 +29,8 @@
         "DEEPSEEK_API_KEY",
         "ZAI_API_KEY",
         "HEALTH_TICK_MS",
+        // Display-only operator name (default ticket/run assignee) — ticket 3.
+        "OPERATOR_NAME",
         "NODE_ENV",
         "VITE_*"
       ]
