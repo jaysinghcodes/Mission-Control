@@ -8,7 +8,13 @@ import { PillButton, SearchField } from '../components/ui'
  */
 
 interface LogLine { tm: string; lvl: string; msg: string }
-interface LogsResp { logs: LogLine[] }
+/**
+ * `available` / `reason` are additive API fields (ticket 2). `available === false`
+ * means this machine has no OpenClaw gateway log (/tmp/openclaw missing — e.g.
+ * a fresh clone, docker, or demo-seed install), which is a normal state, not an
+ * error. Optional so an older API (fields absent) keeps the previous rendering.
+ */
+interface LogsResp { logs: LogLine[]; available?: boolean; reason?: string | null }
 
 const LEVELS = ['ALL', 'INFO', 'WARN', 'ERROR'] as const
 
@@ -16,6 +22,9 @@ export default function Logs() {
   const { data } = useApi<LogsResp>('/logs?lines=300', { pollMs: 10000 })
   const [level, setLevel] = useState<(typeof LEVELS)[number]>('ALL')
   const [q, setQ] = useState('')
+
+  // No log source on this box → clean empty state instead of "no matching lines".
+  const noSource = data?.available === false
 
   const lines = (data?.logs ?? []).filter(
     (l) => (level === 'ALL' || l.lvl === level) && (q === '' || l.msg.toLowerCase().includes(q.toLowerCase())),
@@ -42,7 +51,18 @@ export default function Logs() {
       </div>
 
       <div className="mt-4 h-[470px] rounded-2xl border border-mc-border bg-mc-inner p-4 font-mono text-[12px] overflow-y-auto">
-        {lines.length === 0 && (
+        {noSource && (
+          // Empty state for machines without OpenClaw. The API supplies the
+          // exact reason (missing dir / no files / unreadable) — shown verbatim.
+          <div className="pt-2">
+            <div className="text-mc-sub font-semibold">No gateway log source</div>
+            <div className="mt-1 text-mc-faint">
+              {data?.reason ?? 'OpenClaw is not running on this machine.'}
+            </div>
+            <div className="mt-1 text-mc-faint">See bridge/README.md to connect an OpenClaw instance.</div>
+          </div>
+        )}
+        {!noSource && lines.length === 0 && (
           <div className="text-mc-faint pt-2">No matching log lines{data ? '' : ' — waiting for the API…'}.</div>
         )}
         {lines.map((l, i) => (
@@ -57,7 +77,8 @@ export default function Logs() {
             <span className="text-mc-text">{l.msg}</span>
           </div>
         ))}
-        <div className="mt-3 text-[12px] font-semibold text-mc-greentext">● LIVE TAIL — streaming…</div>
+        {/* Only claim a live tail when there is actually a log being tailed. */}
+        {!noSource && <div className="mt-3 text-[12px] font-semibold text-mc-greentext">● LIVE TAIL — streaming…</div>}
       </div>
     </div>
   )

@@ -12,3 +12,9 @@ apps/api/prisma.config.js
 apps/api/prisma.config.js.map
 apps/api/prisma.config.d.ts
 apps/api/tsconfig.build.tsbuildinfo
+
+# OpenClaw bridge run-diff state (bridge/mc-bridge-sync.py) — local only
+bridge/.state/
+
+# Python bytecode (bridge/ scripts)
+__pycache__/

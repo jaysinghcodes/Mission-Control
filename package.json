@@ -11,7 +11,8 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
-    "lint": "turbo run lint"
+    "lint": "turbo run lint",
+    "seed:demo": "npm run seed:demo --workspace api"
   },
   "devDependencies": {
     "turbo": "^2.5.0"

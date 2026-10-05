@@ -10,5 +10,7 @@
     // whose outputs were just deleted → broken dist after clean builds.
     "incremental": false
   },
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts", "prisma.config.ts"]
+  // scripts/ (seed:demo) runs via ts-node on the host, never part of the app
+  // bundle — excluded so rootDir=./src stays valid.
+  "exclude": ["node_modules", "test", "dist", "**/*spec.ts", "prisma.config.ts", "scripts"]
 }
