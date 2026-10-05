@@ -119,10 +119,19 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
     // Set in the effect body (not at declaration) so React StrictMode's
     // mount → unmount → mount dev cycle ends with mounted = true.
     mounted.current = true
-    void refetch()
+    // QA-3: start the first load on a 0 ms timer, not synchronously. React
+    // StrictMode (dev) mounts → unmounts → re-mounts every effect; a
+    // synchronous fetch in the throw-away mount was aborted by its cleanup
+    // a moment later, so every page load logged net::ERR_ABORTED requests.
+    // The throw-away mount's cleanup now cancels this timer before it fires,
+    // so only the real mount ever hits the network. (Same trick as the
+    // live-activity socket, item 5.) Aborts that do still happen — page
+    // change, superseded refetch — are never reported as failures.
+    const first = setTimeout(() => void refetch(), 0)
     const t = pollMs > 0 ? setInterval(() => void refetch(), pollMs) : null
     return () => {
       mounted.current = false
+      clearTimeout(first)
       if (t) clearInterval(t)
       // Rule 2: nothing may land after unmount.
       inflight.current?.abort()
