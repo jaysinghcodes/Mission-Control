@@ -1,9 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-// MC-211: robot avatar design tokens (frame sizes, status colors, motion —
-// reduced-motion safe). Loaded once at app entry per the MC-210 guide.
-import './design/avatars/tokens.css'
+// Ticket 12: avatars are the inline robots in components/robots.tsx (sticker
+// halo included). The older sprite tokens.css is not loaded — nothing in the
+// live UI uses .mc-avatar anymore.
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(

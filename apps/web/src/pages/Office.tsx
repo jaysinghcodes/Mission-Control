@@ -19,7 +19,7 @@ import { AgentAvatar } from '../components/AgentAvatar'
  * PHYSICALLY moves along the walkway to its next stage while bobbing.
  */
 
-interface Agent { id: string; name: string; role: string | null; color: string; status: string }
+interface Agent { id: string; name: string; role: string | null; color: string; status: string; parentId?: string | null }
 interface AgentsResp { agents: Agent[] }
 // `agent` is optional: bridge/seed run.* events carry it, API ticket moves may not.
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
@@ -196,10 +196,10 @@ export default function Office() {
                 className="absolute flex flex-col items-center -translate-x-1/2"
                 style={{ left: `${x}%`, transition: 'left 2.5s ease-in-out' }}
               >
-                {/* MC-211: Pixel's robot avatar (state-driven bob/glow per tokens.css);
-                    the outer wrapper only adds the quick transit dash on run.* moves. */}
+                {/* Ticket 12: hand-tuned robot (halo on the dark floor). The wrapper
+                    only adds the quick transit dash on run.* moves. */}
                 <div className={isTransiting ? 'animate-bob' : undefined} style={isTransiting ? { animationDuration: '0.6s' } : undefined}>
-                  <AgentAvatar agent={a} size={0.8} />
+                  <AgentAvatar agent={a} agents={roster} size={0.8} />
                 </div>
                 {/* desk line — static 44px bar under the avatar slot; the desk stays put while the agent works at it */}
                 <div className="mt-[3px] h-[3px] w-[44px] rounded-full border border-mc-border2 bg-mc-inner" />

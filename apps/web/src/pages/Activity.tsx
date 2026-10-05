@@ -8,7 +8,7 @@ import { AgentAvatar } from '../components/AgentAvatar'
  * Socket.IO events appended as they arrive. Agent cards show the real roster.
  */
 
-interface Agent { id: string; name: string; role: string | null; color: string; status: string }
+interface Agent { id: string; name: string; role: string | null; color: string; status: string; parentId?: string | null }
 interface AgentsResp { agents: Agent[] }
 interface EventApi { type: string; payload: { name?: string } | null; ts: string }
 interface ActivityResp { events: EventApi[] }
@@ -55,7 +55,7 @@ export default function Activity() {
             <div className="mt-3 flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <AgentAvatar agent={a} size={0.8} />
+                  <AgentAvatar agent={a} agents={agents.data?.agents ?? []} size={0.8} />
                   <span className="text-[12px] font-semibold truncate">{a.name}</span>
                 </div>
                 <div className="text-[10.5px] text-mc-sub truncate mt-1">{a.role ?? 'agent'}</div>
