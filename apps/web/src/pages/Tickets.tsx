@@ -125,8 +125,9 @@ export default function Tickets() {
    *     the `!t` check stops it (no duplicate ticket, which is what `busy`
    *     used to protect against).
    *   - Queue the POST on the shared ticketCreateQueue instead of ignoring it.
-   *     Creates still go out one at a time, in submit order — required while
-   *     the API's MC-N key allocation is count-based (see serialQueue.ts).
+   *     Creates still go out one at a time, in submit order, so MC-N keys
+   *     follow typing order; key uniqueness itself is enforced server-side
+   *     by an advisory lock (QA-1 polish item 4, see serialQueue.ts).
    *   - On failure: say which title failed and why (inline notice, same
    *     component as move errors), and put the title back in the input if
    *     the user hasn't started typing something else, so it's one Enter to

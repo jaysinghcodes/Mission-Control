@@ -22,6 +22,16 @@ import {
   isTicketStatus,
 } from './ticket-status';
 
+/**
+ * Name of the Postgres advisory lock that serializes ticket-key allocation
+ * (QA-1 #5). Hashed with `hashtext()` in SQL, so any other writer that wants
+ * to mint MC-<n> keys safely just has to take the same named lock.
+ */
+const TICKET_KEY_LOCK = 'mission-control:ticket-key';
+
+/** First number handed out on an empty board — matches the old `150 + 0`. */
+const FIRST_TICKET_NUMBER = 150;
+
 /** Body accepted by POST /tickets. Everything is optional at the type level
  *  because it arrives as untrusted JSON — validation happens in the handler. */
 interface CreateTicketBody {
@@ -108,16 +118,24 @@ export class TicketsController {
       this.optionalString(body?.assignee, 'assignee') ?? operatorName();
     const tags = this.optionalStringArray(body?.tags, 'tags') ?? [];
 
-    const count = await this.prisma.ticket.count();
-    const ticket = await this.prisma.ticket.create({
-      data: {
-        title,
-        key: `MC-${150 + count}`,
-        priority,
-        assignee,
-        tags,
-        status,
-      },
+    // ── key allocation (QA-1 #5) ─────────────────────────────────────────
+    // The old code did `count()` then `create({ key: MC-${150 + count} })` as
+    // two separate, unlocked round-trips. Every create that read the count
+    // before any of the others committed got the SAME number — QA fired 10
+    // parallel creates and got MC-306 six times. (Counting rows was also
+    // wrong after deletes: count goes down, so a fresh key could collide
+    // with a surviving older one.)
+    //
+    // Fix, without a schema change: allocate the key and insert the row in
+    // ONE transaction that first takes a transaction-scoped Postgres
+    // advisory lock (see allocateKeyAndCreate). Concurrent creates queue on
+    // that lock, so each one sees the previous one's committed MC-N.
+    const ticket = await this.allocateKeyAndCreate({
+      title,
+      priority,
+      assignee,
+      tags,
+      status,
     });
     await this.persist('run.queued', {
       name: `ticket ${ticket.key}`,
@@ -128,6 +146,73 @@ export class TicketsController {
       ticket: ticket.key,
     });
     return { ticket, ts: Date.now() };
+  }
+
+  /**
+   * Insert a ticket with the next free `MC-<n>` key, race-free (QA-1 #5).
+   *
+   * How it works, step by step, inside ONE interactive transaction:
+   *  1. `pg_advisory_xact_lock(hashtext('mission-control:ticket-key'))`
+   *     — an application-level mutex that lives in Postgres, not in this
+   *     Node process, so it also serializes creates coming from a second api
+   *     replica, the seed script, or anything else that adopts the same
+   *     lock name. `_xact_` means Postgres releases it automatically on
+   *     COMMIT or ROLLBACK — no unlock call to forget, no leak on errors.
+   *     `hashtext(...)` turns a readable name into the int key the function
+   *     needs, so nobody has to remember a magic number.
+   *  2. Read the highest existing `MC-<digits>` key (other prefixes such as
+   *     the demo seed's `DEMO-1` and NULL keys are ignored) and add 1. Using
+   *     MAX instead of COUNT means deleted tickets never cause a reuse.
+   *  3. Insert the row and COMMIT, which releases the lock; the next waiting
+   *     create then reads our key as the new maximum.
+   *
+   * Numbering keeps the historical starting point: an empty table (or one
+   * with only non-MC keys) yields MC-150, exactly what `150 + count` gave.
+   *
+   * Still no DB-level guarantee: rows inserted by something that skips this
+   * lock (raw psql, an old api build) could duplicate a key. The PR body
+   * proposes a partial unique index on "Ticket"."key" for Jay to approve —
+   * schema changes are human-reviewed, so it is deliberately not here.
+   */
+  private allocateKeyAndCreate(data: {
+    title: string;
+    priority: string;
+    assignee: string;
+    tags: string[];
+    status: string;
+  }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        // (1) Serialize every key allocation. `pg_advisory_xact_lock`
+        // returns `void`, which $queryRaw cannot deserialize, so the call is
+        // made via $executeRaw (we only need its side effect: the lock).
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${TICKET_KEY_LOCK}))`;
+
+        // (2) Highest MC-<n> currently stored. The regex both filters to our
+        // key format and extracts the number; `::bigint` avoids int4
+        // overflow on hand-typed huge keys. MAX over zero rows is NULL.
+        const [{ max }] = await tx.$queryRaw<{ max: bigint | null }[]>`
+          SELECT MAX(SUBSTRING("key" FROM '^MC-([0-9]+)$')::bigint) AS "max"
+          FROM "Ticket"
+          WHERE "key" ~ '^MC-[0-9]+$'`;
+        const next =
+          max === null || max === undefined
+            ? FIRST_TICKET_NUMBER
+            : Math.max(Number(max) + 1, FIRST_TICKET_NUMBER);
+
+        // (3) Insert while still holding the lock; COMMIT releases it.
+        return tx.ticket.create({ data: { ...data, key: `MC-${next}` } });
+      },
+      {
+        // Creates now queue behind each other on the lock. Prisma's default
+        // interactive-transaction budget (2 s to get a connection, 5 s to
+        // finish) is generous for one insert, but a burst of parallel
+        // creates waits in line — give the tail of the queue some headroom
+        // instead of failing a perfectly valid create with a 500.
+        maxWait: 10_000,
+        timeout: 10_000,
+      },
+    );
   }
 
   /**

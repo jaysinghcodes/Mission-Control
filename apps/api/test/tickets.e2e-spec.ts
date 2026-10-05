@@ -242,4 +242,23 @@ describe('Tickets (e2e)', () => {
       expect(after - before).toBe(1);
     });
   });
+
+  describe('concurrent creates (QA-1 #5)', () => {
+    it('10 parallel POSTs → 10 unique MC-N keys', async () => {
+      const settled = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          request(app.getHttpServer())
+            .post('/tickets')
+            .send({ title: `e2e parallel ${i}`, status: 'todo' }),
+        ),
+      );
+      for (const res of settled) {
+        expect(res.status).toBe(201);
+        if (res.body?.ticket?.id) created.push(res.body.ticket.id);
+      }
+      const keys = settled.map((r) => r.body.ticket.key as string);
+      expect(new Set(keys).size).toBe(10);
+      for (const key of keys) expect(key).toMatch(/^MC-[0-9]+$/);
+    });
+  });
 });

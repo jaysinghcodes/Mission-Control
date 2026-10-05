@@ -78,8 +78,8 @@ export default function Backlog() {
    *     being submitted, frees the input for the next one, and makes a
    *     double-Enter harmless (2nd press sees an empty input → `!t`).
    *   - POST goes through the shared ticketCreateQueue: one create at a
-   *     time, in submit order (count-based MC-N keys on the API, see
-   *     serialQueue.ts) — queued, never ignored.
+   *     time, in submit order (keys follow typing order; uniqueness is the
+   *     API's advisory lock, see serialQueue.ts) — queued, never ignored.
    *   - Failure → warn notice naming the title + server reason, and the title
    *     goes back into the input only if the input is still empty.
    */
