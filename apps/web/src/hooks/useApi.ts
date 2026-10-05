@@ -60,3 +60,29 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T | null>
     return null
   }
 }
+
+/**
+ * PATCH helper for partial updates (ticket status moves, etc.).
+ *
+ * Why a separate helper (not reusing apiPost):
+ * - The Nest tickets controller only exposes `@Patch(':id')` for updates —
+ *   there is no POST /tickets/:id. Calling apiPost here 404s and the kanban
+ *   board silently fails to move cards (ONBOARDING Step 8 ticket loop).
+ * - Keeping method-specific helpers makes the HTTP verb obvious at the call
+ *   site and mirrors how browsers/devtools show the request.
+ * - Same never-throw contract as apiPost: callers treat null as failure and
+ *   render an empty/offline path instead of crashing the page.
+ */
+export async function apiPatch<T>(path: string, body: unknown): Promise<T | null> {
+  try {
+    const res = await fetch(`${API}${path}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) return null
+    return (await res.json()) as T
+  } catch {
+    return null
+  }
+}

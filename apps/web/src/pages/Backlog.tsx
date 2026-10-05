@@ -4,6 +4,7 @@ import { Card, Chip, PillButton } from '../components/ui'
 
 /**
  * Backlog — real backlog tickets from the API, ranked table with create CTA.
+ * Create sends status: "backlog" so items land here (not kanban To-Do).
  */
 
 interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; createdAt: string }
@@ -25,7 +26,10 @@ export default function Backlog() {
     const t = title.trim()
     if (!t || busy) return
     setBusy(true)
-    await apiPost('/tickets', { title: t, priority: 'med' })
+    // Explicit status: 'backlog' — POST /tickets defaults to 'todo' for the
+    // kanban empty-state CTA; without this, Backlog creates never appear on
+    // GET /tickets?status=backlog (they land in To-Do instead).
+    await apiPost('/tickets', { title: t, priority: 'med', status: 'backlog' })
     setTitle('')
     setBusy(false)
     void refetch()

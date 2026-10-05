@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useApi, apiPost } from '../hooks/useApi'
+import { useApi, apiPost, apiPatch } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { useEffect } from 'react'
 import { Bot, Card, Chip, Inner, PillButton, SectionLabel } from '../components/ui'
@@ -35,8 +35,17 @@ function inColumn(t: Ticket, col: { status: string; aliases: string[] }): boolea
   return t.status === col.status || col.aliases.includes(t.status)
 }
 
+/**
+ * Move a ticket between kanban columns.
+ *
+ * MUST use apiPatch → PATCH /tickets/:id. The API only registers
+ * `@Patch(':id')` (see tickets.controller.ts); a POST to the same path 404s,
+ * so the old apiPost call made "Start / QA / Review / Done" no-ops and broke
+ * ONBOARDING Step 8's ticket smoke loop on a fresh clone (no OpenClaw needed
+ * for this path — the controller itself persists run.* activity events).
+ */
 async function patchTicket(id: string, status: string): Promise<boolean> {
-  return (await apiPost(`/tickets/${id}`, { status })) !== null
+  return (await apiPatch(`/tickets/${id}`, { status })) !== null
 }
 
 export default function Tickets() {

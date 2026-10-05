@@ -5,7 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * TicketsController — Kanban + Backlog backend.
  *  - GET /tickets?status=  → todo|inprogress|done for the board, backlog for Backlog
- *  - POST /tickets         → create from the UI (empty-state CTA)
+ *  - POST /tickets         → create from the UI (status: todo|backlog; default todo)
+ *  - PATCH /tickets/:id     → move / update (kanban pipeline)
  */
 @Controller('tickets')
 export class TicketsController {
@@ -25,11 +26,32 @@ export class TicketsController {
   }
 
   @Post()
-  async create(@Body() body: { title?: string; priority?: string; assignee?: string; tags?: string[] }) {
+  async create(
+    @Body()
+    body: {
+      title?: string;
+      priority?: string;
+      assignee?: string;
+      tags?: string[];
+      /** Only `todo` (kanban) or `backlog` (Backlog page) on create — pipeline
+       *  statuses (build/qa/…) are reached via PATCH, not inventable here. */
+      status?: string;
+    },
+  ) {
     const title = body?.title?.trim();
     if (!title) {
       return { error: 'title is required' };
     }
+    // Whitelist create-time statuses so Backlog can land on /backlog while the
+    // kanban "+ New ticket" CTA (no status) still defaults to To-Do. Rejecting
+    // unknown values avoids accidentally creating cards mid-pipeline.
+    // Schema default is `backlog`, but the product default for an omitted
+    // status stays `todo` — that matches ONBOARDING Step 8 ("create → To-Do")
+    // and keeps Tickets.tsx unchanged.
+    const allowedCreateStatus = new Set(['todo', 'backlog']);
+    const requested = body.status?.trim();
+    const status =
+      requested && allowedCreateStatus.has(requested) ? requested : 'todo';
     const count = await this.prisma.ticket.count();
     const ticket = await this.prisma.ticket.create({
       data: {
@@ -38,7 +60,7 @@ export class TicketsController {
         priority: body.priority ?? 'med',
         assignee: body.assignee ?? 'Jarvis Singh',
         tags: body.tags ?? [],
-        status: 'todo', // land in the kanban To-Do column so it's visible immediately
+        status,
       },
     });
     await this.persist('run.queued', { name: `ticket ${ticket.key}`, ticket: ticket.key });

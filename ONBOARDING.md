@@ -129,12 +129,20 @@ connection live before handing off.
 
 ### Step 8 — Smoke test
 Walk the operator through the core loops so they trust the data:
-1. **Tickets:** create one → it lands in To-Do; start it → it travels
-   Build → QA → Review → Done and persists to the activity stream.
+1. **Tickets (no OpenClaw required):** create one on `/tickets` → it lands in
+   To-Do; click Start → move it Build → QA → Review → Done. Each move is a
+   `PATCH /tickets/:id` and the API itself writes a `run.*` row to the activity
+   stream, so this loop passes on a fresh clone before the bridge is connected.
+   Creating from `/backlog` with status `backlog` should appear on that page,
+   not in To-Do.
 2. **Calendar:** all their OpenClaw cron jobs are listed (weekly grid, ‹ › week
-   navigation works).
+   navigation works). Needs the Step 6 bridge.
 3. **Office:** agents physically move between rooms when a `run.*` event fires.
-4. **Live Activity:** recently run tasks show up there.
+   Needs the Step 6 bridge (or the ticket moves above, which also emit `run.*`).
+4. **Live Activity:** recently run tasks show up there. Ticket moves alone are
+   enough to prove the band; OpenClaw enriches it further.
 
-Once Step 8 passes, the install is complete. Thank the operator and summarize
-what was set up, where secrets live, and what is intentionally still optional.
+Once the **Tickets** loop in (1) passes, the core dashboard write-path is
+verified even without OpenClaw. Items 2–4 complete the full install once the
+bridge from Step 6 is connected. Thank the operator and summarize what was set
+up, where secrets live, and what is intentionally still optional.
