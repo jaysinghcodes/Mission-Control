@@ -12,7 +12,13 @@ interface Hit { id?: string; name?: string; title?: string; key?: string | null;
 interface SearchResults {
   tasks: Hit[]; tickets: Hit[]; agents: Hit[]; sessions: Hit[]; approvals: Hit[]; activity: Hit[]; logs: { tm: string; lvl: string; msg: string }[]
 }
-interface SearchResp { query: string; results: SearchResults }
+/**
+ * `logsAvailable` / `logsHint` are additive API fields (ticket 2). `false`
+ * means the box has no OpenClaw gateway log (/tmp/openclaw missing — fresh
+ * clone, docker, demo seed), so an empty Logs group means "no source", not
+ * "no match". Optional so an older API (fields absent) renders as before.
+ */
+interface SearchResp { query: string; results: SearchResults; logsAvailable?: boolean | null; logsHint?: string | null }
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
@@ -29,6 +35,8 @@ const GROUPS: { key: keyof SearchResults; label: string; path: string; field: (h
 export default function SearchBox({ w = 220 }: { w?: number }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchResults | null>(null)
+  // True only when the API explicitly says there is no log source on this box.
+  const [noLogSource, setNoLogSource] = useState(false)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -46,7 +54,11 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`${API}/search?q=${encodeURIComponent(query)}`)
-        if (res.ok) setResults(((await res.json()) as SearchResp).results)
+        if (res.ok) {
+          const body = (await res.json()) as SearchResp
+          setResults(body.results)
+          setNoLogSource(body.logsAvailable === false)
+        }
       } catch {
         setResults(null)
       } finally {
@@ -143,6 +155,13 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
               </div>
             )
           })}
+          {/* Friendly note instead of silently omitting the Logs group on
+              machines without OpenClaw — explains why logs never match. */}
+          {noLogSource && !loading && (
+            <div className="px-4 pb-3 pt-1 text-[11px] text-mc-faint">
+              Logs not searched — no OpenClaw gateway log on this machine (see bridge/README.md).
+            </div>
+          )}
         </div>
       )}
     </div>
