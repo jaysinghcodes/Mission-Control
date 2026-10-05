@@ -20,12 +20,19 @@
  *   - Different keys never wait on each other.
  *
  * Scope / limits (documented, not hidden):
- *   - This orders writes within ONE api process. The controller ALSO takes a
- *     Postgres row lock (`SELECT … FOR UPDATE`) inside a transaction, so
- *     multiple api replicas can never interleave a read-modify-write on the
- *     same row; across replicas, "last" means last to acquire the row lock.
- *     Mission Control runs a single api container today (docker-compose.yml).
- *   - No schema change needed (no version column) — see PR #20 body.
+ *   - IN-PROCESS ONLY. The queue lives in this Node process's memory, so the
+ *     "last-received write wins" guarantee holds for ONE api instance — which
+ *     is exactly what docker-compose.yml runs today (a single `api` service).
+ *   - Multiple api instances (replicas / horizontal scaling) would each have
+ *     their own queue, so requests landing on different instances are NOT
+ *     ordered by receive time. That setup would need a DB-level ordering lock
+ *     instead (e.g. a Postgres advisory lock per ticket, or an optimistic
+ *     `version` column compare-and-set — the latter is a schema change).
+ *   - The controller's `SELECT … FOR UPDATE` row lock is a safety net, not a
+ *     replacement: it stops two transactions interleaving a read-modify-write
+ *     on the same row, but across instances "last" then means "last to get
+ *     the row lock", not "last received".
+ *   - No schema change needed for the single-instance fix — see PR #20 body.
  */
 export class KeyedMutex {
   /** Tail of each key's queue: resolves when the most recently queued job is done. */

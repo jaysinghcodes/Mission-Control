@@ -58,7 +58,9 @@ export class TicketsController {
    * Per-ticket FIFO write queue (QA finding B). Every PATCH for a given id
    * runs strictly after the previous one finished, in the order the requests
    * were received — so the last-received move is the one that persists.
-   * Controllers are singletons in Nest, so one queue serves the whole process.
+   * Controllers are singletons in Nest, so one queue serves the whole process
+   * (in-process only: fine for today's single api container; multi-instance
+   * deployments would need a DB-level lock — see keyed-mutex.ts).
    */
   private readonly writes = new KeyedMutex();
 
@@ -133,8 +135,13 @@ export class TicketsController {
    *  2. Enter the per-ticket FIFO queue SYNCHRONOUSLY — there is no `await`
    *     before `this.writes.run(...)`, so queue order == receive order.
    *  3. Inside the queue, run a transaction that row-locks the ticket with
-   *     `SELECT … FOR UPDATE` before writing. That covers writers outside
-   *     this process (other api replicas, psql) without any schema change.
+   *     `SELECT … FOR UPDATE` before writing. That stops writers outside this
+   *     process (psql, a second replica) interleaving with us mid-write, but
+   *     it does NOT order them by receive time.
+   *     ⚠ The ordering guarantee is IN-PROCESS: correct for the single api
+   *     instance docker-compose runs. Running several api instances would
+   *     need a DB-level ordering lock (advisory lock / version column) —
+   *     see keyed-mutex.ts "Scope / limits".
    *  4. Only the fields the caller sent are written — no read-modify-write of
    *     assignee/priority from a possibly stale read.
    *  5. The response carries the committed row, and the web UI applies it /
