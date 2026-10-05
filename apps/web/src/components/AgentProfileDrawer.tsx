@@ -19,10 +19,10 @@ const statusColor = (status: string) => (status === 'working' ? 'var(--mc-green)
  * values fall back to '—' and the personality/task rows collapse cleanly.
  *
  * Per-agent deep link (bottom): when `channelHref()` resolves a channel
- * (agent.channel from the bridge, else the documented roster fallback map)
- * a real <a href target="_blank"> button renders — canonical
- * discord.com/channels/<guild>/<channel> URL, never <#id>, never a dead
- * link. When null the footer is simply absent.
+ * (agent.channel from the bridge — a full URL, or a Discord id expanded with
+ * the operator's own VITE_DISCORD_GUILD_ID) a real <a href target="_blank">
+ * button renders — never <#id>, never a dead link. When null (the default on
+ * a fresh clone — no hardcoded server since ticket 3) the footer is absent.
  *
  * A11y: role=dialog + aria-label, initial focus into the panel, ESC/backdrop/
  * close-button all close, focus returns to the triggering card (Team.tsx
@@ -156,7 +156,7 @@ export function AgentProfileDrawer({ agent, onClose }: { agent: Agent; onClose: 
               href={href}
               target="_blank"
               rel="noreferrer"
-              aria-label={`Open ${name}'s channel on Discord (new tab)`}
+              aria-label={`Open ${name}'s channel (new tab)`}
               className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-full bg-mc-primary px-4 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary"
             >
               Open channel
