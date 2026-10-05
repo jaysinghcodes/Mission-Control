@@ -44,6 +44,7 @@ const TITLES: Record<string, string> = {
   '/': 'Overview',
   '/tasks': 'Tasks',
   '/tickets': 'Tickets',
+  '/projects': 'Projects',
   '/backlog': 'Backlog',
   '/calendar': 'Calendar',
   '/approvals': 'Approvals',
@@ -62,7 +63,10 @@ export default function AppLayout() {
   const { connected } = useLiveActivity()
   const { pathname } = useLocation()
   const nav = useNavigate()
-  const title = TITLES[pathname] ?? 'Mission Control'
+  // /projects/:id is not a static key. The page itself prints the project name.
+  const title = pathname.startsWith('/projects/')
+    ? 'Project'
+    : (TITLES[pathname] ?? 'Mission Control')
   const [menuOpen, setMenuOpen] = useState(false)
 
   // Close the avatar menu on outside click / Escape.

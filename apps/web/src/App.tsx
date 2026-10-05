@@ -4,6 +4,8 @@ import Connect from './pages/Connect'
 import Overview from './pages/Overview'
 import Tasks from './pages/Tasks'
 import Tickets from './pages/Tickets'
+import Projects from './pages/Projects'
+import ProjectDetail from './pages/ProjectDetail'
 import Backlog from './pages/Backlog'
 import Calendar from './pages/Calendar'
 import Approvals from './pages/Approvals'
@@ -31,6 +33,9 @@ function App() {
           <Route path="/" element={<Overview />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/tickets" element={<Tickets />} />
+          {/* Ticket 4. HashRouter → /#/projects and /#/projects/:id */}
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/backlog" element={<Backlog />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/approvals" element={<Approvals />} />

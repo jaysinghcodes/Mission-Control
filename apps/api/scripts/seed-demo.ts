@@ -7,6 +7,7 @@
  *   - 8 agents (one lead on top, seven sub-agents below — generic names)
  *   - 6 cron jobs (timed, weekly, and interval — exercises every Calendar lane)
  *   - 8 tickets spread across To-Do / Build / QA / Review / Done + 2 backlog
+ *   - 3 projects (Onboarding 1 of 2 done, Pipeline 0 of 3, Ideas empty)
  *   - 10 activity events (run.* + approvals) so Activity/Office have history
  *   - 1 pending approval (matches the `approval.new` activity event)
  *
@@ -18,8 +19,10 @@
  *     Done), a re-seed does NOT undo your changes.
  *   - Nothing is ever deleted. Real (non-demo) rows are never touched.
  *
- * NO SCHEMA CHANGES. Uses only existing tables/columns (prisma/schema.prisma).
- * Demo activity is tagged `source: 'demo'` (existing column, default
+ * Ticket 4 added the Project table and Ticket.projectId. This script writes
+ * those columns; it does not migrate. If the table is missing, the run fails
+ * with a pointer at `prisma migrate deploy` (the api container does that on
+ * boot). Demo activity is tagged `source: 'demo'` (existing column, default
  * 'openclaw') so it is distinguishable from real bridge traffic.
  *
  * Interaction with the bridge: once a real OpenClaw bridge posts
@@ -41,6 +44,12 @@ import { PrismaPg } from '@prisma/adapter-pg';
 // typo or a future status rename fails the seed loudly instead of creating
 // cards that vanish from every column.
 import { isTicketStatus, TICKET_STATUSES } from '../src/tickets/ticket-status';
+import {
+  DEMO_PROJECTS,
+  assertDemoSeedProjects,
+  demoProjectIdForTicket,
+} from '../src/projects/demo-catalog';
+import { projectNameKey } from '../src/projects/project-name';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -154,7 +163,24 @@ async function main(): Promise<void> {
     );
   }
 
-  const counts = { agents: 0, cronJobs: 0, tickets: 0, activity: 0, approvals: 0 };
+  // Throws if the ticket list no longer produces Onboarding "1 of 2",
+  // Pipeline "0 of 3", and an empty Ideas project. See demo-catalog.ts.
+  assertDemoSeedProjects(TICKETS);
+
+  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0 };
+
+  // Projects BEFORE tickets: Ticket.projectId is a foreign key. Fixed ids
+  // plus `update: {}` — a re-run does not rename or un-archive a project
+  // you already edited, and it does not insert a second copy.
+  for (const p of DEMO_PROJECTS) {
+    const before = await prisma.project.findUnique({ where: { id: p.id }, select: { id: true } });
+    await prisma.project.upsert({
+      where: { id: p.id },
+      update: {},
+      create: { id: p.id, name: p.name, nameKey: projectNameKey(p.name) },
+    });
+    if (!before) counts.projects++;
+  }
 
   // Agents — phase 1: upsert by unique name (no parent yet → FK-safe in any order).
   for (const a of AGENTS) {
@@ -193,7 +219,14 @@ async function main(): Promise<void> {
 
   for (const t of TICKETS) {
     const before = await prisma.ticket.findUnique({ where: { id: t.id }, select: { id: true } });
-    await prisma.ticket.upsert({ where: { id: t.id }, update: {}, create: t });
+    // projectId is part of `create` only. A ticket that already exists keeps
+    // whatever project you assigned (or cleared) — same rule as status.
+    // Fresh databases get the sample links; a second run inserts nothing.
+    await prisma.ticket.upsert({
+      where: { id: t.id },
+      update: {},
+      create: { ...t, projectId: demoProjectIdForTicket(t.id) },
+    });
     if (!before) counts.tickets++;
   }
 
@@ -216,22 +249,23 @@ async function main(): Promise<void> {
 
   // What THIS run inserted (0 everywhere on a re-run = already seeded).
   console.log(
-    `[seed:demo] inserted agents=${counts.agents} cronJobs=${counts.cronJobs} tickets=${counts.tickets} ` +
+    `[seed:demo] inserted agents=${counts.agents} cronJobs=${counts.cronJobs} projects=${counts.projects} tickets=${counts.tickets} ` +
       `activity=${counts.activity} approvals=${counts.approvals} (0 everywhere = already seeded; re-running is safe)`,
   );
 
   // Table totals AFTER the run — the idempotency check is simply "these
   // numbers do not change when you run seed:demo a second time" (as long as
   // nothing else, e.g. a running api/bridge, writes in between).
-  const [agents, cronJobs, tickets, activity, approvals] = await Promise.all([
+  const [agents, cronJobs, projects, tickets, activity, approvals] = await Promise.all([
     prisma.agent.count(),
     prisma.cronJob.count(),
+    prisma.project.count(),
     prisma.ticket.count(),
     prisma.activityEvent.count(),
     prisma.approval.count(),
   ]);
   console.log(
-    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} tickets=${tickets} activity=${activity} approvals=${approvals}`,
+    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} projects=${projects} tickets=${tickets} activity=${activity} approvals=${approvals}`,
   );
 }
 

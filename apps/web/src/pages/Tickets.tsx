@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { Card, Chip, Inner, PillButton, SectionLabel } from '../components/ui'
 import { AgentAvatar } from '../components/AgentAvatar'
-import type { Agent, AgentsResp } from '../types'
+import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { rosterDisplayName } from '../data/roster'
 import { ticketCreateQueue } from '../lib/serialQueue'
 
@@ -19,9 +20,13 @@ import { ticketCreateQueue } from '../lib/serialQueue'
  *    so what you see always matches what a browser refresh would show
  *  - API errors (400/404/network) show a gentle inline notice, never a crash
  *  - Socket events trigger instant refetch; status changes persist + broadcast
+ *  - Filter by project via ?project= on the hash URL (/#/tickets?project=<id>).
+ *    The API does the filtering (`GET /tickets?projectId=`). A new ticket
+ *    created while a project is selected is attached to that project.
+ *    Each card can also move to a different project (at most one).
  */
 
-interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; createdAt: string }
+interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; projectId: string | null; createdAt: string }
 interface TicketsResp { tickets: Ticket[] }
 
 const PRIO: Record<string, { bg: string; fg: string }> = {
@@ -73,9 +78,22 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 export default function Tickets() {
+  // The filter lives in the hash URL (`/#/tickets?project=<id>`) so a refresh
+  // keeps it. useApi refetches when this path changes (see useApi).
+  const [params, setParams] = useSearchParams()
+  const projectFilter = params.get('project') ?? ''
+  const ticketPath = projectFilter
+    ? `/tickets?projectId=${encodeURIComponent(projectFilter)}`
+    : '/tickets'
   // `loading`/`errorMessage` (QA-1 polish item 1): distinguish "not loaded yet"
   // and "load failed" from a genuinely empty board.
-  const { data, loading, errorMessage: loadError, refetch, mutate } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
+  const { data, loading, errorMessage: loadError, refetch, mutate } = useApi<TicketsResp>(ticketPath, { pollMs: 10000 })
+  // archived=all so a ticket that still points at an archived project can
+  // show that name. The filter dropdown itself only offers active projects
+  // (plus the one currently selected, if it has since been archived).
+  const projectsQ = useApi<ProjectsResp>('/projects?archived=all', { pollMs: 30000 })
+  const allProjects = projectsQ.data?.projects ?? []
+  const activeProjects = allProjects.filter((p) => !p.archivedAt)
   // Same roster Team uses, so an assignee's sticker matches their card.
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const roster = rosterQ.data?.agents ?? []
@@ -172,8 +190,14 @@ export default function Tickets() {
     // apiSend never throws (it returns ok:false + a readable error for HTTP
     // errors, legacy `{ error }` bodies and network failures alike), so the
     // queued job always resolves and we only need to branch on `r.ok`.
+    // A selected project is sent with the create. The API rejects an
+    // archived one with 400; the notice below shows that message.
+    const body: { title: string; priority: string; status: string; projectId?: string } = {
+      title: t, priority: 'med', status: 'todo',
+    }
+    if (projectFilter) body.projectId = projectFilter
     void ticketCreateQueue
-      .run(() => apiSend<{ ticket: Ticket }>('POST', '/tickets', { title: t, priority: 'med', status: 'todo' }))
+      .run(() => apiSend<{ ticket: Ticket }>('POST', '/tickets', body))
       .then((r) => {
         if (r.ok) return
         failedCreates.current.push(t)
@@ -229,6 +253,65 @@ export default function Tickets() {
       )
     }
     void refetch()
+  }
+
+  /**
+   * Move a ticket onto a project, or off every project (`null`).
+   * Same one-write-at-a-time guard as column moves: the select and the
+   * move buttons share it, so two clicks cannot interleave on one card.
+   * The server rejects an archived target with 400; we show that message
+   * and refetch so the card snaps back to the project it still has.
+   */
+  async function assignProject(id: string, projectId: string | null) {
+    if (movingRef.current.has(id)) return
+    movingRef.current.add(id)
+    setMoving(new Set(movingRef.current))
+    const r = await apiSend<{ ticket: Ticket }>('PATCH', `/tickets/${id}`, { projectId })
+    movingRef.current.delete(id)
+    setMoving(new Set(movingRef.current))
+    if (r.ok && r.data?.ticket) {
+      const updated = r.data.ticket
+      mutate((prev) => {
+        if (!prev) return prev
+        // Drop the card from a filtered board when it no longer belongs
+        // to the project on screen. The unfiltered board keeps it.
+        const next = prev.tickets.map((t) => (t.id === id ? updated : t))
+        const visible = projectFilter ? next.filter((t) => t.projectId === projectFilter) : next
+        return { ...prev, tickets: visible }
+      })
+    } else if (!r.ok) {
+      showNotice(
+        r.status === 404
+          ? (r.error ?? 'That ticket or project no longer exists — the board has been refreshed.')
+          : `Couldn't update the project — ${r.error}`,
+      )
+    }
+    void refetch()
+  }
+
+  function setProjectFilter(id: string) {
+    const next = new URLSearchParams(params)
+    if (id) next.set('project', id)
+    else next.delete('project')
+    setParams(next, { replace: true })
+  }
+
+  const selectedProject = allProjects.find((p) => p.id === projectFilter) ?? null
+
+  /** Options for one card. Active projects, plus the card's current
+   *  project when that one is archived — so the select still shows the
+   *  truth instead of snapping to "No project". Archived projects are
+   *  not offered as new targets; the API would 400 them anyway. */
+  function optionsFor(ticketProjectId: string | null): { id: string; label: string }[] {
+    const opts = activeProjects.map((p) => ({ id: p.id, label: p.name }))
+    if (ticketProjectId && !opts.some((o) => o.id === ticketProjectId)) {
+      const found = allProjects.find((p) => p.id === ticketProjectId)
+      opts.push({
+        id: ticketProjectId,
+        label: found ? `${found.name} (archived)` : 'Archived project',
+      })
+    }
+    return opts
   }
 
   const metrics = [
@@ -287,6 +370,36 @@ export default function Tickets() {
         </div>
       )}
 
+      {/* Project filter. The value is the hash query (`?project=`), so a
+          refresh shows the same slice. "All projects" clears it. */}
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-[12.5px] text-mc-sub">
+          Project
+          <select
+            aria-label="Filter by project"
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="h-9 max-w-full rounded-full border border-mc-border bg-mc-card px-3 text-[13px] text-mc-text outline-none focus:border-mc-primary"
+          >
+            <option value="">All projects</option>
+            {activeProjects.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+            {selectedProject?.archivedAt && (
+              <option value={selectedProject.id}>{selectedProject.name} (archived)</option>
+            )}
+          </select>
+        </label>
+        {selectedProject && (
+          <Link to={`/projects/${selectedProject.id}`} className="text-[12px] font-semibold text-mc-primary hover:underline">
+            {selectedProject.doneCount} of {selectedProject.ticketCount} done · open project
+          </Link>
+        )}
+        {projectFilter && !selectedProject && projectsQ.data && (
+          <span className="text-[12px] text-mc-faint">That project is not on the list. The board below is filtered anyway.</span>
+        )}
+      </div>
+
       {/* Five columns are a fixed 260px each (w-max row), same idea as the
           Backlog's min-width table. A CSS grid with minmax(0, 1fr) let the
           columns shrink to the sidebar's leftover width at ~768px: titles
@@ -322,6 +435,23 @@ export default function Tickets() {
                     {/* Full title, wrapped — never ellipsized. break-words keeps a
                         long unbroken token inside the column. */}
                     <div className="mt-1.5 text-[13px] font-semibold leading-snug break-words">{t.title}</div>
+                    {/* One project per ticket. Value "" is unassigned (API null).
+                        Disabled while a move or another assign is in flight. */}
+                    <label className="mt-2 block">
+                      <span className="sr-only">Project for {t.key ?? t.title}</span>
+                      <select
+                        aria-label={`Project for ${t.key ?? t.title}`}
+                        value={t.projectId ?? ''}
+                        disabled={moving.has(t.id)}
+                        onChange={(e) => void assignProject(t.id, e.target.value || null)}
+                        className="h-7 w-full rounded-lg border border-mc-border bg-mc-card px-2 text-[11px] text-mc-text outline-none focus:border-mc-primary disabled:opacity-50"
+                      >
+                        <option value="">No project</option>
+                        {optionsFor(t.projectId).map((p) => (
+                          <option key={p.id} value={p.id}>{p.label}</option>
+                        ))}
+                      </select>
+                    </label>
                     <div className="mt-2.5 flex items-center gap-2">
                       {/* Same sticker as Team / Office / Live Activity — not the generic bot. */}
                       <AgentAvatar {...assigneeFace(t.assignee, roster)} size={0.75} />
