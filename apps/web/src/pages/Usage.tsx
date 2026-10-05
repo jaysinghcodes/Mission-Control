@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApi, apiPost } from '../hooks/useApi'
 import { Card, Chip, PillButton, Progress, SectionLabel } from '../components/ui'
+import { API_URL } from '../lib/apiBase'
 
 /**
  * Usage & Cost — real usage snapshot pushed by the bridge (usage.snapshot)
@@ -73,7 +74,7 @@ export default function Usage() {
 
   async function removeModel(id: string) {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}/models/${id}`, { method: 'DELETE' })
+      const res = await fetch(`${API_URL}/models/${id}`, { method: 'DELETE' })
       if (res.ok) models.refetch()
     } catch {
       // ignore — list refreshes on next poll

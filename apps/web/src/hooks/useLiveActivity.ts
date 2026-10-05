@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { API_URL } from '../lib/apiBase';
 
 /**
  * Live activity event shape pushed by the API gateway.
@@ -46,9 +47,9 @@ export function useLiveActivity(maxEvents = 50): { events: ActivityEvent[]; conn
   maxEventsRef.current = maxEvents;
 
   useEffect(() => {
-    // VITE_API_URL lets the deploy env point at a real API; local dev
-    // falls back to the NestJS default port. Never hardcode a prod URL.
-    const socket: Socket = io(import.meta.env.VITE_API_URL ?? 'http://localhost:3000', {
+    // Same configured API location as REST and the heartbeat (lib/apiBase,
+    // QA-1 polish item 7) — VITE_API_URL, else the NestJS default port.
+    const socket: Socket = io(API_URL, {
       transports: ['websocket'],
       // Item 5: do NOT dial in the constructor — see the deferred connect below.
       autoConnect: false,

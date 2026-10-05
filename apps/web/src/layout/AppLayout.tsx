@@ -1,18 +1,38 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { NAV_GROUPS } from '../data/mock'
 import { Glyph, type GlyphKind } from '../components/glyphs'
 import { Dot } from '../components/ui'
 import SearchBox from '../components/SearchBox'
 import { useLiveActivity } from '../hooks/useLiveActivity'
+<<<<<<< HEAD
 import { OPERATOR_NAME, operatorInitial } from '../config'
+=======
+import { API_URL, socketLabel } from '../lib/apiBase'
+import { reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
+>>>>>>> e8bb5b0 (fix(web): real API status/latency, stale-data notice when the API drops, one configured API URL (QA-1 polish 7))
 
 /**
  * AppLayout — the shell every screen shares (wireframe sidebar() + topbar()).
  * Sidebar: WORKSPACE / TEAM / OBSERVE groups, Settings footer w/ connection state.
  * Topbar: page title · search · Connected · theme toggle (sun/moon) · avatar.
- * The Live Activity socket drives the honest connection indicator.
+ * Connection indicator (QA-1 polish item 7 / QA-3) — REAL status, no more
+ * hardcoded "Connected · 74ms" / "ws://…:3000":
+ *  - reachability comes from the shared apiStatus store (every request
+ *    reports into it) plus a /health heartbeat that also measures latency;
+ *  - the live-feed socket state says whether updates are pushed ("Connected")
+ *    or only polled ("API only");
+ *  - the endpoint label is derived from the configured API_URL.
+ * When the API drops mid-session an inline notice says the page's data may
+ * be stale, instead of silently showing old numbers.
  */
+
+/** Heartbeat cadence and per-beat ceiling (a hung API counts as down). */
+const HEARTBEAT_MS = 5000
+const HEARTBEAT_TIMEOUT_MS = 4000
+/** First beat waits a moment: lets StrictMode's throw-away mount be cleaned
+ *  up BEFORE any request starts (so nothing is aborted — QA-3 ERR_ABORTED). */
+const FIRST_BEAT_DELAY_MS = 300
 
 function useTheme() {
   const [light, setLight] = useState(() => localStorage.getItem('mc-theme') === 'light')
@@ -61,17 +81,88 @@ export default function AppLayout() {
     }
   }, [menuOpen])
 
-  // Onboarding gate: if the API is unreachable, send the user to the
-  // Connect page (it explains the SSH tunnel) instead of an empty shell.
+  // Heartbeat + onboarding gate (QA-1 polish item 7 / QA-3).
+  //
+  // Old version: a one-shot /health fetch in an effect that depended on
+  // `nav`. react-router hands out a NEW navigate function on every location
+  // change, so the effect re-ran (aborting the in-flight request → the
+  // ERR_ABORTED QA saw on every page load) and never measured anything.
+  // Now: mount-once effect (navigate read through a ref), a repeating
+  // GET /health against the configured API_URL that
+  //   - reports latency / reachability to the shared apiStatus store,
+  //   - on the FIRST beat only, keeps the old gate: API unreachable → send
+  //     the user to /connect (explains the SSH tunnel) instead of an empty
+  //     shell. Later drops show the stale-data notice instead — yanking a
+  //     user to the setup guide mid-session would be worse.
+  // Our own aborts (unmount, StrictMode) are never reported as failures.
+  const navRef = useRef(nav)
   useEffect(() => {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => {
-      fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}/health`, { signal: ctrl.signal })
-        .then((r) => { if (!r.ok) nav('/connect') })
-        .catch(() => nav('/connect'))
-    }, 1200)
-    return () => { clearTimeout(t); ctrl.abort() }
+    navRef.current = nav
   }, [nav])
+  useEffect(() => {
+    let cancelled = false
+    let first = true
+    let ctrl: AbortController | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    async function beat() {
+      ctrl = new AbortController()
+      let timedOut = false
+      const ceiling = setTimeout(() => {
+        timedOut = true
+        ctrl?.abort()
+      }, HEARTBEAT_TIMEOUT_MS)
+      const t0 = performance.now()
+      let ok = false
+      try {
+        const res = await fetch(`${API_URL}/health`, { signal: ctrl.signal, cache: 'no-store' })
+        if (cancelled) return
+        if (res.ok) {
+          reportLatency(performance.now() - t0)
+          ok = true
+        } else {
+          // Answered but unhappy (e.g. 500) = reachable; 502-504 = down.
+          reportOutcome(res.status, `GET /health returned HTTP ${res.status}`)
+        }
+      } catch {
+        // Unmount/StrictMode abort: our doing, not an outage — report nothing.
+        if (cancelled) return
+        reportUnreachable(timedOut ? `no answer within ${HEARTBEAT_TIMEOUT_MS / 1000} s` : 'API unreachable — is the server running?')
+      } finally {
+        clearTimeout(ceiling)
+      }
+      if (first) {
+        first = false
+        if (!ok) {
+          navRef.current('/connect')
+          return
+        }
+      }
+      timer = setTimeout(() => void beat(), HEARTBEAT_MS)
+    }
+
+    timer = setTimeout(() => void beat(), FIRST_BEAT_DELAY_MS)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      ctrl?.abort()
+    }
+  }, [])
+
+  // ── Status shown in the sidebar footer and the top bar (item 7) ────────
+  // Only existing tokens: green/red dot as before, faint while unknown.
+  const api = useApiStatus()
+  const ms = api.latencyMs !== null ? ` · ${api.latencyMs}ms` : ''
+  const status =
+    api.state === 'offline'
+      ? { dot: 'var(--mc-red)', label: 'Offline', title: api.lastError ?? 'API unreachable' }
+      : api.state === 'unknown'
+        ? { dot: 'var(--mc-faint)', label: 'Connecting…', title: `Contacting ${API_URL}` }
+        : connected
+          ? { dot: 'var(--mc-green)', label: `Connected${ms}`, title: `API ${API_URL} · live feed connected` }
+          : // API answers but the websocket is down: data still refreshes by
+            // polling, just not instantly — say so rather than "Connected".
+            { dot: 'var(--mc-green)', label: `API only${ms}`, title: `API ${API_URL} · live feed reconnecting (pages refresh by polling)` }
 
   return (
     <div className="flex h-screen bg-mc-bg text-mc-text">
@@ -119,11 +210,12 @@ export default function AppLayout() {
               Setup guide · SSH tunnel
             </Link>
             <div className="flex items-center justify-between mt-1.5">
-              <span className="flex items-center gap-1.5 text-[11.5px] text-mc-sub">
-                <Dot color={connected ? 'var(--mc-green)' : 'var(--mc-red)'} size={5} />
-                {connected ? 'Connected · 74ms' : 'Offline'}
+              <span className="flex items-center gap-1.5 text-[11.5px] text-mc-sub" title={status.title}>
+                <Dot color={status.dot} size={5} />
+                {status.label}
               </span>
-              <span className="text-[11px] text-mc-faint">ws://…:3000</span>
+              {/* Derived from the configured API_URL — was hardcoded :3000. */}
+              <span className="text-[11px] text-mc-faint">{socketLabel()}</span>
             </div>
           </div>
         </div>
@@ -135,9 +227,9 @@ export default function AppLayout() {
           <div className="text-[17px] font-semibold">{title}</div>
           <div className="flex items-center gap-4">
             <SearchBox w={200} />
-            <span className="flex items-center gap-2 text-[12px] text-mc-sub">
-              <Dot color={connected ? 'var(--mc-green)' : 'var(--mc-red)'} size={5} />
-              Connected
+            <span className="flex items-center gap-2 text-[12px] text-mc-sub" title={status.title}>
+              <Dot color={status.dot} size={5} />
+              {status.label}
             </span>
             <div className="w-px h-6 bg-mc-border2" />
             {/* Theme toggle — sun in dark (click → light), moon in light */}
@@ -214,6 +306,16 @@ export default function AppLayout() {
             </div>
           </div>
         </header>
+
+        {/* API dropped mid-session (item 7): pages keep their last data, so
+            SAY it may be stale. Same notice look as the Tickets/Backlog
+            notices (orange bg/text) — no new design. Clears on next contact. */}
+        {api.state === 'offline' && (
+          <div role="alert" className="mx-6 mt-4 shrink-0 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
+            Can't reach the API at {API_URL} — {api.lastError ?? 'no response'}. Data on this page may be out of date
+            {api.lastOkAt ? ` (last update ${new Date(api.lastOkAt).toLocaleTimeString()})` : ''}; retrying automatically.
+          </div>
+        )}
 
         <main className="flex-1 overflow-y-auto">
           <Outlet />

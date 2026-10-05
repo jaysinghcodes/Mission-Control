@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { API_URL } from '../lib/apiBase'
+import { reportOutcome } from '../lib/apiStatus'
 
 /**
  * useApi — tiny fetch hook for the Mission Control API.
@@ -20,8 +22,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  *   3. Load failures are surfaced (`error` / `errorMessage`) and the last good
  *      `data` is kept, so pages can show "couldn't refresh" over the old data
  *      instead of silently pretending it is current.
+ *
+ * QA-1 polish item 7: every settled (non-aborted) request also reports to the
+ * shared apiStatus store, so one page noticing the API is gone flips the
+ * app-wide "offline / data may be stale" banner and the top-bar status.
  */
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+// Single source of truth for the API location (lib/apiBase.ts, item 7).
+const API = API_URL
 
 export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
   data: T | null
@@ -63,6 +70,9 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
     const current = () => mounted.current && mine === generation.current
     try {
       const res = await fetch(`${API}${pathRef.current}`, { signal: ctrl.signal })
+      // Item 7: the API (or a proxy in front of it) answered — tell the shared
+      // status store. 502/503/504 count as "API down", anything else as up.
+      reportOutcome(res.status, `HTTP ${res.status}`)
       // Parse defensively: proxies/502 pages are often not JSON at all.
       let json: unknown = null
       try {
@@ -85,6 +95,8 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
       if (ctrl.signal.aborted) return
       // Network failure (fetch rejected) or one of the throws above. Keep the
       // last good `data` (rule 1) and surface why (rule 3).
+      // Item 7: a rejected fetch (TypeError) = API unreachable, app-wide.
+      if (err instanceof TypeError) reportOutcome(0, errorMessage(null, 0))
       if (current()) {
         const msg = err instanceof TypeError ? errorMessage(null, 0) : err instanceof Error ? err.message : String(err)
         setLoadError(msg)
@@ -177,8 +189,12 @@ export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', pa
     })
   } catch {
     // fetch only rejects on network-level failures (offline, CORS, DNS).
+    // Item 7: report it to the shared status (apiSend never aborts itself).
+    reportOutcome(0, errorMessage(null, 0))
     return { ok: false, status: 0, data: null, error: errorMessage(null, 0) }
   }
+  // Item 7: we got an HTTP answer — reachable unless a gateway says otherwise.
+  reportOutcome(res.status, `HTTP ${res.status}`)
   // Parse defensively — error pages (proxies, 502s) may not be JSON at all.
   let json: unknown = null
   try {

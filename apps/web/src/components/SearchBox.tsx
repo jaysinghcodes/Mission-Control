@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_URL } from '../lib/apiBase'
 
 /**
  * SearchBox — the topbar search. Debounced query → GET /search → grouped
@@ -20,7 +21,8 @@ interface SearchResults {
  */
 interface SearchResp { query: string; results: SearchResults; logsAvailable?: boolean | null; logsHint?: string | null }
 
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+// Configured API location, shared app-wide (lib/apiBase, QA-1 polish item 7).
+const API = API_URL
 
 const GROUPS: { key: keyof SearchResults; label: string; path: string; field: (h: Hit) => string }[] = [
   { key: 'tasks', label: 'Tasks', path: '/tasks', field: (h) => h.name ?? h.title ?? '' },
