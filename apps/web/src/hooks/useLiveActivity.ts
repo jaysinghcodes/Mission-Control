@@ -20,6 +20,17 @@ export interface ActivityEvent {
  *  - surfaces connection state so the UI can show an honest status dot
  *    (green = connected, red = disconnected — no fake "online")
  *
+ * QA-1 polish item 5 — no StrictMode websocket warning:
+ *  React 18+ StrictMode (main.tsx) mounts → unmounts → re-mounts every effect
+ *  in dev. Opening the socket synchronously meant the first mount's socket
+ *  was torn down while its WebSocket handshake was still CONNECTING, which
+ *  the browser reports on every load as "WebSocket is closed before the
+ *  connection is established". Fix: create the socket with
+ *  `autoConnect: false` and start it on a 0 ms timer. StrictMode's
+ *  throw-away mount is cleaned up synchronously, before that timer fires, so
+ *  its socket never touches the network; only the real mount connects.
+ *  Cleanup is idempotent: cancel the timer if pending, else disconnect.
+ *
  * GLM review fixes (🟡 #5, #6):
  *  - Server ts is preserved (payload.ts wins; Date.now() is only a fallback)
  *  - maxEvents is read via ref so the socket never reconnects on re-render
@@ -39,6 +50,8 @@ export function useLiveActivity(maxEvents = 50): { events: ActivityEvent[]; conn
     // falls back to the NestJS default port. Never hardcode a prod URL.
     const socket: Socket = io(import.meta.env.VITE_API_URL ?? 'http://localhost:3000', {
       transports: ['websocket'],
+      // Item 5: do NOT dial in the constructor — see the deferred connect below.
+      autoConnect: false,
       // Production socket guard: the api gateway requires SOCKET_TOKEN in the
       // handshake when NODE_ENV=production (docker compose). Compose bakes the
       // same token into this bundle via VITE_SOCKET_TOKEN; local dev builds omit
@@ -63,7 +76,17 @@ export function useLiveActivity(maxEvents = 50): { events: ActivityEvent[]; conn
       setEvents((prev) => [{ type, ts, ...data }, ...prev].slice(0, maxEventsRef.current));
     });
 
+    // Item 5: dial on the next macrotask. If this effect is StrictMode's
+    // throw-away mount, the cleanup below runs first and cancels the timer, so
+    // no half-open WebSocket is ever created (and none is closed mid-handshake).
+    const connectTimer = setTimeout(() => socket.connect(), 0);
+
     return () => {
+      clearTimeout(connectTimer);
+      // Listeners off first so a late 'disconnect' can't setState after unmount.
+      socket.removeAllListeners();
+      socket.offAny();
+      // Safe whether or not connect() ever ran (no-op on a never-opened socket).
       socket.disconnect();
     };
   }, []);
