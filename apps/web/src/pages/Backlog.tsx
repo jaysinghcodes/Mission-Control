@@ -138,22 +138,25 @@ export default function Backlog() {
 
   return (
     <div className="p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      {/* Header wraps at ~768px so the create field and button stay on screen
+          instead of being clipped by the sidebar + padding. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 max-w-xl">
           <div className="text-[22px] font-semibold">Backlog</div>
           <div className="mt-1 text-[13px] text-mc-sub">Every ticket not yet started — ranked, tagged, ready to pull.</div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && create()}
             placeholder="New backlog item…"
-            className="h-9 w-64 rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
+            className="h-9 w-64 max-w-full rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
           />
           {/* Label-only progress hint (same pattern as the row's "Moving…"); the
-              button stays clickable — extra submits queue, never dropped. */}
-          <PillButton label={saving > 0 ? 'Saving…' : '+  New ticket'} on onClick={create} />
+              button stays clickable — extra submits queue, never dropped.
+              shrink-0: the pill must not shrink below its label. */}
+          <PillButton label={saving > 0 ? 'Saving…' : '+  New ticket'} on onClick={create} className="shrink-0" />
         </div>
       </div>
 
@@ -183,7 +186,13 @@ export default function Backlog() {
         </div>
       )}
 
-      <Card className="mt-8 rounded-2xl px-0 pb-2 overflow-hidden">
+      {/* The row is ~1020px (fixed columns). A clipping card used to cut off
+          the "→ To-Do" button and crop long titles at tablet width. Scroll the
+          whole table sideways instead; the title cell wraps inside its 320px
+          and the row grows (min-h, not a fixed height) so nothing is ellipsized.
+          Layout only. */}
+      <Card className="mt-8 rounded-2xl px-0 pb-2 overflow-x-auto">
+        <div className="min-w-[1020px]">
         <div className="flex px-[18px] pt-4 pb-2">
           {['TICKET', 'TITLE', 'PRIORITY', 'STATUS', 'CREATED', 'ACTIONS'].map((h) => (
             <div key={h} className="text-[11px] font-semibold uppercase tracking-[0.1em] text-mc-faint" style={{ width: h === 'TITLE' ? 320 : 140 }}>
@@ -202,27 +211,29 @@ export default function Backlog() {
           </div>
         )}
         {rows.map((row) => (
-          <div key={row.id} className="flex items-center px-[18px] h-16 border-t border-mc-border2">
-            <div className="font-mono text-[11.5px] font-semibold text-mc-faint" style={{ width: 140 }}>{row.key ?? row.id.slice(0, 8)}</div>
-            <div className="text-[13px] font-medium" style={{ width: 320 }}>{row.title}</div>
+          <div key={row.id} className="flex items-center px-[18px] min-h-16 py-2 border-t border-mc-border2">
+            <div className="font-mono text-[11.5px] font-semibold text-mc-faint shrink-0" style={{ width: 140 }}>{row.key ?? row.id.slice(0, 8)}</div>
+            {/* Full title, wrapped inside the column. The row grows with it. */}
+            <div className="text-[13px] font-medium break-words" style={{ width: 320 }}>{row.title}</div>
             <div style={{ width: 140 }}>
               <Chip label={row.priority.toUpperCase()} bg={PRIO[row.priority]?.bg ?? PRIO.med.bg} fg={PRIO[row.priority]?.fg ?? PRIO.med.fg} h={19} fs="text-[10px]" />
             </div>
             <div className="text-[12px] text-mc-sub" style={{ width: 140 }}>{row.status}</div>
             <div className="text-[12px] text-mc-faint" style={{ width: 140 }}>{new Date(row.createdAt).toLocaleDateString()}</div>
             {/* Backlog → To-Do: the only way onto the kanban board from here. */}
-            <div style={{ width: 140 }}>
+            <div className="shrink-0" style={{ width: 140 }}>
               <button
                 type="button"
                 onClick={() => void moveToTodo(row)}
                 disabled={moving.has(row.id)}
-                className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                className="h-6 shrink-0 whitespace-nowrap px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
               >
                 {moving.has(row.id) ? 'Moving…' : '→ To-Do'}
               </button>
             </div>
           </div>
         ))}
+        </div>
       </Card>
     </div>
   )

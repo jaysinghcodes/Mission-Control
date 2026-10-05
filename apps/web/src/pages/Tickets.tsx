@@ -215,22 +215,25 @@ export default function Tickets() {
 
   return (
     <div className="p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      {/* Header wraps at ~768px (sidebar 220px leaves ~548px). The create
+          controls drop to the next line instead of being clipped off the right. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 max-w-xl">
           <div className="text-[22px] font-semibold">Tickets</div>
           <div className="mt-1 text-[13px] text-mc-sub">Kanban — create a ticket, then move it To-Do → Build → QA → Review → Done.</div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && create()}
             placeholder="New ticket title…"
-            className="h-9 w-64 rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
+            className="h-9 w-64 max-w-full rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
           />
           {/* Label-only progress hint (same pattern as Backlog's "Moving…"); the
-              button stays clickable — extra submits queue, they're never dropped. */}
-          <PillButton label={saving > 0 ? 'Saving…' : '+ New ticket'} on onClick={create} />
+              button stays clickable — extra submits queue, they're never dropped.
+              shrink-0: a narrow row must not squash the label. */}
+          <PillButton label={saving > 0 ? 'Saving…' : '+ New ticket'} on onClick={create} className="shrink-0" />
         </div>
       </div>
 
@@ -258,11 +261,16 @@ export default function Tickets() {
         </div>
       )}
 
-      <div className="grid grid-cols-5 gap-4 mt-6">
+      {/* Five columns need ~1240px. Below that (a 768–1024px window minus the
+          220px sidebar) the board scrolls sideways. Each column stays at least
+          ~240px so titles wrap in full and the move buttons are not clipped.
+          Layout only — no change to create/move behaviour. */}
+      <div className="mt-6 overflow-x-auto pb-1">
+        <div className="grid min-w-[1240px] grid-cols-5 gap-4">
         {COLUMNS.map((col) => {
           const rows = tickets.filter((t) => inColumn(t, col))
           return (
-            <Card key={col.title} className="px-3.5 py-3 min-h-[380px]">
+            <Card key={col.title} className="px-3.5 py-3 min-h-[380px] min-w-0">
               <div className="flex items-center justify-between px-1">
                 <SectionLabel>{col.title}</SectionLabel>
                 <span className="text-[11px] font-semibold text-mc-sub">{rows.length}</span>
@@ -282,16 +290,20 @@ export default function Tickets() {
                       <span className="font-mono text-[11px] font-semibold text-mc-faint">{t.key ?? t.id.slice(0, 8)}</span>
                       <Chip label={t.priority.toUpperCase()} bg={PRIO[t.priority]?.bg ?? PRIO.med.bg} fg={PRIO[t.priority]?.fg ?? PRIO.med.fg} h={18} fs="text-[10px]" />
                     </div>
-                    <div className="mt-1.5 text-[13px] font-semibold leading-snug">{t.title}</div>
+                    {/* Full title, wrapped — never ellipsized. break-words keeps a
+                        long unbroken token inside the column. */}
+                    <div className="mt-1.5 text-[13px] font-semibold leading-snug break-words">{t.title}</div>
                     <div className="mt-2.5 flex items-center gap-2">
                       <Bot color={t.assignee ? 'var(--mc-primary)' : 'var(--mc-faint)'} scale={0.8} />
-                      <span className="text-[11px] text-mc-sub truncate">{t.assignee ?? 'unassigned'}</span>
+                      <span className="text-[11px] text-mc-sub break-words">{t.assignee ?? 'unassigned'}</span>
                     </div>
                     {/* Pipeline actions — full movement through all 5 columns (MC-214).
                         Every move button is disabled while this card has a PATCH
                         in flight (item 2; same disabled:opacity-50 look as
-                        Backlog's "Moving…" button — no new styles). */}
-                    <div className="mt-2.5 flex items-center gap-2">
+                        Backlog's "Moving…" button — no new styles).
+                        flex-wrap + shrink-0: at a narrow column the second button
+                        drops to the next line whole, it is not cut in half. */}
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
                       {t.status === 'todo' && (
                         <>
                           {/* Start sends the canonical `build` (MC-214); the API
@@ -300,7 +312,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'build')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ▶ Start
                           </button>
@@ -309,7 +321,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'backlog')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ Backlog
                           </button>
@@ -321,7 +333,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'qa')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ QA
                           </button>
@@ -329,7 +341,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'todo')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ To-Do
                           </button>
@@ -341,7 +353,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'review')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-orangebg text-mc-orangetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-orangebg text-mc-orangetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ Review
                           </button>
@@ -349,7 +361,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'build')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ Build
                           </button>
@@ -361,7 +373,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'done')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-greenbg text-mc-greentext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-greenbg text-mc-greentext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ Done
                           </button>
@@ -369,7 +381,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'qa')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 shrink-0 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ QA
                           </button>
@@ -385,16 +397,19 @@ export default function Tickets() {
             </Card>
           )
         })}
+        </div>
       </div>
 
-      {/* Pipeline metrics */}
-      <div className="grid grid-cols-5 gap-4 mt-6">
+      {/* Same idea as the board: five tiles scroll instead of squashing labels. */}
+      <div className="mt-6 overflow-x-auto pb-1">
+      <div className="grid min-w-[640px] grid-cols-5 gap-4">
         {metrics.map((m) => (
           <Card key={m.label} className="px-3 py-2">
             <div className="text-[18px] font-semibold">{m.value}</div>
             <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-mc-faint">{m.label}</div>
           </Card>
         ))}
+      </div>
       </div>
     </div>
   )
