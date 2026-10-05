@@ -325,7 +325,9 @@ export default function Tickets() {
                     <div className="mt-2.5 flex items-center gap-2">
                       {/* Same sticker as Team / Office / Live Activity — not the generic bot. */}
                       <AgentAvatar {...assigneeFace(t.assignee, roster)} size={0.75} />
-                      <span className="text-[11px] text-mc-sub whitespace-nowrap">{t.assignee ?? 'unassigned'}</span>
+                      {/* Wrap on spaces inside the fixed column. break-words in a shrunk
+                          column was collapsing the name to a single letter. */}
+                      <span className="min-w-0 text-[11px] text-mc-sub">{t.assignee ?? 'unassigned'}</span>
                     </div>
                     {/* Pipeline actions — full movement through all 5 columns (MC-214).
                         Every move button is disabled while this card has a PATCH
