@@ -240,7 +240,8 @@ export default function Tickets() {
           errors below; no new design. Clears itself on the next good load. */}
       {loadError && (
         <div role="alert" className="mt-4 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-          Couldn't load tickets — {loadError}.{' '}
+          {/* Reason in parentheses: server messages may carry their own "?"/"." */}
+          Couldn't load tickets ({loadError}).{' '}
           {data ? 'Showing the last loaded board; retrying automatically.' : 'Retrying automatically.'}
         </div>
       )}

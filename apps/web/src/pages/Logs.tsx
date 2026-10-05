@@ -85,12 +85,12 @@ export default function Logs() {
             WARN lines / notices; polling keeps retrying underneath. */}
         {unreachable && (
           <div className="text-mc-orangetext pt-2">
-            Couldn't load the gateway log — {errorMessage ?? `no answer from the API after ${WAIT_LIMIT_MS / 1000} s`}. Retrying every 10 s.
+            Couldn't load the gateway log ({errorMessage ?? `no answer from the API after ${WAIT_LIMIT_MS / 1000} s`}). Retrying every 10 s.
           </div>
         )}
         {stale && (
           <div className="text-mc-orangetext pt-2 pb-2">
-            Showing the last loaded lines — refresh failed: {errorMessage}. Retrying every 10 s.
+            Showing the last loaded log — refresh failed ({errorMessage}). Retrying every 10 s.
           </div>
         )}
         {!noSource && !unreachable && lines.length === 0 && (

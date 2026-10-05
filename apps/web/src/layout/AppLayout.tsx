@@ -312,7 +312,8 @@ export default function AppLayout() {
             notices (orange bg/text) — no new design. Clears on next contact. */}
         {api.state === 'offline' && (
           <div role="alert" className="mx-6 mt-4 shrink-0 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-            Can't reach the API at {API_URL} — {api.lastError ?? 'no response'}. Data on this page may be out of date
+            {/* Reason in parentheses: messages may end in "?" or "." already. */}
+            Can't reach the API at {API_URL} ({api.lastError ?? 'no response'}). Data on this page may be out of date
             {api.lastOkAt ? ` (last update ${new Date(api.lastOkAt).toLocaleTimeString()})` : ''}; retrying automatically.
           </div>
         )}
