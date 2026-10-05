@@ -1,7 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { LogLine, parseLogLine, tailNewestOpenclawLog } from '../logs/openclaw-log';
 
 /**
  * SearchController — global dashboard search (topbar).
@@ -11,6 +10,12 @@ import { PrismaService } from '../prisma/prisma.service';
  * sub-millisecond with zero extra infra; if the corpus ever outgrows Postgres
  * the endpoint can be swapped to Elasticsearch/Meilisearch behind the same
  * response shape without touching the UI.
+ *
+ * Ticket 2: the log group is OPTIONAL. On a machine without OpenClaw
+ * (/tmp/openclaw missing — always the case inside docker unless mounted) the
+ * log grep returns [] via the never-throwing `openclaw-log` helper, and the
+ * response carries `logsAvailable: false` so the UI can say "no log source"
+ * rather than implying the query matched nothing. DB groups are unaffected.
  */
 @Controller('search')
 export class SearchController {
@@ -20,8 +25,10 @@ export class SearchController {
   async search(@Query('q') q?: string) {
     const query = (q ?? '').trim();
     const empty = { tasks: [], tickets: [], agents: [], sessions: [], approvals: [], activity: [], logs: [] };
+    // `logsAvailable` is additive (old clients ignore it). For short queries we
+    // skip all work, so we don't claim anything about the log source either.
     if (query.length < 2) {
-      return { query, results: empty };
+      return { query, results: empty, logsAvailable: null, logsHint: null };
     }
     const like = { contains: query, mode: 'insensitive' as const };
 
@@ -32,39 +39,30 @@ export class SearchController {
       this.prisma.session.findMany({ where: { OR: [{ name: like }, { agent: like }, { model: like }] }, take: 6 }),
       this.prisma.approval.findMany({ where: { OR: [{ tag: like }, { desc: like }] }, take: 6 }),
       this.prisma.activityEvent.findMany({ where: { OR: [{ type: like }, { payload: { path: ['name'], string_contains: query } }] }, orderBy: { ts: 'desc' }, take: 6 }),
-      this.grepLogs(query),
+      Promise.resolve(this.grepLogs(query)),
     ]);
 
-    return { query, results: { tasks, tickets, agents, sessions, approvals, activity, logs } };
+    return {
+      query,
+      results: { tasks, tickets, agents, sessions, approvals, activity, logs: logs.hits },
+      logsAvailable: logs.available,
+      // Human-readable reason when the log group is empty because there is no
+      // log SOURCE (not because nothing matched). null when logs are available.
+      logsHint: logs.available ? null : logs.reason,
+    };
   }
 
-  /** Tail the newest gateway log and filter lines containing the query. */
-  private grepLogs(query: string): { tm: string; lvl: string; msg: string }[] {
-    try {
-      const dir = '/tmp/openclaw';
-      const candidates = readdirSync(dir)
-        .filter((f) => f.startsWith('openclaw-') && f.endsWith('.log'))
-        .map((f) => join(dir, f))
-        .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-      if (!candidates[0]) return [];
-      const raw = readFileSync(candidates[0], 'utf8').split('\n').filter(Boolean).slice(-2000);
-      return raw
-        .map((line) => {
-          try {
-            const j = JSON.parse(line);
-            return {
-              tm: typeof j.time === 'string' ? j.time.slice(11, 19) : '',
-              lvl: String(j._meta?.logLevelName ?? 'INFO'),
-              msg: String(j.message ?? line),
-            };
-          } catch {
-            return { tm: '', lvl: 'INFO', msg: line };
-          }
-        })
-        .filter((l) => l.msg.toLowerCase().includes(query.toLowerCase()))
-        .slice(0, 6);
-    } catch {
-      return [];
-    }
+  /**
+   * Tail the newest gateway log (last 2000 lines) and keep lines containing
+   * the query. Never throws: a missing /tmp/openclaw → `{ available: false, reason, hits: [] }`.
+   */
+  private grepLogs(query: string): { available: boolean; reason: string | null; hits: LogLine[] } {
+    const tail = tailNewestOpenclawLog(2000);
+    const needle = query.toLowerCase();
+    const hits = tail.lines
+      .map((line) => parseLogLine(line))
+      .filter((l) => l.msg.toLowerCase().includes(needle))
+      .slice(0, 6);
+    return { available: tail.available, reason: tail.reason, hits };
   }
 }
