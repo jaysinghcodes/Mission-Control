@@ -8,15 +8,28 @@
  * Rules:
  *   1. An agent whose role (or name) is one of the roster jobs gets that slot,
  *      so "QA" is always the QA robot and "development" wears the Engineer.
- *   2. Anyone else gets slotForId(id) — stable across reloads, still inside
- *      0–11.
- *   3. The dashboard may show more agents than there are designs. The first
- *      12 seats stay full robots (roots first, then roster-role agents, then
- *      whoever is left, in name order). Every agent past that cap who has a
- *      parent in the same list is a SMALL NUMBERED COPY of the parent's
- *      robot. The number is 1-based among that parent's overflow children.
+ *   2. Anyone else would get slotForId(id) — stable across reloads, still
+ *      inside 0–11. A hash can land on a robot someone else already wears
+ *      ("scrum master" has no roster slot, so it can hash onto Writer).
+ *      The first 12 seats therefore CLAIM slots: a known job takes its robot
+ *      if it is still free, then everyone else walks forward from their hash
+ *      until they find a free one. Two agents in that seated set never share
+ *      a drawing.
+ *   3. The dashboard may show more agents than there are designs. Seats are
+ *      handed out in this order, and ties inside a tier use numeric order
+ *      (the first integer in the name — "Spawn 2" before "Spawn 10"), then
+ *      creation time when both agents have one, then a numeric string compare.
+ *      A plain A–Z sort is wrong: "Spawn 10" sorts before "Spawn 2", so the
+ *      badge landed on Spawn 9 and Spawn 10/11 kept full robots.
+ *        - parentless agents (the org roots — their robot is what children copy)
+ *        - then agents whose role is one of the 12 jobs
+ *        - then the rest, until 12 seats are full
+ *      Every agent past that cap who has a parent in the same list is a SMALL
+ *      NUMBERED COPY of the parent's robot. The number is 1-based among that
+ *      parent's overflow children, in the same numeric / creation-time order.
  *      OpenClaw's starter cap is 3 children per agent, so the badge is a
- *      single digit in normal use.
+ *      single digit in normal use. Sharing the parent's robot is the only
+ *      allowed repeat, and the badge is what makes the copy readable.
  */
 import { ROBOT_COUNT, ROSTER, slotForId } from './robots'
 
@@ -26,11 +39,13 @@ export interface AgentRobotRef {
   name?: string | null
   role?: string | null
   parentId?: string | null
+  /** ISO string or epoch ms, when the wire has it. Used only as a tiebreak. */
+  createdAt?: string | number | null
 }
 
 /**
  * How to draw one agent.
- * childNumber === null → a full robot (one of the 12).
+ * childNumber === null → a full robot (one of the 12, unique among seats).
  * childNumber >= 1     → overflow child: same slot as the parent, drawn
  *                         smaller, with this number on the badge.
  */
@@ -67,7 +82,7 @@ const ROLE_ALIASES: ReadonlyArray<{ slot: number; keys: readonly string[] }> = [
 
 /**
  * Roster slot for a known job, or null when the agent isn't one of the 12
- * roles (the caller then falls through to slotForId).
+ * roles (the caller then falls through to slotForId, then to a free seat).
  */
 export function rosterSlotForAgent(agent: Pick<AgentRobotRef, 'name' | 'role'>): number | null {
   const role = norm(agent.role)
@@ -84,7 +99,7 @@ export function rosterSlotForAgent(agent: Pick<AgentRobotRef, 'name' | 'role'>):
   return null
 }
 
-/** Slot 0–11 for one agent, ignoring the "past 12 agents" numbering rule. */
+/** Preferred slot 0–11 for one agent, before the "already taken" walk. */
 export function slotForAgent(agent: Pick<AgentRobotRef, 'id' | 'name' | 'role'>): number {
   const known = rosterSlotForAgent(agent)
   if (known != null) return known
@@ -92,55 +107,115 @@ export function slotForAgent(agent: Pick<AgentRobotRef, 'id' | 'name' | 'role'>)
   return slotForId(agent.id || agent.name || 'agent')
 }
 
-/** Name, then id — so child numbers don't jump around between polls. */
-function byName(a: AgentRobotRef, b: AgentRobotRef): number {
-  const n = (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' })
+/** First integer in the name ("Spawn 10" → 10). Null when the name has none. */
+function firstInt(name: string | null | undefined): number | null {
+  const m = (name ?? '').match(/\d+/)
+  if (!m) return null
+  const n = Number(m[0])
+  return Number.isFinite(n) ? n : null
+}
+
+/** Epoch ms when createdAt parses; null when the agent doesn't carry one. */
+function timeOf(v: string | number | null | undefined): number | null {
+  if (v == null || v === '') return null
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  const t = Date.parse(v)
+  return Number.isFinite(t) ? t : null
+}
+
+/**
+ * Seat order inside a tier. Numbers in the name win ("Spawn 2" before
+ * "Spawn 10") — a code-unit sort puts "Spawn 10" first and hands the badge
+ * to the wrong child. When either name has no number, creation time orders
+ * them if both have it. The numeric string compare is only the leftover
+ * tiebreak, so "Planner" still sorts steadily against "Spawn 00".
+ */
+function bySeat(a: AgentRobotRef, b: AgentRobotRef): number {
+  const na = firstInt(a.name)
+  const nb = firstInt(b.name)
+  if (na != null && nb != null && na !== nb) return na - nb
+  const ta = timeOf(a.createdAt)
+  const tb = timeOf(b.createdAt)
+  if (ta != null && tb != null && ta !== tb) return ta - tb
+  const n = (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true, sensitivity: 'base' })
   if (n !== 0) return n
   return a.id.localeCompare(b.id)
 }
 
 /**
+ * Roots, then known jobs, then everyone else. Each tier is already bySeat,
+ * so Spawn 11 is the last spawn considered — the one that should wear badge 1
+ * when the chief and Spawn 0–10 have taken the 12 seats.
+ */
+function seatOrder(agents: readonly AgentRobotRef[]): AgentRobotRef[] {
+  const ordered = [...agents].sort(bySeat)
+  const roots = ordered.filter((a) => !a.parentId)
+  const jobs = ordered.filter((a) => a.parentId && rosterSlotForAgent(a) != null)
+  const rest = ordered.filter((a) => a.parentId && rosterSlotForAgent(a) == null)
+  return [...roots, ...jobs, ...rest]
+}
+
+/**
+ * One distinct slot per seated agent.
+ * Pass 1: a known roster job takes its robot while it is free, in seat
+ * order, so the real Writer keeps Writer even if a scrum master's hash is
+ * also slot 8.
+ * Pass 2: everyone else starts at slotForId and walks forward until a robot
+ * nobody in this set has claimed. With at most 12 seated agents this always
+ * finds a free slot.
+ */
+function assignUnique(seated: readonly AgentRobotRef[]): Map<string, number> {
+  const taken = new Set<number>()
+  const out = new Map<string, number>()
+  for (const a of seated) {
+    const pref = rosterSlotForAgent(a)
+    if (pref != null && !taken.has(pref)) {
+      taken.add(pref)
+      out.set(a.id, pref)
+    }
+  }
+  for (const a of seated) {
+    if (out.has(a.id)) continue
+    const start = slotForId(a.id || a.name || 'agent')
+    for (let i = 0; i < ROBOT_COUNT; i++) {
+      const cand = (start + i) % ROBOT_COUNT
+      if (!taken.has(cand)) {
+        taken.add(cand)
+        out.set(a.id, cand)
+        break
+      }
+    }
+  }
+  return out
+}
+
+/**
  * One face per agent id.
  *
- * At or under 12 agents everyone gets a full robot. Past that, seats are
- * handed out until ROBOT_COUNT is exhausted:
- *   - parentless agents (the org roots — their robot is what children copy)
- *   - then agents whose role is one of the 12 jobs (so QA keeps the QA robot
- *     even when a swarm of spawned sub-agents sorts first alphabetically)
- *   - then the rest, in name order
- * Agents left over copy their parent's slot and get childNumber 1, 2, 3…
- * An overflow agent with no parent in this list still gets a wrapped slot
- * (there is no 13th drawing) but no number — a number means "copy of parent".
+ * The first min(n, 12) agents in seat order get full, unique robots — that
+ * includes a roster of 12 or fewer, where hashes used to collide (Demo
+ * Planner and Demo Writer both drawing Writer, or a spawn drawing Chief).
+ * Past 12, the leftovers copy their parent's slot and get childNumber
+ * 1, 2, 3… in the same seat order. An overflow agent with no parent in this
+ * list still gets a wrapped slot (there is no 13th drawing) but no number —
+ * a number means "copy of parent".
  */
 export function robotFaces(agents: readonly AgentRobotRef[]): Map<string, RobotFace> {
   const faces = new Map<string, RobotFace>()
-  if (agents.length <= ROBOT_COUNT) {
-    for (const a of agents) faces.set(a.id, { slot: slotForAgent(a), childNumber: null })
-    return faces
+  const ordered = seatOrder(agents)
+  const seated = ordered.slice(0, ROBOT_COUNT)
+  const slots = assignUnique(seated)
+  for (const a of seated) {
+    faces.set(a.id, { slot: slots.get(a.id) ?? slotForAgent(a), childNumber: null })
   }
+  if (agents.length <= ROBOT_COUNT) return faces
 
   const byId = new Map(agents.map((a) => [a.id, a]))
-  const ordered = [...agents].sort(byName)
-  const primaryIds: string[] = []
-  const claim = (list: AgentRobotRef[]) => {
-    for (const a of list) {
-      if (primaryIds.length >= ROBOT_COUNT) return
-      if (!primaryIds.includes(a.id)) primaryIds.push(a.id)
-    }
-  }
-  // Roots first, then named jobs, then whoever is left — never more than 12.
-  claim(ordered.filter((a) => !a.parentId))
-  claim(ordered.filter((a) => rosterSlotForAgent(a) != null))
-  claim(ordered)
-  const primary = new Set(primaryIds)
-
-  for (const id of primaryIds) {
-    const a = byId.get(id)
-    if (!a) continue
-    faces.set(id, { slot: slotForAgent(a), childNumber: null })
-  }
+  const primary = new Set(seated.map((a) => a.id))
 
   // Group the overflow by parent so siblings are numbered 1..n together.
+  // `ordered` is already numeric / creation-time, so Spawn 11 is child 1
+  // when it is the only spawn past the cap — not Spawn 9 from an A–Z sort.
   const kidsByParent = new Map<string, AgentRobotRef[]>()
   for (const a of ordered) {
     if (primary.has(a.id)) continue

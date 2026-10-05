@@ -190,16 +190,109 @@ test('starter OpenClaw defaults are maxChildrenPerAgent 3 and maxConcurrent 4', 
   assert.equal(cfg.agents.defaults.maxChildrenPerAgent, undefined)
 })
 
+test('Spawn 11 is the numbered copy when names are not zero-padded', () => {
+  // Lexicographic order is Spawn 0, 1, 10, 11, 2… so the badge used to land
+  // on Spawn 9. Numeric order keeps Spawn 0–10 as full robots and Spawn 11
+  // as child 1 of the chief.
+  const agents = [{ id: 'chief', name: 'Chief', role: 'chief of staff', parentId: null }]
+  for (let i = 0; i <= 11; i++) {
+    agents.push({ id: `s${i}`, name: `Spawn ${i}`, role: null, parentId: 'chief' })
+  }
+  const faces = robotFaces(agents)
+  assert.equal(faces.get('s11').childNumber, 1)
+  assert.equal(faces.get('s11').slot, faces.get('chief').slot)
+  for (let i = 0; i <= 10; i++) assert.equal(faces.get(`s${i}`).childNumber, null, `Spawn ${i}`)
+  const seated = ['chief', ...Array.from({ length: 11 }, (_, i) => `s${i}`)]
+  assert.equal(new Set(seated.map((id) => faces.get(id).slot)).size, 12)
+})
+
+test('a number in the name beats creation time; creation time beats A–Z', () => {
+  // Spawn 11 was created first, Spawn 0 last. The badge still follows the
+  // number, not the clock and not code-unit order.
+  const numbered = [{ id: 'chief', name: 'Chief', role: 'chief of staff', parentId: null, createdAt: '2020-01-01T00:00:00Z' }]
+  for (let i = 0; i <= 11; i++) {
+    numbered.push({
+      id: `s${i}`,
+      name: `Spawn ${i}`,
+      role: null,
+      parentId: 'chief',
+      createdAt: new Date(Date.UTC(2024, 0, 12 - i)).toISOString(),
+    })
+  }
+  const byNumber = robotFaces(numbered)
+  assert.equal(byNumber.get('s11').childNumber, 1)
+  assert.equal(byNumber.get('s0').childNumber, null)
+
+  // No digits in the names. Lex order would overflow "Zed" (last letter).
+  // Creation time overflows the latest child ("Amy") instead.
+  const timed = [{ id: 'chief', name: 'Chief', role: 'chief of staff', parentId: null, createdAt: '2020-01-01T00:00:00Z' }]
+  const names = ['Zed', 'Yan', 'Xin', 'Wes', 'Val', 'Uma', 'Ted', 'Sam', 'Ray', 'Qin', 'Bea', 'Amy']
+  names.forEach((name, i) => {
+    timed.push({
+      id: name.toLowerCase(),
+      name,
+      role: null,
+      parentId: 'chief',
+      createdAt: new Date(Date.UTC(2024, 0, i + 1)).toISOString(),
+    })
+  })
+  const byTime = robotFaces(timed)
+  assert.equal(byTime.get('amy').childNumber, 1)
+  assert.equal(byTime.get('zed').childNumber, null)
+})
+
+test('the first 12 seats are unique even when a hash lands on a taken robot', () => {
+  // Find a scrum-master id whose hash is Writer (slot 8) — the Demo Planner
+  // collision. The Writer keeps slot 8; the planner walks to a free robot.
+  let collided = null
+  for (let i = 0; i < 500; i++) {
+    const id = `planner-${i}`
+    if (slotForId(id) === 8) { collided = id; break }
+  }
+  assert.ok(collided, 'expected some id to hash to slot 8')
+  const pair = robotFaces([
+    { id: 'wri', name: 'Demo Writer', role: 'summary', parentId: null },
+    { id: collided, name: 'Demo Planner', role: 'scrum master', parentId: null },
+  ])
+  assert.equal(slotForAgent({ id: collided, role: 'scrum master' }), 8)
+  assert.equal(pair.get('wri').slot, 8)
+  assert.notEqual(pair.get(collided).slot, pair.get('wri').slot)
+  assert.equal(pair.get(collided).childNumber, null)
+
+  // Chief + 11 spawns (12 agents, all seated) must be 12 different robots,
+  // including a spawn whose hash is the chief's slot.
+  const team = [{ id: 'chief', name: 'Chief', role: 'chief of staff', parentId: null }]
+  for (let i = 0; i < 11; i++) team.push({ id: `s${i}`, name: `Spawn ${i}`, role: null, parentId: 'chief' })
+  const faces = robotFaces(team)
+  assert.equal(faces.size, 12)
+  assert.equal(new Set([...faces.values()].map((f) => f.slot)).size, 12)
+  for (const face of faces.values()) assert.equal(face.childNumber, null)
+  assert.equal(faces.get('chief').slot, 0)
+})
+
 test('board and backlog scroll sideways and wrap actions (layout only)', async () => {
   const tickets = await readFile(new URL('../src/pages/Tickets.tsx', import.meta.url), 'utf8')
   const backlog = await readFile(new URL('../src/pages/Backlog.tsx', import.meta.url), 'utf8')
-  // Horizontal scroll + a min width so five columns are not crushed at ~768px.
+  const activity = await readFile(new URL('../src/pages/Activity.tsx', import.meta.url), 'utf8')
+  const office = await readFile(new URL('../src/pages/Office.tsx', import.meta.url), 'utf8')
+  // Fixed-width columns inside a sideways scroller. A shrinking grid clipped
+  // titles at ~768px; w-[260px] shrink-0 keeps each column readable.
   assert.match(tickets, /overflow-x-auto/)
-  assert.match(tickets, /min-w-\[1240px\]/)
+  assert.match(tickets, /w-\[260px\]/)
+  assert.match(tickets, /shrink-0/)
+  assert.match(tickets, /w-max/)
   assert.match(tickets, /flex-wrap/)
   assert.match(tickets, /break-words/)
-  // Titles must not be ellipsized.
+  assert.match(tickets, /whitespace-nowrap/)
+  assert.match(tickets, /AgentAvatar/)
+  // Titles must not be ellipsized, and the generic bot glyph is gone.
   assert.equal(tickets.includes('truncate'), false)
+  assert.equal(tickets.includes('<Bot'), false)
+  assert.equal(activity.includes('<Bot'), false)
+  assert.match(activity, /AgentAvatar/)
+  // Same-room agents drop by STACK_STEP instead of sharing one left point.
+  assert.match(office, /STACK_STEP/)
+  assert.match(office, /place\.i \* STACK_STEP/)
   assert.match(backlog, /overflow-x-auto/)
   assert.match(backlog, /min-w-\[1020px\]/)
   assert.match(backlog, /flex-wrap/)

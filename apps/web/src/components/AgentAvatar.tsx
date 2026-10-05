@@ -30,6 +30,8 @@ export interface AvatarAgentShape {
   role?: string | null
   status?: string | null
   parentId?: string | null
+  /** Passed through so seat order can use creation time when the wire has it. */
+  createdAt?: string | number | null
 }
 
 /**
@@ -85,6 +87,7 @@ function toRef(agent: AvatarAgentShape, index: number): AgentRobotRef {
     name: agent.name,
     role: agent.role,
     parentId: agent.parentId ?? null,
+    createdAt: agent.createdAt ?? null,
   }
 }
 

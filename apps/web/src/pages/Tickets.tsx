@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
-import { Bot, Card, Chip, Inner, PillButton, SectionLabel } from '../components/ui'
+import { Card, Chip, Inner, PillButton, SectionLabel } from '../components/ui'
+import { AgentAvatar } from '../components/AgentAvatar'
+import type { Agent, AgentsResp } from '../types'
+import { rosterDisplayName } from '../data/roster'
 import { ticketCreateQueue } from '../lib/serialQueue'
 
 /**
@@ -41,6 +44,26 @@ function inColumn(t: Ticket, col: { status: string; aliases: string[] }): boolea
   return t.status === col.status || col.aliases.includes(t.status)
 }
 
+/**
+ * Assignee sticker. The card used to draw the generic Bot glyph. Match the
+ * name (or the roster display name) to a real agent so the ticket wears the
+ * same robot as Team / Office. Unknown and empty assignees still get a
+ * sticker — hashed from the label — without being folded into the live
+ * roster (that would burn a seat and renumber a child).
+ */
+function assigneeFace(assignee: string | null, roster: readonly Agent[]): { agent: Agent | { id: string; name: string; status: string }; agents?: readonly Agent[] } {
+  const label = assignee?.trim() || ''
+  if (!label) return { agent: { id: 'unassigned', name: 'unassigned', status: 'offline' } }
+  const key = label.toLowerCase()
+  const hit = roster.find((a) =>
+    a.name.toLowerCase() === key ||
+    a.id.toLowerCase() === key ||
+    rosterDisplayName(a.name, a.role).toLowerCase() === key,
+  )
+  if (hit) return { agent: hit, agents: roster }
+  return { agent: { id: label, name: label, status: 'idle' } }
+}
+
 /** How long an inline notice stays up before fading on its own. */
 const NOTICE_MS = 6000
 
@@ -53,6 +76,9 @@ export default function Tickets() {
   // `loading`/`errorMessage` (QA-1 polish item 1): distinguish "not loaded yet"
   // and "load failed" from a genuinely empty board.
   const { data, loading, errorMessage: loadError, refetch, mutate } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
+  // Same roster Team uses, so an assignee's sticker matches their card.
+  const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const roster = rosterQ.data?.agents ?? []
   const { events } = useLiveActivity()
   const [title, setTitle] = useState('')
   // How many of THIS page's creates are queued or in flight. Display-only
@@ -261,18 +287,21 @@ export default function Tickets() {
         </div>
       )}
 
-      {/* Five columns need ~1240px. Below that (a 768–1024px window minus the
-          220px sidebar) the board scrolls sideways. Each column stays at least
-          ~240px so titles wrap in full and the move buttons are not clipped.
-          Layout only — no change to create/move behaviour. */}
-      <div className="mt-6 overflow-x-auto pb-1">
-        <div className="grid min-w-[1240px] grid-cols-5 gap-4">
+      {/* Five columns are a fixed 260px each (w-max row), same idea as the
+          Backlog's min-width table. A CSS grid with minmax(0, 1fr) let the
+          columns shrink to the sidebar's leftover width at ~768px: titles
+          clipped ("TO-…"), move buttons spilled past the card, assignees
+          collapsed to a letter, and ids wrapped. The row is wider than a
+          768 or 1024 content area, so the board scrolls sideways and each
+          column stays readable. Layout only — create/move is unchanged. */}
+      <div className="mt-6 min-w-0 overflow-x-auto pb-1">
+        <div className="flex w-max gap-4">
         {COLUMNS.map((col) => {
           const rows = tickets.filter((t) => inColumn(t, col))
           return (
-            <Card key={col.title} className="px-3.5 py-3 min-h-[380px] min-w-0">
-              <div className="flex items-center justify-between px-1">
-                <SectionLabel>{col.title}</SectionLabel>
+            <Card key={col.title} className="w-[260px] shrink-0 px-3.5 py-3 min-h-[380px]">
+              <div className="flex items-center justify-between gap-2 px-1">
+                <SectionLabel className="whitespace-nowrap">{col.title}</SectionLabel>
                 <span className="text-[11px] font-semibold text-mc-sub">{rows.length}</span>
               </div>
               <div className="mt-3 space-y-3">
@@ -286,16 +315,17 @@ export default function Tickets() {
                 )}
                 {rows.map((t) => (
                   <Inner key={t.id} className="rounded-[10px] px-3 py-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[11px] font-semibold text-mc-faint">{t.key ?? t.id.slice(0, 8)}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] font-semibold text-mc-faint whitespace-nowrap">{t.key ?? t.id.slice(0, 8)}</span>
                       <Chip label={t.priority.toUpperCase()} bg={PRIO[t.priority]?.bg ?? PRIO.med.bg} fg={PRIO[t.priority]?.fg ?? PRIO.med.fg} h={18} fs="text-[10px]" />
                     </div>
                     {/* Full title, wrapped — never ellipsized. break-words keeps a
                         long unbroken token inside the column. */}
                     <div className="mt-1.5 text-[13px] font-semibold leading-snug break-words">{t.title}</div>
                     <div className="mt-2.5 flex items-center gap-2">
-                      <Bot color={t.assignee ? 'var(--mc-primary)' : 'var(--mc-faint)'} scale={0.8} />
-                      <span className="text-[11px] text-mc-sub break-words">{t.assignee ?? 'unassigned'}</span>
+                      {/* Same sticker as Team / Office / Live Activity — not the generic bot. */}
+                      <AgentAvatar {...assigneeFace(t.assignee, roster)} size={0.75} />
+                      <span className="text-[11px] text-mc-sub whitespace-nowrap">{t.assignee ?? 'unassigned'}</span>
                     </div>
                     {/* Pipeline actions — full movement through all 5 columns (MC-214).
                         Every move button is disabled while this card has a PATCH
@@ -303,7 +333,7 @@ export default function Tickets() {
                         Backlog's "Moving…" button — no new styles).
                         flex-wrap + shrink-0: at a narrow column the second button
                         drops to the next line whole, it is not cut in half. */}
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <div className="mt-2.5 flex max-w-full flex-wrap items-center gap-2">
                       {t.status === 'todo' && (
                         <>
                           {/* Start sends the canonical `build` (MC-214); the API
@@ -401,10 +431,10 @@ export default function Tickets() {
       </div>
 
       {/* Same idea as the board: five tiles scroll instead of squashing labels. */}
-      <div className="mt-6 overflow-x-auto pb-1">
-      <div className="grid min-w-[640px] grid-cols-5 gap-4">
+      <div className="mt-6 min-w-0 overflow-x-auto pb-1">
+      <div className="flex w-max gap-4">
         {metrics.map((m) => (
-          <Card key={m.label} className="px-3 py-2">
+          <Card key={m.label} className="w-[140px] shrink-0 px-3 py-2">
             <div className="text-[18px] font-semibold">{m.value}</div>
             <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-mc-faint">{m.label}</div>
           </Card>
