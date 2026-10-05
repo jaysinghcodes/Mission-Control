@@ -50,7 +50,9 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 export default function Tickets() {
-  const { data, refetch, mutate } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
+  // `loading`/`errorMessage` (QA-1 polish item 1): distinguish "not loaded yet"
+  // and "load failed" from a genuinely empty board.
+  const { data, loading, errorMessage: loadError, refetch, mutate } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
   const { events } = useLiveActivity()
   const [title, setTitle] = useState('')
   // How many of THIS page's creates are queued or in flight. Display-only
@@ -211,6 +213,17 @@ export default function Tickets() {
         </div>
       </div>
 
+      {/* Load failure (QA-1 polish item 1). useApi keeps the last good board
+          on a failed refresh, so we must SAY it is not current — otherwise a
+          dead API looks like a quiet board. Same notice styling as the write
+          errors below; no new design. Clears itself on the next good load. */}
+      {loadError && (
+        <div role="alert" className="mt-4 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
+          Couldn't load tickets — {loadError}.{' '}
+          {data ? 'Showing the last loaded board; retrying automatically.' : 'Retrying automatically.'}
+        </div>
+      )}
+
       {notice && (
         <div
           role="status"
@@ -235,7 +248,10 @@ export default function Tickets() {
               <div className="mt-3 space-y-3">
                 {rows.length === 0 && (
                   <div className="text-[12px] text-mc-faint px-1 py-4">
-                    {col.title === 'Done' ? 'Nothing shipped yet.' : col.title === 'To-Do' ? 'Empty — create a ticket above.' : `Nothing in ${col.title} yet.`}
+                    {/* Before the first good load there is NO board to describe:
+                        say "Loading…" (or point at the error) rather than claim
+                        the column is empty (QA-1 polish item 1). */}
+                    {!data ? (loading && !loadError ? 'Loading…' : 'Not loaded — see the notice above.') : col.title === 'Done' ? 'Nothing shipped yet.' : col.title === 'To-Do' ? 'Empty — create a ticket above.' : `Nothing in ${col.title} yet.`}
                   </div>
                 )}
                 {rows.map((t) => (

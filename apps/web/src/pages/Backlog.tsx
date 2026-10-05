@@ -29,7 +29,9 @@ const PRIO: Record<string, { bg: string; fg: string }> = {
 const NOTICE_MS = 6000
 
 export default function Backlog() {
-  const { data, refetch, mutate } = useApi<TicketsResp>('/tickets?status=backlog', { pollMs: 15000 })
+  // `loading`/`errorMessage` (QA-1 polish item 1): distinguish "not loaded yet"
+  // and "load failed" from a genuinely empty backlog.
+  const { data, loading, errorMessage: loadError, refetch, mutate } = useApi<TicketsResp>('/tickets?status=backlog', { pollMs: 15000 })
   const [title, setTitle] = useState('')
   // How many of THIS page's creates are queued or in flight. Display-only
   // (drives the "Saving…" button label) — it NEVER gates a submit. The old
@@ -155,6 +157,17 @@ export default function Backlog() {
         </div>
       </div>
 
+      {/* Load failure (QA-1 polish item 1). useApi keeps the last good board
+          on a failed refresh, so we must SAY it is not current — otherwise a
+          dead API looks like a quiet board. Same notice styling as the write
+          notice below; no new design. Clears itself on the next good load. */}
+      {loadError && (
+        <div role="alert" className="mt-4 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
+          Couldn't load the backlog — {loadError}.{' '}
+          {data ? 'Showing the last loaded list; retrying automatically.' : 'Retrying automatically.'}
+        </div>
+      )}
+
       {notice && (
         <div
           role="status"
@@ -179,7 +192,12 @@ export default function Backlog() {
         </div>
         {rows.length === 0 && (
           <div className="px-[18px] py-8 text-[12.5px] text-mc-faint">
-            Backlog is empty. Use the field above to add a ticket, then move it to To-Do when it is ready.
+{/* Only claim "empty" after a successful load (QA-1 polish item 1). */}
+            {!data
+              ? loading && !loadError
+                ? 'Loading…'
+                : 'Not loaded — see the notice above.'
+              : 'Backlog is empty. Use the field above to add a ticket, then move it to To-Do when it is ready.'}
           </div>
         )}
         {rows.map((row) => (
