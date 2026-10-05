@@ -166,10 +166,24 @@ Verify: `curl http://127.0.0.1:3000/health` → `{"status":"ok",...,"database":"
 then open **http://localhost:5173** — the topbar dot should be green and the Live Activity
 band fills with `hello`, periodic `health.tick`, and OpenClaw-run events.
 
-> **Shipping note:** the event bridge (`~/.openclaw/.mc-bridge-sync.py`) is the
-> OpenClaw-integration piece — it reads OpenClaw's own state (sessions, cron,
-> sqlite) and is optional for a standalone clone. Everything else runs on env
-> vars + Postgres alone.
+> **Shipping note:** the event bridge now ships in the repo at [`bridge/`](bridge/README.md)
+> (it previously lived only at `~/.openclaw/.mc-bridge-sync.py`). It reads OpenClaw's own
+> state via the `openclaw` CLI and is optional for a standalone clone. Everything else runs
+> on env vars + Postgres alone.
+
+### No OpenClaw? Demo data
+
+On a machine without OpenClaw, seed sample agents, cron jobs, tickets and activity so the
+Board, Calendar, Team and Office are clickable:
+
+```bash
+npm install
+docker compose up -d --build   # or the manual Postgres setup above
+npm run seed:demo              # idempotent — safe to re-run; data persists in the mc-db volume
+```
+
+Logs and search show a clean "no gateway log source" empty state when `/tmp/openclaw` is
+missing (always true inside the api container) — never an error.
 
 ### Build / test / lint
 
@@ -184,9 +198,19 @@ npm run lint
 
 ## OpenClaw integration
 
-Mission Control is fed by the OpenClaw instance on the same box. A cron job (isolated agent
-turn, every 5 minutes) summarizes recent real activity — sessions, scheduled runs, notable
-tool work — and POSTs it to the ingest endpoint:
+Mission Control is fed by the OpenClaw instance on the same box through the vendored
+bridge in [`bridge/`](bridge/README.md). Run it every ~5 minutes (system cron or an
+OpenClaw cron job):
+
+```bash
+python3 bridge/mc-bridge-sync.py            # one sync; reads INGEST_TOKEN from the root .env
+python3 bridge/mc-bridge-sync.py --dry-run  # print the events instead of posting
+```
+
+Each run posts `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`,
+`usage.snapshot`, `approvals.snapshot` and `run.*` events to `POST /events` with the
+`x-ingest-token` header. The full event contract (payload shapes, sources, safety rules)
+is documented in [`bridge/README.md`](bridge/README.md). A single event looks like:
 
 ```bash
 curl -s -X POST http://127.0.0.1:3000/events \
