@@ -1,0 +1,10 @@
+{
+  "agents": {
+    "defaults": {
+      "subagents": {
+        "maxChildrenPerAgent": 3,
+        "maxConcurrent": 4
+      }
+    }
+  }
+}

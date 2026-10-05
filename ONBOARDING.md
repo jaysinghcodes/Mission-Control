@@ -148,6 +148,17 @@ band shows real events after a sync. A 401 means the bridge and the api disagree
 on the token — an unset `INGEST_TOKEN` in `.env` makes compose fall back to
 `dev-ingest-token` for the api.
 
+While they are in their OpenClaw config, merge the Mission Control starter
+limits from `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json`
+(merge, don't replace the file):
+
+- `agents.defaults.subagents.maxChildrenPerAgent` = **3**
+- `agents.defaults.subagents.maxConcurrent` = **4**
+
+Those are the starter values for this dashboard (OpenClaw itself defaults to 5
+and 8). The api does not read them — they cap how hard a local OpenClaw fans
+out, which is also how many numbered child robots the Team page has to draw.
+
 ### Step 7 — Connect from another machine (optional)
 If the operator wants remote access, point them at the
 `http://localhost:5173/#/connect` page in the dashboard: it gives OS-specific
