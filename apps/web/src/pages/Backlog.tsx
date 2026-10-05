@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApi, apiSend } from '../hooks/useApi'
 import { Card, Chip, PillButton } from '../components/ui'
+import { ticketCreateQueue } from '../lib/serialQueue'
 
 /**
  * Backlog — real backlog tickets from the API, ranked table with create CTA.
@@ -12,6 +13,7 @@ import { Card, Chip, PillButton } from '../components/ui'
  *   every move must be a button; drag-and-drop is a separate follow-up).
  * - Write failures show a gentle inline notice; the list always re-syncs
  *   with the server afterwards.
+ * - Creates are QUEUED, never dropped (QA-1 #1): see create().
  */
 
 interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; createdAt: string }
@@ -29,36 +31,78 @@ const NOTICE_MS = 6000
 export default function Backlog() {
   const { data, refetch, mutate } = useApi<TicketsResp>('/tickets?status=backlog', { pollMs: 15000 })
   const [title, setTitle] = useState('')
-  const [busy, setBusy] = useState(false)
+  // How many of THIS page's creates are queued or in flight. Display-only
+  // (drives the "Saving…" button label) — it NEVER gates a submit. The old
+  // `busy` flag did (`if (!title || busy) return`), which is how a second
+  // create ~1 s after the first was silently dropped (QA-1 #1).
+  const [saving, setSaving] = useState(0)
   // Row ids with a "→ To-Do" move in flight (disables that row's button so a
   // double-click doesn't fire two identical PATCHes).
   const [moving, setMoving] = useState<Set<string>>(new Set())
   // Inline notice: success ("MC-151 moved to To-Do") or a gentle error.
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Titles whose create failed and that the current notice is reporting.
+  // Accumulated so a burst of failures (API down with several creates
+  // queued) names EVERY lost title instead of each failure overwriting the
+  // last one's notice a few ms later. Reset when the notice goes away.
+  const failedCreates = useRef<string[]>([])
   const rows = data?.tickets ?? []
+
+  /** Hide the notice and forget the failed-create titles it was listing. */
+  function clearNotice() {
+    setNotice(null)
+    failedCreates.current = []
+  }
 
   function showNotice(text: string, tone: 'ok' | 'warn') {
     setNotice({ text, tone })
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
-    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS)
+    noticeTimer.current = setTimeout(clearNotice, NOTICE_MS)
   }
   useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
 
-  async function create() {
+  /**
+   * "+ New ticket" (button or Enter). QA-1 #1 fix — every submit is either
+   * SAVED or shows a VISIBLE error; nothing is dropped silently.
+   * (Same logic as Tickets.tsx create(); the full rationale lives there.)
+   *
+   * Old bug: `if (!t || busy) return` silently ignored a submit made while
+   * the previous POST was in flight, and that POST's `setTitle('')` then
+   * wiped the title typed for the next ticket.
+   *
+   * Now:
+   *   - Snapshot + clear the input at submit time → clears exactly the title
+   *     being submitted, frees the input for the next one, and makes a
+   *     double-Enter harmless (2nd press sees an empty input → `!t`).
+   *   - POST goes through the shared ticketCreateQueue: one create at a
+   *     time, in submit order (count-based MC-N keys on the API, see
+   *     serialQueue.ts) — queued, never ignored.
+   *   - Failure → warn notice naming the title + server reason, and the title
+   *     goes back into the input only if the input is still empty.
+   */
+  function create() {
     const t = title.trim()
-    if (!t || busy) return
-    setBusy(true)
+    if (!t) return
+    setTitle('') // clear ONLY what we're submitting
+    setSaving((n) => n + 1)
     // Explicit status: 'backlog' — matches today's API default, but stays
     // correct even if DEFAULT_CREATE_STATUS changes (see header comment).
-    const r = await apiSend<{ ticket: Ticket }>('POST', '/tickets', { title: t, priority: 'med', status: 'backlog' })
-    if (r.ok) {
-      setTitle('') // keep the typed title on failure so nothing is lost
-    } else {
-      showNotice(`Couldn't create ticket — ${r.error}`, 'warn')
-    }
-    setBusy(false)
-    void refetch()
+    // apiSend never throws, so the queued job always resolves; branch on r.ok.
+    void ticketCreateQueue
+      .run(() => apiSend<{ ticket: Ticket }>('POST', '/tickets', { title: t, priority: 'med', status: 'backlog' }))
+      .then((r) => {
+        if (r.ok) return
+        failedCreates.current.push(t)
+        const names = failedCreates.current.map((x) => `"${x}"`).join(', ')
+        showNotice(`Couldn't create ${names} — ${r.error}`, 'warn')
+        // Never clobber a title typed while this create was queued/in flight.
+        setTitle((cur) => (cur.trim() ? cur : t))
+      })
+      .finally(() => {
+        setSaving((n) => n - 1)
+        void refetch() // re-sync with what the server committed
+      })
   }
 
   /**
@@ -101,11 +145,13 @@ export default function Backlog() {
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void create()}
+            onKeyDown={(e) => e.key === 'Enter' && create()}
             placeholder="New backlog item…"
             className="h-9 w-64 rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
           />
-          <PillButton label="+  New ticket" on onClick={() => void create()} />
+          {/* Label-only progress hint (same pattern as the row's "Moving…"); the
+              button stays clickable — extra submits queue, never dropped. */}
+          <PillButton label={saving > 0 ? 'Saving…' : '+  New ticket'} on onClick={create} />
         </div>
       </div>
 
@@ -117,7 +163,7 @@ export default function Backlog() {
           }`}
         >
           <span>{notice.text}</span>
-          <button type="button" onClick={() => setNotice(null)} className="ml-4 text-[11px] font-semibold hover:opacity-80">
+          <button type="button" onClick={clearNotice} className="ml-4 text-[11px] font-semibold hover:opacity-80">
             Dismiss
           </button>
         </div>
