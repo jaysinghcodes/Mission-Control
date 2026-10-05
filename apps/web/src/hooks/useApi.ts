@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { API_URL } from '../lib/apiBase'
+import { reportOutcome } from '../lib/apiStatus'
 
 /**
  * useApi — tiny fetch hook for the Mission Control API.
@@ -6,21 +8,42 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * - optional pollMs for auto-refresh (logs, sessions, …)
  * - mutate(updater) to apply a server response locally right away (e.g. the
  *   ticket a PATCH returned) without waiting for the next poll
- * - never throws: on failure it surfaces `error: true` so pages can render
- *   their empty state / offline notice instead of crashing.
+ * - never throws: on failure it surfaces `error: true` plus a readable
+ *   `errorMessage` so pages can say WHY instead of rendering a blank page.
+ *
+ * QA-1 polish item 1 ("empty board after ↺ Backlog + reload") — the rules:
+ *   1. `data` is ONLY ever replaced by a successful (2xx, JSON object, no
+ *      legacy `{ error }` body) response from the LATEST request. A failed,
+ *      aborted or superseded request never touches `data`, so a hiccup can
+ *      never wipe a loaded board to "empty".
+ *   2. Every new fetch ABORTS the previous in-flight one (its answer would be
+ *      stale anyway), and unmount aborts whatever is left — no setState on an
+ *      unmounted page, no late response painting over a newer one.
+ *   3. Load failures are surfaced (`error` / `errorMessage`) and the last good
+ *      `data` is kept, so pages can show "couldn't refresh" over the old data
+ *      instead of silently pretending it is current.
+ *
+ * QA-1 polish item 7: every settled (non-aborted) request also reports to the
+ * shared apiStatus store, so one page noticing the API is gone flips the
+ * app-wide "offline / data may be stale" banner and the top-bar status.
  */
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+// Single source of truth for the API location (lib/apiBase.ts, item 7).
+const API = API_URL
 
 export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
   data: T | null
   loading: boolean
   error: boolean
+  /** Readable reason for the latest load failure; null after a good load. */
+  errorMessage: string | null
   refetch: () => void
   mutate: (updater: (prev: T | null) => T | null) => void
 } {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
+  // One piece of state for both `error` and `errorMessage` so they can never
+  // disagree (null = last load succeeded).
+  const [loadError, setLoadError] = useState<string | null>(null)
   const pollMs = opts.pollMs ?? 0
   const pathRef = useRef(path)
   pathRef.current = path
@@ -32,20 +55,58 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
   // server's post-move answer. The board therefore always converges on what
   // the server last said, and a browser refresh shows the same thing.
   const generation = useRef(0)
+  // The in-flight GET, so the next refetch (or unmount) can abort it.
+  const inflight = useRef<AbortController | null>(null)
+  // False between unmount and (StrictMode) remount — guards every setState.
+  const mounted = useRef(false)
 
   const refetch = useCallback(async () => {
     const mine = ++generation.current
+    // Rule 2: a newer request supersedes the older one — cancel it outright.
+    inflight.current?.abort()
+    const ctrl = new AbortController()
+    inflight.current = ctrl
+    // Only the latest, still-mounted request may write state.
+    const current = () => mounted.current && mine === generation.current
     try {
-      const res = await fetch(`${API}${pathRef.current}`)
-      if (!res.ok) throw new Error(String(res.status))
-      const json = (await res.json()) as T
-      if (mine !== generation.current) return // superseded — drop stale data
-      setData(json)
-      setError(false)
-    } catch {
-      if (mine === generation.current) setError(true)
+      const res = await fetch(`${API}${pathRef.current}`, { signal: ctrl.signal })
+      // Item 7: the API (or a proxy in front of it) answered — tell the shared
+      // status store. 502/503/504 count as "API down", anything else as up.
+      reportOutcome(res.status, `HTTP ${res.status}`)
+      // Parse defensively: proxies/502 pages are often not JSON at all.
+      let json: unknown = null
+      try {
+        json = await res.json()
+      } catch {
+        json = null
+      }
+      if (!res.ok) throw new Error(errorMessage(json, res.status))
+      // Rule 1: a 2xx that is not a JSON object, or that carries the legacy
+      // `{ error }` shape, is a FAILURE — never something to render as data.
+      if (!json || typeof json !== 'object') throw new Error('Unexpected response from the API')
+      const legacy = (json as { error?: unknown }).error
+      if (typeof legacy === 'string' && legacy) throw new Error(legacy)
+      if (!current()) return // superseded — drop stale data
+      setData(json as T)
+      setLoadError(null)
+    } catch (err) {
+      // Aborted = superseded or unmounted: not an error, and never a reason
+      // to touch `data`. (fetch rejects with AbortError in that case.)
+      if (ctrl.signal.aborted) return
+      // Network failure (fetch rejected) or one of the throws above. Keep the
+      // last good `data` (rule 1) and surface why (rule 3).
+      // Item 7: a rejected fetch (TypeError) = API unreachable, app-wide.
+      if (err instanceof TypeError) reportOutcome(0, errorMessage(null, 0))
+      if (current()) {
+        const msg = err instanceof TypeError ? errorMessage(null, 0) : err instanceof Error ? err.message : String(err)
+        setLoadError(msg)
+      }
     } finally {
-      setLoading(false)
+      if (inflight.current === ctrl) inflight.current = null
+      // Only the request that actually settled the latest generation ends
+      // the initial "loading" state; an aborted one leaves that to its
+      // successor (otherwise pages would flash "empty" before data arrives).
+      if (current() && !ctrl.signal.aborted) setLoading(false)
     }
   }, [])
 
@@ -55,14 +116,30 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
   }, [])
 
   useEffect(() => {
-    void refetch()
-    if (pollMs > 0) {
-      const t = setInterval(() => void refetch(), pollMs)
-      return () => clearInterval(t)
+    // Set in the effect body (not at declaration) so React StrictMode's
+    // mount → unmount → mount dev cycle ends with mounted = true.
+    mounted.current = true
+    // QA-3: start the first load on a 0 ms timer, not synchronously. React
+    // StrictMode (dev) mounts → unmounts → re-mounts every effect; a
+    // synchronous fetch in the throw-away mount was aborted by its cleanup
+    // a moment later, so every page load logged net::ERR_ABORTED requests.
+    // The throw-away mount's cleanup now cancels this timer before it fires,
+    // so only the real mount ever hits the network. (Same trick as the
+    // live-activity socket, item 5.) Aborts that do still happen — page
+    // change, superseded refetch — are never reported as failures.
+    const first = setTimeout(() => void refetch(), 0)
+    const t = pollMs > 0 ? setInterval(() => void refetch(), pollMs) : null
+    return () => {
+      mounted.current = false
+      clearTimeout(first)
+      if (t) clearInterval(t)
+      // Rule 2: nothing may land after unmount.
+      inflight.current?.abort()
+      inflight.current = null
     }
   }, [refetch, pollMs])
 
-  return { data, loading, error, refetch, mutate }
+  return { data, loading, error: loadError !== null, errorMessage: loadError, refetch, mutate }
 }
 
 /**
@@ -121,8 +198,12 @@ export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', pa
     })
   } catch {
     // fetch only rejects on network-level failures (offline, CORS, DNS).
+    // Item 7: report it to the shared status (apiSend never aborts itself).
+    reportOutcome(0, errorMessage(null, 0))
     return { ok: false, status: 0, data: null, error: errorMessage(null, 0) }
   }
+  // Item 7: we got an HTTP answer — reachable unless a gateway says otherwise.
+  reportOutcome(res.status, `HTTP ${res.status}`)
   // Parse defensively — error pages (proxies, 502s) may not be JSON at all.
   let json: unknown = null
   try {

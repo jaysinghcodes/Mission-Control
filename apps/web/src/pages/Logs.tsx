@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useApi } from '../hooks/useApi'
 import { PillButton, SearchField } from '../components/ui'
 
@@ -18,8 +18,26 @@ interface LogsResp { logs: LogLine[]; available?: boolean; reason?: string | nul
 
 const LEVELS = ['ALL', 'INFO', 'WARN', 'ERROR'] as const
 
+/**
+ * How long "waiting for the API…" may show before it becomes an error
+ * (QA-1 polish item 7). Before, a dead API meant waiting forever with no
+ * explanation. 8 s ≈ a cold api start; the hook keeps retrying every poll.
+ */
+const WAIT_LIMIT_MS = 8000
+
 export default function Logs() {
-  const { data } = useApi<LogsResp>('/logs?lines=300', { pollMs: 10000 })
+  const { data, error, errorMessage } = useApi<LogsResp>('/logs?lines=300', { pollMs: 10000 })
+  // Item 7: flips true if the first load hasn't arrived within WAIT_LIMIT_MS.
+  const [waitedOut, setWaitedOut] = useState(false)
+  useEffect(() => {
+    if (data) return // loaded — no timer needed (and none left running)
+    const t = setTimeout(() => setWaitedOut(true), WAIT_LIMIT_MS)
+    return () => clearTimeout(t)
+  }, [data])
+  // Can't show the log right now: never loaded and (failed or timed out).
+  const unreachable = !data && (error || waitedOut)
+  // Loaded once, but the latest refresh failed → what's shown is stale.
+  const stale = !!data && error
   const [level, setLevel] = useState<(typeof LEVELS)[number]>('ALL')
   const [q, setQ] = useState('')
 
@@ -62,7 +80,20 @@ export default function Logs() {
             <div className="mt-1 text-mc-faint">See bridge/README.md to connect an OpenClaw instance.</div>
           </div>
         )}
-        {!noSource && lines.length === 0 && (
+        {/* Item 7: "waiting" is time-boxed. After WAIT_LIMIT_MS (or a hard
+            failure) say what went wrong, in the existing orange text used for
+            WARN lines / notices; polling keeps retrying underneath. */}
+        {unreachable && (
+          <div className="text-mc-orangetext pt-2">
+            Couldn't load the gateway log ({errorMessage ?? `no answer from the API after ${WAIT_LIMIT_MS / 1000} s`}). Retrying every 10 s.
+          </div>
+        )}
+        {stale && (
+          <div className="text-mc-orangetext pt-2 pb-2">
+            Showing the last loaded log — refresh failed ({errorMessage}). Retrying every 10 s.
+          </div>
+        )}
+        {!noSource && !unreachable && lines.length === 0 && (
           <div className="text-mc-faint pt-2">No matching log lines{data ? '' : ' — waiting for the API…'}.</div>
         )}
         {lines.map((l, i) => (
@@ -77,8 +108,9 @@ export default function Logs() {
             <span className="text-mc-text">{l.msg}</span>
           </div>
         ))}
-        {/* Only claim a live tail when there is actually a log being tailed. */}
-        {!noSource && <div className="mt-3 text-[12px] font-semibold text-mc-greentext">● LIVE TAIL — streaming…</div>}
+        {/* Only claim a live tail when there is actually a log being tailed —
+            and the latest refresh worked (item 7: no "streaming" over stale data). */}
+        {!noSource && data && !error && <div className="mt-3 text-[12px] font-semibold text-mc-greentext">● LIVE TAIL — streaming…</div>}
       </div>
     </div>
   )

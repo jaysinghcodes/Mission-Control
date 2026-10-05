@@ -3,6 +3,17 @@
 # Then open http://localhost:5173/#/ (web, hash routes) — API on http://localhost:3000.
 # No OpenClaw? `npm run seed:demo` (from the host) fills sample data.
 # Loopback-first: no ports are exposed beyond localhost by default.
+#
+# Host ports are overridable (QA-1 polish item 6) — 5432/3000/5173 are often
+# taken on a dev box (another Postgres, another dev server):
+#   MC_DB_PORT=55432 MC_API_PORT=3200 MC_WEB_PORT=5273 docker compose up --build
+# Only the HOST side of each mapping moves; inside the compose network the
+# services still talk on 5432/3000/5173. Two values follow the ports
+# automatically unless you set them yourself (see .env.example):
+#   - WEB_ORIGIN (api CORS allowlist) defaults to the web port you chose;
+#   - VITE_API_URL (baked into the web bundle at BUILD time) defaults to the
+#     api port you chose — so after changing MC_API_PORT, rebuild web
+#     (`--build`), or the bundle keeps calling the old port.
 services:
   db:
     image: postgres:16-alpine
@@ -19,7 +30,8 @@ services:
       timeout: 3s
       retries: 10
     ports:
-      - "127.0.0.1:5432:5432"
+      # Host port overridable (item 6); container port stays 5432.
+      - "127.0.0.1:${MC_DB_PORT:-5432}:5432"
 
   api:
     build:
@@ -33,7 +45,12 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/mission_control
       PORT: 3000
       HOST: 0.0.0.0
-      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
+      # CORS allowlist. Default is DERIVED from the web host port (item 6 /
+      # QA-3): moving the web to MC_WEB_PORT=5273 with a hardcoded :5173 here
+      # made every API call fail CORS. Both localhost spellings, matching the
+      # api's own built-in default (apps/api/src/cors-origins.ts). An explicit
+      # WEB_ORIGIN (comma-separated) still wins.
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:${MC_WEB_PORT:-5173},http://127.0.0.1:${MC_WEB_PORT:-5173}}
       INGEST_TOKEN: ${INGEST_TOKEN:-dev-ingest-token}
       # Socket handshake guard (gateway requires SOCKET_TOKEN when NODE_ENV=production).
       # Default matches the token baked into the web bundle (see web build args below),
@@ -44,7 +61,8 @@ services:
       OPERATOR_NAME: ${OPERATOR_NAME:-}
       NODE_ENV: production
     ports:
-      - "127.0.0.1:3000:3000"
+      # Host port overridable (item 6); the api still listens on 3000 inside.
+      - "127.0.0.1:${MC_API_PORT:-3000}:3000"
 
   web:
     build:
@@ -55,19 +73,24 @@ services:
         # SOCKET_TOKEN (same root .env value) or the socket guard rejects the
         # dashboard in production.
         VITE_SOCKET_TOKEN: ${SOCKET_TOKEN:-dev-socket-token}
-        # Display-only operator name (Overview greeting + avatar initial).
+# Display-only operator name (Overview greeting + avatar initial).
         # Blank → neutral greeting. Same root .env value the api gets.
         VITE_OPERATOR_NAME: ${OPERATOR_NAME:-}
         # Optional: YOUR Discord server id — expands bare channel ids from the
         # bridge into profile-drawer links. Blank → no link (no hardcoded server).
         VITE_DISCORD_GUILD_ID: ${VITE_DISCORD_GUILD_ID:-}
+        # Item 6: the API URL the BROWSER uses (REST + websocket + health
+        # check). Vite inlines VITE_* at build time, so it must be a build
+        # ARG — the old runtime `environment: VITE_API_URL` did nothing for a
+        # static nginx bundle, which is why the bundle ignored it. Defaults to
+        # the api's host port so moving MC_API_PORT just works (after --build).
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:${MC_API_PORT:-3000}}
     restart: unless-stopped
     depends_on:
       - api
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
     ports:
-      - "127.0.0.1:5173:5173"
+      # Host port overridable (item 6); nginx still listens on 5173 inside.
+      - "127.0.0.1:${MC_WEB_PORT:-5173}:5173"
 
 volumes:
   mc-db:

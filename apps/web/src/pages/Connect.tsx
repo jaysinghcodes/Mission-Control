@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, PillButton, Progress, SectionLabel } from '../components/ui'
+import { API_URL } from '../lib/apiBase'
 import {
   CodeBlock,
   ConnectStepCard,
@@ -31,7 +32,8 @@ import {
  *    fail with a next action, never a dead-end spinner.
  */
 
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+// Configured API location, shared app-wide (lib/apiBase, QA-1 polish item 7).
+const API = API_URL
 const PROGRESS_KEY = 'mc-setup-progress'
 
 function clientOS(): OsKey {

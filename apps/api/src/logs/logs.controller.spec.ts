@@ -60,6 +60,9 @@ describe('OpenClaw log empty states (ticket 2)', () => {
       session: none,
       approval: none,
       activityEvent: none,
+      // QA-1 polish item 8: the activity group now finds ids with a raw
+      // ILIKE query (case-insensitive payload.name) before findMany.
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
     const res = await new SearchController(prisma as never).search('demo');
     expect(res.results.logs).toEqual([]);
