@@ -1,14 +1,19 @@
-import { useState } from 'react'
-import { useApi, apiPost, apiPatch } from '../hooks/useApi'
+import { useEffect, useRef, useState } from 'react'
+import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
-import { useEffect } from 'react'
 import { Bot, Card, Chip, Inner, PillButton, SectionLabel } from '../components/ui'
 
 /**
  * Tickets — full-page kanban, fully functional (Jay fix #9) + Option B (MC-214).
- *  - New tickets land in TO-DO and are visible instantly
+ *  - "+ New ticket" here sends status `todo` EXPLICITLY: since PR #20 the API
+ *    default for an omitted status is `backlog` (Atlas decision, see
+ *    apps/api/src/tickets/ticket-status.ts DEFAULT_CREATE_STATUS)
  *  - 5 office-aligned columns: To-Do → Build → QA → Review → Done
- *  - Cards move through all 5 via PATCH; legacy `inprogress` rows render in Build
+ *  - Cards move through all 5 via PATCH buttons (drag-and-drop is a separate
+ *    follow-up ticket); legacy `inprogress` rows render in Build
+ *  - After every write the board applies the server's answer, then refetches,
+ *    so what you see always matches what a browser refresh would show
+ *  - API errors (400/404/network) show a gentle inline notice, never a crash
  *  - Socket events trigger instant refetch; status changes persist + broadcast
  */
 
@@ -35,25 +40,36 @@ function inColumn(t: Ticket, col: { status: string; aliases: string[] }): boolea
   return t.status === col.status || col.aliases.includes(t.status)
 }
 
-/**
- * Move a ticket between kanban columns.
- *
- * MUST use apiPatch → PATCH /tickets/:id. The API only registers
- * `@Patch(':id')` (see tickets.controller.ts); a POST to the same path 404s,
- * so the old apiPost call made "Start / QA / Review / Done" no-ops and broke
- * ONBOARDING Step 8's ticket smoke loop on a fresh clone (no OpenClaw needed
- * for this path — the controller itself persists run.* activity events).
- */
-async function patchTicket(id: string, status: string): Promise<boolean> {
-  return (await apiPatch(`/tickets/${id}`, { status })) !== null
+/** How long an inline notice stays up before fading on its own. */
+const NOTICE_MS = 6000
+
+/** Board columns → readable names for notices (`inprogress` = legacy Build). */
+const STATUS_LABEL: Record<string, string> = {
+  backlog: 'Backlog', todo: 'To-Do', build: 'Build', inprogress: 'Build', qa: 'QA', review: 'Review', done: 'Done',
 }
 
 export default function Tickets() {
-  const { data, refetch } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
+  const { data, refetch, mutate } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
   const { events } = useLiveActivity()
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
+  // Gentle inline notice for failed writes (400 invalid status, 404 deleted
+  // ticket, API offline…). Auto-clears; never blocks the board.
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Per-ticket move counter: if the user clicks two moves on one card quickly,
+  // only the response to the LATEST click is applied locally. The server
+  // already persists the last-received move (per-ticket write queue); this
+  // stops an earlier response that arrives late from repainting the card.
+  const moveSeq = useRef(new Map<string, number>())
   const tickets = data?.tickets ?? []
+
+  function showNotice(msg: string) {
+    setNotice(msg)
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS)
+  }
+  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
 
   // Instant refresh on any ticket/run activity event.
   useEffect(() => {
@@ -64,14 +80,45 @@ export default function Tickets() {
     const t = title.trim()
     if (!t || busy) return
     setBusy(true)
-    await apiPost('/tickets', { title: t, priority: 'med' })
-    setTitle('')
+    // status: 'todo' is REQUIRED here — the API default is now `backlog`
+    // (Atlas, PR #20). Omitting it would send kanban creates to /backlog.
+    const r = await apiSend<{ ticket: Ticket }>('POST', '/tickets', { title: t, priority: 'med', status: 'todo' })
+    if (r.ok) {
+      setTitle('') // keep the typed title on failure so nothing is lost
+    } else {
+      showNotice(`Couldn't create ticket — ${r.error}`)
+    }
     setBusy(false)
     void refetch()
   }
 
+  /**
+   * Move a ticket between columns via PATCH /tickets/:id.
+   *
+   * MUST be PATCH: the API only registers `@Patch(':id')`; a POST to the same
+   * path 404s (that was the original Step 8 bug fixed earlier in PR #20).
+   *
+   * On success we splice the server's returned row into local state (instant,
+   * and authoritative — it is what was committed), then refetch to pick up
+   * anything else that changed. On failure we show why and refetch, so the
+   * board snaps back to the server's truth instead of guessing.
+   */
   async function move(id: string, status: string) {
-    await patchTicket(id, status)
+    const seq = (moveSeq.current.get(id) ?? 0) + 1
+    moveSeq.current.set(id, seq)
+    const r = await apiSend<{ ticket: Ticket }>('PATCH', `/tickets/${id}`, { status })
+    const isLatest = moveSeq.current.get(id) === seq
+    if (r.ok && isLatest && r.data?.ticket) {
+      const updated = r.data.ticket
+      mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.map((t) => (t.id === id ? updated : t)) } : prev))
+    } else if (!r.ok) {
+      const what = STATUS_LABEL[status] ?? status
+      showNotice(
+        r.status === 404
+          ? 'That ticket no longer exists — the board has been refreshed.'
+          : `Couldn't move ticket to ${what} — ${r.error}`,
+      )
+    }
     void refetch()
   }
 
@@ -102,6 +149,18 @@ export default function Tickets() {
         </div>
       </div>
 
+      {notice && (
+        <div
+          role="status"
+          className="mt-4 flex items-center justify-between rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext"
+        >
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} className="ml-4 text-[11px] font-semibold hover:opacity-80">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-5 gap-4 mt-6">
         {COLUMNS.map((col) => {
           const rows = tickets.filter((t) => inColumn(t, col))
@@ -131,13 +190,25 @@ export default function Tickets() {
                     {/* Pipeline actions — full movement through all 5 columns (MC-214) */}
                     <div className="mt-2.5 flex items-center gap-2">
                       {t.status === 'todo' && (
-                        <button
-                          type="button"
-                          onClick={() => void move(t.id, 'inprogress')}
-                          className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
-                        >
-                          ▶ Start
-                        </button>
+                        <>
+                          {/* Start sends the canonical `build` (MC-214); the API
+                              still accepts legacy `inprogress` from older clients. */}
+                          <button
+                            type="button"
+                            onClick={() => void move(t.id, 'build')}
+                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                          >
+                            ▶ Start
+                          </button>
+                          {/* Symmetric with Backlog's "→ To-Do": every move has a button. */}
+                          <button
+                            type="button"
+                            onClick={() => void move(t.id, 'backlog')}
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                          >
+                            ↺ Backlog
+                          </button>
+                        </>
                       )}
                       {(t.status === 'build' || t.status === 'inprogress') && (
                         <>
@@ -168,7 +239,7 @@ export default function Tickets() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => void move(t.id, 'inprogress')}
+                            onClick={() => void move(t.id, 'build')}
                             className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
                           >
                             ↺ Build
