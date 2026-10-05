@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { useApi } from '../hooks/useApi'
 import { Bot, KpiCard, PillButton, SectionLabel } from '../components/ui'
+// Operator name comes from VITE_OPERATOR_NAME (see config.ts) — no hardcoded names.
+import { greeting } from '../config'
 
 /**
  * Overview — live dashboard. KPIs come from the real API (runs, approvals,
@@ -46,7 +48,9 @@ export default function Overview() {
 
   return (
     <div className="p-6">
-      <div className="text-[34px] font-semibold leading-tight">Good evening, Jay</div>
+      {/* Time-of-day greeting; personalised only when VITE_OPERATOR_NAME is set
+          (neutral "Good evening" on a fresh clone — ticket 3). */}
+      <div className="text-[34px] font-semibold leading-tight">{greeting()}</div>
       <div className="mt-1 text-[14.5px] text-mc-sub">Live state from your OpenClaw instance.</div>
 
       {/* KPI tiles — real values from the API */}

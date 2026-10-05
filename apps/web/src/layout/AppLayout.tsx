@@ -5,6 +5,7 @@ import { Glyph, type GlyphKind } from '../components/glyphs'
 import { Dot } from '../components/ui'
 import SearchBox from '../components/SearchBox'
 import { useLiveActivity } from '../hooks/useLiveActivity'
+import { OPERATOR_NAME, operatorInitial } from '../config'
 
 /**
  * AppLayout — the shell every screen shares (wireframe sidebar() + topbar()).
@@ -172,10 +173,18 @@ export default function AppLayout() {
               <button
                 type="button"
                 aria-label="Account menu"
+                title={OPERATOR_NAME || 'Account'}
                 onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v) }}
                 className="w-8 h-8 rounded-full bg-mc-primary text-white flex items-center justify-center text-[13px] font-semibold ring-1 ring-mc-border hover:opacity-90 cursor-pointer"
               >
-                J
+                {/* Operator initial from VITE_OPERATOR_NAME; generic person
+                    glyph when unset (was a hardcoded "J" — ticket 3). */}
+                {operatorInitial() ?? (
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="8" cy="5.5" r="3" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M2.5 14c.8-2.8 3-4.2 5.5-4.2s4.7 1.4 5.5 4.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                )}
               </button>
               {menuOpen && (
                 <div

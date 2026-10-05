@@ -179,7 +179,7 @@ export default function Backlog() {
         </div>
         {rows.length === 0 && (
           <div className="px-[18px] py-8 text-[12.5px] text-mc-faint">
-            Backlog is empty. Use the field above to add a ticket — Jarvis will pick it up.
+            Backlog is empty. Use the field above to add a ticket, then move it to To-Do when it is ready.
           </div>
         )}
         {rows.map((row) => (

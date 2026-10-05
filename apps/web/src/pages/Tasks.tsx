@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useApi, apiPost } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { Bot, Card, Chip, PillButton, Progress } from '../components/ui'
+// Recognise runs that defaulted to the operator (API: OPERATOR_NAME / "Operator").
+import { OPERATOR_ASSIGNEE } from '../config'
 
 /**
  * Tasks — REAL runs with a visible stage trail. Every run shows its
@@ -85,7 +87,7 @@ export default function Tasks() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void create()}
-          placeholder="Give Jarvis a task… e.g. run the web tests"
+          placeholder="Queue a task… e.g. run the web tests"
           className="h-9 flex-1 max-w-md rounded-full border border-mc-border bg-mc-card px-4 text-[13px] text-mc-text placeholder:text-mc-faint outline-none focus:border-mc-primary"
         />
         <PillButton label="+ New task" on onClick={() => void create()} />
@@ -99,7 +101,7 @@ export default function Tasks() {
               <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-mc-faint mb-2.5">{group.title}</div>
               {rows.length === 0 ? (
                 <Card className="px-4 py-6 text-[12.5px] text-mc-faint">
-                  Nothing {group.title.toLowerCase()}. {group.title === 'Queued' ? 'Use the field above to give Jarvis a task.' : ''}
+                  Nothing {group.title.toLowerCase()}. {group.title === 'Queued' ? 'Use the field above to queue a task for your agents.' : ''}
                 </Card>
               ) : (
                 <Card className="px-0 py-1">
@@ -114,7 +116,10 @@ export default function Tasks() {
                         }`}
                       >
                         <span className="text-[13px] font-medium w-[240px] truncate">{row.name}</span>
-                        <Bot color={row.agent && row.agent.toLowerCase().includes('jarvis') ? 'var(--mc-primary)' : 'var(--mc-blue)'} scale={0.8} />
+                        {/* Primary tint for runs owned by the operator (the API's default
+                            assignee), blue for everything an agent picked up. Was a
+                            hardcoded personal agent name — ticket 3. */}
+                        <Bot color={row.agent === OPERATOR_ASSIGNEE ? 'var(--mc-primary)' : 'var(--mc-blue)'} scale={0.8} />
                         <span className="text-[12px] text-mc-sub w-[80px] truncate">{row.agent ?? '—'}</span>
                         <Chip label={chip.label} bg={chip.bg} fg={chip.fg} h={20} />
                         {row.status === 'running' ? (

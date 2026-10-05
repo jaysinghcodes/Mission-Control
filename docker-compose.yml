@@ -54,6 +54,9 @@ services:
         # SOCKET_TOKEN (same root .env value) or the socket guard rejects the
         # dashboard in production.
         VITE_SOCKET_TOKEN: ${SOCKET_TOKEN:-dev-socket-token}
+        # Display-only operator name (Overview greeting + avatar initial).
+        # Blank → neutral greeting. Same root .env value the api gets.
+        VITE_OPERATOR_NAME: ${OPERATOR_NAME:-}
     restart: unless-stopped
     depends_on:
       - api
