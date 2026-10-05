@@ -120,7 +120,7 @@ const hashAccentDeep = (name: string): string => `hsl(${hashHue(name)} 55% 32%)`
  *
  * Priority (mirrors data/roster.ts identity seeding):
  *  1. Exact roster match — one of the 8 map entries, by roleKey (lane is the
- *     stable identity the bridge pushes) or by name (Jarvis/Jarvis Singh…).
+ *     stable identity the bridge pushes) or by name (roster display name, e.g. Atlas/Nova).
  *  2. Fallback archetype — role keyword regex (dev|build|eng → welder, …)
  *     picks the archetype's sprite; the sprite is tinted with a deterministic
  *     color derived from the agent's name hash (each cloned agent gets a
