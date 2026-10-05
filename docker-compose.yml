@@ -39,6 +39,8 @@ services:
       # so a fresh clone's dashboard socket works out of the box.
       SOCKET_TOKEN: ${SOCKET_TOKEN:-dev-socket-token}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Display-only: default assignee for new tickets/runs. Blank → "Operator".
+      OPERATOR_NAME: ${OPERATOR_NAME:-}
       NODE_ENV: production
     ports:
       - "127.0.0.1:3000:3000"
