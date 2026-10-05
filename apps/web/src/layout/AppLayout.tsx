@@ -5,12 +5,9 @@ import { Glyph, type GlyphKind } from '../components/glyphs'
 import { Dot } from '../components/ui'
 import SearchBox from '../components/SearchBox'
 import { useLiveActivity } from '../hooks/useLiveActivity'
-<<<<<<< HEAD
 import { OPERATOR_NAME, operatorInitial } from '../config'
-=======
 import { API_URL, socketLabel } from '../lib/apiBase'
 import { reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
->>>>>>> e8bb5b0 (fix(web): real API status/latency, stale-data notice when the API drops, one configured API URL (QA-1 polish 7))
 
 /**
  * AppLayout — the shell every screen shares (wireframe sidebar() + topbar()).
