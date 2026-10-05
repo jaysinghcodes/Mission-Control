@@ -43,9 +43,11 @@ Verify the operator has each of these; ask them to confirm or help them install:
 ### Step 2 — Clone and install
 ```sh
 git clone <repo-url> mission-control && cd mission-control
-npm install
+npm ci
 ```
-Confirm `npm install` finished without errors.
+Confirm `npm ci` finished without errors. (The lockfile records native
+bindings for every platform — Linux x64/arm64, macOS, Windows — so this works
+on a fresh clone on any of them; use `npm install` only to change deps.)
 
 ### Step 3 — Create the environment file: the **root** `.env`
 Docker Compose reads exactly one env file: the **root `.env`** (next to
@@ -90,16 +92,15 @@ compiles the images, so it takes a while. Confirm the api is **not** crash-loopi
 If they prefer running without Docker (Postgres still required — a local Postgres
 or just the compose `db` service):
 ```sh
-# terminal 1 — export the root .env, migrate, then run the api in watch mode
+# export the root .env, migrate, then start api + web together
 set -a; . ./.env; set +a
-cd apps/api && npx prisma migrate deploy && cd ..
-npm run start:dev -w apps/api
-# terminal 2 — web dev server
-npm run dev -w apps/web
+(cd apps/api && npx prisma migrate deploy)
+npm run dev   # turbo: api (nest start --watch) + web (vite) in parallel
 ```
 The api reads `process.env` directly and has no `.env` loader of its own, so the
-`set -a; . ./.env` export above is required on the non-Docker path (the `dev`
-script name does not exist in `apps/api/package.json` — use `start:dev`).
+`set -a; . ./.env` export above is required on the non-Docker path (turbo.json
+passes those variables through to the dev tasks). To run one app on its own:
+`npm run dev -w apps/api` or `npm run dev -w apps/web`.
 
 ### Step 5 — Verify the dashboard
 Ask the operator to open `http://localhost:5173`. Confirm:
@@ -129,12 +130,14 @@ connection live before handing off.
 
 ### Step 8 — Smoke test
 Walk the operator through the core loops so they trust the data:
-1. **Tickets (no OpenClaw required):** create one on `/tickets` → it lands in
-   To-Do; click Start → move it Build → QA → Review → Done. Each move is a
-   `PATCH /tickets/:id` and the API itself writes a `run.*` row to the activity
-   stream, so this loop passes on a fresh clone before the bridge is connected.
-   Creating from `/backlog` with status `backlog` should appear on that page,
-   not in To-Do.
+1. **Tickets (no OpenClaw required):** create a ticket on `/backlog` → it
+   appears in the Backlog list; click **→ To-Do** on its row → it moves to the
+   To-Do column on `/tickets`; then use the card buttons to move it
+   Build → QA → Review → Done. Every move is a button (a `PATCH /tickets/:id`)
+   and the API itself writes a `run.*` row to the persisted activity stream,
+   so this loop passes on a fresh clone before the bridge is connected (it
+   works without OpenClaw). Refresh the page at any point — the ticket stays
+   where you left it.
 2. **Calendar:** all their OpenClaw cron jobs are listed (weekly grid, ‹ › week
    navigation works). Needs the Step 6 bridge.
 3. **Office:** agents physically move between rooms when a `run.*` event fires.

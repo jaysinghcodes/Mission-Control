@@ -134,23 +134,32 @@ docker compose up --build
 Prereqs: Node 20+ (tested on 26), npm, Postgres 16.
 
 ```bash
-# 1. Install + generate Prisma client
-npm install
-cd apps/api && npx prisma generate
+# 1. Install (exact lockfile) + generate Prisma client
+#    The lockfile records native bindings for every platform (linux x64/arm64,
+#    macOS, Windows), so `npm ci` works on a fresh clone on any of them.
+npm ci
+(cd apps/api && npx prisma generate)
 
 # 2. Postgres: create the dev database
 sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
 sudo -u postgres psql -c "CREATE DATABASE mission_control;"
 
 # 3. Apply schema — use MIGRATIONS in shared/dev; db push is dev-only
-cd apps/api && npx prisma migrate deploy   # or: npx prisma db push (dev only)
+(cd apps/api && npx prisma migrate deploy)   # or: npx prisma db push (dev only)
 
-# 4. Env files (see .env.example + apps/api/.env.example; never commit real values)
-#    apps/api/.env ← DATABASE_URL, PORT, HOST, WEB_ORIGIN, INGEST_TOKEN, GITHUB_TOKEN
+# 4. Env (see .env.example; never commit real values)
+#    The api has NO .env loader — it reads process.env — so export the root
+#    .env into your shell first (DATABASE_URL, PORT, HOST, WEB_ORIGIN,
+#    INGEST_TOKEN, SOCKET_TOKEN, GITHUB_TOKEN, …). Unset values fall back to
+#    dev defaults (e.g. postgres://postgres:postgres@localhost:5432/mission_control).
 #    apps/web/.env  ← optional VITE_API_URL (default http://localhost:3000)
+cp .env.example .env
+set -a; . ./.env; set +a
 
-# 5. Run both apps
-npm run dev        # turbo: api (nest start --watch) + web (vite) in parallel
+# 5. Run both apps from the repo root (one terminal)
+npm run dev        # turbo: api `dev` (nest start --watch) + web `dev` (vite) in parallel
+#  (turbo.json passes the api env vars through to the dev tasks)
+#  Individually: npm run dev -w apps/api   /   npm run dev -w apps/web
 ```
 
 Verify: `curl http://127.0.0.1:3000/health` → `{"status":"ok",...,"database":"connected"}`,
@@ -166,7 +175,8 @@ band fills with `hello`, periodic `health.tick`, and OpenClaw-run events.
 
 ```bash
 npm run build      # turbo build (tsc + vite + nest)
-npm test           # jest (api)
+npm test           # turbo run test → api jest unit tests (no DB needed)
+npm run test:e2e   # turbo run test:e2e → api e2e; needs a migrated Postgres at DATABASE_URL
 npm run lint
 ```
 
