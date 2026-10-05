@@ -167,5 +167,37 @@ describe('Tickets (e2e)', () => {
         spy.mockRestore();
       }
     });
+
+    it('QA-1 #3: same-status PATCH → 200 and no extra activity event', async () => {
+      const { body } = await createTicket({
+        title: 'e2e noop',
+        status: 'todo',
+      });
+      const id = body.ticket.id as string;
+      const key = body.ticket.key as string;
+      const before = await prisma.activityEvent.count({
+        where: {
+          type: 'run.progress',
+          payload: { path: ['ticket'], equals: key },
+        },
+      });
+      const first = await request(app.getHttpServer())
+        .patch(`/tickets/${id}`)
+        .send({ status: 'build' });
+      expect(first.status).toBe(200);
+      const second = await request(app.getHttpServer())
+        .patch(`/tickets/${id}`)
+        .send({ status: 'build' }); // double-click ▶ Start
+      expect(second.status).toBe(200);
+      expect(second.body.ticket.status).toBe('build');
+      const after = await prisma.activityEvent.count({
+        where: {
+          type: 'run.progress',
+          payload: { path: ['ticket'], equals: key },
+        },
+      });
+      // Exactly one progress event for the real move; the no-op added none.
+      expect(after - before).toBe(1);
+    });
   });
 });

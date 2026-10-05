@@ -56,10 +56,22 @@ function makeFakePrisma() {
     findMany: jest.fn(async () => [...rows.values()]),
   };
   // The tx client used inside $transaction: row lock query + ticket.update.
+  // The row-lock SELECT also returns the CURRENT values (QA-1 #3), so the
+  // controller can tell a real change from a repeat (no-op) PATCH.
   const tx = {
-    $queryRaw: jest.fn(async (_strings: TemplateStringsArray, id: string) =>
-      rows.has(id) ? [{ id }] : [],
-    ),
+    $queryRaw: jest.fn(async (_strings: TemplateStringsArray, id: string) => {
+      const row = rows.get(id);
+      return row
+        ? [
+            {
+              id: row.id,
+              status: row.status,
+              assignee: row.assignee,
+              priority: row.priority,
+            },
+          ]
+        : [];
+    }),
     ticket,
   };
   const prisma = {
@@ -223,6 +235,45 @@ describe('TicketsController', () => {
       expect(prisma.ticket.update).toHaveBeenLastCalledWith({
         where: { id: ticket.id },
         data: { status: 'todo' },
+      });
+    });
+
+    describe('QA-1 #3: no activity event for a no-op move', () => {
+      it('same-status PATCH (double-clicked ▶ Start) → 200, but no extra run.progress', async () => {
+        const { controller, prisma, gateway } = makeController();
+        const { ticket } = await controller.create({
+          title: 't',
+          status: 'todo',
+        });
+        prisma.activityEvent.create.mockClear(); // drop create's run.queued
+        gateway.broadcast.mockClear();
+
+        // Two identical clicks, fired back to back like a double-click.
+        const [r1, r2] = await Promise.all([
+          controller.update(ticket.id, { status: 'build' }),
+          controller.update(ticket.id, { status: 'build' }),
+        ]);
+        expect(r1.ticket.status).toBe('build');
+        expect(r2.ticket.status).toBe('build'); // still a normal 200 answer
+        expect(prisma.activityEvent.create).toHaveBeenCalledTimes(1);
+        expect(gateway.broadcast).toHaveBeenCalledTimes(1);
+        expect(gateway.broadcast).toHaveBeenCalledWith(
+          'run.progress',
+          expect.objectContaining({ name: `ticket ${ticket.key} → build` }),
+        );
+      });
+
+      it('a real change after a no-op still emits its event', async () => {
+        const { controller, gateway } = makeController();
+        const { ticket } = await controller.create({
+          title: 't',
+          status: 'todo',
+        });
+        gateway.broadcast.mockClear();
+        await controller.update(ticket.id, { status: 'todo' }); // no-op
+        expect(gateway.broadcast).not.toHaveBeenCalled();
+        await controller.update(ticket.id, { priority: 'high' }); // change
+        expect(gateway.broadcast).toHaveBeenCalledTimes(1);
       });
     });
 

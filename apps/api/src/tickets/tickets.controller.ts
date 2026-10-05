@@ -166,20 +166,47 @@ export class TicketsController {
     id: string,
     data: { status?: string; assignee?: string; priority?: string },
   ) {
-    const ticket = await this.prisma.$transaction(async (tx) => {
+    const { ticket, changed } = await this.prisma.$transaction(async (tx) => {
       // Row lock: blocks any other transaction that wants this row until we
       // commit. Table/column names are quoted because Prisma created them
       // with PascalCase ("Ticket"). `${id}` is a bound parameter (tagged
       // template), not string concatenation — safe from SQL injection.
-      const locked = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "Ticket" WHERE "id" = ${id} FOR UPDATE`;
+      // QA-1 #3: we also read the CURRENT values under the lock so we can
+      // tell a real change from a repeat of what is already stored.
+      const locked = await tx.$queryRaw<
+        {
+          id: string;
+          status: string;
+          assignee: string | null;
+          priority: string;
+        }[]
+      >`
+        SELECT "id", "status", "assignee", "priority"
+        FROM "Ticket" WHERE "id" = ${id} FOR UPDATE`;
       if (locked.length === 0) {
         // Finding E: this used to be a 200 { error }. Throwing inside the
         // transaction rolls it back and Prisma rethrows our exception as-is.
         throw new NotFoundException(`ticket ${id} not found`);
       }
-      return tx.ticket.update({ where: { id }, data });
+      const before = locked[0];
+      // A field counts as changed only if it was SENT and differs from the
+      // locked (i.e. current, committed) value.
+      const changed = (Object.keys(data) as (keyof typeof data)[]).some(
+        (field) => data[field] !== before[field],
+      );
+      // The write itself is still issued even for a no-op (cheap, and it
+      // returns the full committed row for the response in one place).
+      const row = await tx.ticket.update({ where: { id }, data });
+      return { ticket: row, changed };
     });
+
+    // QA-1 #3: a double-clicked "▶ Start" sends two identical PATCHes. The
+    // per-ticket queue runs them one after the other, so the second one finds
+    // the ticket ALREADY in `build`. It still answers 200 with the row
+    // (idempotent PUT-like semantics — the client's intent is satisfied), but
+    // it must not persist/broadcast a second `run.progress` "→ build" event:
+    // nothing happened, and the activity feed should only show real moves.
+    if (!changed) return { ticket, ts: Date.now() };
 
     const label = data.status
       ? `ticket ${ticket.key} → ${ticket.status}`

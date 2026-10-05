@@ -76,6 +76,16 @@ export default function Tickets() {
   // already persists the last-received move (per-ticket write queue); this
   // stops an earlier response that arrives late from repainting the card.
   const moveSeq = useRef(new Map<string, number>())
+  // QA-1 polish item 2: ticket ids with a move PATCH in flight. While a card
+  // is moving, ALL of its move buttons are disabled, so a double-clicked
+  // "▶ Start" sends ONE PATCH instead of two. Two copies on purpose:
+  //  - the ref is the real guard, read synchronously inside move(), so even
+  //    two clicks handled before React re-renders cannot both get through;
+  //  - the state mirrors it purely to re-render the disabled buttons.
+  // (Server side, a repeated same-status PATCH is also a no-op that writes no
+  // activity event — belt and braces.)
+  const movingRef = useRef(new Set<string>())
+  const [moving, setMoving] = useState<ReadonlySet<string>>(new Set())
   const tickets = data?.tickets ?? []
 
   /** Hide the notice and forget the failed-create titles it was listing. */
@@ -166,9 +176,19 @@ export default function Tickets() {
    * board snaps back to the server's truth instead of guessing.
    */
   async function move(id: string, status: string) {
+    // Item 2: one move per card at a time. A second click while the first
+    // PATCH is pending is ignored on purpose — unlike "+ New ticket" (which
+    // must never drop a submit), a repeated move is the SAME intent, already
+    // being carried out, and the buttons are visibly disabled meanwhile.
+    if (movingRef.current.has(id)) return
+    movingRef.current.add(id)
+    setMoving(new Set(movingRef.current))
     const seq = (moveSeq.current.get(id) ?? 0) + 1
     moveSeq.current.set(id, seq)
     const r = await apiSend<{ ticket: Ticket }>('PATCH', `/tickets/${id}`, { status })
+    // Re-enable this card's buttons whatever the outcome (apiSend never throws).
+    movingRef.current.delete(id)
+    setMoving(new Set(movingRef.current))
     const isLatest = moveSeq.current.get(id) === seq
     if (r.ok && isLatest && r.data?.ticket) {
       const updated = r.data.ticket
@@ -265,7 +285,10 @@ export default function Tickets() {
                       <Bot color={t.assignee ? 'var(--mc-primary)' : 'var(--mc-faint)'} scale={0.8} />
                       <span className="text-[11px] text-mc-sub truncate">{t.assignee ?? 'unassigned'}</span>
                     </div>
-                    {/* Pipeline actions — full movement through all 5 columns (MC-214) */}
+                    {/* Pipeline actions — full movement through all 5 columns (MC-214).
+                        Every move button is disabled while this card has a PATCH
+                        in flight (item 2; same disabled:opacity-50 look as
+                        Backlog's "Moving…" button — no new styles). */}
                     <div className="mt-2.5 flex items-center gap-2">
                       {t.status === 'todo' && (
                         <>
@@ -274,7 +297,8 @@ export default function Tickets() {
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'build')}
-                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ▶ Start
                           </button>
@@ -282,7 +306,8 @@ export default function Tickets() {
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'backlog')}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ Backlog
                           </button>
@@ -293,14 +318,16 @@ export default function Tickets() {
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'qa')}
-                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ QA
                           </button>
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'todo')}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ To-Do
                           </button>
@@ -311,14 +338,16 @@ export default function Tickets() {
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'review')}
-                            className="h-6 px-3 rounded-full bg-mc-orangebg text-mc-orangetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-orangebg text-mc-orangetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ Review
                           </button>
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'build')}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ Build
                           </button>
@@ -329,14 +358,16 @@ export default function Tickets() {
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'done')}
-                            className="h-6 px-3 rounded-full bg-mc-greenbg text-mc-greentext text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-greenbg text-mc-greentext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ Done
                           </button>
                           <button
                             type="button"
                             onClick={() => void move(t.id, 'qa')}
-                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity"
+                            disabled={moving.has(t.id)}
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ QA
                           </button>
