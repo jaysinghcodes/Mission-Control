@@ -18,3 +18,6 @@ bridge/.state/
 
 # Python bytecode (bridge/ scripts)
 __pycache__/
+
+# Transpiled on the fly by apps/web/test (node --test cannot import .tsx)
+apps/web/test/_gen/
