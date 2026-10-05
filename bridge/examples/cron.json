@@ -1,0 +1,10 @@
+{
+  "jobs": [
+    { "id": "morning-brief", "name": "Morning Brief", "agentId": "main", "enabled": true, "status": "ok",
+      "schedule": { "kind": "cron", "expr": "0 7 * * *" }, "state": { "lastRunAtMs": 1, "lastRunStatus": "ok" } },
+    { "id": "weekly-review", "name": "Weekly Review", "agentId": "main", "enabled": true, "status": "idle",
+      "schedule": { "kind": "cron", "expr": "30 16 * * 5" } },
+    { "id": "inbox-poll", "name": "Inbox Poll", "agentId": "dev", "enabled": true, "status": "idle",
+      "schedule": { "kind": "every", "everyMs": 300000 } }
+  ]
+}

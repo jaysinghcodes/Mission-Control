@@ -1,0 +1,1 @@
+[ { "kind": "exec", "tag": "Shell", "desc": "Example: allow `npm test` in the dev workspace" } ]

@@ -1,0 +1,7 @@
+{
+  "path": null, "count": 2, "allAgents": true,
+  "sessions": [
+    { "agentId": "main", "key": "agent:main:main", "model": "example/model-a", "totalTokens": 42000, "contextTokens": 200000, "inputTokens": 30000, "outputTokens": 12000, "costUsd": 0.42 },
+    { "agentId": "dev", "key": "agent:dev:main", "model": "example/model-b", "totalTokens": 9000, "contextTokens": 128000 }
+  ]
+}

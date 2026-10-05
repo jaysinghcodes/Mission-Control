@@ -1,0 +1,5 @@
+[
+  { "id": "main", "identityName": "Example Lead", "identityEmoji": "🧭", "isDefault": true },
+  { "id": "dev", "identityName": "Example Builder", "identityEmoji": "🛠️" },
+  { "id": "qa", "identityName": "Example Tester", "identityEmoji": "🧪" }
+]
