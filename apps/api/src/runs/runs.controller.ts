@@ -74,7 +74,7 @@ export class RunsController {
             : 'run.queued';
     const payload = { id: run.id, name: run.name, status, progress: run.progress };
     // Persist too — the Activity page / Office build log load history from the
-    // DB, so a run that moves fast must still leave a visible trail (Jay's fix #3/#6).
+    // DB, so a run that moves fast must still leave a visible trail (review fix #3/#6).
     await this.persist(eventType, payload);
     this.gateway.broadcast(eventType, payload);
     return { run, ts: Date.now() };

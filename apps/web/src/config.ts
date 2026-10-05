@@ -2,9 +2,9 @@
  * config.ts — build-time, display-only settings for the web app.
  *
  * Ticket 3 (OSS reposition): the UI used to hardcode the original author's
- * name ("Good evening, Jay", a "J" avatar, "Give Jarvis a task…"). A fresh
- * clone must not ship anyone's personal names, so the operator's name now
- * comes from configuration:
+ * name (a personalised greeting, a fixed-initial avatar, task copy naming a
+ * personal agent). A fresh clone must not ship anyone's personal names, so
+ * the operator's name now comes from configuration:
  *
  *   VITE_OPERATOR_NAME=Ada   → "Good evening, Ada", "A" avatar
  *   unset / blank            → neutral "Good evening", generic avatar

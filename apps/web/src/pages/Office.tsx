@@ -5,7 +5,7 @@ import { Card, Chip, SectionLabel } from '../components/ui'
 import { AgentAvatar } from '../components/AgentAvatar'
 
 /**
- * Office — LIVE floor with REAL pipeline semantics (Jay fix #7).
+ * Office — LIVE floor with REAL pipeline semantics (review fix #7).
  *
  * The five stations read as office rooms (the board as a floor plan):
  *  Break Room — team lounge & queue (idle agents rest, no active work)
@@ -76,7 +76,7 @@ export default function Office() {
       prevRoster.current = rosterKey
       const next: Record<string, number> = {}
       roster.forEach((a, i) => {
-        // Jay fix: idle agents hang out in the BREAK ROOM (station 0);
+        // Review fix: idle agents hang out in the BREAK ROOM (station 0);
         // only working agents stand at their role's station on the line.
         next[a.id] = a.status === 'working' ? stageForAgent(a.role, i) : 0
       })

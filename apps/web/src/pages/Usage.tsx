@@ -93,7 +93,7 @@ export default function Usage() {
         <PillButton label="+ Add model" on onClick={() => setAdding(true)} />
       </div>
 
-      {/* Add-model modal (Jay fix: user-configurable models, full flow) */}
+      {/* Add-model modal (review fix: user-configurable models, full flow) */}
       {adding && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setAdding(false)}>
           <Card className="w-[420px] px-6 py-5" rx="rounded-2xl" >

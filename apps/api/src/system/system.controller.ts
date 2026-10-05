@@ -11,7 +11,7 @@ import * as os from 'os';
  *  - Disk: df -kP on / (used/total)
  *  - OS/platform/node/hostname: os + process
  *  - Gateway: TCP probe to 127.0.0.1:18789 (loopback latency, real)
- * No hardcoded values, ever (Jay's fix #5).
+ * No hardcoded values, ever (review fix #5).
  */
 @Controller('system')
 export class SystemController {

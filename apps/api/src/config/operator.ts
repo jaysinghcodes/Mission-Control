@@ -2,7 +2,7 @@
  * operator.ts — who "the operator" is on this Mission Control install.
  *
  * Why this exists (ticket 3, OSS reposition): the API used to hardcode the
- * original author's agent name ('Jarvis Singh') as the default assignee for
+ * original author's personal agent name as the default assignee for
  * new tickets and runs. A cold clone must not ship anyone's personal names,
  * so the default now comes from configuration:
  *

@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 /**
  * GitHubService — merge PRs from Mission Control approvals.
  *
- * When Jay approves a kind='pr' approval, the ApprovalsController calls
+ * When the operator approves a kind='pr' approval, the ApprovalsController calls
  * merge() which merges the PR via the GitHub API and (standing rule #6)
  * deletes the source branch immediately. Token comes from GITHUB_TOKEN
  * (apps/api/.env, git-ignored).

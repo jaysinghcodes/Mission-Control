@@ -5,7 +5,7 @@ import { Bot, Card, Chip, Inner, PillButton, SectionLabel } from '../components/
 import { ticketCreateQueue } from '../lib/serialQueue'
 
 /**
- * Tickets — full-page kanban, fully functional (Jay fix #9) + Option B (MC-214).
+ * Tickets — full-page kanban, fully functional (review fix #9) + Option B (MC-214).
  *  - "+ New ticket" here sends status `todo` EXPLICITLY: since PR #20 the API
  *    default for an omitted status is `backlog` (Atlas decision, see
  *    apps/api/src/tickets/ticket-status.ts DEFAULT_CREATE_STATUS)

@@ -9,7 +9,7 @@ import { OPERATOR_ASSIGNEE } from '../config'
  * Tasks — REAL runs with a visible stage trail. Every run shows its
  * queued → running → done timestamps (persisted by the API on each
  * transition), so even a 3-second task visibly moves through stages
- * (Jay fix #3). Socket events trigger an instant refetch, plus a flash
+ * (review fix #3). Socket events trigger an instant refetch, plus a flash
  * on the row whose stage just changed.
  */
 
