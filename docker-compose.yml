@@ -57,6 +57,9 @@ services:
         # Display-only operator name (Overview greeting + avatar initial).
         # Blank → neutral greeting. Same root .env value the api gets.
         VITE_OPERATOR_NAME: ${OPERATOR_NAME:-}
+        # Optional: YOUR Discord server id — expands bare channel ids from the
+        # bridge into profile-drawer links. Blank → no link (no hardcoded server).
+        VITE_DISCORD_GUILD_ID: ${VITE_DISCORD_GUILD_ID:-}
     restart: unless-stopped
     depends_on:
       - api
