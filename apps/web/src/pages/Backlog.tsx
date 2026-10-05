@@ -138,8 +138,7 @@ export default function Backlog() {
 
   return (
     <div className="p-6">
-      {/* Narrow layout (item 9, pending design approval): wrap, don't overflow. */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[22px] font-semibold">Backlog</div>
           <div className="mt-1 text-[13px] text-mc-sub">Every ticket not yet started — ranked, tagged, ready to pull.</div>
@@ -184,17 +183,10 @@ export default function Backlog() {
         </div>
       )}
 
-      {/* Item 9 (narrow layout, layout-only): the table has fixed column
-          widths, so on a narrow window it must SCROLL sideways — the old
-          overflow-hidden clipped the ACTIONS column (the "→ To-Do" buttons),
-          and shrinking cells made the header titles run into each other.
-          overflow-x-auto + shrink-0 cells fix both; min-w-max on the rows
-          keeps each row's divider as wide as its content while scrolling.
-          Nothing changes visually when the window is wide enough. */}
-      <Card className="mt-8 rounded-2xl px-0 pb-2 overflow-x-auto">
-        <div className="flex min-w-max px-[18px] pt-4 pb-2">
+      <Card className="mt-8 rounded-2xl px-0 pb-2 overflow-hidden">
+        <div className="flex px-[18px] pt-4 pb-2">
           {['TICKET', 'TITLE', 'PRIORITY', 'STATUS', 'CREATED', 'ACTIONS'].map((h) => (
-            <div key={h} className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.1em] text-mc-faint" style={{ width: h === 'TITLE' ? 320 : 140 }}>
+            <div key={h} className="text-[11px] font-semibold uppercase tracking-[0.1em] text-mc-faint" style={{ width: h === 'TITLE' ? 320 : 140 }}>
               {h}
             </div>
           ))}
@@ -210,16 +202,16 @@ export default function Backlog() {
           </div>
         )}
         {rows.map((row) => (
-          <div key={row.id} className="flex min-w-max items-center px-[18px] h-16 border-t border-mc-border2">
-            <div className="shrink-0 font-mono text-[11.5px] font-semibold text-mc-faint" style={{ width: 140 }}>{row.key ?? row.id.slice(0, 8)}</div>
-            <div className="shrink-0 text-[13px] font-medium" style={{ width: 320 }}>{row.title}</div>
-            <div className="shrink-0" style={{ width: 140 }}>
+          <div key={row.id} className="flex items-center px-[18px] h-16 border-t border-mc-border2">
+            <div className="font-mono text-[11.5px] font-semibold text-mc-faint" style={{ width: 140 }}>{row.key ?? row.id.slice(0, 8)}</div>
+            <div className="text-[13px] font-medium" style={{ width: 320 }}>{row.title}</div>
+            <div style={{ width: 140 }}>
               <Chip label={row.priority.toUpperCase()} bg={PRIO[row.priority]?.bg ?? PRIO.med.bg} fg={PRIO[row.priority]?.fg ?? PRIO.med.fg} h={19} fs="text-[10px]" />
             </div>
-            <div className="shrink-0 text-[12px] text-mc-sub" style={{ width: 140 }}>{row.status}</div>
-            <div className="shrink-0 text-[12px] text-mc-faint" style={{ width: 140 }}>{new Date(row.createdAt).toLocaleDateString()}</div>
+            <div className="text-[12px] text-mc-sub" style={{ width: 140 }}>{row.status}</div>
+            <div className="text-[12px] text-mc-faint" style={{ width: 140 }}>{new Date(row.createdAt).toLocaleDateString()}</div>
             {/* Backlog → To-Do: the only way onto the kanban board from here. */}
-            <div className="shrink-0" style={{ width: 140 }}>
+            <div style={{ width: 140 }}>
               <button
                 type="button"
                 onClick={() => void moveToTodo(row)}

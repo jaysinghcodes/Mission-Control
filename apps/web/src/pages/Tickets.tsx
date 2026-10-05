@@ -215,9 +215,7 @@ export default function Tickets() {
 
   return (
     <div className="p-6">
-      {/* Narrow layout (QA-1 polish item 9, pending design approval): let the
-          title and the create controls wrap instead of pushing off-screen. */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[22px] font-semibold">Tickets</div>
           <div className="mt-1 text-[13px] text-mc-sub">Kanban — create a ticket, then move it To-Do → Build → QA → Review → Done.</div>
@@ -264,13 +262,9 @@ export default function Tickets() {
         {COLUMNS.map((col) => {
           const rows = tickets.filter((t) => inColumn(t, col))
           return (
-            // Item 9 (narrow layout, layout-only — no new colours/styles):
-            //  - min-w-0 lets a grid column shrink below its content width
-            //    instead of overflowing into its neighbour;
-            //  - gap-2 + truncate stop the column title colliding with the count.
-            <Card key={col.title} className="px-3.5 py-3 min-h-[380px] min-w-0">
-              <div className="flex items-center justify-between gap-2 px-1">
-                <SectionLabel className="truncate min-w-0">{col.title}</SectionLabel>
+            <Card key={col.title} className="px-3.5 py-3 min-h-[380px]">
+              <div className="flex items-center justify-between px-1">
+                <SectionLabel>{col.title}</SectionLabel>
                 <span className="text-[11px] font-semibold text-mc-sub">{rows.length}</span>
               </div>
               <div className="mt-3 space-y-3">
@@ -284,9 +278,7 @@ export default function Tickets() {
                 )}
                 {rows.map((t) => (
                   <Inner key={t.id} className="rounded-[10px] px-3 py-2.5">
-                    {/* Item 9: wrap (not truncate) so a narrow card shows the full
-                        MC-N key above the priority chip instead of "M…". */}
-                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                    <div className="flex items-center justify-between">
                       <span className="font-mono text-[11px] font-semibold text-mc-faint">{t.key ?? t.id.slice(0, 8)}</span>
                       <Chip label={t.priority.toUpperCase()} bg={PRIO[t.priority]?.bg ?? PRIO.med.bg} fg={PRIO[t.priority]?.fg ?? PRIO.med.fg} h={18} fs="text-[10px]" />
                     </div>
@@ -299,9 +291,7 @@ export default function Tickets() {
                         Every move button is disabled while this card has a PATCH
                         in flight (item 2; same disabled:opacity-50 look as
                         Backlog's "Moving…" button — no new styles). */}
-                    {/* Item 9: flex-wrap so narrow cards wrap their buttons
-                        onto a second line instead of clipping them. */}
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <div className="mt-2.5 flex items-center gap-2">
                       {t.status === 'todo' && (
                         <>
                           {/* Start sends the canonical `build` (MC-214); the API
@@ -310,7 +300,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'build')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ▶ Start
                           </button>
@@ -319,7 +309,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'backlog')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ Backlog
                           </button>
@@ -331,7 +321,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'qa')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ QA
                           </button>
@@ -339,7 +329,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'todo')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ To-Do
                           </button>
@@ -351,7 +341,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'review')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-orangebg text-mc-orangetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-orangebg text-mc-orangetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ Review
                           </button>
@@ -359,7 +349,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'build')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ Build
                           </button>
@@ -371,7 +361,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'done')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-greenbg text-mc-greentext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-greenbg text-mc-greentext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ✓ Done
                           </button>
@@ -379,7 +369,7 @@ export default function Tickets() {
                             type="button"
                             onClick={() => void move(t.id, 'qa')}
                             disabled={moving.has(t.id)}
-                            className="h-6 px-3 whitespace-nowrap rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="h-6 px-3 rounded-full bg-mc-inner text-mc-sub text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
                           >
                             ↺ QA
                           </button>
