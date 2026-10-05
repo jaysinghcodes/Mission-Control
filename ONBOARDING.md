@@ -11,8 +11,13 @@ You are helping your operator install **Mission Control**, a self-hostable
 command-center dashboard for their OpenClaw setup (web: React 19 + Vite + Tailwind v4;
 api: NestJS + Socket.IO + Prisma 7 + Postgres). It shows live agent activity,
 tickets, calendar (cron jobs), approvals, health, usage, and the Office floor —
-all fed by the operator's real OpenClaw instance over a token-guarded ingest
-endpoint.
+fed by the operator's real OpenClaw instance through the vendored `bridge/`
+over a token-guarded ingest endpoint. Without OpenClaw it still runs: the
+tickets loop works out of the box and `npm run seed:demo` fills sample data.
+
+The web app uses **hash routes**: every page URL looks like
+`http://localhost:5173/#/tickets` (a plain `/tickets` shows Overview). All URLs
+below use the `/#/` form.
 
 Guide the operator through the numbered steps below, one at a time. Follow these
 rules throughout:
@@ -37,8 +42,9 @@ Verify the operator has each of these; ask them to confirm or help them install:
   `npm@11.17.0`, which requires `^20.17 || >=22.9` — and **git** (`git --version`)
 - **Docker** with the compose plugin (`docker compose version`) — used for
   Postgres (and optionally the api + web containers)
-- Their **OpenClaw instance** running (this dashboard is useless without it —
-  it is the data source)
+- Optional: their **OpenClaw instance** running — it is the live data source
+  (Step 6). Without it, the tickets loop works and `npm run seed:demo` provides
+  sample agents, cron jobs and activity
 
 ### Step 2 — Clone and install
 ```sh
@@ -72,6 +78,11 @@ real value, then write it into `.env` — never invent one:
   **before the first `docker compose build`** — it is baked into the web bundle
 - `WEB_ORIGIN` — the template default covers `localhost` + `127.0.0.1`; add their
   tunnel origin later if they access the dashboard remotely
+- `OPERATOR_NAME` — optional, **display only, not a secret**: the operator's
+  name for the Overview greeting and the default assignee of new tickets/runs.
+  Compose passes it to the api and bakes it into the web bundle
+  (`VITE_OPERATOR_NAME`). Blank → neutral "Good evening" / "Operator". On the
+  non-Docker path also set `VITE_OPERATOR_NAME`
 - Optional: `GITHUB_TOKEN` (PR approvals → auto-merge from the Approvals page),
   `DEEPSEEK_API_KEY` / `ZAI_API_KEY` (live balances on Health/Usage) — ask the
   operator to paste these only if they want those features; everything else works
@@ -89,6 +100,12 @@ compiles the images, so it takes a while. Confirm the api is **not** crash-loopi
 `docker compose logs api` should end with the Prisma migrations applied and
 `mission-control api listening on 0.0.0.0:3000`.
 
+No OpenClaw yet (or just want to look around)? Seed sample data — idempotent,
+safe to re-run, never touches non-demo rows:
+```sh
+npm run seed:demo
+```
+
 If they prefer running without Docker (Postgres still required — a local Postgres
 or just the compose `db` service):
 ```sh
@@ -103,9 +120,10 @@ passes those variables through to the dev tasks). To run one app on its own:
 `npm run dev -w apps/api` or `npm run dev -w apps/web`.
 
 ### Step 5 — Verify the dashboard
-Ask the operator to open `http://localhost:5173`. Confirm:
+Ask the operator to open `http://localhost:5173/#/`. Confirm:
 - The Overview loads and the topbar shows a green "Connected" dot (live socket)
-- `/health` shows real uptime, client count, and database state
+- `http://localhost:5173/#/health` shows real uptime, client count, and
+  database state
 - Empty states show actions, never fake numbers
 
 If the dot stays red on the Docker path, the api is down or the `SOCKET_TOKEN`
@@ -113,39 +131,54 @@ baked into the web build does not match the api's — set it in `.env` and rebui
 with `docker compose up -d --build`.
 
 ### Step 6 — Connect their OpenClaw (the bridge)
-The dashboard is only as live as the data it receives. The operator's OpenClaw
-instance must POST typed events to `http://127.0.0.1:3000/events` with header
-`x-ingest-token: <the INGEST_TOKEN from Step 3's root .env>`. The standard pattern
-is a cron bridge job in the OpenClaw workspace that pushes
-agents/sessions/calendar/usage/approvals snapshots + run events (see the repo
-README's "Event flow" section). Confirm the bridge is running and the Live
-Activity band starts showing real events within a minute. If no events appear,
-check the bridge sends the **same** token compose sees — an unset `INGEST_TOKEN`
-in `.env` silently falls back to `dev-ingest-token`, and the bridge would get 401.
+Optional — skip if the operator has no OpenClaw instance yet. The bridge ships
+in this repo at `bridge/` (see `bridge/README.md` for the full event contract).
+`bridge/mc-bridge-sync.py` is Python 3 stdlib-only: it reads OpenClaw state via
+the `openclaw` CLI and POSTs agents/sessions/calendar/usage/approvals snapshots
+plus `run.*` events to `http://127.0.0.1:3000/events` with header
+`x-ingest-token`. It reads `INGEST_TOKEN` from the **root `.env`** (Step 3) —
+set it explicitly there; the bridge refuses to guess and exits if it is blank.
+```sh
+python3 bridge/mc-bridge-sync.py --dry-run   # show what would be sent (token never printed)
+python3 bridge/mc-bridge-sync.py             # one real sync
+```
+Then schedule it every ~5 minutes (system cron with absolute paths, or an
+OpenClaw cron job — examples in `bridge/README.md`). Confirm the Live Activity
+band shows real events after a sync. A 401 means the bridge and the api disagree
+on the token — an unset `INGEST_TOKEN` in `.env` makes compose fall back to
+`dev-ingest-token` for the api.
 
 ### Step 7 — Connect from another machine (optional)
-If the operator wants remote access, point them at the **/connect** page in the
-dashboard: it gives OS-specific SSH tunnel instructions and verifies the
-connection live before handing off.
+If the operator wants remote access, point them at the
+`http://localhost:5173/#/connect` page in the dashboard: it gives OS-specific
+SSH tunnel instructions and verifies the connection live before handing off.
 
 ### Step 8 — Smoke test
-Walk the operator through the core loops so they trust the data:
-1. **Tickets (no OpenClaw required):** create a ticket on `/backlog` → it
-   appears in the Backlog list; click **→ To-Do** on its row → it moves to the
-   To-Do column on `/tickets`; then use the card buttons to move it
-   Build → QA → Review → Done. Every move is a button (a `PATCH /tickets/:id`)
-   and the API itself writes a `run.*` row to the persisted activity stream,
-   so this loop passes on a fresh clone before the bridge is connected (it
-   works without OpenClaw). Refresh the page at any point — the ticket stays
-   where you left it.
-2. **Calendar:** all their OpenClaw cron jobs are listed (weekly grid, ‹ › week
-   navigation works). Needs the Step 6 bridge.
-3. **Office:** agents physically move between rooms when a `run.*` event fires.
-   Needs the Step 6 bridge (or the ticket moves above, which also emit `run.*`).
-4. **Live Activity:** recently run tasks show up there. Ticket moves alone are
-   enough to prove the band; OpenClaw enriches it further.
+Walk the operator through the core loops so they trust the data. Be explicit
+about which checks need OpenClaw — do not claim more than they verify.
 
-Once the **Tickets** loop in (1) passes, the core dashboard write-path is
-verified even without OpenClaw. Items 2–4 complete the full install once the
-bridge from Step 6 is connected. Thank the operator and summarize what was set
-up, where secrets live, and what is intentionally still optional.
+**Works with no OpenClaw (fresh clone, bridge not connected):**
+1. **Tickets loop:** create a ticket on `http://localhost:5173/#/backlog` → it
+   appears in the Backlog list; click **→ To-Do** on its row → it moves to the
+   To-Do column on `http://localhost:5173/#/tickets`; then use the card buttons
+   to move it Build → QA → Review → Done. Every move is a button
+   (`PATCH /tickets/:id`), and the api writes a `run.*` row to the persisted
+   activity stream. Refresh at any point — the ticket stays where you left it.
+2. **Seeded demo** (after `npm run seed:demo`): `/#/calendar` shows the 6 sample
+   cron jobs on the weekly grid (‹ › navigation works), `/#/team` shows the
+   8 sample agents in the org chart, `/#/office` places them in rooms by role,
+   and `/#/activity` lists the sample history. Demo agents and tickets are
+   labelled "Demo …" / `DEMO-n`.
+
+**Needs the Step 6 bridge + a running OpenClaw:**
+3. **Calendar** lists the operator's *real* OpenClaw cron jobs (the
+   `calendar.snapshot` replaces the demo jobs).
+4. **Team / Office** show the *real* roster; bots move between rooms when real
+   cron runs fire `run.*` events. (Ticket moves also emit `run.*`, so a bot may
+   nudge locally — that is not proof the bridge works.)
+5. **Live Activity** fills with real agent work between syncs.
+
+Once the tickets loop (1) passes, the core write path is verified without
+OpenClaw. Items 3–5 complete the full install once the bridge is connected.
+Thank the operator and summarize what was set up, where secrets live, and what
+is intentionally still optional.
