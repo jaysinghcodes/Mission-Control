@@ -36,3 +36,37 @@ export interface AgentDetailResp {
   agent: Agent & { children: Agent[] }
   ts: number
 }
+
+/** Project from GET /projects (ticket 4). `nameKey` is not on the wire. */
+export interface Project {
+  id: string
+  name: string
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+  /** Tickets on this project, including ones that are not done. */
+  ticketCount: number
+  /** Tickets whose status is `done`. The page renders "doneCount of ticketCount". */
+  doneCount: number
+}
+
+export interface ProjectsResp {
+  projects: Project[]
+  ts: number
+}
+
+export interface ProjectTicket {
+  id: string
+  key: string | null
+  title: string
+  status: string
+  priority: string
+  assignee: string | null
+  createdAt: string
+}
+
+export interface ProjectDetailResp {
+  project: Project
+  tickets: ProjectTicket[]
+  ts: number
+}

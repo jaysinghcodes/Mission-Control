@@ -4,7 +4,7 @@
  * office, activity, health, sessions, usage, logs).
  */
 export type GlyphKind =
-  | 'overview' | 'tasks' | 'tickets' | 'backlog' | 'calendar' | 'approvals'
+  | 'overview' | 'tasks' | 'tickets' | 'projects' | 'backlog' | 'calendar' | 'approvals'
   | 'agents' | 'office' | 'activity' | 'health' | 'sessions' | 'usage' | 'logs'
 
 export function Glyph({ kind, color = 'currentColor', size = 16 }: { kind: GlyphKind; color?: string; size?: number }) {
@@ -36,6 +36,12 @@ export function Glyph({ kind, color = 'currentColor', size = 16 }: { kind: Glyph
           <rect x="2.5" y="2.5" width="11" height="11" rx="3" />
           <line x1="5" y1="6.5" x2="11" y2="6.5" />
           <line x1="5" y1="10.5" x2="11" y2="10.5" opacity={0.5} strokeWidth={1.4} />
+        </svg>
+      )
+    case 'projects':
+      return (
+        <svg width={s} height={s} viewBox="0 0 16 16" {...common}>
+          <path d="M2 4.2 h3.6 l1.3 1.6 H14 V13 H2 Z" />
         </svg>
       )
     case 'backlog':

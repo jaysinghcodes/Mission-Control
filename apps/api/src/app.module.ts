@@ -9,6 +9,7 @@ import { SnapshotsService } from './snapshots/snapshots.service';
 import { AgentsController } from './agents/agents.controller';
 import { RunsController } from './runs/runs.controller';
 import { TicketsController } from './tickets/tickets.controller';
+import { ProjectsController } from './projects/projects.controller';
 import { SessionsController } from './sessions/sessions.controller';
 import { CalendarController } from './calendar/calendar.controller';
 import { UsageController } from './usage/usage.controller';
@@ -38,6 +39,7 @@ import { PrismaService } from './prisma/prisma.service';
     AgentsController,
     RunsController,
     TicketsController,
+    ProjectsController,
     SessionsController,
     CalendarController,
     UsageController,

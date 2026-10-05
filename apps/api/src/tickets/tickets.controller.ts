@@ -41,6 +41,8 @@ interface CreateTicketBody {
   tags?: unknown;
   /** Only `backlog` or `todo` (CREATE_STATUSES). Omitted → DEFAULT_CREATE_STATUS. */
   status?: unknown;
+  /** Omit or null → no project. A string must be an active project's id. */
+  projectId?: unknown;
 }
 
 /** Body accepted by PATCH /tickets/:id (partial update). */
@@ -48,13 +50,23 @@ interface UpdateTicketBody {
   status?: unknown;
   assignee?: unknown;
   priority?: unknown;
+  /** string → move to that project. null → unassign. Omit → leave it. */
+  projectId?: unknown;
+}
+
+/** Fields a PATCH may write. projectId null means "clear the project". */
+interface TicketPatch {
+  status?: string;
+  assignee?: string;
+  priority?: string;
+  projectId?: string | null;
 }
 
 /**
  * TicketsController — Kanban + Backlog backend.
- *  - GET   /tickets?status=  → board columns (todo|build|qa|review|done) or backlog
- *  - POST  /tickets          → create (status ∈ CREATE_STATUSES, default DEFAULT_CREATE_STATUS)
- *  - PATCH /tickets/:id      → move / update (any TICKET_STATUSES value)
+ *  - GET   /tickets?status=&projectId=  → board, optionally one project
+ *  - POST  /tickets                     → create (status ∈ CREATE_STATUSES, default DEFAULT_CREATE_STATUS)
+ *  - PATCH /tickets/:id                 → move / update (any TICKET_STATUSES value, optional projectId)
  *
  * Error contract (QA finding E on PR #20): failures are REAL HTTP errors via
  * Nest's HttpExceptions — never a 200/201 carrying `{ error }`:
@@ -80,10 +92,23 @@ export class TicketsController {
     private readonly gateway: LiveActivityGateway,
   ) {}
 
+  /**
+   * `status` filters one column (the Backlog page sends `backlog`).
+   * `projectId` filters to one project. `projectId=none` is the unassigned
+   * tickets. An unknown project id is an EMPTY list, not a 404: this is a
+   * filter, and a project that was just archived should not crash the board.
+   */
   @Get()
-  async list(@Query('status') status?: string) {
+  async list(
+    @Query('status') status?: string,
+    @Query('projectId') projectId?: string,
+  ) {
+    const where: { status?: string; projectId?: string | null } = {};
+    if (status) where.status = status;
+    if (projectId === 'none') where.projectId = null;
+    else if (projectId) where.projectId = projectId;
     const tickets = await this.prisma.ticket.findMany({
-      where: status ? { status } : undefined,
+      where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
@@ -117,6 +142,11 @@ export class TicketsController {
     const assignee =
       this.optionalString(body?.assignee, 'assignee') ?? operatorName();
     const tags = this.optionalStringArray(body?.tags, 'tags') ?? [];
+    // Omit and explicit null both mean "create with no project". A string
+    // is checked inside the insert transaction (see lockAssignableProject)
+    // so we never attach a ticket to a project that was archived first.
+    const projectRef = this.parseProjectRef(body?.projectId);
+    const projectId = projectRef.kind === 'id' ? projectRef.id : undefined;
 
     // ── key allocation (QA-1 #5) ─────────────────────────────────────────
     // The old code did `count()` then `create({ key: MC-${150 + count} })` as
@@ -136,6 +166,7 @@ export class TicketsController {
       assignee,
       tags,
       status,
+      projectId,
     });
     await this.persist('run.queued', {
       name: `ticket ${ticket.key}`,
@@ -180,9 +211,17 @@ export class TicketsController {
     assignee: string;
     tags: string[];
     status: string;
+    /** Set only when the caller named a project. Checked before the key lock
+     *  so a 400/404 does not queue behind unrelated creates — but still
+     *  inside this transaction, so the project row lock is held until the
+     *  insert commits. */
+    projectId?: string;
   }) {
     return this.prisma.$transaction(
       async (tx) => {
+        if (data.projectId !== undefined) {
+          await this.lockAssignableProject(tx, data.projectId);
+        }
         // (1) Serialize every key allocation. `pg_advisory_xact_lock`
         // returns `void`, which $queryRaw cannot deserialize, so the call is
         // made via $executeRaw (we only need its side effect: the lock).
@@ -201,7 +240,21 @@ export class TicketsController {
             : Math.max(Number(max) + 1, FIRST_TICKET_NUMBER);
 
         // (3) Insert while still holding the lock; COMMIT releases it.
-        return tx.ticket.create({ data: { ...data, key: `MC-${next}` } });
+        // projectId is included only when the caller sent one, so an omitted
+        // field stays NULL (the column default) rather than being forced.
+        return tx.ticket.create({
+          data: {
+            title: data.title,
+            priority: data.priority,
+            assignee: data.assignee,
+            tags: data.tags,
+            status: data.status,
+            ...(data.projectId !== undefined
+              ? { projectId: data.projectId }
+              : {}),
+            key: `MC-${next}`,
+          },
+        });
       },
       {
         // Creates now queue behind each other on the lock. Prisma's default
@@ -247,10 +300,7 @@ export class TicketsController {
   }
 
   /** The serialized part of PATCH — only ever runs one-at-a-time per id. */
-  private async applyUpdate(
-    id: string,
-    data: { status?: string; assignee?: string; priority?: string },
-  ) {
+  private async applyUpdate(id: string, data: TicketPatch) {
     const { ticket, changed } = await this.prisma.$transaction(async (tx) => {
       // Row lock: blocks any other transaction that wants this row until we
       // commit. Table/column names are quoted because Prisma created them
@@ -258,20 +308,29 @@ export class TicketsController {
       // template), not string concatenation — safe from SQL injection.
       // QA-1 #3: we also read the CURRENT values under the lock so we can
       // tell a real change from a repeat of what is already stored.
+      // projectId is in the same SELECT so "assign the project it already
+      // has" is a no-op (no second activity event), same as a repeated move.
       const locked = await tx.$queryRaw<
         {
           id: string;
           status: string;
           assignee: string | null;
           priority: string;
+          projectId: string | null;
         }[]
       >`
-        SELECT "id", "status", "assignee", "priority"
+        SELECT "id", "status", "assignee", "priority", "projectId"
         FROM "Ticket" WHERE "id" = ${id} FOR UPDATE`;
       if (locked.length === 0) {
         // Finding E: this used to be a 200 { error }. Throwing inside the
         // transaction rolls it back and Prisma rethrows our exception as-is.
         throw new NotFoundException(`ticket ${id} not found`);
+      }
+      // Assigning to a project locks THAT row too, before we write. If it
+      // was archived (or never existed) we throw and the ticket lock rolls
+      // back — the previous projectId stays. Unassign (null) skips this.
+      if (typeof data.projectId === 'string') {
+        await this.lockAssignableProject(tx, data.projectId);
       }
       const before = locked[0];
       // A field counts as changed only if it was SENT and differs from the
@@ -306,12 +365,8 @@ export class TicketsController {
    * Finding D: `{ status: "banana" }` used to save and make the card vanish
    * from every column; unknown statuses are now a 400.
    */
-  private validateUpdate(body: UpdateTicketBody): {
-    status?: string;
-    assignee?: string;
-    priority?: string;
-  } {
-    const data: { status?: string; assignee?: string; priority?: string } = {};
+  private validateUpdate(body: UpdateTicketBody): TicketPatch {
+    const data: TicketPatch = {};
 
     if (body?.status !== undefined && body?.status !== null) {
       const status = typeof body.status === 'string' ? body.status.trim() : '';
@@ -327,13 +382,81 @@ export class TicketsController {
     const priority = this.optionalString(body?.priority, 'priority');
     if (priority !== undefined) data.priority = priority;
 
+    // projectId is special: null is a real write (unassign), a string is a
+    // move, and a missing field means "leave the project alone". The
+    // existence/archive check happens later, under the row lock.
+    if (body && 'projectId' in body && body.projectId !== undefined) {
+      const ref = this.parseProjectRef(body.projectId);
+      // `undefined` was excluded above, so this is null or an id.
+      data.projectId = ref.kind === 'id' ? ref.id : null;
+    }
+
     // An empty/irrelevant body would be a silent no-op 200 — make it explicit.
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(
-        'nothing to update — send status, assignee and/or priority',
+        'nothing to update — send status, assignee, priority and/or projectId',
       );
     }
     return data;
+  }
+
+  /**
+   * `undefined` → field was not sent. `null` → unassign. A non-blank string
+   * → that id (the caller still has to prove the project exists and is
+   * active). Blank strings and non-strings are 400, never coerced.
+   */
+  private parseProjectRef(
+    raw: unknown,
+  ): { kind: 'omit' } | { kind: 'none' } | { kind: 'id'; id: string } {
+    if (raw === undefined) return { kind: 'omit' };
+    if (raw === null) return { kind: 'none' };
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('projectId must be a string or null');
+    }
+    const id = raw.trim();
+    if (!id) {
+      throw new BadRequestException('projectId must be a project id or null');
+    }
+    return { kind: 'id', id };
+  }
+
+  /**
+   * Lock the project row and refuse the assignment when it is missing or
+   * archived.
+   *
+   * Why a lock, not a plain read: archive is `UPDATE Project SET archivedAt`.
+   * Without FOR UPDATE, that update can commit after we have decided the
+   * project is active and before our ticket write commits — the ticket would
+   * land on an archived project, which ticket 4 forbids. Holding this row
+   * lock until our transaction ends makes the archive wait, and we see its
+   * committed archivedAt if it got there first.
+   *
+   * The message names the project so the board can show it verbatim.
+   */
+  private async lockAssignableProject(
+    tx: {
+      $queryRaw: <T>(
+        query: TemplateStringsArray,
+        ...values: unknown[]
+      ) => Promise<T>;
+    },
+    projectId: string,
+  ): Promise<void> {
+    const rows = await tx.$queryRaw<
+      { id: string; name: string; archivedAt: Date | null }[]
+    >`
+      SELECT "id", "name", "archivedAt"
+      FROM "Project"
+      WHERE "id" = ${projectId}
+      FOR UPDATE`;
+    if (rows.length === 0) {
+      throw new NotFoundException(`project ${projectId} not found`);
+    }
+    if (rows[0].archivedAt) {
+      throw new BadRequestException(
+        `project "${rows[0].name}" is archived — unarchive it before assigning tickets`,
+      );
+    }
   }
 
   /** Resolve POST's status: omitted → default; otherwise must be a create status. */

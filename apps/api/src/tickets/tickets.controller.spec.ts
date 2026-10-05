@@ -22,12 +22,17 @@ type Row = {
   priority: string;
   assignee: string | null;
   tags: string[];
+  projectId: string | null;
 };
+
+type ProjectRow = { id: string; name: string; archivedAt: Date | null };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function makeFakePrisma() {
   const rows = new Map<string, Row>();
+  /** Projects the ticket-assignment lock can see. Tests seed this directly. */
+  const projects = new Map<string, ProjectRow>();
   /** Per-call artificial latency for ticket.update, consumed in call order. */
   const updateDelays: number[] = [];
   /** Monotonic id source (rows.size would repeat after deletes). */
@@ -40,7 +45,14 @@ function makeFakePrisma() {
       // race (parallel creates reading the same max) reproduces reliably
       // if the advisory lock below were ever removed.
       await sleep(1);
-      const row = { id: `id-${nextId++}`, ...data } as Row;
+      // projectId defaults to null when the create omitted it. Put it after
+      // the spread only via an explicit fallback so a provided id wins
+      // without listing the key twice (TS2783).
+      const row = {
+        ...data,
+        id: `id-${nextId++}`,
+        projectId: data.projectId ?? null,
+      } as Row;
       rows.set(row.id, row);
       return row;
     }),
@@ -59,7 +71,21 @@ function makeFakePrisma() {
         return { ...row };
       },
     ),
-    findMany: jest.fn(async () => [...rows.values()]),
+    findMany: jest.fn(
+      async (args?: {
+        where?: { status?: string; projectId?: string | null };
+      }) => {
+        let list = [...rows.values()];
+        const where = args?.where;
+        if (where?.status) list = list.filter((r) => r.status === where.status);
+        // `none` filter is `projectId: null` — hasOwnProperty so we don't
+        // treat a missing key (unfiltered list) as "unassigned only".
+        if (where && Object.prototype.hasOwnProperty.call(where, 'projectId')) {
+          list = list.filter((r) => (r.projectId ?? null) === where.projectId);
+        }
+        return list;
+      },
+    ),
   };
 
   // Shared spies so tests can assert on the SQL that was sent. The fake
@@ -82,6 +108,13 @@ function makeFakePrisma() {
             : null;
           return [{ max }];
         }
+        // Ticket 4: assigning a ticket locks the Project row. Branch on the
+        // table name so that query is not mistaken for the ticket row lock
+        // (both pass the id as the first bound value).
+        if (sql.includes('FROM "Project"')) {
+          const project = projects.get(values[0] as string);
+          return project ? [project] : [];
+        }
         const row = rows.get(values[0] as string);
         return row
           ? [
@@ -90,6 +123,7 @@ function makeFakePrisma() {
                 status: row.status,
                 assignee: row.assignee,
                 priority: row.priority,
+                projectId: row.projectId ?? null,
               },
             ]
           : [];
@@ -133,7 +167,7 @@ function makeFakePrisma() {
       },
     ),
   };
-  return { prisma, rows, updateDelays, tx };
+  return { prisma, rows, projects, updateDelays, tx };
 }
 
 function makeController() {
@@ -231,6 +265,7 @@ describe('TicketsController', () => {
           priority: 'med',
           assignee: null,
           tags: [],
+          projectId: null,
         });
         rows.set('old', { ...rows.get('seed')!, id: 'old', key: 'MC-300' });
         expect((await controller.create({ title: 'b' })).ticket.key).toBe(
@@ -401,6 +436,149 @@ describe('TicketsController', () => {
         expect(r2.ticket.status).toBe('done');
         expect(rows.get(ticket.id)!.status).toBe('done'); // what a refresh would show
       }
+    });
+  });
+
+  describe('project membership (ticket 4)', () => {
+    function seedProjects(
+      projects: Map<string, { id: string; name: string; archivedAt: Date | null }>,
+    ) {
+      projects.set('p-active', {
+        id: 'p-active',
+        name: 'Roadmap',
+        archivedAt: null,
+      });
+      projects.set('p-other', {
+        id: 'p-other',
+        name: 'Launch',
+        archivedAt: null,
+      });
+      projects.set('p-archived', {
+        id: 'p-archived',
+        name: 'Old roadmap',
+        archivedAt: new Date('2026-01-01T00:00:00Z'),
+      });
+    }
+
+    it('creates a ticket on an active project', async () => {
+      const { controller, projects } = makeController();
+      seedProjects(projects);
+      const { ticket } = await controller.create({
+        title: 't',
+        projectId: 'p-active',
+      });
+      expect(ticket.projectId).toBe('p-active');
+    });
+
+    it('omitted projectId leaves the ticket unassigned', async () => {
+      const { controller } = makeController();
+      const { ticket } = await controller.create({ title: 't' });
+      expect(ticket.projectId).toBeNull();
+    });
+
+    it.each(['', '   ', 7, true])(
+      'rejects projectId %p with 400 and saves nothing',
+      async (projectId) => {
+        const { controller, prisma } = makeController();
+        await expect(
+          controller.create({ title: 't', projectId }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(prisma.ticket.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('unknown project is a 404 and saves nothing', async () => {
+      const { controller, prisma } = makeController();
+      await expect(
+        controller.create({ title: 't', projectId: 'missing' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.ticket.create).not.toHaveBeenCalled();
+    });
+
+    it('archived project is a 400 that names the project, and saves nothing', async () => {
+      const { controller, prisma, projects } = makeController();
+      seedProjects(projects);
+      await expect(
+        controller.create({ title: 't', projectId: 'p-archived' }),
+      ).rejects.toThrow(
+        'project "Old roadmap" is archived — unarchive it before assigning tickets',
+      );
+      expect(prisma.ticket.create).not.toHaveBeenCalled();
+    });
+
+    it('PATCH moves a ticket from one project to another (still at most one)', async () => {
+      const { controller, projects, rows } = makeController();
+      seedProjects(projects);
+      const { ticket } = await controller.create({
+        title: 't',
+        projectId: 'p-active',
+      });
+      const res = await controller.update(ticket.id, { projectId: 'p-other' });
+      expect(res.ticket.projectId).toBe('p-other');
+      expect(rows.get(ticket.id)!.projectId).toBe('p-other');
+    });
+
+    it('PATCH null unassigns the ticket', async () => {
+      const { controller, projects } = makeController();
+      seedProjects(projects);
+      const { ticket } = await controller.create({
+        title: 't',
+        projectId: 'p-active',
+      });
+      const res = await controller.update(ticket.id, { projectId: null });
+      expect(res.ticket.projectId).toBeNull();
+    });
+
+    it('PATCH onto an archived project is 400 and keeps the previous project', async () => {
+      const { controller, projects, rows } = makeController();
+      seedProjects(projects);
+      const { ticket } = await controller.create({
+        title: 't',
+        projectId: 'p-active',
+      });
+      await expect(
+        controller.update(ticket.id, { projectId: 'p-archived' }),
+      ).rejects.toThrow(/is archived/);
+      expect(rows.get(ticket.id)!.projectId).toBe('p-active');
+    });
+
+    it('PATCH onto a missing project is 404 and keeps the previous project', async () => {
+      const { controller, projects, rows } = makeController();
+      seedProjects(projects);
+      const { ticket } = await controller.create({
+        title: 't',
+        projectId: 'p-active',
+      });
+      await expect(
+        controller.update(ticket.id, { projectId: 'missing' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(rows.get(ticket.id)!.projectId).toBe('p-active');
+    });
+
+    it('GET /tickets?projectId= returns only that project', async () => {
+      const { controller, projects } = makeController();
+      seedProjects(projects);
+      await controller.create({ title: 'on it', projectId: 'p-active' });
+      await controller.create({ title: 'other', projectId: 'p-other' });
+      await controller.create({ title: 'loose' });
+      const { tickets } = await controller.list(undefined, 'p-active');
+      expect(tickets.map((t) => t.title).sort()).toEqual(['on it']);
+    });
+
+    it('GET /tickets?projectId=none returns only unassigned tickets', async () => {
+      const { controller, projects } = makeController();
+      seedProjects(projects);
+      await controller.create({ title: 'on it', projectId: 'p-active' });
+      await controller.create({ title: 'loose' });
+      const { tickets } = await controller.list(undefined, 'none');
+      expect(tickets.map((t) => t.title)).toEqual(['loose']);
+    });
+
+    it('an unknown project filter is an empty list, not an error', async () => {
+      const { controller } = makeController();
+      await controller.create({ title: 'loose' });
+      const { tickets } = await controller.list(undefined, 'does-not-exist');
+      expect(tickets).toEqual([]);
     });
   });
 });

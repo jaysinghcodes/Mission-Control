@@ -34,6 +34,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { key: 'overview', label: 'Overview', path: '/' },
       { key: 'tasks', label: 'Tasks', path: '/tasks' },
       { key: 'tickets', label: 'Tickets', path: '/tickets' },
+      { key: 'projects', label: 'Projects', path: '/projects' },
       { key: 'backlog', label: 'Backlog', path: '/backlog' },
       { key: 'calendar', label: 'Calendar', path: '/calendar' },
       { key: 'approvals', label: 'Approvals', path: '/approvals' },

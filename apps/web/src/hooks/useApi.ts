@@ -137,7 +137,14 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
       inflight.current?.abort()
       inflight.current = null
     }
-  }, [refetch, pollMs])
+    // `path` is a dependency on purpose (ticket 4). The ref above lets an
+    // in-flight poll see a path that changed mid-render, but nothing
+    // re-fired the load when the path itself changed — every caller used
+    // to pass a constant. The Tickets board filter is a query string
+    // (`/tickets?projectId=…`), so a new path must abort the old request
+    // and load the new one. Strings compare by value, so a stable path
+    // does not refetch.
+  }, [refetch, pollMs, path])
 
   return { data, loading, error: loadError !== null, errorMessage: loadError, refetch, mutate }
 }

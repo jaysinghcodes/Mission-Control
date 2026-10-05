@@ -51,7 +51,30 @@ model Run {
   createdAt  DateTime  @default(now())
 }
 
+/// A named group of tickets (ticket 4).
+///
+/// Archive is a flag (`archivedAt`), not a delete: the row stays, its
+/// tickets stay, and GET /projects hides it unless asked. A ticket points
+/// at most at one project (`Ticket.projectId`, nullable).
+///
+/// `nameKey` is the case-folded name. It is the UNIQUE column so
+/// "Roadmap" and "roadmap" cannot both exist. The API writes it whenever
+/// `name` changes; the unique index (not a pre-check) is what makes a
+/// duplicate a real constraint error, which the controller turns into 409.
+/// Blank names are rejected in the controller with 400 — there is no CHECK
+/// constraint, because a check failure would surface as 500.
+model Project {
+  id         String    @id @default(cuid())
+  name       String
+  nameKey    String    @unique
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  tickets    Ticket[]
+}
+
 /// Kanban/backlog items. Status: backlog | todo | inprogress | done.
+/// `projectId` is optional: a ticket belongs to one project or to none.
 model Ticket {
   id        String   @id @default(cuid())
   key       String?
@@ -61,7 +84,13 @@ model Ticket {
   assignee  String?
   tags      Json?
   points    Int?
+  /// Nullable on purpose. ON DELETE SET NULL in the migration: dropping a
+  /// project row must not delete its tickets (archive is the supported path).
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
+
+  @@index([projectId])
 }
 
 /// Active agent sessions — pushed by the bridge (sessions.snapshot).
