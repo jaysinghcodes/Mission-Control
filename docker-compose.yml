@@ -1,6 +1,7 @@
 # Mission Control — clone-and-run stack (postgres + api + web).
 # Usage: docker compose up --build
-# Then open http://localhost:5173 (web) — API on http://localhost:3000.
+# Then open http://localhost:5173/#/ (web, hash routes) — API on http://localhost:3000.
+# No OpenClaw? `npm run seed:demo` (from the host) fills sample data.
 # Loopback-first: no ports are exposed beyond localhost by default.
 services:
   db:
