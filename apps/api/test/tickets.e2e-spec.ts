@@ -6,14 +6,29 @@ import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 
 /**
- * Tickets e2e — real Nest app + REAL Postgres (PR #20 QA findings A–E).
+ * Tickets e2e — real Nest app + REAL Postgres (PR #20 QA findings A–E + QA-1).
  *
  * Needs a migrated database at DATABASE_URL, e.g.
  *   docker compose up -d db
  *   (cd apps/api && npx prisma migrate deploy)
- *   npm run test:e2e -w apps/api
- * Every ticket this suite creates is deleted again in afterAll.
+ *   DATABASE_URL=… npm run test:e2e -w apps/api
+ *
+ * QA-1 #4: without DATABASE_URL, PrismaService falls back to localhost:5432.
+ * That is fine for `npm run dev`, but for e2e it silently targets whoever
+ * owns that port (often someone else's DB) and leaves rows behind. Fail
+ * FAST here, before Nest boots and before any create runs — and clean up
+ * every ticket + its activity events we create, even when a test fails.
  */
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    'Tickets e2e refuses to run without DATABASE_URL.\n' +
+      '  Set it to a migrated Postgres, e.g.\n' +
+      '    DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/mission_control\n' +
+      '    npm run test:e2e -w apps/api\n' +
+      '  (PrismaService would otherwise silently fall back to localhost:5432.)',
+  );
+}
+
 describe('Tickets (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
@@ -43,10 +58,37 @@ describe('Tickets (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (created.length) {
-      await prisma.ticket.deleteMany({ where: { id: { in: created } } });
+    // QA-1 #4: wipe the tickets we created AND the activity events their
+    // creates/moves wrote (keyed by payload.ticket = the MC-N key). Without
+    // this, a forgotten DATABASE_URL that pointed at a shared DB would leave
+    // both tables littered; even on the right DB we do not want QA debris.
+    if (created.length && prisma) {
+      try {
+        const rows = await prisma.ticket.findMany({
+          where: { id: { in: created } },
+          select: { id: true, key: true },
+        });
+        const keys = rows
+          .map((r) => r.key)
+          .filter((k): k is string => typeof k === 'string');
+        if (keys.length) {
+          // ActivityEvent.payload is Json; Prisma's path filter matches
+          // `payload.ticket` for the string keys we broadcast.
+          await prisma.activityEvent.deleteMany({
+            where: {
+              OR: keys.map((key) => ({
+                payload: { path: ['ticket'], equals: key },
+              })),
+            },
+          });
+        }
+        await prisma.ticket.deleteMany({ where: { id: { in: created } } });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[tickets.e2e] cleanup failed:', err);
+      }
     }
-    await app.close();
+    if (app) await app.close();
   });
 
   describe('POST /tickets', () => {
