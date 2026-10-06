@@ -19,5 +19,8 @@ bridge/.state/
 # Python bytecode (bridge/ scripts)
 __pycache__/
 
+# Demo docs written by npm run seed:demo (DOCS_ROOT). Not source.
+data/docs/
+
 # Transpiled on the fly by apps/web/test (node --test cannot import .tsx)
 apps/web/test/_gen/

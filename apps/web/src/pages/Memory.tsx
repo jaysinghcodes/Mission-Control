@@ -126,13 +126,16 @@ export default function Memory() {
   }, [selected])
 
   const groups = useMemo(() => groupMemoryByDay(entries), [entries])
+  const filtering = tab !== 0 || query.trim().length > 0 || day.length > 0
   const current = entries.find((row) => row.id === selected) ?? null
   const body = detail && detail.id === selected ? detail.body : current?.snippet ?? ''
   const summary = !data
     ? (loading && !errorMessage ? 'Loading memories…' : 'Memories not loaded')
-    : data.total === 0
+    : data.total === 0 && !filtering
       ? 'No memories yet'
-      : `${entries.length} ${entries.length === 1 ? 'memory' : 'memories'}`
+      : data.total === 0
+        ? 'No matches'
+        : `${entries.length} ${entries.length === 1 ? 'memory' : 'memories'}`
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -164,7 +167,7 @@ export default function Memory() {
       {!data && errorMessage && (
         <EmptyState title="Memories not loaded" body={errorMessage} />
       )}
-      {data && data.total === 0 && (
+      {data && data.total === 0 && !filtering && (
         <EmptyState
           title="Nothing remembered yet"
           body="No notes are saved. Connect OpenClaw so the bridge can post them, or load the sample set. This page does not read files on disk."
@@ -175,7 +178,7 @@ export default function Memory() {
           </p>
         </EmptyState>
       )}
-      {data && data.total > 0 && (
+      {data && (data.total > 0 || filtering) && (
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-4 lg:grid-cols-[380px_minmax(0,1fr)] lg:grid-rows-1">
           <SoftCard className="mc-scroll min-h-0 overflow-y-auto p-2">
             {entries.length === 0 && (

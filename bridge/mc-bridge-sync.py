@@ -685,10 +685,10 @@ def collect_memory(
     Read each agent's MEMORY.md and memory/YYYY-MM-DD*.md.
 
     Returns None when there is nothing to post: no agents, or agents were
-    given but no workspace directory could be read. An empty list would be
-    a snapshot that clears bridge rows, so a folder with zero workspaces
-    must not become []. Returns [] only when a workspace was readable and
-    simply had no notes.
+    given but no workspace directory could be read. An empty list is a
+    readable workspace with zero notes. The API treats that empty entries
+    list as a no-op, so it cannot delete every agent's rows. Returns []
+    only when a workspace was readable and simply had no notes.
     """
     if not agents:
         return None

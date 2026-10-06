@@ -34,7 +34,7 @@ cd mission-control
 npm ci
 cp .env.example .env          # replace INGEST_TOKEN=change-me with your own (blank → compose uses dev-ingest-token)
 docker compose up --build     # Postgres :5432, API :3000, web :5173
-npm run seed:demo             # optional but recommended — sample agents/tickets/calendar
+npm run seed:demo             # optional but recommended — sample agents, tickets, calendar, memories, and docs
 ```
 
 Open **http://localhost:5173/#/** — green "Connected" dot in the topbar means the live socket is up.
@@ -96,7 +96,11 @@ Migrations are a security red line: schema changes are human-reviewed and never 
                                         └────────────────────────────────────────┘
 ```
 
-Without OpenClaw, `npm run seed:demo` fills agents, cron jobs, tickets, activity, and a pending approval so Board / Calendar / Team / Office are clickable.
+Without OpenClaw, `npm run seed:demo` fills agents, cron jobs, tickets, activity, memories, and a pending approval so Board / Calendar / Team / Office / Memory are clickable. The same command writes sample markdown into the docs folder so Docs is clickable too. Docs do not use the bridge.
+
+### Docs
+
+The Docs page reads markdown through the API. Set `DOCS_ROOT` to a host directory (see [`.env.example`](.env.example)); leave it unset and both the API and `npm run seed:demo` use `<repo>/data/docs`. Docker Compose bind-mounts that host path at `/data/docs` in the api container. The browser only ever asks for a server-issued id or a root-relative slug — it does not read the disk. A missing or empty folder is an empty page with a link to Setup (`/#/connect`) and `npm run seed:demo`, not an error. There is no editor on this page.
 
 ### Event flow
 

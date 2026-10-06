@@ -243,6 +243,67 @@ textarea:focus-visible,
   box-shadow: none;
 }
 
+/* Docs reader. Tokens only, so light and dark stay on the same contrast. */
+.mc-doc {
+  color: var(--mc-text);
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.mc-doc h1,
+.mc-doc h2,
+.mc-doc h3 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 1.1em 0 0.4em;
+}
+.mc-doc h1 { font-size: 22px; }
+.mc-doc h2 { font-size: 18px; }
+.mc-doc h3 { font-size: 16px; }
+.mc-doc p { margin: 0.6em 0; }
+.mc-doc a {
+  color: var(--mc-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mc-doc pre {
+  background: var(--mc-fill);
+  border: 1px solid var(--mc-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mc-doc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.mc-doc p code,
+.mc-doc li code {
+  background: var(--mc-fill);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.mc-doc pre code {
+  background: transparent;
+  padding: 0;
+}
+.mc-doc ul,
+.mc-doc ol {
+  margin: 0.5em 0;
+  padding-left: 1.3em;
+}
+.mc-doc li { margin: 0.2em 0; }
+.mc-doc blockquote {
+  margin: 0.8em 0;
+  padding-left: 0.9em;
+  border-left: 3px solid var(--mc-border);
+  color: var(--mc-sub);
+}
+
 /* White on #248a3d is 4.40:1. The same green on a dark card is 3.17:1,
    and on the light toast (#f5f5f7) is 4.04:1. */
 .mc-check {

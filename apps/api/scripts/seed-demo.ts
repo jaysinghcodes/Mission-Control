@@ -11,6 +11,7 @@
  *   - 10 activity events (run.* + approvals) so Activity/Office have history
  *   - 1 pending approval (matches the `approval.new` activity event)
  *   - sample memories across several America/Chicago days (ticket 5)
+ *   - sample markdown docs in DOCS_ROOT (ticket 6; default <repo>/data/docs)
  *
  * IDEMPOTENT — safe to run any number of times:
  *   - Every row has a FIXED id (prefix `demo-`) or a unique natural key
@@ -52,6 +53,8 @@ import {
 } from '../src/projects/demo-catalog';
 import { projectNameKey } from '../src/projects/project-name';
 import { buildDemoMemories } from '../src/memory/demo-memories';
+import { writeDemoDocs } from '../src/docs/demo-docs';
+import { configuredDocsRoot } from '../src/docs/docs-path';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -228,6 +231,12 @@ async function main(): Promise<void> {
   // Throws if the ticket list no longer produces Onboarding "1 of 2",
   // Pipeline "0 of 3", and an empty Ideas project. See demo-catalog.ts.
   assertDemoSeedProjects(TICKETS);
+
+  const docsRoot = configuredDocsRoot();
+  const docCounts = await writeDemoDocs(docsRoot);
+  console.log(
+    `[seed:demo] docs root=${docsRoot} written=${docCounts.written} skipped=${docCounts.skipped} (skipped = already there; a re-run does not overwrite)`,
+  );
 
   const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0, memories: 0 };
 
@@ -456,7 +465,7 @@ async function main(): Promise<void> {
   // What THIS run inserted (0 everywhere on a re-run = already seeded).
   console.log(
     `[seed:demo] inserted agents=${counts.agents} cronJobs=${counts.cronJobs} projects=${counts.projects} tickets=${counts.tickets} ` +
-      `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} memories=${counts.memories} (0 everywhere = already seeded; re-running is safe)`,
+      `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} memories=${counts.memories} docs=${docCounts.written} (0 everywhere = already seeded; re-running is safe)`,
   );
 
   // Table totals AFTER the run — the idempotency check is simply "these
