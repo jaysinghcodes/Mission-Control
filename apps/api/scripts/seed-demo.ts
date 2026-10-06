@@ -107,19 +107,35 @@ const LEGACY_AGENT_NAMES: Record<string, string> = {
 };
 
 const LEAD = 'Speedy';
+// Task lines are the locked office floor (design-refs/ticket-9): a short
+// status under each desk, and Speedy's line is the Commons table caption.
 const AGENTS = [
-  { name: LEAD, role: 'chief of staff', color: '#8d5bff', status: 'working', parent: null, emoji: null, currentTask: 'Running the build council', tasksCompleted: 42, totalCost: 3.18, tags: ['strategist', 'daily'] },
-  { name: 'Atlas', role: 'product', color: '#ffc531', status: 'idle', parent: LEAD, emoji: null, currentTask: null, tasksCompleted: 17, totalCost: 0.64, tags: ['planner'] },
-  { name: 'Forge', role: 'engineer', color: '#9bd434', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-3 · Wire calendar week view', tasksCompleted: 31, totalCost: 2.41, tags: ['builder'] },
-  { name: 'Sentinel', role: 'qa', color: '#36b3f5', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-4 · Regression pass on Tickets', tasksCompleted: 23, totalCost: 0.97, tags: ['tester'] },
+  { name: LEAD, role: 'chief of staff', color: '#8d5bff', status: 'working', parent: null, emoji: null, currentTask: 'Planning ticket 5', tasksCompleted: 42, totalCost: 3.18, tags: ['strategist', 'daily'] },
+  { name: 'Atlas', role: 'product', color: '#ffc531', status: 'idle', parent: LEAD, emoji: null, currentTask: 'Spec locked', tasksCompleted: 17, totalCost: 0.64, tags: ['planner'] },
+  { name: 'Forge', role: 'engineer', color: '#9bd434', status: 'working', parent: LEAD, emoji: null, currentTask: 'Ticket 4 · Projects', tasksCompleted: 31, totalCost: 2.41, tags: ['builder'] },
+  { name: 'Sentinel', role: 'qa', color: '#36b3f5', status: 'working', parent: LEAD, emoji: null, currentTask: 'QA-4 on fresh clone', tasksCompleted: 23, totalCost: 0.97, tags: ['tester'] },
   { name: 'Echo', role: 'research', color: '#19c4b4', status: 'working', parent: LEAD, emoji: null, currentTask: 'Researching calendar patterns', tasksCompleted: 12, totalCost: 1.12, tags: ['curious'] },
-  { name: 'Pixel', role: 'designer', color: '#ff5fa6', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-2 · Dark-mode screenshots', tasksCompleted: 9, totalCost: 0.38, tags: ['visual'] },
-  { name: 'Bolt', role: 'ops', color: '#ff8a2b', status: 'idle', parent: LEAD, emoji: null, currentTask: null, tasksCompleted: 8, totalCost: 0.2, tags: ['ops'] },
-  { name: 'Ledger', role: 'data', color: '#4a6dff', status: 'idle', parent: LEAD, emoji: null, currentTask: null, tasksCompleted: 6, totalCost: 0.1, tags: ['data'] },
-  { name: 'Quill', role: 'writer', color: '#d257ef', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-5 · Release notes', tasksCompleted: 28, totalCost: 0.55, tags: ['concise'] },
-  { name: 'Aegis', role: 'security', color: '#ff4f5e', status: 'working', parent: LEAD, emoji: null, currentTask: 'DEMO-4 is waiting on your approval', tasksCompleted: 14, totalCost: 0.44, tags: ['security'] },
+  { name: 'Pixel', role: 'designer', color: '#ff5fa6', status: 'working', parent: LEAD, emoji: null, currentTask: 'Office mock', tasksCompleted: 9, totalCost: 0.38, tags: ['visual'] },
+  { name: 'Bolt', role: 'ops', color: '#ff8a2b', status: 'idle', parent: LEAD, emoji: null, currentTask: 'Waiting on Ship', tasksCompleted: 8, totalCost: 0.2, tags: ['ops'] },
+  { name: 'Ledger', role: 'data', color: '#4a6dff', status: 'idle', parent: LEAD, emoji: null, currentTask: 'Nightly sync', tasksCompleted: 6, totalCost: 0.1, tags: ['data'] },
+  { name: 'Quill', role: 'writer', color: '#d257ef', status: 'working', parent: LEAD, emoji: null, currentTask: 'Release notes', tasksCompleted: 28, totalCost: 0.55, tags: ['concise'] },
+  { name: 'Aegis', role: 'security', color: '#ff4f5e', status: 'working', parent: LEAD, emoji: null, currentTask: 'Needs approval', tasksCompleted: 14, totalCost: 0.44, tags: ['security'] },
   { name: 'Patch', role: 'support', color: '#2fc56f', status: 'working', parent: LEAD, emoji: null, currentTask: 'Answering setup questions', tasksCompleted: 11, totalCost: 0.12, tags: ['support'] },
   { name: 'Scout', role: 'scout', color: '#dfe5f0', status: 'working', parent: LEAD, emoji: null, currentTask: 'Checking upstream OpenClaw changes', tasksCompleted: 19, totalCost: 0.33, tags: ['trends'] },
+];
+
+// A re-seed rewrites only these exact previous demo lines, so a task you
+// edited is left alone and a fresh database still inserts the lines above.
+const OFFICE_TASK_FIXUPS: { name: string; from: string | null; to: string }[] = [
+  { name: 'Speedy', from: 'Running the build council', to: 'Planning ticket 5' },
+  { name: 'Forge', from: 'DEMO-3 · Wire calendar week view', to: 'Ticket 4 · Projects' },
+  { name: 'Pixel', from: 'DEMO-2 · Dark-mode screenshots', to: 'Office mock' },
+  { name: 'Sentinel', from: 'DEMO-4 · Regression pass on Tickets', to: 'QA-4 on fresh clone' },
+  { name: 'Quill', from: 'DEMO-5 · Release notes', to: 'Release notes' },
+  { name: 'Aegis', from: 'DEMO-4 is waiting on your approval', to: 'Needs approval' },
+  { name: 'Atlas', from: null, to: 'Spec locked' },
+  { name: 'Bolt', from: null, to: 'Waiting on Ship' },
+  { name: 'Ledger', from: null, to: 'Nightly sync' },
 ];
 
 // Calendar.tsx: day 0=Mon … 6=Sun, day=null repeats daily; time=null → all-day strip.
@@ -164,7 +180,7 @@ const ACTIVITY = [
 // Note: a later real `approvals.snapshot` from the bridge drops all PENDING
 // rows (snapshot contract), which is exactly what we want for demo data.
 const APPROVALS = [
-  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Sentinel' } },
+  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Aegis' } },
   { id: 'demo-approval-2', kind: 'pr', tag: 'Merge the roster update', desc: 'You approved. Sample decision so the Decided tab is not empty.', status: 'approved' },
 ];
 
@@ -285,7 +301,11 @@ async function main(): Promise<void> {
         tasksCompleted: a.tasksCompleted,
         totalCost: a.totalCost,
         personalityTags: a.tags,
-        recentActivity: a.currentTask ? `Working on ${a.currentTask}` : 'Idle in the Break Room',
+        recentActivity: a.currentTask
+          ? a.status === 'working'
+            ? `Working on ${a.currentTask}`
+            : a.currentTask
+          : 'Idle in the Break Room',
       },
     });
     if (!before) counts.agents++;
@@ -296,6 +316,19 @@ async function main(): Promise<void> {
     if (parent) {
       await prisma.agent.updateMany({ where: { name: a.name, parentId: null }, data: { parentId: parent.id } });
     }
+  }
+  // Office floor lines. Exact previous demo copy only — a custom currentTask
+  // stays. Empty Atlas/Bolt/Ledger rows are filled only while they still
+  // carry the original "Idle in the Break Room" activity from this seed.
+  for (const fix of OFFICE_TASK_FIXUPS) {
+    await prisma.agent.updateMany({
+      where: {
+        name: fix.name,
+        currentTask: fix.from,
+        ...(fix.from === null ? { recentActivity: 'Idle in the Break Room' } : {}),
+      },
+      data: { currentTask: fix.to, recentActivity: fix.to },
+    });
   }
 
   for (const j of CRON_JOBS) {
@@ -339,11 +372,13 @@ async function main(): Promise<void> {
     where: { id: 'demo-approval-1', desc: 'Demo: allow the preview deploy script to run' },
     data: { tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.' },
   });
-  // Link the demo decision to DEMO-4 by id. Status is left alone (a decision
-  // already taken stays decided). Prose in `desc` is not the link.
+  // Link the demo decision to DEMO-4 by id, and to Aegis (the requester).
+  // Status is left alone (a decision already taken stays decided). Prose in
+  // `desc` is not the link. Ticket assignee Sentinel stays the fallback only
+  // when agentId is absent.
   await prisma.approval.updateMany({
     where: { id: 'demo-approval-1' },
-    data: { meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Sentinel' } },
+    data: { meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Aegis' } },
   });
   await prisma.activityEvent.updateMany({
     where: { id: 'demo-act-08' },
