@@ -33,6 +33,8 @@ interface DocDetail extends DocItem {
   html: string
 }
 
+const EMPTY_DOCS: DocItem[] = []
+
 function toneFor(type: string): 'blue' | 'orange' | 'green' {
   if (type === 'Brief') return 'orange'
   if (type === 'Note') return 'green'
@@ -49,7 +51,7 @@ export default function Docs() {
   const [detail, setDetail] = useState<DocDetail | null>(null)
   const [detailError, setDetailError] = useState(false)
 
-  const docs = data?.docs ?? []
+  const docs = data?.docs ?? EMPTY_DOCS
   const needle = query.trim().toLowerCase()
   const visible = useMemo(() => docs.filter((doc) => {
     if (tab === 1 && doc.type !== 'Spec') return false
