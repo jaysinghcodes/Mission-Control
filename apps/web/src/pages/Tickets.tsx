@@ -7,6 +7,8 @@ import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { rosterDisplayName } from '../data/roster'
 import { ticketCreateQueue } from '../lib/serialQueue'
 import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
+import { useBoardDrag } from '../lib/boardDrag'
+import { BoardDnd, CardDrag, ColumnDrop } from '../components/boardDnd'
 
 /**
  * Tickets — full-page kanban, fully functional (review fix #9) + Option B (MC-214).
@@ -14,8 +16,8 @@ import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../l
  *    default for an omitted status is `backlog` (Atlas decision, see
  *    apps/api/src/tickets/ticket-status.ts DEFAULT_CREATE_STATUS)
  *  - 5 office-aligned columns: To-Do → Build → QA → Review → Done
- *  - Cards move through all 5 via PATCH buttons (drag-and-drop is a separate
- *    follow-up ticket); legacy `inprogress` rows render in Build
+ *  - Cards move through all 5 via PATCH buttons, and by dragging between
+ *    columns (same PATCH). Legacy `inprogress` rows render in Build
  *  - After every write the board applies the server's answer, then refetches,
  *    so what you see always matches what a browser refresh would show
  *  - API errors (400/404/network) show a gentle inline notice, never a crash
@@ -114,9 +116,25 @@ export default function Tickets() {
   // activity event — belt and braces.)
   const movingRef = useRef(new Set<string>())
   const [moving, setMoving] = useState<ReadonlySet<string>>(new Set())
+  // Drag failures use the same banner as button failures. The ref lets the
+  // drag hook (called below, before showNotice) reach the latest function.
+  const showNoticeRef = useRef<(msg: string) => void>(() => {})
+  const drag = useBoardDrag(
+    data?.tickets ?? null,
+    async (id, status) => {
+      const r = await apiSend<{ ticket: Ticket }>('PATCH', `/tickets/${id}`, { status })
+      if (!r.ok) return { ok: false as const, httpStatus: r.status, error: r.error ?? 'Request failed' }
+      return { ok: true as const, ticket: r.data?.ticket ?? null }
+    },
+    {
+      onError: (msg) => showNoticeRef.current(msg),
+      onSettled: () => { void refetch() },
+      moveSeq,
+    },
+  )
   const [showDone, setShowDone] = useState(false)
   const [query, setQuery] = useState('')
-  const tickets = data?.tickets ?? []
+  const tickets = data ? drag.tickets : []
   const approvalsQ = useApi<{ approvals: ApprovalLike[] }>('/approvals', { pollMs: 15000 })
   const refetchApprovals = approvalsQ.refetch
   const pending = approvalsQ.data?.approvals ?? []
@@ -146,6 +164,7 @@ export default function Tickets() {
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
     noticeTimer.current = setTimeout(clearNotice, NOTICE_MS)
   }
+  showNoticeRef.current = showNotice
   useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
 
   // Instant refresh on any ticket/run activity event.
@@ -238,7 +257,7 @@ export default function Tickets() {
     // PATCH is pending is ignored on purpose — unlike "+ New ticket" (which
     // must never drop a submit), a repeated move is the SAME intent, already
     // being carried out, and the buttons are visibly disabled meanwhile.
-    if (movingRef.current.has(id)) return
+    if (movingRef.current.has(id) || drag.busyRef.current.has(id)) return
     movingRef.current.add(id)
     setMoving(new Set(movingRef.current))
     const seq = (moveSeq.current.get(id) ?? 0) + 1
@@ -270,7 +289,7 @@ export default function Tickets() {
    * and refetch so the card snaps back to the project it still has.
    */
   async function assignProject(id: string, projectId: string | null) {
-    if (movingRef.current.has(id)) return
+    if (movingRef.current.has(id) || drag.busyRef.current.has(id)) return
     movingRef.current.add(id)
     setMoving(new Set(movingRef.current))
     const r = await apiSend<{ ticket: Ticket }>('PATCH', `/tickets/${id}`, { projectId })
@@ -361,7 +380,7 @@ export default function Tickets() {
       <select
         aria-label={`Project for ${t.key ?? t.title}`}
         value={t.projectId ?? ''}
-        disabled={moving.has(t.id)}
+        disabled={moving.has(t.id) || drag.busy.has(t.id)}
         onChange={(e) => void assignProject(t.id, e.target.value || null)}
         className="h-7 max-w-full rounded-lg bg-mc-ctl px-2 text-[11px] text-mc-text outline-none disabled:opacity-50"
       >
@@ -370,6 +389,61 @@ export default function Tickets() {
           <option key={p.id} value={p.id}>{p.label}</option>
         ))}
       </select>
+    )
+  }
+
+  function openCard(t: Ticket) {
+    const face = assigneeFace(t.assignee, roster)
+    const flagged = needsYou(t)
+    return (
+      <SoftCard className="px-3.5 py-3">
+        {flagged && <StatusChip label="Needs you" tone="red" className="mb-2" />}
+        <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[14px] font-semibold leading-snug break-words">{t.title}</button>
+        <div className="mt-1 text-[11px] leading-snug break-words text-mc-sub">{projectLabel(t)}</div>
+        <div className="mt-3 flex items-center gap-2">
+          <Face agent={face.agent} agents={face.agents} px={28} />
+          <span className="min-w-0 flex-1">
+            <AgentName name={face.agent.name} role={'role' in face.agent ? face.agent.role : null} />
+          </span>
+          <span className="whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? t.id.slice(0, 8)}</span>
+        </div>
+        {/* Status buttons are not drag handles, so a click cannot start a drag. */}
+        <div className="mt-2.5 flex max-w-full flex-wrap items-center gap-2" onPointerDown={(e) => e.stopPropagation()}>
+          {t.status === 'todo' && (
+            <>
+              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">Start</button>
+              <button type="button" onClick={() => void move(t.id, 'backlog')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Backlog</button>
+            </>
+          )}
+          {(t.status === 'build' || t.status === 'inprogress') && (
+            <>
+              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">QA</button>
+              <button type="button" onClick={() => void move(t.id, 'todo')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">To-Do</button>
+            </>
+          )}
+          {t.status === 'qa' && (
+            <>
+              <button type="button" onClick={() => void move(t.id, 'review')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-orangebg px-3 text-[10.5px] font-semibold text-mc-orangetext disabled:opacity-50">Review</button>
+              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Build</button>
+            </>
+          )}
+          {t.status === 'review' && (
+            <>
+              <button type="button" onClick={() => void move(t.id, 'done')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-greenbg px-3 text-[10.5px] font-semibold text-mc-greentext disabled:opacity-50">Done</button>
+              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">QA</button>
+            </>
+          )}
+        </div>
+      </SoftCard>
+    )
+  }
+
+  function doneCard(t: Ticket) {
+    return (
+      <SoftCard className="px-3 py-2">
+        <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[13px] font-semibold break-words">{t.title}</button>
+        <div className="mt-1 whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? ''}</div>
+      </SoftCard>
     )
   }
 
@@ -459,11 +533,25 @@ export default function Tickets() {
       )}
 
       <div className="overflow-x-auto pb-2">
+        <BoardDnd
+          onDrop={(id, status) => {
+            // A status-button PATCH owns the card until it returns. A second
+            // drag is allowed — last write wins inside useBoardDrag.
+            if (movingRef.current.has(id)) return
+            void drag.moveTo(id, status)
+          }}
+          renderGhost={(id) => {
+            const t = tickets.find((row) => row.id === id)
+            if (!t) return null
+            const done = inColumn(t.status, BOARD_COLUMNS[4])
+            return <div className={done ? 'w-[168px]' : 'w-[260px]'}>{done ? doneCard(t) : openCard(t)}</div>
+          }}
+        >
         <div className="flex w-max gap-4">
           {openCols.map((col) => {
             const rows = shown.filter((t) => inColumn(t.status, col))
             return (
-              <div key={col.title} className="w-[260px] shrink-0">
+              <ColumnDrop key={col.title} status={col.status} className="w-[260px] shrink-0">
                 <div className="mb-3 flex items-center gap-2 px-1">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: DOT[col.status] }} />
                   <span className="whitespace-nowrap text-[15px] font-semibold">{col.title}</span>
@@ -475,55 +563,16 @@ export default function Tickets() {
                       {!data ? (loading && !loadError ? 'Loading…' : 'Not loaded — see the notice above.') : `Nothing in ${col.title} yet.`}
                     </div>
                   )}
-                  {rows.map((t) => {
-                    const face = assigneeFace(t.assignee, roster)
-                    const flagged = needsYou(t)
-                    return (
-                      <SoftCard key={t.id} className="px-3.5 py-3">
-                        {flagged && <StatusChip label="Needs you" tone="red" className="mb-2" />}
-                        <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[14px] font-semibold leading-snug break-words">{t.title}</button>
-                        <div className="mt-1 text-[11px] leading-snug break-words text-mc-sub">{projectLabel(t)}</div>
-                        <div className="mt-3 flex items-center gap-2">
-                          <Face agent={face.agent} agents={face.agents} px={28} />
-                          <span className="min-w-0 flex-1">
-                            <AgentName name={face.agent.name} role={'role' in face.agent ? face.agent.role : null} />
-                          </span>
-                          <span className="whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? t.id.slice(0, 8)}</span>
-                        </div>
-                        <div className="mt-2.5 flex max-w-full flex-wrap items-center gap-2">
-                          {t.status === 'todo' && (
-                            <>
-                              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">Start</button>
-                              <button type="button" onClick={() => void move(t.id, 'backlog')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Backlog</button>
-                            </>
-                          )}
-                          {(t.status === 'build' || t.status === 'inprogress') && (
-                            <>
-                              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">QA</button>
-                              <button type="button" onClick={() => void move(t.id, 'todo')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">To-Do</button>
-                            </>
-                          )}
-                          {t.status === 'qa' && (
-                            <>
-                              <button type="button" onClick={() => void move(t.id, 'review')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-orangebg px-3 text-[10.5px] font-semibold text-mc-orangetext disabled:opacity-50">Review</button>
-                              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Build</button>
-                            </>
-                          )}
-                          {t.status === 'review' && (
-                            <>
-                              <button type="button" onClick={() => void move(t.id, 'done')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-greenbg px-3 text-[10.5px] font-semibold text-mc-greentext disabled:opacity-50">Done</button>
-                              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">QA</button>
-                            </>
-                          )}
-                        </div>
-                      </SoftCard>
-                    )
-                  })}
+                  {rows.map((t) => (
+                    <CardDrag key={t.id} id={t.id}>
+                      {openCard(t)}
+                    </CardDrag>
+                  ))}
                 </div>
-              </div>
+              </ColumnDrop>
             )
           })}
-          <div className="w-[168px] shrink-0">
+          <ColumnDrop status="done" className="w-[168px] shrink-0">
             <div className="mb-3 flex items-center gap-2 px-1">
               <span className="h-2.5 w-2.5 rounded-full bg-mc-green" />
               <span className="text-[15px] font-semibold">Done</span>
@@ -532,22 +581,22 @@ export default function Tickets() {
             <SoftCard className="px-3 py-4 text-center">
               <div className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-mc-greenbg text-mc-greentext">✓</div>
               <div className="mt-2 text-[12px] text-mc-sub2">{doneRows.length} done</div>
-              <button type="button" onClick={() => setShowDone((v) => !v)} className="mt-2 text-[13px] font-semibold text-mc-accent-text">
+              <button type="button" onClick={() => setShowDone((v) => !v)} onPointerDown={(e) => e.stopPropagation()} className="mt-2 text-[13px] font-semibold text-mc-accent-text">
                 {showDone ? 'Hide' : 'Show all'}
               </button>
             </SoftCard>
             {showDone && (
               <div className="mt-3 space-y-2">
                 {doneRows.map((t) => (
-                  <SoftCard key={t.id} className="px-3 py-2">
-                    <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[13px] font-semibold break-words">{t.title}</button>
-                    <div className="mt-1 whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? ''}</div>
-                  </SoftCard>
+                  <CardDrag key={t.id} id={t.id}>
+                    {doneCard(t)}
+                  </CardDrag>
                 ))}
               </div>
             )}
-          </div>
+          </ColumnDrop>
         </div>
+        </BoardDnd>
       </div>
     </div>
   )
