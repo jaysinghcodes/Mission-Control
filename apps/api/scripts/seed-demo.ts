@@ -149,7 +149,7 @@ const ACTIVITY = [
   { id: 'demo-act-05', minsAgo: 51, type: 'run.progress', payload: { name: 'ticket DEMO-3', agent: 'Forge', progress: 60 } },
   { id: 'demo-act-06', minsAgo: 40, type: 'run.running', payload: { name: 'ticket DEMO-4', ticket: 'DEMO-4', agent: 'Sentinel' } },
   { id: 'demo-act-07', minsAgo: 33, type: 'run.failed', payload: { name: 'Trend Radar', agent: 'Scout', status: 'failed', summary: 'demo: upstream timeout' } },
-  { id: 'demo-act-08', minsAgo: 21, type: 'approval.new', payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis' } },
+  { id: 'demo-act-08', minsAgo: 21, type: 'approval.new', payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis', ticket: 'DEMO-4' } },
   { id: 'demo-act-09', minsAgo: 12, type: 'run.done', payload: { name: 'ticket DEMO-6', ticket: 'DEMO-6', agent: 'Aegis' } },
   { id: 'demo-act-10', minsAgo: 4, type: 'run.completed', payload: { name: 'Inbox Poll', agent: 'Patch', status: 'done' } },
 ];
@@ -159,7 +159,7 @@ const ACTIVITY = [
 // Note: a later real `approvals.snapshot` from the bridge drops all PENDING
 // rows (snapshot contract), which is exactly what we want for demo data.
 const APPROVALS = [
-  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending' },
+  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4' } },
   { id: 'demo-approval-2', kind: 'pr', tag: 'Merge the roster update', desc: 'You approved. Sample decision so the Decided tab is not empty.', status: 'approved' },
 ];
 
@@ -323,6 +323,16 @@ async function main(): Promise<void> {
   await prisma.approval.updateMany({
     where: { id: 'demo-approval-1', desc: 'Demo: allow the preview deploy script to run' },
     data: { tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.' },
+  });
+  // Link the demo decision to DEMO-4 by id. Status is left alone (a decision
+  // already taken stays decided). Prose in `desc` is not the link.
+  await prisma.approval.updateMany({
+    where: { id: 'demo-approval-1' },
+    data: { meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4' } },
+  });
+  await prisma.activityEvent.updateMany({
+    where: { id: 'demo-act-08' },
+    data: { payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis', ticket: 'DEMO-4' } },
   });
 
   // Usage windows. update: {} so a bridge snapshot already stored for that

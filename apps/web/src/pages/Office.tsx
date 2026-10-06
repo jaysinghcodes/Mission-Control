@@ -5,7 +5,7 @@ import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, Face, AgentName, SearchInput, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
-import { agentNeedsYou, mentions, pendingBlob, stageCounts, type ApprovalLike } from '../lib/board'
+import { activityNeedsYou, agentNeedsYou, isWorking, stageCounts, type ApprovalLike } from '../lib/board'
 
 /**
  * Office — Build / QA / Ship / Deploy desks, Commons, Activity and Pipeline.
@@ -13,9 +13,9 @@ import { agentNeedsYou, mentions, pendingBlob, stageCounts, type ApprovalLike } 
  * chief, research, support and trends sit in the Commons.
  */
 
-interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
+interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string; ticket?: string; run?: string; job?: string } | null; ts: string }
 interface ActivityResp { events: EventApi[] }
-interface Ticket { status: string; key?: string | null; title?: string | null; assignee?: string | null }
+interface Ticket { id?: string; status: string; key?: string | null; title?: string | null; assignee?: string | null }
 interface TicketsResp { tickets: Ticket[] }
 interface ApprovalsResp { approvals: ApprovalLike[] }
 
@@ -41,15 +41,22 @@ function roomFor(agent: Agent): Room {
 function Desk() {
   return (
     <div className="pointer-events-none mx-auto -mt-3 w-[120px]" aria-hidden>
-      <div className="mx-auto h-8 w-14 rounded-md bg-[#1d1d1f] p-1">
-        <div className="h-full w-full rounded-sm bg-[#2c2c2e]">
+      <div className="mc-desk-screen mx-auto h-8 w-14 rounded-md p-1">
+        <div className="mc-desk-glass h-full w-full rounded-sm">
           <div className="ml-1 mt-1 h-0.5 w-6 rounded bg-mc-accent" />
           <div className="ml-1 mt-1 h-0.5 w-8 rounded bg-[#636366]" />
         </div>
       </div>
-      <div className="mx-auto h-2.5 w-[88px] rounded-full bg-mc-fill" />
+      <div className="mc-desk-stand mx-auto h-2.5 w-[88px] rounded-full" />
     </div>
   )
+}
+
+function waitingClause(agentsWaiting: number, approvals: number): string {
+  if (agentsWaiting === 0) return ''
+  const who = agentsWaiting === 1 ? '1 agent' : `${agentsWaiting} agents`
+  const what = approvals === 1 ? '1 approval' : `${approvals} approvals`
+  return ` · ${who} waiting on ${what}`
 }
 
 export default function Office() {
@@ -93,12 +100,12 @@ export default function Office() {
     return buckets
   }, [agents, filter, query, pending, ticketRows])
 
-  const working = agents.filter((a) => a.status === 'working').length
+  const working = agents.filter((a) => isWorking(a)).length
   const needsCount = agents.filter((a) => needs(a)).length
   const summary = agentsQ.data
     ? agents.length === 0
       ? 'The floor is empty'
-      : `${agents.length} agents · ${working} working${needsCount ? ` · ${needsCount} needs you` : ''}`
+      : `${agents.length} agents · ${working} working${waitingClause(needsCount, pending.length)}`
     : 'Loading the floor…'
 
   const pipe = stageCounts(ticketRows)
@@ -135,10 +142,10 @@ export default function Office() {
               const countLabel = busy === 0 ? 'Idle' : busy === 1 ? '1 in progress' : `${busy} in progress`
               return (
                 <SoftCard key={room.id} className="relative min-h-[460px] px-3 py-3">
-                  <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: room.color }} />
-                    <span className="min-w-0 truncate text-[15px] font-semibold">{room.label}</span>
-                    <span className="ml-auto shrink-0 whitespace-nowrap text-[12px] text-mc-sub">{countLabel}</span>
+                    <span className="min-w-[auto] shrink-0 text-[15px] font-semibold">{room.label}</span>
+                    <span className="ml-auto min-w-0 truncate text-[12px] text-mc-sub">{countLabel}</span>
                   </div>
                   {crew.length === 0 && <p className="mt-8 text-center text-[12px] text-mc-sub">Empty</p>}
                   {crew.map((agent) => {
@@ -209,7 +216,7 @@ export default function Office() {
               const hit = agents.find((a) => a.name.toLowerCase() === name.toLowerCase())
               const who = hit ?? { id: name, name, role: null, status: 'idle' }
               const text = e.payload?.name || e.payload?.summary || e.type
-              const waiting = mentions(pendingBlob(pending), text, name)
+              const waiting = activityNeedsYou(e.payload, pending)
               const failed = /fail/i.test(`${e.type} ${text}`)
               return (
                 <div key={`${e.ts}-${i}`} className="flex gap-2 border-b border-mc-sep px-3 py-3 last:border-0">

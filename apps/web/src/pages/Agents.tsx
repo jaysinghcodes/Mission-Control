@@ -5,7 +5,7 @@ import type { Agent, AgentsResp } from '../types'
 import { PageHeader, Segmented, StatusChip, Face, Kicker, EmptyState, SearchInput } from '../components/shell'
 import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
-import { agentNeedsYou, type ApprovalLike } from '../lib/board'
+import { agentNeedsYou, isWorking, type ApprovalLike } from '../lib/board'
 
 /**
  * Agents — who is doing what right now. The old Team roster, as cards.
@@ -26,7 +26,7 @@ function tone(
 export default function Agents() {
   const { data, loading, errorMessage } = useApi<AgentsResp>('/agents', { pollMs: 15000 })
   const approvalsQ = useApi<{ approvals: ApprovalLike[] }>('/approvals', { pollMs: 15000 })
-  const ticketsQ = useApi<{ tickets: { key: string | null; title: string; assignee: string | null }[] }>('/tickets', { pollMs: 15000 })
+  const ticketsQ = useApi<{ tickets: { id: string; key: string | null; title: string; assignee: string | null }[] }>('/tickets', { pollMs: 15000 })
   const { events } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
   const agents = data?.agents ?? []
@@ -56,7 +56,7 @@ export default function Agents() {
     return `${cap.name} ${cap.role} ${a.currentTask ?? ''} ${a.recentActivity ?? ''}`.toLowerCase().includes(q)
   })
 
-  const working = agents.filter((a) => tone(a, pending, tickets) === 'green').length
+  const working = agents.filter((a) => isWorking(a)).length
   const needs = agents.filter((a) => tone(a, pending, tickets) === 'red').length
   const summary = !data
     ? (loading && !errorMessage ? 'Loading agents…' : 'Agents not loaded')

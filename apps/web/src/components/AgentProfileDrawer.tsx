@@ -100,7 +100,7 @@ export function AgentProfileDrawer({
           <AgentAvatar agent={agent} agents={agents} size={1.8} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[16px] font-semibold leading-tight text-mc-text">{name}</div>
-            <div className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${chief ? 'text-mc-primary' : 'text-mc-sub'}`}>
+            <div className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${chief ? 'text-mc-accent-text' : 'text-mc-sub'}`}>
               {roleTitle}
             </div>
             <div className="mt-1.5 flex items-center gap-1.5">

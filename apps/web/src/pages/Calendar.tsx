@@ -393,7 +393,7 @@ function JobBlock({
     orange: 'bg-mc-orangebg text-mc-orangetext',
     green: 'bg-mc-greenbg text-mc-greentext',
     teal: 'bg-mc-tealbg text-mc-tealtext',
-    gray: 'bg-mc-fill text-mc-sub',
+    gray: 'bg-mc-fill text-mc-graytext',
   }[tone]
   const t = parseTime(job.time)
   return (

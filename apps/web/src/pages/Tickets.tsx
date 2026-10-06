@@ -6,7 +6,7 @@ import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, Bann
 import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { rosterDisplayName } from '../data/roster'
 import { ticketCreateQueue } from '../lib/serialQueue'
-import { ticketNeedsYou, type ApprovalLike } from '../lib/board'
+import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
 
 /**
  * Tickets — full-page kanban, fully functional (review fix #9) + Option B (MC-214).
@@ -29,19 +29,7 @@ import { ticketNeedsYou, type ApprovalLike } from '../lib/board'
 interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; projectId: string | null; createdAt: string }
 interface TicketsResp { tickets: Ticket[] }
 
-/** Option B columns (MC-214, locked): `inprogress` is a legacy alias for Build. */
-const COLUMNS = [
-  { title: 'To-Do', status: 'todo', aliases: [] as string[] },
-  { title: 'Build', status: 'build', aliases: ['inprogress'] },
-  { title: 'QA', status: 'qa', aliases: [] as string[] },
-  { title: 'Review', status: 'review', aliases: [] as string[] },
-  { title: 'Done', status: 'done', aliases: [] as string[] },
-]
-
-/** Column membership — canonical status plus legacy aliases (no data loss). */
-function inColumn(t: Ticket, col: { status: string; aliases: string[] }): boolean {
-  return t.status === col.status || col.aliases.includes(t.status)
-}
+/** Columns live in board.ts so the board, Pipeline, and Office share one status map. */
 
 /**
  * Assignee sticker. The card used to draw the generic Bot glyph. Match the
@@ -338,9 +326,9 @@ export default function Tickets() {
     if (!q) return true
     return t.title.toLowerCase().includes(q) || (t.key ?? '').toLowerCase().includes(q) || (t.assignee ?? '').toLowerCase().includes(q)
   })
-  const openCols = COLUMNS.filter((c) => c.status !== 'done')
-  const doneRows = shown.filter((t) => inColumn(t, COLUMNS[4]))
-  const openCount = shown.filter((t) => !inColumn(t, COLUMNS[4]) && t.status !== 'backlog').length
+  const openCols = BOARD_COLUMNS.filter((c) => c.status !== 'done')
+  const doneRows = shown.filter((t) => inColumn(t.status, BOARD_COLUMNS[4]))
+  const openCount = shown.filter((t) => !inColumn(t.status, BOARD_COLUMNS[4]) && t.status !== 'backlog').length
   const needs = shown.filter((t) => needsYou(t)).length
   const summary = !data
     ? (loading && !loadError ? 'Loading the board…' : 'Board not loaded')
@@ -473,7 +461,7 @@ export default function Tickets() {
       <div className="overflow-x-auto pb-2">
         <div className="flex w-max gap-4">
           {openCols.map((col) => {
-            const rows = shown.filter((t) => inColumn(t, col))
+            const rows = shown.filter((t) => inColumn(t.status, col))
             return (
               <div key={col.title} className="w-[260px] shrink-0">
                 <div className="mb-3 flex items-center gap-2 px-1">
@@ -506,25 +494,25 @@ export default function Tickets() {
                           {t.status === 'todo' && (
                             <>
                               <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">Start</button>
-                              <button type="button" onClick={() => void move(t.id, 'backlog')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">Backlog</button>
+                              <button type="button" onClick={() => void move(t.id, 'backlog')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Backlog</button>
                             </>
                           )}
                           {(t.status === 'build' || t.status === 'inprogress') && (
                             <>
                               <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">QA</button>
-                              <button type="button" onClick={() => void move(t.id, 'todo')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">To-Do</button>
+                              <button type="button" onClick={() => void move(t.id, 'todo')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">To-Do</button>
                             </>
                           )}
                           {t.status === 'qa' && (
                             <>
                               <button type="button" onClick={() => void move(t.id, 'review')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-orangebg px-3 text-[10.5px] font-semibold text-mc-orangetext disabled:opacity-50">Review</button>
-                              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">Build</button>
+                              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Build</button>
                             </>
                           )}
                           {t.status === 'review' && (
                             <>
                               <button type="button" onClick={() => void move(t.id, 'done')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-greenbg px-3 text-[10.5px] font-semibold text-mc-greentext disabled:opacity-50">Done</button>
-                              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-sub disabled:opacity-50">QA</button>
+                              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">QA</button>
                             </>
                           )}
                         </div>

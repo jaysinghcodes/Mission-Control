@@ -137,7 +137,7 @@ export function SearchInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={label}
-        className="w-full bg-transparent text-[13px] text-mc-text outline-none placeholder:text-mc-sub"
+        className="w-full bg-transparent text-[13px] text-mc-text outline-none placeholder:text-mc-placeholder"
       />
     </label>
   )

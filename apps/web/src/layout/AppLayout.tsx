@@ -15,6 +15,12 @@ import { reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '.
 const HEARTBEAT_MS = 5000
 const HEARTBEAT_TIMEOUT_MS = 4000
 const FIRST_BEAT_DELAY_MS = 300
+const NARROW_QUERY = '(max-width: 899px)'
+
+function focusableIn(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])')]
+    .filter((el) => !el.hidden && el.getAttribute('aria-hidden') !== 'true')
+}
 
 type ThemeChoice = 'system' | 'light' | 'dark'
 
@@ -74,9 +80,14 @@ export default function AppLayout() {
   const { pathname } = useLocation()
   const nav = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const approvals = useApi<{ approvals: { id: string }[] }>('/approvals', { pollMs: 15000 })
   const needs = approvals.data?.approvals.length ?? 0
   const navEl = useRef<HTMLElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  const menuOpenRef = useRef(false)
 
   const refetchApprovals = approvals.refetch
   useEffect(() => {
@@ -86,6 +97,21 @@ export default function AppLayout() {
   useEffect(() => {
     navEl.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' })
   }, [pathname])
+
+  useEffect(() => { menuOpenRef.current = menuOpen }, [menuOpen])
+
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW_QUERY)
+    const apply = () => {
+      setNarrow(mq.matches)
+      if (!mq.matches) setSidebarOpen(false)
+    }
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+
+  useEffect(() => { setSidebarOpen(false) }, [pathname])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -98,6 +124,39 @@ export default function AppLayout() {
       window.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
+
+  useEffect(() => {
+    if (!narrow || !sidebarOpen) return
+    const root = asideRef.current
+    if (!root) return
+    const items = focusableIn(root)
+    const current = root.querySelector<HTMLElement>('[aria-current="page"]')
+    ;(current && items.includes(current) ? current : items[0])?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (menuOpenRef.current) return
+        e.preventDefault()
+        setSidebarOpen(false)
+        toggleRef.current?.focus()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const list = focusableIn(root)
+      if (!list.length) return
+      const first = list[0]
+      const last = list[list.length - 1]
+      const active = document.activeElement
+      if (e.shiftKey && (active === first || !root.contains(active))) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [narrow, sidebarOpen])
 
   const navRef = useRef(nav)
   useEffect(() => { navRef.current = nav }, [nav])
@@ -165,8 +224,31 @@ export default function AppLayout() {
 
   return (
     <div className="h-full bg-[var(--mc-desk)] p-3 sm:p-4">
-      <div className="mc-window flex h-full min-h-0 overflow-hidden">
-        <aside className="flex h-full min-h-0 w-[230px] shrink-0 flex-col overflow-hidden border-r border-mc-sideborder bg-mc-sidebar">
+      <div className="mc-window relative flex h-full min-h-0 overflow-hidden">
+        {narrow && sidebarOpen && (
+          <button
+            type="button"
+            aria-label="Close sidebar"
+            className="absolute inset-0 z-30 bg-black/40"
+            onClick={() => {
+              setSidebarOpen(false)
+              toggleRef.current?.focus()
+            }}
+          />
+        )}
+        {(!narrow || sidebarOpen) && (
+        <aside
+          id="app-sidebar"
+          ref={asideRef}
+          role={narrow ? 'dialog' : undefined}
+          aria-modal={narrow ? true : undefined}
+          aria-label="Sidebar"
+          className={
+            narrow
+              ? 'absolute inset-y-0 left-0 z-40 flex h-full w-[230px] flex-col overflow-hidden border-r border-mc-sideborder bg-mc-sidebar shadow-xl'
+              : 'flex h-full min-h-0 w-[230px] shrink-0 flex-col overflow-hidden border-r border-mc-sideborder bg-mc-sidebar'
+          }
+        >
           <div className="flex items-center gap-2 px-4 pt-4">
             {['#ff5f57', '#febc2e', '#28c840'].map((c) => (
               <span key={c} className="h-3 w-3 rounded-full" style={{ background: c }} aria-hidden />
@@ -182,6 +264,11 @@ export default function AppLayout() {
                   <NavLink
                     key={item.path}
                     to={item.path}
+                    onClick={() => {
+                      if (!narrow) return
+                      setSidebarOpen(false)
+                      toggleRef.current?.focus()
+                    }}
                     className={({ isActive }) => {
                       const on = isActive || (item.path === '/tasks' && onTasks) || (item.path === '/system' && pathname.startsWith('/system'))
                       return `mb-0.5 flex h-8 items-center rounded-lg px-3 text-[14px] ${
@@ -268,8 +355,26 @@ export default function AppLayout() {
             )}
           </div>
         </aside>
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col">
+          {narrow && (
+            <div className="flex h-12 shrink-0 items-center border-b border-mc-border px-4">
+              <button
+                ref={toggleRef}
+                type="button"
+                aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+                aria-expanded={sidebarOpen}
+                aria-controls="app-sidebar"
+                onClick={() => setSidebarOpen((open) => !open)}
+                className="grid h-8 w-8 place-items-center rounded-lg text-mc-text hover:bg-black/5"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          )}
           {api.state === 'offline' && (
             <div role="alert" className="mx-6 mt-4 shrink-0 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
               Can't reach the API at {API_URL} ({api.lastError ?? 'no response'}). Data on this page may be out of date

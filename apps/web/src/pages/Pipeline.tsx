@@ -204,7 +204,7 @@ export default function Pipeline() {
               {done.map((ticket) => (
                 <div key={ticket.id} className="flex items-center justify-between px-5 py-3 text-[13px]">
                   <span className="font-medium">{ticket.title}</span>
-                  <span className="text-mc-sub">Deployed · {fmt(ticket.createdAt)}</span>
+                  <span className="text-mc-sub">Started · {fmt(ticket.createdAt)}</span>
                 </div>
               ))}
             </SoftCard>

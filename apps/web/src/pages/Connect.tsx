@@ -17,7 +17,7 @@ import {
  */
 
 const API = API_URL
-const PROGRESS_KEY = 'mc-setup-progress'
+const PROGRESS_KEY = 'mc-setup-progress-v2'
 const SHORT = ['Prerequisites', 'Clone', 'Root .env', 'Start stack', 'Verify', 'OpenClaw', 'Remote', 'Smoke test']
 
 function clientOS(): OsKey {
@@ -39,6 +39,18 @@ function loadProgress(): Record<number, string> {
   } catch {
     return {}
   }
+}
+
+/** The green bar reaches only steps that are really done, in order. The current index does not count. */
+function setupLineWidth(progress: Record<number, string>): string {
+  let prefix = 0
+  for (const step of STEP_DATA) {
+    if (!progress[step.id]) break
+    prefix += 1
+  }
+  if (prefix <= 1) return '0px'
+  const fraction = (prefix - 1) / (STEP_DATA.length - 1)
+  return `calc(${fraction * 100}% - ${fraction * 2}rem)`
 }
 
 async function probeApi(): Promise<{ ok: boolean; detail: string }> {
@@ -138,7 +150,7 @@ export default function Connect() {
           <span className="absolute left-4 right-4 top-[10px] h-0.5 bg-mc-track" aria-hidden />
           <span
             className="absolute left-4 top-[10px] h-0.5 bg-mc-green"
-            style={{ width: `calc(${(index / (STEP_DATA.length - 1)) * 100}% - 2rem)` }}
+            style={{ width: setupLineWidth(progress) }}
             aria-hidden
           />
           {STEP_DATA.map((s, i) => {

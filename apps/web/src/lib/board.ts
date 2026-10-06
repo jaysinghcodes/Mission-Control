@@ -2,9 +2,21 @@
  * One status → stage map for the board, Pipeline, and the Office pipeline
  * panel. Build / QA / Ship / Deploy match the kanban columns
  * (build, qa, review, done). To-Do and Backlog are not stages.
+ *
+ * Needs-you is an id link: approval.meta → ticket or run → the assignee.
+ * Approval prose is never searched, so an agent named Patch cannot match
+ * the words "security patch".
  */
 
 export const STAGES = ['Build', 'QA', 'Ship', 'Deploy'] as const
+
+export const BOARD_COLUMNS = [
+  { title: 'To-Do', status: 'todo', aliases: [] as string[] },
+  { title: 'Build', status: 'build', aliases: ['inprogress'] },
+  { title: 'QA', status: 'qa', aliases: [] as string[] },
+  { title: 'Review', status: 'review', aliases: [] as string[] },
+  { title: 'Done', status: 'done', aliases: [] as string[] },
+] as const
 
 export function stageIndexForStatus(status: string | null | undefined): number | null {
   const s = (status ?? '').toLowerCase()
@@ -24,40 +36,75 @@ export function stageCounts(tickets: { status: string }[]): number[] {
   return counts
 }
 
+export function inColumn(
+  status: string,
+  col: { status: string; aliases: readonly string[] },
+): boolean {
+  const s = status.toLowerCase()
+  return s === col.status || col.aliases.some((alias) => alias === s)
+}
+
+/** Working means the agent status, including someone who also needs a decision. */
+export function isWorking(agent: { status?: string | null }): boolean {
+  return agent.status === 'working'
+}
+
+export interface ApprovalLink {
+  ticketId?: string | null
+  ticketKey?: string | null
+  runId?: string | null
+  agentId?: string | null
+}
+
 export interface ApprovalLike {
+  id?: string
   tag?: string | null
   desc?: string | null
+  meta?: ApprovalLink | null
 }
 
-/** Pending approvals only. Callers pass the default GET /approvals list. */
-export function pendingBlob(rows: ApprovalLike[]): string {
-  return rows.map((row) => `${row.tag ?? ''} ${row.desc ?? ''}`).join('\n').toLowerCase()
-}
-
-export function mentions(blob: string, ...parts: (string | null | undefined)[]): boolean {
-  if (!blob) return false
-  return parts.some((part) => {
-    const s = (part ?? '').trim().toLowerCase()
-    return s.length >= 2 && blob.includes(s)
-  })
+function links(rows: ApprovalLike[]): ApprovalLink[] {
+  const out: ApprovalLink[] = []
+  for (const row of rows) {
+    const meta = row.meta
+    if (!meta || typeof meta !== 'object') continue
+    if (meta.ticketId || meta.ticketKey || meta.runId) out.push(meta)
+  }
+  return out
 }
 
 export function ticketNeedsYou(
-  ticket: { key?: string | null; title?: string | null },
+  ticket: { id?: string | null; key?: string | null },
   rows: ApprovalLike[],
 ): boolean {
-  return mentions(pendingBlob(rows), ticket.key, ticket.title)
+  return links(rows).some(
+    (meta) =>
+      (!!meta.ticketId && !!ticket.id && meta.ticketId === ticket.id) ||
+      (!!meta.ticketKey && !!ticket.key && meta.ticketKey === ticket.key),
+  )
 }
 
 export function agentNeedsYou(
-  agent: { name: string },
+  agent: { id?: string; name: string },
   rows: ApprovalLike[],
-  tickets: { key?: string | null; title?: string | null; assignee?: string | null }[],
+  tickets: { id?: string | null; key?: string | null; assignee?: string | null }[],
 ): boolean {
-  const blob = pendingBlob(rows)
-  if (!blob) return false
-  if (mentions(blob, agent.name)) return true
-  return tickets.some(
-    (ticket) => ticket.assignee === agent.name && mentions(blob, ticket.key, ticket.title),
+  return tickets.some((ticket) => {
+    if (!ticketNeedsYou(ticket, rows) || !ticket.assignee) return false
+    return ticket.assignee === agent.name || ticket.assignee === agent.id
+  })
+}
+
+export function activityNeedsYou(
+  payload: { ticket?: string | null; run?: string | null; job?: string | null } | null | undefined,
+  rows: ApprovalLike[],
+): boolean {
+  const ticket = payload?.ticket ?? null
+  const run = payload?.run ?? payload?.job ?? null
+  if (!ticket && !run) return false
+  return links(rows).some(
+    (meta) =>
+      (!!ticket && (ticket === meta.ticketId || ticket === meta.ticketKey)) ||
+      (!!run && run === meta.runId),
   )
 }

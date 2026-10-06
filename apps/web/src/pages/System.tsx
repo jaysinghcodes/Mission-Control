@@ -41,8 +41,8 @@ interface EventApi { type: string; payload: { name?: string; summary?: string; a
 
 const PERIODS = [
   { id: '24h', label: 'Today' },
-  { id: '7d', label: 'This week' },
-  { id: 'month', label: 'This month' },
+  { id: '7d', label: 'Last 7 days' },
+  { id: 'month', label: 'Month to date' },
 ] as const
 
 function providersOf(usage: Usage | null | undefined): Provider[] {
@@ -162,7 +162,7 @@ export default function System() {
       </div>
       <div className="mb-3">
         <Segmented
-          labels={['Today', 'This week', 'This month']}
+          labels={PERIODS.map((p) => p.label)}
           active={period}
           onChange={setPeriod}
           ariaLabel="Spend period"
@@ -172,7 +172,7 @@ export default function System() {
       {!any && (day.data || week.data || month.data) && (
         <EmptyState
           title="No model spend yet"
-          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. Today, this week, and this month stay empty until a snapshot exists. A per-model price override is not part of this build."
+          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. Today, the last 7 days, and the month to date stay empty until a snapshot exists. A per-model price override is not part of this build."
         />
       )}
       {!day.data && !week.data && !month.data && (
@@ -202,8 +202,8 @@ export default function System() {
                   <th className="px-4 py-2 font-semibold">Model</th>
                   <th className="px-4 py-2 text-right font-semibold">Tokens · {PERIODS[period].label.toLowerCase()}</th>
                   <th className="px-4 py-2 text-right font-semibold">Today</th>
-                  <th className="px-4 py-2 text-right font-semibold">Week</th>
-                  <th className="px-4 py-2 text-right font-semibold">Month</th>
+                  <th className="px-4 py-2 text-right font-semibold">Last 7 days</th>
+                  <th className="px-4 py-2 text-right font-semibold">Month to date</th>
                 </tr>
               </thead>
               <tbody>
@@ -235,7 +235,7 @@ export default function System() {
                       {open && (
                         <tr className="border-t border-mc-sep bg-mc-bg">
                           <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
-                            Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. This month is the calendar month to date (UTC). A long session counts in the window of its last activity.
+                            Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month (UTC). A long session counts in the window of its last activity.
                             Price override is later — this build does not store a per-token price.
                           </td>
                         </tr>
