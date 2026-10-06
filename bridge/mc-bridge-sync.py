@@ -16,6 +16,7 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
                                           + run.* for job-state changes
   (derived from sessions token counts) →  usage.snapshot × 3 (24h, 7d, month)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
+  agent workspace MEMORY.md + memory/*.md → memory.snapshot
 
 Design rules (why the code looks the way it does):
   * stdlib only — runs under any python3 >= 3.8 with zero installs.
@@ -34,12 +35,14 @@ Usage:
   python3 bridge/mc-bridge-sync.py              # collect + post
   python3 bridge/mc-bridge-sync.py --dry-run    # collect + print payloads, post nothing
   python3 bridge/mc-bridge-sync.py --from-dir bridge/examples   # use JSON files instead of the CLI
+  python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw-memory
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -447,6 +450,283 @@ def usage_from_sessions(
     }
 
 
+# ── Memory (OpenClaw workspace files → memory.snapshot) ────────────────────
+# Confirmed from OpenClaw docs (docs.openclaw.ai/concepts/memory and
+# concepts/agent-workspace):
+#   * Each agent has one workspace. `openclaw agents list --json` includes
+#     `workspace` (default ~/.openclaw/workspace, or agents.entries.*.workspace).
+#   * MEMORY.md at the workspace root is curated long-term memory.
+#   * memory/YYYY-MM-DD.md and memory/YYYY-MM-DD-<slug>.md are daily notes.
+#     Slugged files are what the session-memory hook writes next to the
+#     date-only file. Nested dirs (memory/.dreams, memory/imports) are not
+#     daily notes and are not walked.
+# The web app never reads these files. This bridge posts them.
+
+DAILY_NOTE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:-.+)?\.md$")
+# A line by itself, so a sentence that happens to mention a clock is not a timestamp.
+NOTE_CLOCK = re.compile(
+    r"^(?:#+\s*)?(?:time\s*:\s*)?(\d{1,2}):(\d{2})\s*(AM|PM)?(?:\s*(?:CT|CST|CDT))?\s*$",
+    re.IGNORECASE,
+)
+MAX_MEMORY_BYTES = 1_000_000
+
+
+def memory_stable_id(agent_id: str, rel: str) -> str:
+    """Stable across re-syncs. Same agent + relative path → same id."""
+    digest = hashlib.sha256(f"{agent_id}\n{rel}".encode("utf-8")).hexdigest()[:24]
+    return f"mem-{digest}"
+
+
+def iso_utc(mtime: float) -> str:
+    dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).replace(microsecond=0)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def iso_z(dt: datetime.datetime) -> str:
+    utc = dt.astimezone(datetime.timezone.utc).replace(microsecond=0)
+    return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _nth_sunday(year: int, month: int, n: int) -> int:
+    """Day-of-month of the nth Sunday. weekday(): Monday is 0, Sunday is 6."""
+    first = datetime.date(year, month, 1)
+    offset = (6 - first.weekday()) % 7
+    return 1 + offset + (n - 1) * 7
+
+
+def chicago_offset_seconds(utc_naive: datetime.datetime) -> int:
+    """
+    Seconds to add to a UTC instant to get America/Chicago wall time.
+
+    US Central rules since 2007, stdlib only (no zoneinfo, so Python 3.8
+    can run the bridge): DST starts the second Sunday in March at 02:00 CST
+    (08:00 UTC) and ends the first Sunday in November at 02:00 CDT (07:00 UTC).
+    """
+    year = utc_naive.year
+    start = datetime.datetime(year, 3, _nth_sunday(year, 3, 2), 8, 0, 0)
+    end = datetime.datetime(year, 11, _nth_sunday(year, 11, 1), 7, 0, 0)
+    if start <= utc_naive < end:
+        return -5 * 3600
+    return -6 * 3600
+
+
+def chicago_day_of(dt: datetime.datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    utc = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    local = utc + datetime.timedelta(seconds=chicago_offset_seconds(utc))
+    return local.strftime("%Y-%m-%d")
+
+
+def chicago_wall(day: str, hour: int, minute: int) -> datetime.datetime:
+    """UTC instant of a clock time on a Chicago calendar day."""
+    year, month, date = (int(part) for part in day.split("-"))
+    local = datetime.datetime(year, month, date, hour, minute)
+    as_cdt = local + datetime.timedelta(hours=5)
+    as_cst = local + datetime.timedelta(hours=6)
+    if chicago_offset_seconds(as_cdt) == -5 * 3600:
+        utc = as_cdt
+    else:
+        utc = as_cst
+    return utc.replace(tzinfo=datetime.timezone.utc)
+
+
+def parse_note_clock(body: str) -> Optional[tuple]:
+    """First standalone clock in the note, or None. 23:58 and 11:58 PM both work."""
+    for line in body.splitlines()[:30]:
+        match = NOTE_CLOCK.match(line.strip())
+        if not match:
+            continue
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        ampm = (match.group(3) or "").upper()
+        if minute > 59:
+            continue
+        if ampm:
+            if hour < 1 or hour > 12:
+                continue
+            hour = (0 if hour == 12 else hour) if ampm == "AM" else (12 if hour == 12 else hour + 12)
+        elif hour > 23:
+            continue
+        return hour, minute
+    return None
+
+
+def daily_created_at(day: str, mtime: float, body: str) -> str:
+    """
+    Daily notes take their calendar day from the filename, in America/Chicago.
+
+    A copy, restore, or checkout rewrites mtime, and appending after midnight
+    must not move yesterday's note onto today. Use mtime only when that
+    instant already falls on the filename's Chicago date. Otherwise a
+    standalone clock in the note (``Time: 23:58 CT``), and if there is none,
+    12:00 CT on that date.
+    """
+    mtime_dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc)
+    if chicago_day_of(mtime_dt) == day:
+        return iso_utc(mtime)
+    clock = parse_note_clock(body)
+    if clock:
+        return iso_z(chicago_wall(day, clock[0], clock[1]))
+    return iso_z(chicago_wall(day, 12, 0))
+
+
+def memory_title(body: str, fallback: str) -> str:
+    for line in body.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if text.startswith("#"):
+            text = text.lstrip("#").strip()
+        if text:
+            return text[:200]
+    return fallback[:200] or "Note"
+
+
+def is_real_day(day: str) -> bool:
+    try:
+        datetime.datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
+def resolve_workspace(raw: str, base: Optional[Path]) -> Path:
+    path = Path(os.path.expanduser(raw))
+    if not path.is_absolute() and base is not None:
+        path = base / path
+    return path
+
+
+def is_memory_workspace(path: Path) -> bool:
+    return (path / "MEMORY.md").is_file() or (path / "memory").is_dir()
+
+
+def agents_from_memory_dir(root: Path) -> Optional[List[Dict[str, Any]]]:
+    """
+    A sample OpenClaw memory dir is either one workspace (MEMORY.md or
+    memory/ inside it) or a folder of per-agent workspaces. None if `root`
+    does not exist — the caller skips the snapshot instead of posting [].
+    """
+    if not root.is_dir():
+        return None
+    if is_memory_workspace(root):
+        return [{"id": root.name, "name": root.name, "identityName": root.name, "workspace": str(root)}]
+    agents: List[Dict[str, Any]] = []
+    for child in sorted(root.iterdir()):
+        if child.name.startswith(".") or not child.is_dir():
+            continue
+        if is_memory_workspace(child):
+            agents.append({
+                "id": child.name,
+                "name": child.name,
+                "identityName": child.name,
+                "workspace": str(child),
+            })
+    return agents
+
+
+def _read_memory_text(path: Path) -> Optional[str]:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        log(f"{path}: {exc} — skipping")
+        return None
+    if size > MAX_MEMORY_BYTES:
+        log(f"{path}: over 1MB — skipping")
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        log(f"{path}: {exc} — skipping")
+        return None
+
+
+def entry_from_file(
+    agent_id: str,
+    agent_name: str,
+    workspace: Path,
+    path: Path,
+    kind: str,
+    day: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    text = _read_memory_text(path)
+    if text is None:
+        return None
+    body = text.strip()
+    if not body:
+        return None
+    rel = path.relative_to(workspace).as_posix()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError as exc:
+        log(f"{path}: {exc} — skipping")
+        return None
+    # `day` is the filename date for a daily note. Long-term MEMORY.md has
+    # no date in the name and keeps the file mtime.
+    created = daily_created_at(day, mtime, body) if day else iso_utc(mtime)
+    return {
+        "id": memory_stable_id(agent_id, rel),
+        "title": memory_title(body, path.stem),
+        "body": body,
+        "agent": agent_name,
+        "createdAt": created,
+        "kind": kind,
+        "source": "bridge",
+        "ref": rel,
+    }
+
+
+def collect_memory(
+    agents: List[Dict[str, Any]],
+    base: Optional[Path] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Read each agent's MEMORY.md and memory/YYYY-MM-DD*.md.
+
+    Returns None when there is nothing to post: no agents, or agents were
+    given but no workspace directory could be read. An empty list would be
+    a snapshot that clears bridge rows, so a folder with zero workspaces
+    must not become []. Returns [] only when a workspace was readable and
+    simply had no notes.
+    """
+    if not agents:
+        return None
+    readable = 0
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for agent in agents:
+        raw = agent.get("workspace")
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        workspace = resolve_workspace(raw, base)
+        if not workspace.is_dir():
+            log(f"memory workspace missing: {workspace} — skipping agent")
+            continue
+        readable += 1
+        agent_id = str(first(agent, "id", "name") or workspace.name)
+        agent_name = str(first(agent, "identityName", "name", "id") or agent_id)
+        long_term = workspace / "MEMORY.md"
+        if long_term.is_file():
+            row = entry_from_file(agent_id, agent_name, workspace, long_term, "long-term")
+            if row:
+                by_id[row["id"]] = row
+        daily_dir = workspace / "memory"
+        if not daily_dir.is_dir():
+            continue
+        for path in sorted(daily_dir.iterdir()):
+            if not path.is_file():
+                continue
+            match = DAILY_NOTE.match(path.name)
+            if not match or not is_real_day(match.group(1)):
+                continue
+            row = entry_from_file(agent_id, agent_name, workspace, path, "daily", match.group(1))
+            if row:
+                by_id[row["id"]] = row
+    if readable == 0:
+        return None
+    return sorted(by_id.values(), key=lambda row: (row["createdAt"], row["id"]), reverse=True)
+
+
 # ── Transport ───────────────────────────────────────────────────────────────
 
 def post(api_url: str, token: str, etype: str, payload: Dict[str, Any]) -> bool:
@@ -479,6 +759,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="OpenClaw → Mission Control bridge (one sync per run)")
     ap.add_argument("--dry-run", action="store_true", help="print events as JSON lines; post nothing")
     ap.add_argument("--from-dir", type=Path, help="read <dir>/{agents,sessions,cron,approvals}.json instead of the CLI")
+    ap.add_argument(
+        "--memory-dir",
+        type=Path,
+        help="read an OpenClaw memory tree (one workspace, or one subdirectory per agent)",
+    )
     args = ap.parse_args()
 
     # Repo-root .env is the single source of truth for INGEST_TOKEN (same file
@@ -528,6 +813,23 @@ def main() -> int:
              "desc": str(a.get("desc", "")), "meta": a.get("meta")}
             for a in approvals_rows
         ]}))
+
+    # Memory is its own source. --memory-dir is a sample (or explicit) tree.
+    # Otherwise use workspace paths from `openclaw agents list --json`.
+    # Unreadable workspaces skip the event so a broken path cannot wipe notes.
+    memory_entries: Optional[List[Dict[str, Any]]] = None
+    if args.memory_dir is not None:
+        mem_agents = agents_from_memory_dir(args.memory_dir)
+        if mem_agents is None:
+            log(f"memory dir {args.memory_dir} not found — skipping memory.snapshot")
+        elif len(mem_agents) == 0:
+            log(f"memory dir {args.memory_dir} has no agent workspaces — skipping memory.snapshot")
+        else:
+            memory_entries = collect_memory(mem_agents)
+    elif agents_rows is not None:
+        memory_entries = collect_memory(agents_rows, base=args.from_dir)
+    if memory_entries is not None:
+        events.append(("memory.snapshot", {"entries": memory_entries}))
 
     if not events:
         log("no OpenClaw sources available — nothing to post (dashboard data left untouched)")

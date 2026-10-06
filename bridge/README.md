@@ -38,9 +38,15 @@ Every 5 minutes via system cron (absolute paths; the script finds the repo-root
 > back to `dev-ingest-token` for the api, but the bridge refuses to guess and
 > exits 2. Set the value explicitly in `.env` and both sides agree.
 
-Flags: `--dry-run` (print events as JSON lines, post nothing, write no state) and
+Flags: `--dry-run` (print events as JSON lines, post nothing, write no state),
 `--from-dir DIR` (read `DIR/{agents,sessions,cron,approvals}.json` instead of the
-CLI — `bridge/examples/` holds illustrative inputs for testing the mapping).
+CLI — `bridge/examples/` holds illustrative inputs for testing the mapping), and
+`--memory-dir DIR` (read an OpenClaw memory tree: one workspace, or one
+subdirectory per agent). `bridge/examples/openclaw-memory/` is a sample.
+
+```bash
+python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw-memory
+```
 
 ## Event contract
 
@@ -59,6 +65,7 @@ also persisted to `ActivityEvent` and broadcast on the socket.**
 | `calendar.snapshot` | `{ jobs: [{ name, schedule?, day?: 0=Mon…6=Sun\|null, time?: "HH:MM"\|null, color?, enabled? }] }` | **Replaces** the CronJob table | `openclaw cron list --all --json` (`day=null` ⇒ daily, `time=null` ⇒ all-day strip) |
 | `usage.snapshot` | `{ period: "24h"\|"7d"\|"30d"\|"month", totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }` | Upserts one row per `period` | 24h rollup of session token/cost counters (fields absent ⇒ 0) |
 | `approvals.snapshot` | `{ approvals: [{ kind, tag, desc, status?, meta? }] }` | Drops stale **pending** rows, keeps decided history, inserts new | `MC_BRIDGE_APPROVALS_CMD` (opt-in) |
+| `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term"\|"daily"\|"other", source?, ref? }] }` | Upserts by stable `id`. Deletes only rows with `source=bridge` (and legacy `openclaw`) for agents present in the payload. Demo rows are left alone. A payload with no `entries` array is ignored. An empty `entries` array clears bridge rows only | Each agent's workspace: `MEMORY.md` (long-term, `createdAt` is the file mtime) and `memory/YYYY-MM-DD.md` plus `memory/YYYY-MM-DD-<slug>.md` (daily). The daily calendar day is the filename in America/Chicago. The clock is the file mtime when that mtime falls on the same Chicago date; otherwise a standalone `Time: HH:MM CT` line, otherwise 12:00 CT. `id` is a hash of agent id + relative path. `source` is `bridge` |
 | `run.queued` · `run.started` · `run.running` · `run.progress` · `run.completed` · `run.done` · `run.failed` | `{ name, …free-form (agent, job, status, progress, summary) }` | Persisted + broadcast (Live Activity, Office movement, Tickets refetch) | Cron job state changes between bridge runs |
 
 Other accepted types (not sent by this bridge): `health.tick`, `hello`,
@@ -68,10 +75,16 @@ Other accepted types (not sent by this bridge): `health.tick`, `hello`,
 ### Safety rules the bridge follows
 
 1. **Never wipe on failure.** Snapshots are replace-semantics server-side, so an
-   unavailable source (no `openclaw` on PATH, non-zero exit, unrecognized JSON) is
-   **skipped**, not posted empty. With no OpenClaw at all, the bridge posts
-   nothing and exits 0 — demo-seed data stays intact. A real instance with zero
-   items still posts `[]`.
+   unavailable source (no `openclaw` on PATH, non-zero exit, unrecognized JSON,
+   a memory workspace path that cannot be read, or a `--memory-dir` that
+   contains no agent workspaces) is **skipped**, not posted empty. With no
+   OpenClaw at all, the bridge posts nothing and exits 0 — demo-seed data
+   stays intact. A real workspace that was readable and has zero notes still
+   posts `[]`, and the API clears bridge rows only.
+   Memory files follow [OpenClaw's layout](https://docs.openclaw.ai/concepts/memory):
+   `MEMORY.md` at the agent workspace root, daily notes in `memory/YYYY-MM-DD.md`
+   (and slugged `memory/YYYY-MM-DD-<name>.md`). `openclaw agents list --json`
+   supplies each `workspace`. The web app does not read those files.
 2. **run.\* only on change.** The first run records each job's state; later runs
    emit `run.running` when a job starts and `run.completed` / `run.failed` when
    `lastRunAtMs` advances. State is saved only after every post succeeded.

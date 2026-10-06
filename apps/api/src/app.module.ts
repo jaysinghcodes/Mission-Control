@@ -19,6 +19,7 @@ import { ApprovalsController } from './approvals/approvals.controller';
 import { SearchController } from './search/search.controller';
 import { SystemController } from './system/system.controller';
 import { ModelsController } from './models/models.controller';
+import { MemoryController } from './memory/memory.controller';
 import { GitHubService } from './github/github.service';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -49,6 +50,7 @@ import { PrismaService } from './prisma/prisma.service';
     SearchController,
     SystemController,
     ModelsController,
+    MemoryController,
   ],
   providers: [
     AppService,

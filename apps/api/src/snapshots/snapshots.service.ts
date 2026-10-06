@@ -166,6 +166,98 @@ export class SnapshotsService {
       });
     }
   }
+
+  /**
+   * Replace memory with the bridge snapshot.
+   *
+   * Ids are the caller's stable ids (agent + path). Re-posting the same id
+   * updates that row. Ids missing from this payload are removed, so a file
+   * that went away does not linger. A payload without an `entries` array is
+   * ignored — a malformed event must not wipe the table. An empty array is
+   * a real empty workspace and clears the table.
+   */
+  async applyMemory(payload: Record<string, unknown>): Promise<void> {
+    if (!Array.isArray(payload.entries)) return;
+    const rows = dedupeMemory(payload.entries.map(normalizeMemory).filter(isMemoryRow));
+    const ids = rows.map((row) => row.id);
+    const agents = [...new Set(rows.map((row) => row.agent))];
+    await this.prisma.$transaction(async (tx) => {
+      // Replace bridge rows only. Seed rows (source=demo) stay. When the
+      // snapshot names agents, only those agents are replaced, so a Forge
+      // sync cannot drop Aegis. An empty list is a readable workspace with
+      // no notes: clear every bridge row, still not the demo set. Legacy
+      // source=openclaw is the same writer from before this was named bridge.
+      await tx.memoryEntry.deleteMany({
+        where: {
+          source: { in: ['bridge', 'openclaw'] },
+          ...(agents.length > 0 ? { agent: { in: agents } } : {}),
+          ...(ids.length > 0 ? { id: { notIn: ids } } : {}),
+        },
+      });
+      for (const row of rows) {
+        await tx.memoryEntry.upsert({
+          where: { id: row.id },
+          create: row,
+          update: {
+            title: row.title,
+            body: row.body,
+            agent: row.agent,
+            createdAt: row.createdAt,
+            kind: row.kind,
+            source: row.source,
+            ref: row.ref,
+          },
+        });
+      }
+    });
+  }
+}
+
+const MEMORY_KINDS = new Set(['long-term', 'daily', 'other']);
+
+type MemoryWrite = {
+  id: string;
+  title: string;
+  body: string;
+  agent: string;
+  createdAt: Date;
+  kind: string;
+  source: string | null;
+  ref: string | null;
+};
+
+function isMemoryRow(row: MemoryWrite | null): row is MemoryWrite {
+  return row !== null;
+}
+
+function dedupeMemory(rows: MemoryWrite[]): MemoryWrite[] {
+  const byId = new Map<string, MemoryWrite>();
+  for (const row of rows) byId.set(row.id, row);
+  return [...byId.values()];
+}
+
+/**
+ * One snapshot entry → a row, or null when the entry cannot be stored.
+ * Missing id, title, body, or a createdAt that is not a real instant is
+ * dropped. Unknown kinds become `other` so a future file shape still lands.
+ */
+function normalizeMemory(value: unknown): MemoryWrite | null {
+  if (!value || typeof value !== 'object') return null;
+  const entry = value as Record<string, unknown>;
+  const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+  if (!id || id.length > 200) return null;
+  const title = String(entry.title ?? '').trim().slice(0, 200);
+  const body = typeof entry.body === 'string' ? entry.body : '';
+  if (!title || !body.trim()) return null;
+  const createdAt = new Date(String(entry.createdAt ?? ''));
+  if (Number.isNaN(createdAt.getTime())) return null;
+  const kindRaw = String(entry.kind ?? 'other');
+  const kind = MEMORY_KINDS.has(kindRaw) ? kindRaw : 'other';
+  const agent = String(entry.agent ?? 'agent').trim().slice(0, 120) || 'agent';
+  const ref = entry.ref ? String(entry.ref).slice(0, 300) : null;
+  // Every snapshot row is a bridge row. The replace below only deletes
+  // source=bridge, so a payload cannot hide a note by labeling it demo.
+  return { id, title, body, agent, createdAt, kind, source: 'bridge', ref };
 }
 
 /**
