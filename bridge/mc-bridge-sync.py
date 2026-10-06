@@ -39,6 +39,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -372,13 +373,20 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
     return events
 
 
-# Same rollup, three windows. Session counters are cumulative, so a long
+# 24h and 7d are trailing durations. `month` is the UTC calendar month to
+# date (not the last 30 days). Session counters are cumulative, so a long
 # session is counted in the window of its last activity (the UI says "estimated").
 USAGE_WINDOWS = (
     ("24h", 86_400_000),
     ("7d", 7 * 86_400_000),
-    ("month", 30 * 86_400_000),
 )
+
+
+def month_start_utc_ms(now_ms: int) -> int:
+    """00:00:00.000 UTC on the first day of the month that contains now_ms."""
+    dt = datetime.datetime.fromtimestamp(now_ms / 1000.0, datetime.timezone.utc)
+    start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return int(start.timestamp() * 1000)
 
 
 def usage_from_sessions(
@@ -386,16 +394,24 @@ def usage_from_sessions(
     now_ms: int,
     period: str = "24h",
     window_ms: Optional[int] = None,
+    since_ms: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Usage rolled up from per-session token/cost counters.
 
-    `period` is the UsageSnapshot key (24h | 7d | month). `window_ms` defaults
-    to that period's window. Callers that only want the original 24h snapshot
-    can keep calling usage_from_sessions(sessions, now_ms).
+    `period` is the UsageSnapshot key (24h | 7d | month). A duration window
+    keeps sessions whose last activity is within `window_ms`. `month` with
+    no explicit window uses the UTC calendar month (`_updatedMs >= month start`).
+    Callers that only want the original 24h snapshot can keep calling
+    usage_from_sessions(sessions, now_ms).
     """
-    if window_ms is None:
-        window_ms = dict(USAGE_WINDOWS).get(period, 86_400_000)
-    day = [s for s in sessions if s["_updatedMs"] and now_ms - s["_updatedMs"] < window_ms]
+    if period == "month" and since_ms is None and window_ms is None:
+        since_ms = month_start_utc_ms(now_ms)
+    if since_ms is not None:
+        day = [s for s in sessions if s["_updatedMs"] and s["_updatedMs"] >= since_ms]
+    else:
+        if window_ms is None:
+            window_ms = dict(USAGE_WINDOWS).get(period, 86_400_000)
+        day = [s for s in sessions if s["_updatedMs"] and now_ms - s["_updatedMs"] < window_ms]
 
     def num(v: Any) -> float:
         try:
@@ -503,6 +519,7 @@ def main() -> int:
     if sessions is not None:
         for period, window_ms in USAGE_WINDOWS:
             events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms, period, window_ms)))
+        events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms, "month")))
 
     approvals_rows = as_list(src.approvals(), "approvals")
     if approvals_rows is not None:

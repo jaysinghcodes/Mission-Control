@@ -93,8 +93,6 @@ export default function Connect() {
     setChecking(true)
     const r = await probeApi()
     if (r.ok) {
-      markDone(5)
-      markDone(7)
       try {
         localStorage.setItem('mc-connected', 'true')
       } catch {
@@ -104,7 +102,7 @@ export default function Connect() {
     setProbe(r)
     setChecking(false)
     return r
-  }, [checking, markDone])
+  }, [checking])
 
   useEffect(() => {
     setOs(clientOS())
@@ -117,9 +115,10 @@ export default function Connect() {
   const osStep = OS_STEPS[os]
 
   async function continueStep() {
-    if (step.probe === 'health' && !probe?.ok) {
-      const r = await runProbe()
+    if (step.probe === 'health') {
+      const r = probe?.ok ? probe : await runProbe()
       if (!r?.ok) return
+      markDone(step.id)
     }
     if (step.confirmable) markDone(step.id)
     if (index >= STEP_DATA.length - 1) {
@@ -143,7 +142,7 @@ export default function Connect() {
             aria-hidden
           />
           {STEP_DATA.map((s, i) => {
-            const done = i < index || !!progress[s.id]
+            const done = !!progress[s.id]
             const current = i === index
             return (
               <li key={s.id} className="relative z-10 flex w-16 flex-col items-center">
@@ -153,7 +152,7 @@ export default function Connect() {
                   aria-current={current ? 'step' : undefined}
                   aria-label={`Step ${s.id}: ${s.title}`}
                   className={`grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold ${
-                    current ? 'bg-mc-accent text-white ring-4 ring-mc-accent/20' : done ? 'bg-mc-green text-white' : 'border border-mc-sub bg-mc-card text-mc-sub'
+                    current ? 'bg-mc-accent-fill text-white ring-4 ring-mc-accent/20' : done ? 'bg-mc-green text-white' : 'border border-mc-sub bg-mc-card text-mc-sub'
                   }`}
                 >
                   {done && !current ? '✓' : s.id}
@@ -165,7 +164,7 @@ export default function Connect() {
         </ol>
 
         <div className="mt-8">
-          <p className="text-center text-[10.5px] font-bold tracking-[0.06em] text-mc-accent">
+          <p className="text-center text-[10.5px] font-bold tracking-[0.06em] text-mc-accent-text">
             STEP {step.id} OF 8 · {step.phaseLabel}
           </p>
           <h1 className="mt-2 text-center text-[28px] font-bold tracking-[-0.02em]">{step.title}</h1>
@@ -214,7 +213,7 @@ export default function Connect() {
                       type="button"
                       aria-pressed={os === k}
                       onClick={() => setOs(k)}
-                      className={`h-7 rounded-full px-3 text-[11.5px] font-semibold ${os === k ? 'bg-mc-accent text-white' : 'bg-mc-ctl text-mc-sub'}`}
+                      className={`h-7 rounded-full px-3 text-[11.5px] font-semibold ${os === k ? 'bg-mc-accent-fill text-white' : 'bg-mc-ctl text-mc-sub'}`}
                     >
                       {OS_STEPS[k].name}
                     </button>
@@ -250,9 +249,9 @@ export default function Connect() {
             <div className="mt-4 flex flex-wrap gap-3">
               {step.links.map((link) =>
                 link.external ? (
-                  <a key={link.label} href={link.to} className="text-[13px] font-semibold text-mc-accent" target="_blank" rel="noreferrer">{link.label}</a>
+                  <a key={link.label} href={link.to} className="text-[13px] font-semibold text-mc-accent-text" target="_blank" rel="noreferrer">{link.label}</a>
                 ) : (
-                  <button key={link.label} type="button" onClick={() => nav(link.to)} className="text-[13px] font-semibold text-mc-accent">{link.label}</button>
+                  <button key={link.label} type="button" onClick={() => nav(link.to)} className="text-[13px] font-semibold text-mc-accent-text">{link.label}</button>
                 ),
               )}
             </div>
@@ -269,7 +268,7 @@ export default function Connect() {
             Back
           </button>
           <span className="text-[12px] text-mc-sub">Steps match ONBOARDING.md</span>
-          <button type="button" onClick={() => void continueStep()} className="h-9 rounded-[10px] bg-mc-accent px-5 text-[14px] font-semibold text-white">
+          <button type="button" onClick={() => void continueStep()} className="h-9 rounded-[10px] bg-mc-accent-fill px-5 text-[14px] font-semibold text-white">
             {index === STEP_DATA.length - 1 ? 'Enter the dashboard' : 'Continue'}
           </button>
         </div>

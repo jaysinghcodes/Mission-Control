@@ -63,7 +63,7 @@ export default function Logs() {
 
       <div className="flex items-center gap-3 mt-6">
         {LEVELS.map((l) => (
-          <PillButton key={l} label={l} on={level === l} className="w-[60px] px-0" onClick={() => setLevel(l)} />
+          <PillButton key={l} label={l} on={level === l} className="min-w-[4.75rem] px-3" onClick={() => setLevel(l)} />
         ))}
         <SearchField w={300} h={30} placeholder="Filter by source…" value={q} onChange={setQ} />
       </div>

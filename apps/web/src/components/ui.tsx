@@ -48,7 +48,7 @@ export function PillButton({
       type="button"
       onClick={onClick}
       className={`h-8 rounded-full px-4 text-[12.5px] font-semibold whitespace-nowrap transition-colors duration-150 ${
-        on ? 'bg-mc-primary text-white' : 'border border-mc-border bg-mc-card text-mc-sub hover:text-mc-text'
+        on ? 'bg-mc-accent-fill text-white' : 'border border-mc-border bg-mc-card text-mc-sub hover:text-mc-text'
       } ${className}`}
       style={style}
     >

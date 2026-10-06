@@ -18,7 +18,7 @@ interface ActivityResp { events: EventApi[] }
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 const START_HOUR = 6
 const END_HOUR = 20
-const HOUR_H = 36
+const HOUR_H = 52
 
 const OWNERS: { test: RegExp; name: string; tone: 'blue' | 'orange' | 'green' | 'teal' | 'gray' }[] = [
   { test: /brief/i, name: 'Speedy', tone: 'blue' },
@@ -226,8 +226,8 @@ export default function Calendar() {
                   const today = sameDay(d, now)
                   return (
                     <button key={i} type="button" onClick={() => setSelected(d)} className="border-l border-mc-sep py-2 text-center">
-                      <div className={`text-[10.5px] font-semibold tracking-[0.06em] ${today ? 'text-mc-accent' : 'text-mc-sub'}`}>{DAY_LABELS[i]}</div>
-                      <div className={`mx-auto mt-1 grid h-7 w-7 place-items-center rounded-full text-[15px] font-semibold ${today ? 'bg-mc-accent text-white' : 'text-mc-text'} ${on && !today ? 'ring-2 ring-mc-accent' : ''}`}>
+                      <div className={`text-[10.5px] font-semibold tracking-[0.06em] ${today ? 'text-mc-accent-text' : 'text-mc-sub'}`}>{DAY_LABELS[i]}</div>
+                      <div className={`mx-auto mt-1 grid h-7 w-7 place-items-center rounded-full text-[15px] font-semibold ${today ? 'bg-mc-accent-fill text-white' : 'text-mc-text'} ${on && !today ? 'ring-2 ring-mc-accent' : ''}`}>
                         {d.getDate()}
                       </div>
                     </button>
@@ -276,7 +276,7 @@ export default function Calendar() {
                         const top = ((t.h - START_HOUR) + t.m / 60) * HOUR_H + 2
                         const past = sameDay(d, now) && (t.h < now.getHours() || (t.h === now.getHours() && t.m <= now.getMinutes()))
                         return (
-                          <div key={j.id} className="absolute inset-x-1" style={{ top, height: HOUR_H - 6 }}>
+                          <div key={j.id} className="absolute inset-x-1" style={{ top, height: HOUR_H - 4 }}>
                             <JobBlock job={j} agents={agents} faceFor={faceFor} past={past} failed={failed(j) && sameDay(d, now)} onOpen={() => setOpenId(j.id)} />
                           </div>
                         )
@@ -397,8 +397,8 @@ function JobBlock({
   }[tone]
   const t = parseTime(job.time)
   return (
-    <button type="button" onClick={onOpen} className={`flex h-full w-full flex-col justify-between overflow-hidden rounded-md px-1.5 py-1 text-left ${bg} ${past ? 'opacity-70' : ''} ${failed ? 'border border-dashed border-mc-orange' : ''}`}>
-      <span className="truncate text-[11px] font-semibold">{job.name}</span>
+    <button type="button" title={job.name} onClick={onOpen} className={`flex h-full w-full flex-col justify-between overflow-hidden rounded-md px-1.5 py-0.5 text-left ${bg} ${past ? 'opacity-70' : ''} ${failed ? 'border border-dashed border-mc-orange' : ''}`}>
+      <span className="line-clamp-2 text-[11px] font-semibold leading-[13px]">{job.name}</span>
       <span className="flex items-center gap-1">
         <Face agent={faceFor(who.name)} agents={agents} px={14} />
         <span className="truncate text-[10px]">{failed ? 'Timed out' : t ? clock(t.h, t.m) : ''}</span>
@@ -475,7 +475,7 @@ function MonthGrid({
           const inMonth = d.getMonth() === weekStart.getMonth()
           const on = sameDay(d, selected)
           return (
-            <button key={i} type="button" onClick={() => onPick(d)} className={`h-14 rounded-lg text-left ${on ? 'bg-mc-accent text-white' : 'bg-mc-inner text-mc-text'} ${inMonth ? '' : 'opacity-40'}`}>
+            <button key={i} type="button" onClick={() => onPick(d)} className={`h-14 rounded-lg text-left ${on ? 'bg-mc-accent-fill text-white' : 'bg-mc-inner text-mc-text'} ${inMonth ? '' : 'opacity-40'}`}>
               <span className="block px-2 pt-1 text-[12px] font-semibold">{d.getDate()}</span>
               {count > 0 && <span className={`block px-2 text-[10px] ${on ? 'text-white' : 'text-mc-sub'}`}>{count} jobs</span>}
             </button>

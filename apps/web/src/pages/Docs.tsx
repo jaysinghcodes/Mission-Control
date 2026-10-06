@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useApi } from '../hooks/useApi'
 import type { Agent, AgentsResp } from '../types'
-import { PageHeader, Segmented, SoftCard, Face, AgentName, StatusChip, EmptyState, Btn } from '../components/shell'
+import { PageHeader, Segmented, SoftCard, Face, StatusChip, EmptyState, Btn } from '../components/shell'
 import { agentCaption } from '../data/roster'
 
 /**
@@ -35,6 +35,12 @@ const SAMPLES: Doc[] = [
 
 const KEY = 'mc-local-docs'
 
+/** Raw API names from the demo seed. Captions are not enough — OpenClaw `main` captions as Speedy. */
+const SEEDED_NAMES = new Set([
+  'Speedy', 'Atlas', 'Forge', 'Sentinel', 'Echo', 'Pixel',
+  'Bolt', 'Ledger', 'Quill', 'Aegis', 'Patch', 'Scout',
+])
+
 function loadLocal(): Doc[] {
   try {
     const raw = localStorage.getItem(KEY)
@@ -49,7 +55,7 @@ function loadLocal(): Doc[] {
 export default function Docs() {
   const { data } = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const agents = data?.agents ?? []
-  const demo = agents.some((a) => ['Speedy', 'Forge', 'Aegis', 'Quill'].includes(agentCaption(a.name, a.role).name))
+  const demo = agents.some((a) => SEEDED_NAMES.has(a.name))
   const [tab, setTab] = useState(0)
   const [local, setLocal] = useState<Doc[]>(loadLocal)
   const [open, setOpen] = useState<Doc | null>(null)
@@ -109,7 +115,7 @@ export default function Docs() {
 
       {open && open.id !== 'new' && (
         <SoftCard className="mb-4 px-6 py-5">
-          <button type="button" onClick={() => setOpen(null)} className="text-[13px] font-semibold text-mc-accent">← All docs</button>
+          <button type="button" onClick={() => setOpen(null)} className="text-[13px] font-semibold text-mc-accent-text">← All docs</button>
           <h2 className="mt-3 text-[24px] font-bold tracking-tight">{open.title}</h2>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed">{open.body}</p>
         </SoftCard>
@@ -145,10 +151,12 @@ export default function Docs() {
                   {doc.state && <StatusChip label={doc.state} tone="gray" />}
                 </div>
                 <div className="mt-2 text-[15px] font-semibold">{doc.title}</div>
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 flex min-w-0 items-center gap-2">
                   <Face agent={who} agents={agents} px={24} />
-                  <AgentName name={who.name} role={who.role} />
-                  <span className="text-[12px] text-mc-sub">· {doc.when}</span>
+                  <span className="min-w-0 truncate whitespace-nowrap text-[12px]" title={`${agentCaption(who.name, who.role).name} · ${agentCaption(who.name, who.role).role} · ${doc.when}`}>
+                    <span className="font-semibold text-mc-text">{agentCaption(who.name, who.role).name}</span>
+                    <span className="font-normal text-mc-sub"> · {agentCaption(who.name, who.role).role} · {doc.when}</span>
+                  </span>
                 </div>
               </button>
             )

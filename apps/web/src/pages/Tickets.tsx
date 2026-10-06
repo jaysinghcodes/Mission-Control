@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
-import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, Banner, SearchInput } from '../components/shell'
+import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, Banner, SearchInput, FieldError, EmptyState } from '../components/shell'
 import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { rosterDisplayName } from '../data/roster'
 import { ticketCreateQueue } from '../lib/serialQueue'
+import { ticketNeedsYou, type ApprovalLike } from '../lib/board'
 
 /**
  * Tickets — full-page kanban, fully functional (review fix #9) + Option B (MC-214).
@@ -92,6 +93,8 @@ export default function Tickets() {
   const roster = rosterQ.data?.agents ?? []
   const { events } = useLiveActivity()
   const [title, setTitle] = useState('')
+  const [titleError, setTitleError] = useState<string | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
   // How many of THIS page's creates are queued or in flight. Display-only
   // (drives the "Saving…" button label) — it NEVER gates a submit. The old
   // `busy` flag did gate submits (`if (!title || busy) return`), and that is
@@ -126,13 +129,16 @@ export default function Tickets() {
   const [showDone, setShowDone] = useState(false)
   const [query, setQuery] = useState('')
   const tickets = data?.tickets ?? []
-  const approvalsQ = useApi<{ approvals: { desc: string; tag: string }[] }>('/approvals', { pollMs: 15000 })
+  const approvalsQ = useApi<{ approvals: ApprovalLike[] }>('/approvals', { pollMs: 15000 })
+  const refetchApprovals = approvalsQ.refetch
+  const pending = approvalsQ.data?.approvals ?? []
+
+  useEffect(() => {
+    if (events.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
+  }, [events, refetchApprovals])
 
   function needsYou(t: Ticket): boolean {
-    const blob = (approvalsQ.data?.approvals ?? []).map((a) => `${a.tag} ${a.desc}`).join(' ').toLowerCase()
-    if (!blob) return false
-    const key = (t.key ?? '').toLowerCase()
-    return (!!key && blob.includes(key.toLowerCase())) || blob.includes(t.title.toLowerCase())
+    return ticketNeedsYou(t, pending)
   }
 
   function openBacklog() {
@@ -191,7 +197,11 @@ export default function Tickets() {
    */
   function create() {
     const t = title.trim()
-    if (!t) return
+    if (!t) {
+      setTitleError('Title is required')
+      return
+    }
+    setTitleError(null)
     setTitle('') // clear ONLY what we're submitting (see above)
     setSaving((n) => n + 1)
     // status: 'todo' is REQUIRED here — the API default is now `backlog`
@@ -337,6 +347,14 @@ export default function Tickets() {
     : `${openCount} open${needs ? ` · ${needs} needs you` : ''} · ${doneRows.length} done`
 
   const DOT: Record<string, string> = { todo: 'var(--mc-gray)', build: 'var(--mc-blue)', qa: 'var(--mc-orange)', review: 'var(--mc-teal)', done: 'var(--mc-green)' }
+  const detail = tickets.find((t) => t.id === detailId) ?? null
+
+  function projectLabel(t: Ticket): string {
+    const current = allProjects.find((p) => p.id === t.projectId) ?? null
+    if (!t.projectId) return 'No project'
+    if (!current) return 'Archived project'
+    return current.archivedAt ? `${current.name} (archived)` : current.name
+  }
 
   function projectControl(t: Ticket) {
     const current = allProjects.find((p) => p.id === t.projectId) ?? null
@@ -382,14 +400,18 @@ export default function Tickets() {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && create()}
-          placeholder="New task title…"
-          aria-label="New task title"
-          className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
-        />
+          <div>
+          <input
+            value={title}
+            onChange={(e) => { setTitle(e.target.value); setTitleError(null) }}
+            onKeyDown={(e) => e.key === 'Enter' && create()}
+            placeholder="New task title…"
+            aria-label="New task title"
+            aria-invalid={!!titleError}
+            className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
+          />
+          {titleError && <FieldError>{titleError}</FieldError>}
+        </div>
         <label className="flex items-center gap-2 text-[12.5px] text-mc-sub">
           Project
           <select
@@ -408,7 +430,7 @@ export default function Tickets() {
           </select>
         </label>
         {selectedProject && (
-          <Link to={`/projects/${selectedProject.id}`} className="text-[12px] font-semibold text-mc-accent">
+          <Link to={`/projects/${selectedProject.id}`} className="text-[12px] font-semibold text-mc-accent-text">
             {selectedProject.doneCount} of {selectedProject.ticketCount} done
           </Link>
         )}
@@ -420,6 +442,33 @@ export default function Tickets() {
         </Banner>
       )}
       {notice && <Banner onDismiss={clearNotice}>{notice}</Banner>}
+
+      {data && tickets.length === 0 && !projectFilter && !query.trim() && (
+        <div className="mb-4">
+          <EmptyState
+            title="No tasks yet"
+            body="A fresh install starts empty. Run npm run seed:demo for the sample board, or open setup to connect your OpenClaw."
+          >
+            <Link to="/connect" className="mt-3 inline-block text-[13px] font-semibold text-mc-accent-text">Open setup</Link>
+          </EmptyState>
+        </div>
+      )}
+
+      {detail && (
+        <SoftCard className="mb-4 px-4 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] text-mc-sub">{detail.key ?? 'Task'}</div>
+              <div className="text-[16px] font-semibold">{detail.title}</div>
+            </div>
+            <button type="button" onClick={() => setDetailId(null)} className="text-[13px] font-semibold text-mc-sub">Close</button>
+          </div>
+          <div className="mt-3 max-w-xs">
+            <div className="mb-1 text-[12px] font-semibold text-mc-sub">Project</div>
+            {projectControl(detail)}
+          </div>
+        </SoftCard>
+      )}
 
       <div className="overflow-x-auto pb-2">
         <div className="flex w-max gap-4">
@@ -444,8 +493,8 @@ export default function Tickets() {
                     return (
                       <SoftCard key={t.id} className="px-3.5 py-3">
                         {flagged && <StatusChip label="Needs you" tone="red" className="mb-2" />}
-                        <div className="text-[14px] font-semibold leading-snug break-words">{t.title}</div>
-                        <div className="mt-2">{projectControl(t)}</div>
+                        <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[14px] font-semibold leading-snug break-words">{t.title}</button>
+                        <div className="mt-1 text-[11px] leading-snug break-words text-mc-sub">{projectLabel(t)}</div>
                         <div className="mt-3 flex items-center gap-2">
                           <Face agent={face.agent} agents={face.agents} px={28} />
                           <span className="min-w-0 flex-1">
@@ -495,7 +544,7 @@ export default function Tickets() {
             <SoftCard className="px-3 py-4 text-center">
               <div className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-mc-greenbg text-mc-greentext">✓</div>
               <div className="mt-2 text-[12px] text-mc-sub2">{doneRows.length} done</div>
-              <button type="button" onClick={() => setShowDone((v) => !v)} className="mt-2 text-[13px] font-semibold text-mc-accent">
+              <button type="button" onClick={() => setShowDone((v) => !v)} className="mt-2 text-[13px] font-semibold text-mc-accent-text">
                 {showDone ? 'Hide' : 'Show all'}
               </button>
             </SoftCard>
@@ -503,7 +552,7 @@ export default function Tickets() {
               <div className="mt-3 space-y-2">
                 {doneRows.map((t) => (
                   <SoftCard key={t.id} className="px-3 py-2">
-                    <div className="text-[13px] font-semibold break-words">{t.title}</div>
+                    <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[13px] font-semibold break-words">{t.title}</button>
                     <div className="mt-1 whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? ''}</div>
                   </SoftCard>
                 ))}

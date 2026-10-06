@@ -1,100 +1,82 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useApi, apiPost } from '../hooks/useApi'
+import { useEffect, useMemo, useState } from 'react'
+import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
-import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Kicker, Face, AgentName, EmptyState } from '../components/shell'
+import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Kicker, Face, AgentName, EmptyState, FieldError } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { OPERATOR_ASSIGNEE } from '../config'
+import { STAGES, stageCounts, stageIndexForStatus, ticketNeedsYou, type ApprovalLike } from '../lib/board'
 
 /**
- * Pipeline — the old Tasks run trail, drawn as Build → QA → Ship → Deploy.
- * Live runs come from GET /runs. With no runs (and no bridge) the page says so.
+ * Pipeline — the same tickets as the board, in Build → QA → Ship → Deploy.
+ * Stage counts use the shared status map (board.ts), so this header matches
+ * the Office pipeline panel. Needs-you is a pending approval, not a run flag.
  */
 
-interface Run {
+interface Ticket {
   id: string
-  name: string
-  agent: string | null
+  key: string | null
+  title: string
   status: string
-  progress: number
+  assignee: string | null
   createdAt: string
-  startedAt: string | null
-  finishedAt: string | null
 }
-interface RunsResp { runs: Run[] }
+interface TicketsResp { tickets: Ticket[] }
+interface ApprovalsResp { approvals: ApprovalLike[] }
 
-const STAGES = ['Build', 'QA', 'Ship', 'Deploy'] as const
 const STAGE_COLOR = ['var(--mc-blue)', 'var(--mc-orange)', 'var(--mc-green)', 'var(--mc-teal)']
-
-function stageIndex(run: Run): number {
-  if (run.status === 'needs_approval') return 2
-  if (run.status === 'done' || run.status === 'failed') return 3
-  if (run.status === 'queued') return 0
-  const p = run.progress
-  if (p < 35) return 0
-  if (p < 70) return 1
-  return 2
-}
 
 function fmt(iso: string | null): string {
   if (!iso) return ''
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-function age(iso: string | null): string {
-  if (!iso) return ''
-  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
-  if (mins < 60) return `${mins}m`
-  const h = Math.floor(mins / 60)
-  return `${h}h ${mins % 60}m`
-}
-
 export default function Pipeline() {
-  const { data, refetch } = useApi<RunsResp>('/runs', { pollMs: 10000 })
+  const { data, refetch } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
+  const approvalsQ = useApi<ApprovalsResp>('/approvals', { pollMs: 15000 })
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const { events } = useLiveActivity()
+  const refetchApprovals = approvalsQ.refetch
   const [title, setTitle] = useState('')
+  const [titleError, setTitleError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [range, setRange] = useState(0)
   const [showDone, setShowDone] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [flashId, setFlashId] = useState<string | null>(null)
-  const prevStatus = useRef<Record<string, string>>({})
   const roster = rosterQ.data?.agents ?? []
+  const pending = approvalsQ.data?.approvals ?? []
 
   useEffect(() => {
-    if (events.some((e) => e.type.startsWith('run.'))) void refetch()
-  }, [events, refetch])
-
-  useEffect(() => {
-    for (const run of data?.runs ?? []) {
-      const prev = prevStatus.current[run.id]
-      if (prev && prev !== run.status) {
-        setFlashId(run.id)
-        setTimeout(() => setFlashId(null), 1800)
-      }
-      prevStatus.current[run.id] = run.status
-    }
-  }, [data])
+    if (events.some((e) => e.type.includes('ticket') || e.type.startsWith('run.'))) void refetch()
+    if (events.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
+  }, [events, refetch, refetchApprovals])
 
   async function create() {
     const name = title.trim()
-    if (!name || busy) return
+    if (!name) {
+      setTitleError('Title is required')
+      return
+    }
+    if (busy) return
+    setTitleError(null)
     setBusy(true)
-    await apiPost('/runs', { name })
+    await apiSend('POST', '/tickets', { title: name, priority: 'med', status: 'build' })
     setTitle('')
     setBusy(false)
     void refetch()
   }
 
-  const runs = data?.runs ?? []
+  const tickets = data?.tickets ?? []
   const now = Date.now()
   const windowMs = range === 0 ? Infinity : range === 1 ? 86_400_000 : 7 * 86_400_000
-  const visible = runs.filter((r) => windowMs === Infinity || now - new Date(r.createdAt).getTime() < windowMs)
-  const moving = visible.filter((r) => r.status !== 'done' && r.status !== 'failed')
-  const done = visible.filter((r) => r.status === 'done' || r.status === 'failed')
-  const needs = moving.filter((r) => r.status === 'needs_approval').length
-  const counts = STAGES.map((_, i) => moving.filter((r) => stageIndex(r) === i).length)
+  const visible = tickets.filter((t) => windowMs === Infinity || now - new Date(t.createdAt).getTime() < windowMs)
+  const moving = visible.filter((t) => {
+    const at = stageIndexForStatus(t.status)
+    return at !== null && at < 3
+  })
+  const done = visible.filter((t) => stageIndexForStatus(t.status) === 3)
+  const counts = stageCounts(visible)
+  const needs = moving.filter((t) => ticketNeedsYou(t, pending)).length
 
   const summary = data
     ? `${moving.length} moving${needs ? ` · ${needs} needs you` : ''} · ${done.length} finished`
@@ -105,7 +87,7 @@ export default function Pipeline() {
       const key = (agentName ?? '').toLowerCase()
       const hit = roster.find((a) => a.name.toLowerCase() === key || agentCaption(a.name, a.role).name.toLowerCase() === key)
       if (hit) return hit
-      return { id: agentName || 'run', name: agentName || OPERATOR_ASSIGNEE, role: null, status: 'working' } as Agent
+      return { id: agentName || 'ticket', name: agentName || OPERATOR_ASSIGNEE, role: null, status: 'working' } as Agent
     }
   }, [roster])
 
@@ -118,14 +100,18 @@ export default function Pipeline() {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void create()}
-          placeholder="Queue a task…"
-          aria-label="New task name"
-          className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
-        />
+        <div>
+          <input
+            value={title}
+            onChange={(e) => { setTitle(e.target.value); setTitleError(null) }}
+            onKeyDown={(e) => e.key === 'Enter' && void create()}
+            placeholder="Queue a task…"
+            aria-label="New task name"
+            aria-invalid={!!titleError}
+            className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
+          />
+          {titleError && <FieldError>{titleError}</FieldError>}
+        </div>
         <Btn kind="primary" onClick={() => void create()} disabled={busy}>{busy ? 'Saving…' : 'New task'}</Btn>
       </div>
 
@@ -154,26 +140,26 @@ export default function Pipeline() {
           {moving.length === 0 ? (
             <EmptyState
               title="Nothing is moving"
-              body="Queue a task above, or connect the OpenClaw bridge. Seeded demo runs show up here after npm run seed:demo."
+              body="Queue a task above, or connect your OpenClaw. Seeded demo tickets show up here after npm run seed:demo."
             />
           ) : (
             <SoftCard className="divide-y divide-mc-sep px-2">
-              {moving.map((run) => {
-                const at = stageIndex(run)
-                const who = faceFor(run.agent)
-                const blocked = run.status === 'needs_approval'
-                const open = openId === run.id
+              {moving.map((ticket) => {
+                const at = stageIndexForStatus(ticket.status) ?? 0
+                const who = faceFor(ticket.assignee)
+                const blocked = ticketNeedsYou(ticket, pending)
+                const open = openId === ticket.id
                 return (
                   <button
-                    key={run.id}
+                    key={ticket.id}
                     type="button"
-                    onClick={() => setOpenId(open ? null : run.id)}
-                    className={`block w-full px-4 py-4 text-left ${flashId === run.id ? 'bg-mc-sel' : ''}`}
+                    onClick={() => setOpenId(open ? null : ticket.id)}
+                    className="block w-full px-4 py-4 text-left"
                   >
                     <div className="flex flex-wrap items-center gap-4">
                       <Face agent={{ ...who, status: blocked ? 'blocked' : 'working' }} agents={roster} px={46} />
                       <div className="min-w-0 flex-1">
-                        <div className="text-[15px] font-semibold">{run.name}</div>
+                        <div className="text-[15px] font-semibold">{ticket.title}</div>
                         <AgentName name={who.name} role={who.role} />
                       </div>
                       <div className="hidden min-w-[280px] items-center md:flex">
@@ -194,16 +180,12 @@ export default function Pipeline() {
                         </div>
                       </div>
                       {blocked ? <StatusChip label="Needs you" tone="red" /> : (
-                        <span className="whitespace-nowrap text-[13px] text-mc-sub2">
-                          {run.status === 'queued' ? 'Queued' : `In ${STAGES[at]} · ${age(run.startedAt ?? run.createdAt)}`}
-                        </span>
+                        <span className="whitespace-nowrap text-[13px] text-mc-sub2">In {STAGES[at]}</span>
                       )}
                     </div>
                     {open && (
                       <div className="mt-3 pl-16 text-[12.5px] text-mc-sub">
-                        Queued {fmt(run.createdAt) || '—'}
-                        {run.startedAt ? ` · started ${fmt(run.startedAt)}` : ''}
-                        {run.status === 'running' ? ` · ${run.progress}%` : ''}
+                        {ticket.key ?? 'No key'} · queued {fmt(ticket.createdAt) || '—'}
                         {blocked ? ' · paused until you decide in Approvals' : ''}
                       </div>
                     )}
@@ -215,14 +197,14 @@ export default function Pipeline() {
 
           <button type="button" onClick={() => setShowDone((v) => !v)} className="mt-5 text-[13px] text-mc-sub">
             {done.length} finished {range === 2 ? 'this week' : 'in view'}{' '}
-            <span className="font-semibold text-mc-accent">{showDone ? 'Hide' : 'Show'}</span>
+            <span className="font-semibold text-mc-accent-text">{showDone ? 'Hide' : 'Show'}</span>
           </button>
           {showDone && done.length > 0 && (
             <SoftCard className="mt-3 divide-y divide-mc-sep">
-              {done.map((run) => (
-                <div key={run.id} className="flex items-center justify-between px-5 py-3 text-[13px]">
-                  <span className="font-medium">{run.name}</span>
-                  <span className="text-mc-sub">{run.status === 'failed' ? 'Failed' : 'Deployed'} · {fmt(run.finishedAt)}</span>
+              {done.map((ticket) => (
+                <div key={ticket.id} className="flex items-center justify-between px-5 py-3 text-[13px]">
+                  <span className="font-medium">{ticket.title}</span>
+                  <span className="text-mc-sub">Deployed · {fmt(ticket.createdAt)}</span>
                 </div>
               ))}
             </SoftCard>

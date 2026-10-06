@@ -22,7 +22,7 @@ interface Ticket { id: string; key: string | null; title: string; status: string
 interface TicketsResp { tickets: Ticket[] }
 
 const PRIO: Record<string, { bg: string; fg: string }> = {
-  high: { bg: 'var(--mc-redbg)', fg: 'var(--mc-redtext)' },
+  high: { bg: 'var(--mc-orangebg)', fg: 'var(--mc-orangetext)' },
   med: { bg: 'var(--mc-orangebg)', fg: 'var(--mc-orangetext)' },
   low: { bg: 'var(--mc-inner)', fg: 'var(--mc-sub)' },
 }

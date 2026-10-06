@@ -92,7 +92,7 @@ export default function Approvals() {
                       </div>
                     </div>
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-mc-sep pt-3">
-                      <button type="button" onClick={() => setOpen(open === row.id ? null : row.id)} className="text-[13px] font-semibold text-mc-accent">
+                      <button type="button" onClick={() => setOpen(open === row.id ? null : row.id)} className="text-[13px] font-semibold text-mc-accent-text">
                         {open === row.id ? 'Hide details' : 'Show details'}
                       </button>
                       <div className="flex gap-2">
@@ -104,7 +104,7 @@ export default function Approvals() {
                       <div className="mt-3 text-[13px] text-mc-sub2">
                         <div>{row.desc}</div>
                         {meta?.repo && <div className="mt-1 font-mono text-[12px]">Repo {meta.repo}{meta.branch ? ` · ${meta.branch}` : ''}{meta.number ? ` · #${meta.number}` : ''}</div>}
-                        {meta?.url && <a className="mt-1 block text-mc-accent" href={meta.url} target="_blank" rel="noreferrer">{meta.url}</a>}
+                        {meta?.url && <a className="mt-1 block text-mc-accent-text" href={meta.url} target="_blank" rel="noreferrer">{meta.url}</a>}
                         {row.kind === 'pr' && <p className="mt-2 text-[12px] text-mc-sub">Approving a pull request merges it on GitHub.</p>}
                       </div>
                     )}

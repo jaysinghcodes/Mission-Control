@@ -15,7 +15,7 @@ import Settings from './Settings'
  * what the bridge posts. With no snapshot, the card says the bridge is absent.
  */
 
-interface HealthResp { status: string; database: string; uptimeSeconds: number }
+interface HealthResp { status: string; database: string; uptimeSeconds: number; lastIngestAt?: string | null }
 interface SystemResp {
   cpu: { pct: number }
   memory: { pct: number }
@@ -48,6 +48,18 @@ const PERIODS = [
 function providersOf(usage: Usage | null | undefined): Provider[] {
   if (!usage?.providers) return []
   return Array.isArray(usage.providers) ? usage.providers : Object.values(usage.providers)
+}
+
+const STALE_MS = 15 * 60 * 1000
+
+function ingestFact(iso: string | null | undefined): { value: string; ok: boolean } {
+  if (!iso) return { value: 'Not connected', ok: false }
+  const at = new Date(iso).getTime()
+  if (!Number.isFinite(at)) return { value: 'Not connected', ok: false }
+  const age = Date.now() - at
+  const mins = Math.max(0, Math.round(age / 60000))
+  const when = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`
+  return { value: `Last ingest ${when}`, ok: age < STALE_MS }
 }
 
 function money(n: number | undefined): string {
@@ -88,17 +100,19 @@ export default function System() {
     return [...names]
   }, [day.data, week.data, month.data])
 
-  const monthSpend = snaps[2]?.totalCost
+  const periodSpend = selected?.totalCost
+  const periodName = PERIODS[period].label.toLowerCase()
   const summary = health.data
-    ? `${health.data.status === 'ok' ? 'All systems normal' : 'Degraded'}${typeof monthSpend === 'number' ? ` · ${money(monthSpend)} spent this month` : any ? '' : ' · no spend reported'}`
+    ? `${health.data.status === 'ok' ? 'All systems normal' : 'Degraded'}${typeof periodSpend === 'number' ? ` · ${money(periodSpend)} spent ${periodName}` : any ? '' : ' · no spend reported'}`
     : 'Checking health…'
+  const bridge = ingestFact(health.data?.lastIngestAt)
 
   const issue = (activity.data?.events ?? []).find((e) => /fail|error|timeout/i.test(`${e.type} ${e.payload?.name ?? ''} ${e.payload?.summary ?? ''}`))
 
   if (panel === 'logs' || panel === 'sessions' || panel === 'settings' || panel === 'connection') {
     return (
       <div>
-        <Link to="/system" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent">← System</Link>
+        <Link to="/system" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">← System</Link>
         {panel === 'logs' && <Logs />}
         {panel === 'sessions' && <Sessions />}
         {panel === 'settings' && <Settings />}
@@ -107,7 +121,7 @@ export default function System() {
             <PageHeader title="Connection" summary="How this browser reaches the API." />
             <SoftCard className="px-5 py-4 text-[14px]">
               <p>The API is loopback-only. From another machine, use the SSH tunnel in setup.</p>
-              <Link to="/connect" className="mt-3 inline-block font-semibold text-mc-accent">Open setup</Link>
+              <Link to="/connect" className="mt-3 inline-block font-semibold text-mc-accent-text">Open setup</Link>
             </SoftCard>
           </div>
         )}
@@ -137,7 +151,7 @@ export default function System() {
         </div>
         <div className="ml-auto flex flex-wrap gap-6">
           <Fact label="API" value={api.state === 'offline' ? 'Offline' : `Connected · ${latency}`} />
-          <Fact label="OpenClaw bridge" value={any ? 'Usage posted' : 'Not connected'} />
+          <Fact label="OpenClaw bridge" value={bridge.value} ok={bridge.ok} />
           <Fact label={`Host · ${host}`} value={cpu} />
         </div>
       </SoftCard>
@@ -221,7 +235,7 @@ export default function System() {
                       {open && (
                         <tr className="border-t border-mc-sep bg-mc-bg">
                           <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
-                            Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. A long session counts in the window of its last activity.
+                            Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. This month is the calendar month to date (UTC). A long session counts in the window of its last activity.
                             Price override is later — this build does not store a per-token price.
                           </td>
                         </tr>
@@ -271,11 +285,11 @@ export default function System() {
   )
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value, ok = true }: { label: string; value: string; ok?: boolean }) {
   return (
     <div className="min-w-[140px]">
       <div className="flex items-center gap-1.5 text-[12px] font-semibold text-mc-sub">
-        <span className="h-1.5 w-1.5 rounded-full bg-mc-green" />
+        <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-mc-green' : 'bg-mc-gray'}`} />
         {label}
       </div>
       <div className="mt-0.5 whitespace-nowrap text-[13px]">{value}</div>

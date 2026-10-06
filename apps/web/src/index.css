@@ -40,11 +40,16 @@
 
   --mc-primary: #0a84ff;
   --mc-accent: #0a84ff;
+  /* Small white text sits on a darker fill. The locked accent stays for icons and large fills. */
+  --mc-accent-fill: #0060d0;
+  --mc-accent-text: #5eb0ff;
   --mc-accent-tint: #0a84ff26;
   --mc-sel: #0a84ff2e;
 
   --mc-green: #30d158;  --mc-greenbg: #30d15833;  --mc-greentext: #4cd964;
-  --mc-red: #ff453a;    --mc-redbg: #ff453a33;    --mc-redtext: #ff6961;
+  --mc-red: #ff453a;    --mc-redbg: #ff453a33;    --mc-redtext: #ffb4ae;
+  --mc-red-fill: #d1242f;
+  --mc-graytext: #c7c7cc;
   --mc-blue: #0a84ff;   --mc-bluebg: #0a84ff33;   --mc-bluetext: #5eb0ff;
   --mc-purple: #5e5ce6; --mc-purplebg: #5e5ce633; --mc-purpletext: #b4b2ff;
   --mc-teal: #64d2ff;   --mc-tealbg: #64d2ff33;   --mc-tealtext: #7fdcff;
@@ -82,22 +87,27 @@
   --mc-scroll-thumb: #c7c7cc;
 
   --mc-text: #1d1d1f;
-  /* #6e6e73 is the locked secondary — about 5.9:1 on white, AA. */
+  /* #6e6e73 on white is 5.07:1 (AA). */
   --mc-sub: #6e6e73;
   --mc-sub2: #515154;
   --mc-faint: #6e6e73;
 
   --mc-primary: #007aff;
   --mc-accent: #007aff;
+  /* Small white text sits on a darker fill. The locked accent stays for icons and large fills. */
+  --mc-accent-fill: #0066cc;
+  --mc-accent-text: #0066cc;
   --mc-accent-tint: #007aff14;
   --mc-sel: #007aff12;
 
   --mc-green: #34c759;  --mc-greenbg: #34c75921;  --mc-greentext: #1e7e35;
-  --mc-red: #ff3b30;    --mc-redbg: #ff3b3021;    --mc-redtext: #d70015;
+  --mc-red: #ff3b30;    --mc-redbg: #ff3b3021;    --mc-redtext: #c41a12;
+  --mc-red-fill: #d1242f;
+  --mc-graytext: #6e6e73;
   --mc-blue: #007aff;   --mc-bluebg: #007aff21;   --mc-bluetext: #0062d1;
   --mc-purple: #5e5ce6; --mc-purplebg: #5e5ce621; --mc-purpletext: #5e5ce6;
   --mc-teal: #5ac8fa;   --mc-tealbg: #5ac8fa24;   --mc-tealtext: #0a6f95;
-  --mc-orange: #ff9f0a; --mc-orangebg: #ff9f0a24; --mc-orangetext: #b35c00;
+  --mc-orange: #ff9f0a; --mc-orangebg: #ff9f0a24; --mc-orangetext: #9a4e00;
   --mc-yellow: #ff9f0a; --mc-yellowbg: #ff9f0a24;
   --mc-gray: #8e8e93;
 
@@ -128,8 +138,12 @@
   --color-mc-faint: var(--mc-faint);
   --color-mc-primary: var(--mc-primary);
   --color-mc-accent: var(--mc-accent);
+  --color-mc-accent-fill: var(--mc-accent-fill);
+  --color-mc-accent-text: var(--mc-accent-text);
   --color-mc-green: var(--mc-green);   --color-mc-greenbg: var(--mc-greenbg);   --color-mc-greentext: var(--mc-greentext);
   --color-mc-red: var(--mc-red);       --color-mc-redbg: var(--mc-redbg);       --color-mc-redtext: var(--mc-redtext);
+  --color-mc-red-fill: var(--mc-red-fill);
+  --color-mc-graytext: var(--mc-graytext);
   --color-mc-blue: var(--mc-blue);     --color-mc-bluebg: var(--mc-bluebg);     --color-mc-bluetext: var(--mc-bluetext);
   --color-mc-purple: var(--mc-purple); --color-mc-purplebg: var(--mc-purplebg); --color-mc-purpletext: var(--mc-purpletext);
   --color-mc-teal: var(--mc-teal);     --color-mc-tealbg: var(--mc-tealbg);     --color-mc-tealtext: var(--mc-tealtext);

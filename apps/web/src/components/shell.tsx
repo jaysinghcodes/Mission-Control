@@ -16,7 +16,7 @@ export function SoftCard({
 }
 
 export function Kicker({ children, tone = 'sub' }: { children: ReactNode; tone?: 'sub' | 'red' | 'accent' }) {
-  const color = tone === 'red' ? 'text-mc-red' : tone === 'accent' ? 'text-mc-accent' : 'text-mc-sub'
+  const color = tone === 'red' ? 'text-mc-redtext' : tone === 'accent' ? 'text-mc-accent-text' : 'text-mc-sub'
   return (
     <div className={`text-[10.5px] font-semibold uppercase tracking-[0.06em] ${color}`}>{children}</div>
   )
@@ -38,7 +38,7 @@ export function StatusChip({
     green: 'bg-mc-greenbg text-mc-greentext',
     teal: 'bg-mc-tealbg text-mc-tealtext',
     red: 'bg-mc-redbg text-mc-redtext',
-    gray: 'bg-mc-fill text-mc-sub',
+    gray: 'bg-mc-fill text-mc-graytext',
   } as const
   return (
     <span className={`inline-flex h-[22px] items-center rounded-full px-2.5 text-[11.5px] font-semibold whitespace-nowrap ${map[tone]} ${className}`}>
@@ -63,9 +63,9 @@ export function Btn({
   className?: string
 }) {
   const look = {
-    primary: 'bg-mc-accent text-white',
+    primary: 'bg-mc-accent-fill text-white',
     plain: 'bg-mc-ctl text-mc-text',
-    ghost: 'bg-transparent text-mc-accent',
+    ghost: 'bg-transparent text-mc-accent-text',
     outline: 'bg-mc-card text-mc-text border border-mc-border',
   }[kind]
   return (
@@ -180,7 +180,7 @@ export function AgentName({
   return (
     <span className={`min-w-0 truncate ${className}`}>
       <span className={`font-semibold text-mc-text ${nameCls}`}>{cap.name}</span>
-      <span className="font-medium text-mc-sub"> · {cap.role}</span>
+      <span className="text-[11px] font-normal text-mc-sub"> · {cap.role}</span>
     </span>
   )
 }
@@ -198,11 +198,12 @@ export function Face({
   return <AgentAvatar agent={agent} agents={agents} size={size} />
 }
 
-export function EmptyState({ title, body }: { title: string; body: string }) {
+export function EmptyState({ title, body, children }: { title: string; body: string; children?: ReactNode }) {
   return (
     <SoftCard className="px-6 py-10">
       <div className="text-[15px] font-semibold">{title}</div>
       <p className="mt-1 max-w-lg text-[13px] leading-relaxed text-mc-sub">{body}</p>
+      {children}
     </SoftCard>
   )
 }
@@ -245,5 +246,5 @@ export function Toast({ message, onDismiss }: { message: string; onDismiss: () =
 }
 
 export function FieldError({ children }: { children: ReactNode }) {
-  return <p className="mt-1 text-[12px] font-medium text-mc-red">{children}</p>
+  return <p className="mt-1 text-[12px] font-medium text-mc-redtext">{children}</p>
 }

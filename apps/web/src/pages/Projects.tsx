@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
+import { useLiveActivity } from '../hooks/useLiveActivity'
 import type { Agent, AgentsResp, Project, ProjectsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, EmptyState, Banner, Toast, FieldError } from '../components/shell'
 import { agentCaption } from '../data/roster'
+import { ticketNeedsYou, type ApprovalLike } from '../lib/board'
 
 /**
  * Projects — ticket 4, drawn as the Apple list.
@@ -13,16 +15,70 @@ import { agentCaption } from '../data/roster'
 
 const TOAST_MS = 4000
 
-function lead(project: Project, ticketsNote: string | undefined, roster: Agent[]): Agent | { id: string; name: string; role: string | null; status: string } {
-  const hint = (ticketsNote ?? project.name).toLowerCase()
-  const hit = roster.find((a) => hint.includes(a.name.toLowerCase()) || hint.includes(agentCaption(a.name, a.role).name.toLowerCase()))
-  return hit ?? roster[0] ?? { id: project.id, name: 'Agent', role: null, status: 'idle' }
+/** Demo projects with no open assignee still get the sample lead. User projects do not. */
+const DEMO_LEAD: Record<string, string> = {
+  'demo-project-onboarding': 'Atlas',
+  'demo-project-pipeline': 'Forge',
+  'demo-project-ideas': 'Echo',
+}
+
+interface ProjectTicket {
+  projectId: string | null
+  assignee: string | null
+  status: string
+  key: string | null
+  title: string
+}
+
+function stageRank(status: string): number {
+  const s = status.toLowerCase()
+  if (s === 'build' || s === 'inprogress') return 0
+  if (s === 'qa') return 1
+  if (s === 'review') return 2
+  if (s === 'todo') return 3
+  return 4
+}
+
+function leadName(projectId: string, tickets: ProjectTicket[]): string | null {
+  const open = tickets.filter((t) => t.projectId === projectId && t.assignee?.trim() && t.status !== 'done')
+  if (open.length) {
+    const counts = new Map<string, { n: number; best: number }>()
+    for (const ticket of open) {
+      const name = ticket.assignee!.trim()
+      const rank = stageRank(ticket.status)
+      const cur = counts.get(name)
+      if (!cur) counts.set(name, { n: 1, best: rank })
+      else {
+        cur.n += 1
+        if (rank < cur.best) cur.best = rank
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1].n - a[1].n || a[1].best - b[1].best)[0][0]
+  }
+  return DEMO_LEAD[projectId] ?? null
+}
+
+function faceFor(name: string | null, roster: Agent[]): Agent | { id: string; name: string; role: string | null; status: string } | null {
+  if (!name) return null
+  const key = name.toLowerCase()
+  return roster.find((a) => a.name.toLowerCase() === key || agentCaption(a.name, a.role).name.toLowerCase() === key)
+    ?? { id: name, name, role: null, status: 'idle' }
 }
 
 export default function Projects() {
   const { data, loading, errorMessage: loadError, refetch } = useApi<ProjectsResp>('/projects?archived=all', { pollMs: 15000 })
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const ticketsQ = useApi<{ tickets: ProjectTicket[] }>('/tickets', { pollMs: 20000 })
+  const approvalsQ = useApi<{ approvals: ApprovalLike[] }>('/approvals', { pollMs: 15000 })
+  const { events } = useLiveActivity()
+  const refetchApprovals = approvalsQ.refetch
   const roster = rosterQ.data?.agents ?? []
+  const projectTickets = ticketsQ.data?.tickets ?? []
+  const pending = approvalsQ.data?.approvals ?? []
+
+  useEffect(() => {
+    if (events.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
+  }, [events, refetchApprovals])
   const [filter, setFilter] = useState(0)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
@@ -150,14 +206,14 @@ export default function Projects() {
 
       <div className="space-y-3">
         {rows.map((p) => {
-          const who = lead(p, undefined, roster)
+          const who = faceFor(leadName(p.id, projectTickets), roster)
           const frac = p.ticketCount ? p.doneCount / p.ticketCount : 0
           const finished = p.ticketCount > 0 && p.doneCount === p.ticketCount
-          const needs = /needs you|approval/i.test(p.name)
+          const needs = projectTickets.some((t) => t.projectId === p.id && ticketNeedsYou(t, pending))
           return (
             <SoftCard key={p.id} className="group px-4 py-3">
               <div className="flex flex-wrap items-center gap-4">
-                <Face agent={who} agents={roster} px={52} />
+                {who ? <Face agent={who} agents={roster} px={52} /> : <span className="h-[52px] w-[52px] shrink-0" aria-hidden />}
                 <div className="min-w-[200px] flex-1">
                   {editingId === p.id ? (
                     <div>
@@ -210,7 +266,7 @@ export default function Projects() {
                       >
                         {busyId === p.id ? 'Saving…' : 'Archive'}
                       </button>
-                      {!needs && <AgentName name={who.name} role={who.role} />}
+                      {!needs && who && <AgentName name={who.name} role={who.role} />}
                     </>
                   )}
                 </div>
@@ -222,7 +278,7 @@ export default function Projects() {
 
       {filter === 0 && archived.length > 0 && (
         <button type="button" onClick={() => setFilter(1)} className="mt-4 text-[13px] text-mc-sub">
-          {archived.length} archived project{archived.length === 1 ? '' : 's'} <span className="font-semibold text-mc-accent">Show</span>
+          {archived.length} archived project{archived.length === 1 ? '' : 's'} <span className="font-semibold text-mc-accent-text">Show</span>
         </button>
       )}
       {loading && !data && <p className="text-[13px] text-mc-sub">Loading…</p>}

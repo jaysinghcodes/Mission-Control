@@ -70,7 +70,7 @@ export default function ProjectDetail() {
 
   return (
     <div>
-      <Link to="/projects" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent">← Projects</Link>
+      <Link to="/projects" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">← Projects</Link>
       {loadError && (
         <Banner>Couldn't load this project ({loadError}). {data ? 'Showing the last loaded page; retrying automatically.' : 'Retrying automatically.'}</Banner>
       )}
@@ -93,7 +93,7 @@ export default function ProjectDetail() {
                   <Btn kind="plain" disabled={busy} onClick={() => void setArchived(!project.archivedAt)}>
                     {busy ? 'Saving…' : project.archivedAt ? 'Unarchive' : 'Archive'}
                   </Btn>
-                  <Link to={`/tasks?project=${encodeURIComponent(project.id)}`} className="inline-flex h-8 items-center rounded-lg bg-mc-accent px-3.5 text-[13px] font-semibold text-white">
+                  <Link to={`/tasks?project=${encodeURIComponent(project.id)}`} className="inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white">
                     Open on board
                   </Link>
                 </>
@@ -127,7 +127,7 @@ export default function ProjectDetail() {
             </SoftCard>
           )}
           {tickets.length === 0 && (
-            <Link to={`/tasks?project=${encodeURIComponent(project.id)}`} className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent px-3.5 text-[13px] font-semibold text-white">
+            <Link to={`/tasks?project=${encodeURIComponent(project.id)}`} className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white">
               Go to the board
             </Link>
           )}

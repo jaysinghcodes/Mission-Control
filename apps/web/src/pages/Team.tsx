@@ -61,7 +61,7 @@ export default function Team() {
       <SoftCard className="px-7 py-6">
         <div className="flex items-center justify-between">
           <Kicker>Mission</Kicker>
-          <button type="button" className="text-[13px] font-semibold text-mc-accent" onClick={() => { setDraft(mission); setEditing(true) }}>Edit</button>
+          <button type="button" className="text-[13px] font-semibold text-mc-accent-text" onClick={() => { setDraft(mission); setEditing(true) }}>Edit</button>
         </div>
         {editing ? (
           <div className="mt-3">
@@ -93,7 +93,7 @@ export default function Team() {
             </div>
             <StatusChip label="You" tone="blue" />
           </div>
-          <button type="button" onClick={() => setInvite(true)} className="mt-5 text-[13px] font-semibold text-mc-accent">
+          <button type="button" onClick={() => setInvite(true)} className="mt-5 text-[13px] font-semibold text-mc-accent-text">
             Invite a teammate <span className="font-medium text-mc-sub">to share approvals</span>
           </button>
         </SoftCard>
@@ -112,14 +112,14 @@ export default function Team() {
               ))}
             </div>
           )}
-          <Link to="/agents" className="mt-4 inline-block text-[13px] font-semibold text-mc-accent">See who's doing what</Link>
+          <Link to="/agents" className="mt-4 inline-block text-[13px] font-semibold text-mc-accent-text">See who's doing what</Link>
         </SoftCard>
       </div>
 
       <SoftCard className="mt-5 px-6 py-5">
         <div className="flex items-center justify-between">
           <span className="text-[15px] font-semibold">Devices</span>
-          <button type="button" className="text-[13px] font-semibold text-mc-accent" onClick={() => setPair(true)}>Pair a device</button>
+          <button type="button" className="text-[13px] font-semibold text-mc-accent-text" onClick={() => setPair(true)}>Pair a device</button>
         </div>
         {devices.length === 0 ? (
           <EmptyState title="No devices" body="The API host shows up here when /system answers." />
@@ -147,13 +147,13 @@ export default function Team() {
       {invite && (
         <Sheet title="Invite a teammate" onClose={() => setInvite(false)}>
           <p className="text-[14px] text-mc-sub2">This build does not send invites. Share the setup guide — they connect with the SSH tunnel in ONBOARDING.md.</p>
-          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent px-3.5 text-[13px] font-semibold text-white" onClick={() => setInvite(false)}>Open setup</Link>
+          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setInvite(false)}>Open setup</Link>
         </Sheet>
       )}
       {pair && (
         <Sheet title="Pair a device" onClose={() => setPair(false)}>
           <p className="text-[14px] text-mc-sub2">Pairing is the SSH tunnel from another machine. Step 7 of setup has the command for your OS and a live API check.</p>
-          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent px-3.5 text-[13px] font-semibold text-white" onClick={() => setPair(false)}>Open setup</Link>
+          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setPair(false)}>Open setup</Link>
         </Sheet>
       )}
     </div>
