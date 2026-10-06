@@ -42,6 +42,8 @@ export default function Approvals() {
 
   const pending = pendingQ.data?.approvals ?? []
   const decided = decidedQ.data?.approvals ?? []
+  // Approval stores createdAt only. There is no decidedAt, resolvedAt, or
+  // updatedAt, so "Decided today" uses createdAt as a Chicago calendar day.
   const summary = pendingQ.data
     ? `${pending.length} waiting on you · ${countOnChicagoDay(decided)} decided today`
     : 'Loading approvals…'

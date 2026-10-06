@@ -39,6 +39,21 @@ export function formatChicagoClock(iso: string): string {
   }).format(date)
 }
 
+/** Reader line. The zone abbreviation separates the two 1:30 AM instants on a fall-back night. */
+export function formatChicagoSaved(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: CHICAGO,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(date)
+}
+
 export function formatChicagoDayHeading(day: string, now: Date = new Date()): string {
   const [year, month, date] = day.split('-').map(Number)
   if (!year || !month || !date) return day
@@ -46,7 +61,6 @@ export function formatChicagoDayHeading(day: string, now: Date = new Date()): st
     timeZone: 'UTC',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
   }).format(new Date(Date.UTC(year, month - 1, date)))
   return day === chicagoDay(now) ? `Today · ${label}` : label
 }

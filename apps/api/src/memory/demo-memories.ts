@@ -1,11 +1,14 @@
 /**
  * Sample memories for `npm run seed:demo` (ticket 5).
  *
- * Fixed ids so a second seed inserts nothing. Times are absolute instants:
- * the page buckets them in America/Chicago, including the 11:58 PM note.
+ * Fixed ids so a second seed inserts nothing. Dates are relative to seed
+ * time in America/Chicago, and every instant is at or before that moment:
+ * a busy day is yesterday, and the 11:58 PM note sits on an earlier day.
  * Agents are the seeded cool names (Forge, Aegis, …) so the existing robots
  * and "Name · Function" captions resolve.
  */
+
+import { chicagoDay, chicagoWallTime, shiftChicagoDay } from './chicago-day';
 
 export type DemoMemoryKind = 'long-term' | 'daily' | 'other';
 
@@ -53,10 +56,10 @@ const LONG_NOTE = [
   }),
 ].join('\n\n');
 
-function bulkDay(): DemoMemory[] {
-  // 2026-10-05 is CDT (UTC-5). 13:00Z is 8:00 AM Chicago. 52 notes, 8 minutes
-  // apart, stay on that calendar day (the last one lands mid-afternoon).
-  const start = Date.UTC(2026, 9, 5, 13, 0, 0);
+function bulkDay(day: string): DemoMemory[] {
+  // 8:00 AM Chicago, then every 8 minutes. 52 notes finish mid-afternoon
+  // on that same calendar day, which the caller picks in the past.
+  const start = chicagoWallTime(day, 8, 0).getTime();
   return Array.from({ length: 52 }, (_, i) => {
     const n = String(i + 1).padStart(2, '0');
     const agent = ROSTER[i % ROSTER.length];
@@ -73,72 +76,77 @@ function bulkDay(): DemoMemory[] {
   });
 }
 
-export const DEMO_MEMORIES: DemoMemory[] = [
-  {
-    id: 'demo-memory-long',
-    title: 'Long note on the build',
-    body: LONG_NOTE,
-    agent: 'Forge',
-    // 2026-10-06 10:04 AM CDT.
-    createdAt: '2026-10-06T15:04:00.000Z',
-    kind: 'long-term',
-    source: 'demo',
-    ref: null,
-  },
-  {
-    id: 'demo-memory-aegis',
-    title: 'Preview deploys wait',
-    body: 'Aegis will not run the preview deploy until the approval on DEMO-4 is decided. The script stays gated.',
-    agent: 'Aegis',
-    // 2026-10-06 3:15 PM CDT.
-    createdAt: '2026-10-06T20:15:00.000Z',
-    kind: 'daily',
-    source: 'demo',
-    ref: null,
-  },
-  {
-    id: 'demo-memory-quill',
-    title: 'Release note draft',
-    body: 'Quill started the release note for the next cut. It names the project filter and the memory page, and it is still a draft.',
-    agent: 'Quill',
-    // 2026-10-06 8:40 AM CDT.
-    createdAt: '2026-10-06T13:40:00.000Z',
-    kind: 'daily',
-    source: 'demo',
-    ref: null,
-  },
-  {
-    id: 'demo-memory-echo',
-    title: 'Calendar patterns',
-    body: 'Echo wrote down that the week grid starts on Monday and that an all-day job has no clock time.',
-    agent: 'Echo',
-    // 2026-10-02 11:00 AM CDT.
-    createdAt: '2026-10-02T16:00:00.000Z',
-    kind: 'daily',
-    source: 'demo',
-    ref: null,
-  },
-  {
-    id: 'demo-memory-sentinel',
-    title: 'Regression pass notes',
-    body: 'Sentinel checked the ticket board after a reload. The columns matched the database, including an empty Review column.',
-    agent: 'Sentinel',
-    // 2026-10-02 4:30 PM CDT.
-    createdAt: '2026-10-02T21:30:00.000Z',
-    kind: 'daily',
-    source: 'demo',
-    ref: null,
-  },
-  {
-    id: 'demo-memory-midnight',
-    title: 'Handoff before midnight',
-    body: 'Speedy closed the day at 11:58 PM Central. This note belongs on January 15, not January 16.',
-    agent: 'Speedy',
-    // 2026-01-15 23:58 America/Chicago (CST, UTC-6).
-    createdAt: '2026-01-16T05:58:00.000Z',
-    kind: 'daily',
-    source: 'demo',
-    ref: null,
-  },
-  ...bulkDay(),
-];
+/**
+ * Build the sample set for one seed instant. Every createdAt is <= now.
+ * Ids do not depend on now, so a second seed still inserts nothing.
+ */
+export function buildDemoMemories(now: Date = new Date()): DemoMemory[] {
+  const today = chicagoDay(now);
+  const yesterday = shiftChicagoDay(today, -1);
+  const twoAgo = shiftChicagoDay(today, -2);
+  const threeAgo = shiftChicagoDay(today, -3);
+  const fourAgo = shiftChicagoDay(today, -4);
+  return [
+    {
+      id: 'demo-memory-long',
+      title: 'Long note on the build',
+      body: LONG_NOTE,
+      agent: 'Forge',
+      createdAt: new Date(now.getTime() - 90 * 60_000).toISOString(),
+      kind: 'long-term',
+      source: 'demo',
+      ref: null,
+    },
+    {
+      id: 'demo-memory-aegis',
+      title: 'Preview deploys wait',
+      body: 'Aegis will not run the preview deploy until the approval on DEMO-4 is decided. The script stays gated.',
+      agent: 'Aegis',
+      createdAt: chicagoWallTime(yesterday, 15, 15).toISOString(),
+      kind: 'daily',
+      source: 'demo',
+      ref: null,
+    },
+    {
+      id: 'demo-memory-quill',
+      title: 'Release note draft',
+      body: 'Quill started the release note for the next cut. It names the project filter and the memory page, and it is still a draft.',
+      agent: 'Quill',
+      createdAt: chicagoWallTime(yesterday, 8, 40).toISOString(),
+      kind: 'daily',
+      source: 'demo',
+      ref: null,
+    },
+    {
+      id: 'demo-memory-echo',
+      title: 'Calendar patterns',
+      body: 'Echo wrote down that the week grid starts on Monday and that an all-day job has no clock time.',
+      agent: 'Echo',
+      createdAt: chicagoWallTime(fourAgo, 11, 0).toISOString(),
+      kind: 'daily',
+      source: 'demo',
+      ref: null,
+    },
+    {
+      id: 'demo-memory-sentinel',
+      title: 'Regression pass notes',
+      body: 'Sentinel checked the ticket board after a reload. The columns matched the database, including an empty Review column.',
+      agent: 'Sentinel',
+      createdAt: chicagoWallTime(twoAgo, 16, 30).toISOString(),
+      kind: 'daily',
+      source: 'demo',
+      ref: null,
+    },
+    {
+      id: 'demo-memory-midnight',
+      title: 'Handoff before midnight',
+      body: 'Speedy closed the day at 11:58 PM Central. This note belongs on that Chicago day, not the next morning.',
+      agent: 'Speedy',
+      createdAt: chicagoWallTime(threeAgo, 23, 58).toISOString(),
+      kind: 'daily',
+      source: 'demo',
+      ref: null,
+    },
+    ...bulkDay(yesterday),
+  ];
+}

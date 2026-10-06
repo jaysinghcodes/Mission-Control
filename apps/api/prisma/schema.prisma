@@ -170,7 +170,7 @@ model MemoryEntry {
   agent     String
   createdAt DateTime
   kind      String // long-term | daily | other
-  source    String? // openclaw | demo
+  source    String? // bridge | demo
   ref       String? // workspace-relative path when the bridge has one
   updatedAt DateTime @updatedAt
 

@@ -6,7 +6,7 @@ import type { Agent, AgentsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, SearchInput, Face, AgentName, StatusChip, Kicker, EmptyState, Banner } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import { API_URL } from '../lib/apiBase'
-import { formatChicagoClock, formatChicagoDayHeading } from '../lib/chicago-day'
+import { formatChicagoClock, formatChicagoDayHeading, formatChicagoSaved } from '../lib/chicago-day'
 import { groupMemoryByDay } from '../lib/memory-groups'
 
 /**
@@ -79,7 +79,7 @@ export default function Memory() {
 
   const { data, loading, errorMessage, refetch } = useApi<MemoryList>(path, { pollMs: 20000 })
   const { events } = useLiveActivity()
-  const entries = data?.entries ?? []
+  const entries = useMemo(() => data?.entries ?? [], [data])
   const seenSnapshot = useRef(0)
 
   useEffect(() => {
@@ -135,7 +135,8 @@ export default function Memory() {
       : `${entries.length} ${entries.length === 1 ? 'memory' : 'memories'}`
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="shrink-0">
       <PageHeader
         title="Memory"
         summary={summary}
@@ -158,7 +159,8 @@ export default function Memory() {
           </>
         }
       />
-      {errorMessage && data && <Banner>{errorMessage}</Banner>}
+      </div>
+      {errorMessage && data && <div className="shrink-0"><Banner>{errorMessage}</Banner></div>}
       {!data && errorMessage && (
         <EmptyState title="Memories not loaded" body={errorMessage} />
       )}
@@ -174,8 +176,8 @@ export default function Memory() {
         </EmptyState>
       )}
       {data && data.total > 0 && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
-          <SoftCard className="max-h-[640px] overflow-y-auto p-2">
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-4 lg:grid-cols-[380px_minmax(0,1fr)] lg:grid-rows-1">
+          <SoftCard className="mc-scroll min-h-0 overflow-y-auto p-2">
             {entries.length === 0 && (
               <p className="px-3 py-6 text-[13px] text-mc-sub">{emptyFilterCopy(day, query, tab)}</p>
             )}
@@ -184,9 +186,9 @@ export default function Memory() {
                 <button
                   type="button"
                   onClick={() => setSelected(group.entries[0].id)}
-                  className="px-3 py-2 text-left"
+                  className="sticky top-0 z-10 w-full bg-mc-card px-3 py-2 text-left"
                 >
-                  <Kicker>{formatChicagoDayHeading(group.day)}</Kicker>
+                  <Kicker>{formatChicagoDayHeading(group.day)} · {group.entries.length}</Kicker>
                 </button>
                 {group.entries.map((row) => {
                   const on = current?.id === row.id
@@ -214,11 +216,11 @@ export default function Memory() {
             ))}
           </SoftCard>
           {current ? (
-            <SoftCard className="px-8 py-7">
+            <SoftCard className="mc-scroll min-h-0 overflow-y-auto px-8 py-7">
               <MemoryReader entry={current} body={body} agents={agents} />
             </SoftCard>
           ) : (
-            <SoftCard className="px-8 py-7">
+            <SoftCard className="mc-scroll min-h-0 overflow-y-auto px-8 py-7">
               <p className="text-[13px] text-mc-sub">{emptyFilterCopy(day, query, tab)}</p>
             </SoftCard>
           )}
@@ -246,13 +248,13 @@ function MemoryReader({
           <Face agent={who} agents={agents} px={44} />
           <div>
             <AgentName name={who.name} role={who.role} size="md" />
-            <div className="text-[12.5px] text-mc-sub">Saved {formatChicagoClock(entry.createdAt)} CT</div>
+            <div className="text-[12.5px] text-mc-sub">Saved {formatChicagoSaved(entry.createdAt)}</div>
           </div>
         </div>
         <StatusChip label={kindLabel(entry.kind)} tone={kindTone(entry.kind)} />
       </div>
       <h2 className="mt-6 text-[24px] font-bold tracking-tight">{entry.title}</h2>
-      <div className="mt-4 max-h-[min(520px,60vh)] overflow-y-auto whitespace-pre-wrap break-words text-[15px] leading-relaxed text-mc-text">
+      <div className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-mc-text">
         {body}
       </div>
       <div className="mt-8 border-t border-mc-sep pt-4 text-[13px]">

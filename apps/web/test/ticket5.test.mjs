@@ -52,6 +52,20 @@ test('Started matches the run by ticket id and uses startedAt', () => {
   assert.equal(started.startedIso(ticket, [unstarted]), '')
 })
 
+test('saved time names the Chicago date and the zone, so the two 1:30s differ', () => {
+  // Fall back is 2026-11-01 02:00 CDT → 01:00 CST.
+  // 01:30 CDT is 06:30 UTC. 01:30 CST is 07:30 UTC.
+  const cdt = days.formatChicagoSaved('2026-11-01T06:30:00.000Z')
+  const cst = days.formatChicagoSaved('2026-11-01T07:30:00.000Z')
+  assert.match(cdt, /Nov 1, 2026/)
+  assert.match(cdt, /1:30/)
+  assert.match(cdt, /AM/)
+  assert.match(cdt, /CDT/)
+  assert.match(cst, /1:30/)
+  assert.match(cst, /CST/)
+  assert.notEqual(cdt, cst)
+})
+
 test('memory groups keep newest day first and skip empty days', () => {
   const grouped = groups.groupMemoryByDay([
     { id: 'a', day: '2026-10-06' },

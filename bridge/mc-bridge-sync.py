@@ -463,6 +463,11 @@ def usage_from_sessions(
 # The web app never reads these files. This bridge posts them.
 
 DAILY_NOTE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:-.+)?\.md$")
+# A line by itself, so a sentence that happens to mention a clock is not a timestamp.
+NOTE_CLOCK = re.compile(
+    r"^(?:#+\s*)?(?:time\s*:\s*)?(\d{1,2}):(\d{2})\s*(AM|PM)?(?:\s*(?:CT|CST|CDT))?\s*$",
+    re.IGNORECASE,
+)
 MAX_MEMORY_BYTES = 1_000_000
 
 
@@ -475,6 +480,95 @@ def memory_stable_id(agent_id: str, rel: str) -> str:
 def iso_utc(mtime: float) -> str:
     dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).replace(microsecond=0)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def iso_z(dt: datetime.datetime) -> str:
+    utc = dt.astimezone(datetime.timezone.utc).replace(microsecond=0)
+    return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _nth_sunday(year: int, month: int, n: int) -> int:
+    """Day-of-month of the nth Sunday. weekday(): Monday is 0, Sunday is 6."""
+    first = datetime.date(year, month, 1)
+    offset = (6 - first.weekday()) % 7
+    return 1 + offset + (n - 1) * 7
+
+
+def chicago_offset_seconds(utc_naive: datetime.datetime) -> int:
+    """
+    Seconds to add to a UTC instant to get America/Chicago wall time.
+
+    US Central rules since 2007, stdlib only (no zoneinfo, so Python 3.8
+    can run the bridge): DST starts the second Sunday in March at 02:00 CST
+    (08:00 UTC) and ends the first Sunday in November at 02:00 CDT (07:00 UTC).
+    """
+    year = utc_naive.year
+    start = datetime.datetime(year, 3, _nth_sunday(year, 3, 2), 8, 0, 0)
+    end = datetime.datetime(year, 11, _nth_sunday(year, 11, 1), 7, 0, 0)
+    if start <= utc_naive < end:
+        return -5 * 3600
+    return -6 * 3600
+
+
+def chicago_day_of(dt: datetime.datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    utc = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    local = utc + datetime.timedelta(seconds=chicago_offset_seconds(utc))
+    return local.strftime("%Y-%m-%d")
+
+
+def chicago_wall(day: str, hour: int, minute: int) -> datetime.datetime:
+    """UTC instant of a clock time on a Chicago calendar day."""
+    year, month, date = (int(part) for part in day.split("-"))
+    local = datetime.datetime(year, month, date, hour, minute)
+    as_cdt = local + datetime.timedelta(hours=5)
+    as_cst = local + datetime.timedelta(hours=6)
+    if chicago_offset_seconds(as_cdt) == -5 * 3600:
+        utc = as_cdt
+    else:
+        utc = as_cst
+    return utc.replace(tzinfo=datetime.timezone.utc)
+
+
+def parse_note_clock(body: str) -> Optional[tuple]:
+    """First standalone clock in the note, or None. 23:58 and 11:58 PM both work."""
+    for line in body.splitlines()[:30]:
+        match = NOTE_CLOCK.match(line.strip())
+        if not match:
+            continue
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        ampm = (match.group(3) or "").upper()
+        if minute > 59:
+            continue
+        if ampm:
+            if hour < 1 or hour > 12:
+                continue
+            hour = (0 if hour == 12 else hour) if ampm == "AM" else (12 if hour == 12 else hour + 12)
+        elif hour > 23:
+            continue
+        return hour, minute
+    return None
+
+
+def daily_created_at(day: str, mtime: float, body: str) -> str:
+    """
+    Daily notes take their calendar day from the filename, in America/Chicago.
+
+    A copy, restore, or checkout rewrites mtime, and appending after midnight
+    must not move yesterday's note onto today. Use mtime only when that
+    instant already falls on the filename's Chicago date. Otherwise a
+    standalone clock in the note (``Time: 23:58 CT``), and if there is none,
+    12:00 CT on that date.
+    """
+    mtime_dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc)
+    if chicago_day_of(mtime_dt) == day:
+        return iso_utc(mtime)
+    clock = parse_note_clock(body)
+    if clock:
+        return iso_z(chicago_wall(day, clock[0], clock[1]))
+    return iso_z(chicago_wall(day, 12, 0))
 
 
 def memory_title(body: str, fallback: str) -> str:
@@ -554,6 +648,7 @@ def entry_from_file(
     workspace: Path,
     path: Path,
     kind: str,
+    day: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     text = _read_memory_text(path)
     if text is None:
@@ -563,10 +658,13 @@ def entry_from_file(
         return None
     rel = path.relative_to(workspace).as_posix()
     try:
-        created = iso_utc(path.stat().st_mtime)
+        mtime = path.stat().st_mtime
     except OSError as exc:
         log(f"{path}: {exc} — skipping")
         return None
+    # `day` is the filename date for a daily note. Long-term MEMORY.md has
+    # no date in the name and keeps the file mtime.
+    created = daily_created_at(day, mtime, body) if day else iso_utc(mtime)
     return {
         "id": memory_stable_id(agent_id, rel),
         "title": memory_title(body, path.stem),
@@ -574,7 +672,7 @@ def entry_from_file(
         "agent": agent_name,
         "createdAt": created,
         "kind": kind,
-        "source": "openclaw",
+        "source": "bridge",
         "ref": rel,
     }
 
@@ -586,12 +684,14 @@ def collect_memory(
     """
     Read each agent's MEMORY.md and memory/YYYY-MM-DD*.md.
 
-    Returns None when agents were given but no workspace directory could be
-    read (skip the snapshot — do not wipe). Returns [] when the source was
-    readable and empty (a real empty memory dir still posts []).
+    Returns None when there is nothing to post: no agents, or agents were
+    given but no workspace directory could be read. An empty list would be
+    a snapshot that clears bridge rows, so a folder with zero workspaces
+    must not become []. Returns [] only when a workspace was readable and
+    simply had no notes.
     """
     if not agents:
-        return []
+        return None
     readable = 0
     by_id: Dict[str, Dict[str, Any]] = {}
     for agent in agents:
@@ -619,7 +719,7 @@ def collect_memory(
             match = DAILY_NOTE.match(path.name)
             if not match or not is_real_day(match.group(1)):
                 continue
-            row = entry_from_file(agent_id, agent_name, workspace, path, "daily")
+            row = entry_from_file(agent_id, agent_name, workspace, path, "daily", match.group(1))
             if row:
                 by_id[row["id"]] = row
     if readable == 0:
@@ -722,6 +822,8 @@ def main() -> int:
         mem_agents = agents_from_memory_dir(args.memory_dir)
         if mem_agents is None:
             log(f"memory dir {args.memory_dir} not found — skipping memory.snapshot")
+        elif len(mem_agents) == 0:
+            log(f"memory dir {args.memory_dir} has no agent workspaces — skipping memory.snapshot")
         else:
             memory_entries = collect_memory(mem_agents)
     elif agents_rows is not None:

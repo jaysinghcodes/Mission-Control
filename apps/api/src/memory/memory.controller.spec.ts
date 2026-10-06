@@ -28,11 +28,13 @@ function row(partial: Partial<Row> & Pick<Row, 'id' | 'createdAt'>): Row {
 function makePrisma(rows: Row[]) {
   const calls: unknown[] = [];
   const memoryEntry = {
-    findMany: jest.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+    findMany: jest.fn(async ({ where, take, skip }: { where?: Record<string, unknown>; take?: number; skip?: number }) => {
       calls.push(where);
-      return rows
+      const matched = rows
         .filter((item) => matches(item, where))
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      const start = skip ?? 0;
+      return take == null ? matched.slice(start) : matched.slice(start, start + take);
     }),
     count: jest.fn(async () => rows.length),
     findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
@@ -127,6 +129,18 @@ describe('MemoryController', () => {
     expect(res.entries.map((entry) => entry.id)).toEqual(['early-cdt']);
     const where = calls[0] as { OR: { title: { contains: string } }[] };
     expect(where.OR[0].title.contains).toBe('100\\%');
+  });
+
+  it('honors limit and offset without changing the unfiltered total', async () => {
+    const { prisma } = makePrisma(rows);
+    const controller = new MemoryController(prisma);
+    const page = await controller.list(undefined, undefined, undefined, '1', '1');
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0].id).toBe('late-cdt');
+    expect(page.total).toBe(rows.length);
+    await expect(controller.list(undefined, undefined, undefined, '500')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.list(undefined, undefined, undefined, 'nope')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.list(undefined, undefined, undefined, undefined, '-1')).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('filters kind without hiding the unfiltered total', async () => {

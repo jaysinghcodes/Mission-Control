@@ -63,6 +63,27 @@ function chicagoOffsetMs(instant: Date): number {
   return asUtc - instant.getTime();
 }
 
+/** UTC instant of a clock time on a YYYY-MM-DD America/Chicago day. */
+export function chicagoWallTime(day: string, hour: number, minute: number): Date {
+  const [y, m, d] = day.split('-').map(Number);
+  let utc = Date.UTC(y, m - 1, d, hour + 6, minute, 0);
+  for (let i = 0; i < 4; i++) {
+    const offset = chicagoOffsetMs(new Date(utc));
+    const next = Date.UTC(y, m - 1, d, hour, minute, 0) - offset;
+    if (next === utc) return new Date(utc);
+    utc = next;
+  }
+  return new Date(utc);
+}
+
+/** Shift a YYYY-MM-DD calendar label by whole days. Not an instant conversion. */
+export function shiftChicagoDay(day: string, deltaDays: number): string {
+  const [y, m, d] = day.split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d));
+  next.setUTCDate(next.getUTCDate() + deltaDays);
+  return next.toISOString().slice(0, 10);
+}
+
 /** UTC instant of 00:00:00.000 in America/Chicago on `day` (YYYY-MM-DD). */
 function chicagoMidnightUtc(day: string): Date {
   const [y, m, d] = day.split('-').map(Number);

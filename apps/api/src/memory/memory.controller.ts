@@ -26,6 +26,8 @@ const KINDS = ['long-term', 'daily', 'other'] as const;
 type MemoryKind = (typeof KINDS)[number];
 
 const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** Optional page size. Omitted means the whole filtered list (the Memory page). */
+const MAX_LIMIT = 200;
 
 type MemoryRow = {
   id: string;
@@ -47,12 +49,18 @@ export class MemoryController {
     @Query('day') day?: string,
     @Query('kind') kind?: string,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const where = memoryListWhere(day, kind, q);
+    const take = parseLimit(limit);
+    const skip = parseOffset(offset);
     const [rows, total] = await Promise.all([
       this.prisma.memoryEntry.findMany({
         where,
         orderBy: { createdAt: 'desc' },
+        ...(take != null ? { take } : {}),
+        ...(skip ? { skip } : {}),
       }),
       this.prisma.memoryEntry.count(),
     ]);
@@ -108,6 +116,28 @@ export function memoryListWhere(day?: string, kind?: string, q?: string) {
   }
 
   return where;
+}
+
+function parseLimit(raw?: string): number | undefined {
+  const text = (raw ?? '').trim();
+  if (!text) return undefined;
+  if (!/^\d+$/.test(text)) {
+    throw new BadRequestException('limit must be a non-negative integer');
+  }
+  const n = Number(text);
+  if (n > MAX_LIMIT) {
+    throw new BadRequestException(`limit must be at most ${MAX_LIMIT}`);
+  }
+  return n;
+}
+
+function parseOffset(raw?: string): number {
+  const text = (raw ?? '').trim();
+  if (!text) return 0;
+  if (!/^\d+$/.test(text)) {
+    throw new BadRequestException('offset must be a non-negative integer');
+  }
+  return Number(text);
 }
 
 function assertDay(day: string): void {

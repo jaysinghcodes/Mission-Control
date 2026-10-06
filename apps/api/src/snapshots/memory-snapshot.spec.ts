@@ -15,14 +15,21 @@ type Row = {
 function makePrisma() {
   const rows = new Map<string, Row>();
   const memoryEntry = {
-    deleteMany: jest.fn(async ({ where }: { where?: { id?: { notIn?: string[] } } } = {}) => {
+    deleteMany: jest.fn(async ({ where }: {
+      where?: {
+        source?: { in?: string[] };
+        agent?: { in?: string[] };
+        id?: { notIn?: string[] };
+      };
+    } = {}) => {
+      const sources = where?.source?.in;
+      const agents = where?.agent?.in;
       const notIn = where?.id?.notIn;
-      if (!notIn) {
-        rows.clear();
-        return { count: 0 };
-      }
-      for (const id of [...rows.keys()]) {
-        if (!notIn.includes(id)) rows.delete(id);
+      for (const [id, row] of [...rows.entries()]) {
+        if (sources && (row.source == null || !sources.includes(row.source))) continue;
+        if (agents && !agents.includes(row.agent)) continue;
+        if (notIn && notIn.includes(id)) continue;
+        rows.delete(id);
       }
       return { count: 0 };
     }),
@@ -51,16 +58,29 @@ function makePrisma() {
   return { client: client as unknown as PrismaService, rows, prisma };
 }
 
-const entry = (id: string, body: string) => ({
+const entry = (id: string, body: string, agent = 'Forge') => ({
   id,
   title: `Title ${id}`,
   body,
-  agent: 'Forge',
+  agent,
   createdAt: '2026-10-05T15:00:00.000Z',
   kind: 'daily',
   source: 'openclaw',
   ref: 'memory/2026-10-05.md',
 });
+
+function demoRow(id: string): Row {
+  return {
+    id,
+    title: 'Seed note',
+    body: 'from seed:demo',
+    agent: 'Forge',
+    createdAt: new Date('2026-10-05T15:00:00.000Z'),
+    kind: 'daily',
+    source: 'demo',
+    ref: null,
+  };
+}
 
 describe('SnapshotsService.applyMemory', () => {
   it('upserts stable ids and does not duplicate on a second sync', async () => {
@@ -83,12 +103,29 @@ describe('SnapshotsService.applyMemory', () => {
     expect(rows.size).toBe(1);
   });
 
-  it('clears the table when the snapshot is a real empty list', async () => {
+  it('clears bridge rows on an empty snapshot and leaves demo rows', async () => {
     const { client, rows } = makePrisma();
+    rows.set('demo-1', demoRow('demo-1'));
     const service = new SnapshotsService(client);
     await service.applyMemory({ entries: [entry('mem-1', 'bye')] });
     await service.applyMemory({ entries: [] });
-    expect(rows.size).toBe(0);
+    expect([...rows.keys()]).toEqual(['demo-1']);
+    expect(rows.get('demo-1')?.source).toBe('demo');
+  });
+
+  it('replaces bridge rows only for agents in the snapshot', async () => {
+    const { client, rows } = makePrisma();
+    rows.set('demo-forge', demoRow('demo-forge'));
+    const service = new SnapshotsService(client);
+    await service.applyMemory({
+      entries: [entry('forge-1', 'old', 'Forge'), entry('aegis-1', 'keep', 'Aegis')],
+    });
+    await service.applyMemory({ entries: [entry('forge-2', 'new', 'Forge')] });
+    expect(rows.has('forge-1')).toBe(false);
+    expect(rows.has('forge-2')).toBe(true);
+    expect(rows.get('aegis-1')?.body).toBe('keep');
+    expect(rows.get('demo-forge')?.source).toBe('demo');
+    expect(rows.get('forge-2')?.source).toBe('bridge');
   });
 
   it('skips an entry that has no id and stores an unknown kind as other', async () => {

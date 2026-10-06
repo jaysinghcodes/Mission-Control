@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -66,7 +67,7 @@ class MemoryMapTest(unittest.TestCase):
         ])
         self.assertIsNone(rows)
 
-    def test_mtime_is_the_saved_instant(self):
+    def test_same_day_mtime_is_the_saved_instant(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "openclaw-memory"
             shutil.copytree(SAMPLE, root)
@@ -78,6 +79,49 @@ class MemoryMapTest(unittest.TestCase):
             hit = next(row for row in rows if row["ref"] == "memory/2026-01-15.md")
             self.assertEqual(hit["createdAt"], "2026-01-16T05:58:00Z")
             self.assertEqual(hit["agent"], "Aegis")
+            self.assertEqual(hit["source"], "bridge")
+
+    def test_copied_daily_note_keeps_the_filename_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ws"
+            daily = root / "memory"
+            daily.mkdir(parents=True)
+            note = daily / "2024-06-01.md"
+            note.write_text("# June 1\n\nShipped the week grid.\n", encoding="utf-8")
+            now = time.time()
+            os.utime(note, (now, now))
+            long_term = root / "MEMORY.md"
+            long_term.write_text("# Forge long-term\n\nKept.\n", encoding="utf-8")
+            stamp = datetime.datetime(2026, 3, 1, 15, 4, tzinfo=datetime.timezone.utc).timestamp()
+            os.utime(long_term, (stamp, stamp))
+            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root))
+            daily_row = next(row for row in rows if row["ref"] == "memory/2024-06-01.md")
+            created = datetime.datetime.strptime(
+                daily_row["createdAt"], "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=datetime.timezone.utc)
+            self.assertEqual(self.mod.chicago_day_of(created), "2024-06-01")
+            self.assertEqual(daily_row["createdAt"], self.mod.iso_z(self.mod.chicago_wall("2024-06-01", 12, 0)))
+            self.assertNotEqual(daily_row["createdAt"], self.mod.iso_utc(now))
+            memory_md = next(row for row in rows if row["ref"] == "MEMORY.md")
+            self.assertEqual(memory_md["createdAt"], "2026-03-01T15:04:00Z")
+            self.assertEqual(memory_md["kind"], "long-term")
+
+    def test_midnight_sample_stays_on_its_filename_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "openclaw-memory"
+            shutil.copytree(SAMPLE, root)
+            note = root / "Aegis" / "memory" / "2026-01-15.md"
+            os.utime(note, None)
+            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root))
+            hit = next(row for row in rows if row["ref"] == "memory/2026-01-15.md")
+            self.assertEqual(hit["createdAt"], "2026-01-16T05:58:00Z")
+            created = datetime.datetime.strptime(
+                hit["createdAt"], "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=datetime.timezone.utc)
+            self.assertEqual(self.mod.chicago_day_of(created), "2026-01-15")
+
+    def test_empty_agent_list_is_not_an_empty_snapshot(self):
+        self.assertIsNone(self.mod.collect_memory([]))
 
 
 class MemoryDryRunTest(unittest.TestCase):
@@ -103,6 +147,9 @@ class MemoryDryRunTest(unittest.TestCase):
         refs = {row["ref"] for row in entries}
         self.assertIn("MEMORY.md", refs)
         self.assertNotIn("USER.md", refs)
+        midnight = next(row for row in entries if row["ref"] == "memory/2026-01-15.md")
+        self.assertEqual(midnight["createdAt"], "2026-01-16T05:58:00Z")
+        self.assertTrue(all(row["source"] == "bridge" for row in entries))
 
         again = subprocess.run(
             [sys.executable, str(BRIDGE), "--dry-run", "--memory-dir", str(SAMPLE)],
@@ -126,6 +173,19 @@ class MemoryDryRunTest(unittest.TestCase):
         events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
         self.assertTrue(events)
         self.assertFalse(any(event["type"] == "memory.snapshot" for event in events))
+
+    def test_dir_with_no_workspaces_does_not_post(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "readme.txt").write_text("no agents\n", encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(BRIDGE), "--dry-run", "--memory-dir", tmp],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "")
+            self.assertIn("no agent workspaces", proc.stderr)
 
     def test_missing_memory_dir_skips(self):
         missing = SAMPLE.parent / "no-such-memory-dir"

@@ -180,12 +180,20 @@ export class SnapshotsService {
     if (!Array.isArray(payload.entries)) return;
     const rows = dedupeMemory(payload.entries.map(normalizeMemory).filter(isMemoryRow));
     const ids = rows.map((row) => row.id);
+    const agents = [...new Set(rows.map((row) => row.agent))];
     await this.prisma.$transaction(async (tx) => {
-      if (ids.length === 0) {
-        await tx.memoryEntry.deleteMany({});
-        return;
-      }
-      await tx.memoryEntry.deleteMany({ where: { id: { notIn: ids } } });
+      // Replace bridge rows only. Seed rows (source=demo) stay. When the
+      // snapshot names agents, only those agents are replaced, so a Forge
+      // sync cannot drop Aegis. An empty list is a readable workspace with
+      // no notes: clear every bridge row, still not the demo set. Legacy
+      // source=openclaw is the same writer from before this was named bridge.
+      await tx.memoryEntry.deleteMany({
+        where: {
+          source: { in: ['bridge', 'openclaw'] },
+          ...(agents.length > 0 ? { agent: { in: agents } } : {}),
+          ...(ids.length > 0 ? { id: { notIn: ids } } : {}),
+        },
+      });
       for (const row of rows) {
         await tx.memoryEntry.upsert({
           where: { id: row.id },
@@ -246,9 +254,10 @@ function normalizeMemory(value: unknown): MemoryWrite | null {
   const kindRaw = String(entry.kind ?? 'other');
   const kind = MEMORY_KINDS.has(kindRaw) ? kindRaw : 'other';
   const agent = String(entry.agent ?? 'agent').trim().slice(0, 120) || 'agent';
-  const source = entry.source ? String(entry.source).slice(0, 40) : null;
   const ref = entry.ref ? String(entry.ref).slice(0, 300) : null;
-  return { id, title, body, agent, createdAt, kind, source, ref };
+  // Every snapshot row is a bridge row. The replace below only deletes
+  // source=bridge, so a payload cannot hide a note by labeling it demo.
+  return { id, title, body, agent, createdAt, kind, source: 'bridge', ref };
 }
 
 /**

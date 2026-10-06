@@ -51,7 +51,7 @@ import {
   demoProjectIdForTicket,
 } from '../src/projects/demo-catalog';
 import { projectNameKey } from '../src/projects/project-name';
-import { DEMO_MEMORIES } from '../src/memory/demo-memories';
+import { buildDemoMemories } from '../src/memory/demo-memories';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -204,12 +204,15 @@ const USAGE = [
 ];
 
 // ticketId is the pipeline link (QA-13). A matching title is not the link.
+// startedMinAgo is distinct so Pipeline "Started" is not one seed instant
+// on every moving ticket. DEMO-6 has its own finished run.
 const RUNS = [
-  { id: 'demo-run-1', name: 'Deploy preview build', agent: 'Aegis', status: 'needs_approval', progress: 80, ticketId: null as string | null },
-  { id: 'demo-run-2', name: 'Wire calendar week view', agent: 'Forge', status: 'running', progress: 40, ticketId: 'demo-ticket-3' },
-  { id: 'demo-run-3', name: 'Regression pass on Tickets', agent: 'Sentinel', status: 'running', progress: 55, ticketId: 'demo-ticket-4' },
-  { id: 'demo-run-4', name: 'Release notes for the next cut', agent: 'Quill', status: 'running', progress: 90, ticketId: 'demo-ticket-5' },
-  { id: 'demo-run-5', name: 'Morning Brief', agent: 'Speedy', status: 'done', progress: 100, ticketId: null },
+  { id: 'demo-run-1', name: 'Deploy preview build', agent: 'Aegis', status: 'needs_approval', progress: 80, ticketId: null as string | null, startedMinAgo: 40, finishedMinAgo: null as number | null },
+  { id: 'demo-run-2', name: 'Wire calendar week view', agent: 'Forge', status: 'running', progress: 40, ticketId: 'demo-ticket-3', startedMinAgo: 180, finishedMinAgo: null },
+  { id: 'demo-run-3', name: 'Regression pass on Tickets', agent: 'Sentinel', status: 'running', progress: 55, ticketId: 'demo-ticket-4', startedMinAgo: 75, finishedMinAgo: null },
+  { id: 'demo-run-4', name: 'Release notes for the next cut', agent: 'Quill', status: 'running', progress: 90, ticketId: 'demo-ticket-5', startedMinAgo: 26, finishedMinAgo: null },
+  { id: 'demo-run-5', name: 'Morning Brief', agent: 'Speedy', status: 'done', progress: 100, ticketId: null, startedMinAgo: 500, finishedMinAgo: 470 },
+  { id: 'demo-run-6', name: 'Rotate demo ingest token', agent: 'Aegis', status: 'done', progress: 100, ticketId: 'demo-ticket-6', startedMinAgo: 2400, finishedMinAgo: 2200 },
 ];
 
 async function main(): Promise<void> {
@@ -356,9 +359,14 @@ async function main(): Promise<void> {
     if (!before) counts.usage++;
   }
 
-  const runNow = new Date();
+  const runNow = Date.now();
   for (const r of RUNS) {
-    const before = await prisma.run.findUnique({ where: { id: r.id }, select: { id: true } });
+    const before = await prisma.run.findUnique({
+      where: { id: r.id },
+      select: { id: true, startedAt: true, createdAt: true },
+    });
+    const startedAt = new Date(runNow - r.startedMinAgo * 60_000);
+    const finishedAt = r.finishedMinAgo == null ? null : new Date(runNow - r.finishedMinAgo * 60_000);
     await prisma.run.upsert({
       where: { id: r.id },
       update: {},
@@ -369,8 +377,8 @@ async function main(): Promise<void> {
         status: r.status,
         progress: r.progress,
         ticketId: r.ticketId,
-        startedAt: r.status === 'queued' ? null : runNow,
-        finishedAt: r.status === 'done' || r.status === 'failed' ? runNow : null,
+        startedAt,
+        finishedAt,
       },
     });
     if (!before) counts.runs++;
@@ -382,13 +390,33 @@ async function main(): Promise<void> {
         data: { ticketId: r.ticketId },
       });
     }
+    // The first ticket-5 seed stamped every run with the same instant as
+    // createdAt. Pull those apart once, measured from createdAt, so a later
+    // seed does not move them again.
+    if (before?.startedAt && Math.abs(before.startedAt.getTime() - before.createdAt.getTime()) < 5000) {
+      await prisma.run.update({
+        where: { id: r.id },
+        data: {
+          startedAt: new Date(before.createdAt.getTime() - r.startedMinAgo * 60_000),
+          finishedAt:
+            r.finishedMinAgo == null
+              ? null
+              : new Date(before.createdAt.getTime() - r.finishedMinAgo * 60_000),
+        },
+      });
+    }
   }
 
   // Memories. Fixed ids + update: {} — a second seed inserts 0 and does not
-  // rewrite a note you already have. A later memory.snapshot from the bridge
-  // replaces this table (same contract as agents and calendar).
-  for (const m of DEMO_MEMORIES) {
-    const before = await prisma.memoryEntry.findUnique({ where: { id: m.id }, select: { id: true } });
+  // rewrite a note you already have. A createdAt that landed in the future
+  // (the old absolute October dates, seeded before "now") is pulled back
+  // once. A memory.snapshot replaces bridge rows only, not these demo rows.
+  const memoryRows = buildDemoMemories(new Date());
+  for (const m of memoryRows) {
+    const before = await prisma.memoryEntry.findUnique({
+      where: { id: m.id },
+      select: { id: true, createdAt: true },
+    });
     await prisma.memoryEntry.upsert({
       where: { id: m.id },
       update: {},
@@ -404,6 +432,12 @@ async function main(): Promise<void> {
       },
     });
     if (!before) counts.memories++;
+    else if (before.createdAt.getTime() > Date.now()) {
+      await prisma.memoryEntry.update({
+        where: { id: m.id },
+        data: { createdAt: new Date(m.createdAt) },
+      });
+    }
   }
 
   // Demo activity that still names a retired agent gets the cool name.
