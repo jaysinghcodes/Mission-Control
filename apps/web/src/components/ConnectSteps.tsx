@@ -175,7 +175,7 @@ export const STEP_DATA: ConnectStep[] = [
   },
   {
     id: 6,
-    title: 'Connect their OpenClaw (the bridge)',
+    title: 'Connect your OpenClaw (the bridge)',
     phase: 'verify',
     phaseLabel: 'VERIFY',
     // Ticket 3: copy now points at the vendored `bridge/` (mc-bridge-sync.py)

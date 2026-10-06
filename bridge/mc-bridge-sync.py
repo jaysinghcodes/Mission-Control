@@ -14,7 +14,7 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
   openclaw sessions --all-agents --json → sessions.snapshot
   openclaw cron list --all --json     →   calendar.snapshot
                                           + run.* for job-state changes
-  (derived from sessions token counts) →  usage.snapshot
+  (derived from sessions token counts) →  usage.snapshot × 3 (24h, 7d, month)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
 
 Design rules (why the code looks the way it does):
@@ -39,6 +39,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -372,9 +373,45 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
     return events
 
 
-def usage_from_sessions(sessions: List[Dict[str, Any]], now_ms: int) -> Dict[str, Any]:
-    """24h usage rolled up from per-session token/cost counters (when present)."""
-    day = [s for s in sessions if s["_updatedMs"] and now_ms - s["_updatedMs"] < 86_400_000]
+# 24h and 7d are trailing durations. `month` is the UTC calendar month to
+# date (not the last 30 days). Session counters are cumulative, so a long
+# session is counted in the window of its last activity (the UI says "estimated").
+USAGE_WINDOWS = (
+    ("24h", 86_400_000),
+    ("7d", 7 * 86_400_000),
+)
+
+
+def month_start_utc_ms(now_ms: int) -> int:
+    """00:00:00.000 UTC on the first day of the month that contains now_ms."""
+    dt = datetime.datetime.fromtimestamp(now_ms / 1000.0, datetime.timezone.utc)
+    start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return int(start.timestamp() * 1000)
+
+
+def usage_from_sessions(
+    sessions: List[Dict[str, Any]],
+    now_ms: int,
+    period: str = "24h",
+    window_ms: Optional[int] = None,
+    since_ms: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Usage rolled up from per-session token/cost counters.
+
+    `period` is the UsageSnapshot key (24h | 7d | month). A duration window
+    keeps sessions whose last activity is within `window_ms`. `month` with
+    no explicit window uses the UTC calendar month (`_updatedMs >= month start`).
+    Callers that only want the original 24h snapshot can keep calling
+    usage_from_sessions(sessions, now_ms).
+    """
+    if period == "month" and since_ms is None and window_ms is None:
+        since_ms = month_start_utc_ms(now_ms)
+    if since_ms is not None:
+        day = [s for s in sessions if s["_updatedMs"] and s["_updatedMs"] >= since_ms]
+    else:
+        if window_ms is None:
+            window_ms = dict(USAGE_WINDOWS).get(period, 86_400_000)
+        day = [s for s in sessions if s["_updatedMs"] and now_ms - s["_updatedMs"] < window_ms]
 
     def num(v: Any) -> float:
         try:
@@ -398,7 +435,7 @@ def usage_from_sessions(sessions: List[Dict[str, Any]], now_ms: int) -> Dict[str
         return model.split("/", 1)[0] if "/" in model else model
 
     return {
-        "period": "24h",
+        "period": period,
         "totalCost": round(sum(num(s["_cost"]) for s in day), 4),
         "tokensIn": int(sum(num(s["_in"]) for s in day)),
         "tokensOut": int(sum(num(s["_out"]) for s in day)),
@@ -480,7 +517,9 @@ def main() -> int:
         events.extend(cron_run_events(cron_rows, state))
 
     if sessions is not None:
-        events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms)))
+        for period, window_ms in USAGE_WINDOWS:
+            events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms, period, window_ms)))
+        events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms, "month")))
 
     approvals_rows = as_list(src.approvals(), "approvals")
     if approvals_rows is not None:

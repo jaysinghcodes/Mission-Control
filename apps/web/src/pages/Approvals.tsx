@@ -1,102 +1,149 @@
 import { useState } from 'react'
 import { useApi, apiPost } from '../hooks/useApi'
-import { Card, Inner, PillButton } from '../components/ui'
+import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, Kicker, EmptyState } from '../components/shell'
+import { agentCaption } from '../data/roster'
+import type { Agent, AgentsResp } from '../types'
 
 /**
- * Approvals — real pending approval requests (synced via approvals.snapshot).
- * - Tabs: All + PRs (exec/pairing/messages/sessions removed per owner review)
- * - PR rows expand to show details (repo, branch, GitHub link)
- * - Approving a PR merges it on GitHub automatically (API-side)
+ * Approvals — decide what agents are waiting on.
+ * Pending is the default list. Decided is behind the segment (GET ?status=decided).
  */
 
-interface Approval { id: string; kind: string; tag: string; desc: string; status: string; createdAt: string; meta?: { number?: number; url?: string; repo?: string; branch?: string | null; state?: string } | null }
+interface Approval {
+  id: string
+  kind: string
+  tag: string
+  desc: string
+  status: string
+  createdAt: string
+  meta?: { number?: number; url?: string; repo?: string; branch?: string | null; state?: string } | null
+}
 interface ApprovalsResp { approvals: Approval[] }
 
-const KIND_ICON: Record<string, { glyph: string; color: string }> = {
-  pr: { glyph: '⎇', color: 'var(--mc-green)' },
-  exec: { glyph: '›_', color: 'var(--mc-red)' },
-  pair: { glyph: '⧉', color: 'var(--mc-blue)' },
-  msg: { glyph: '✉', color: 'var(--mc-purple)' },
-  sess: { glyph: '⑂', color: 'var(--mc-teal)' },
+function guessAgent(row: Approval, roster: Agent[]): Agent | { id: string; name: string; role: string | null; status: string } {
+  const blob = `${row.tag} ${row.desc}`.toLowerCase()
+  const hit = roster.find((a) => {
+    const cap = agentCaption(a.name, a.role)
+    return blob.includes(a.name.toLowerCase()) || blob.includes(cap.name.toLowerCase())
+  })
+  if (hit) return hit
+  return { id: row.id, name: row.tag || 'Agent', role: null, status: row.status === 'pending' ? 'blocked' : 'idle' }
 }
 
-const FILTERS = ['All', 'PRs']
-
 export default function Approvals() {
-  const { data, refetch } = useApi<ApprovalsResp>('/approvals', { pollMs: 10000 })
-  const [filter, setFilter] = useState('All')
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const rows = (data?.approvals ?? []).filter((r) => filter === 'All' || (filter === 'PRs' && r.kind === 'pr'))
+  const [tab, setTab] = useState(0)
+  const pendingQ = useApi<ApprovalsResp>('/approvals', { pollMs: 10000 })
+  const decidedQ = useApi<ApprovalsResp>('/approvals?status=decided', { pollMs: 15000 })
+  const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const roster = rosterQ.data?.agents ?? []
+  const [open, setOpen] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const pending = pendingQ.data?.approvals ?? []
+  const decided = decidedQ.data?.approvals ?? []
+  const summary = pendingQ.data
+    ? `${pending.length} waiting on you · ${decided.filter((d) => Date.now() - new Date(d.createdAt).getTime() < 86_400_000).length} decided today`
+    : 'Loading approvals…'
 
   async function decide(id: string, action: 'approve' | 'reject') {
+    setBusy(id)
     await apiPost(`/approvals/${id}/decide`, { action })
-    void refetch()
+    setBusy(null)
+    void pendingQ.refetch()
+    void decidedQ.refetch()
   }
 
   return (
-    <div className="p-6">
-      <div className="text-[22px] font-semibold">Approvals</div>
-      <div className="mt-1 text-[13px] text-mc-sub">Everything waiting on you — approve merges PRs on GitHub, reject declines.</div>
+    <div>
+      <PageHeader
+        title="Approvals"
+        summary={summary}
+        tools={<Segmented labels={['Pending', 'Decided']} active={tab} onChange={setTab} ariaLabel="Approvals" />}
+      />
 
-      <div className="flex gap-3 mt-6">
-        {FILTERS.map((f) => (
-          <PillButton key={f} label={f} on={filter === f} onClick={() => setFilter(f)} />
-        ))}
-      </div>
-
-      <Card className="mt-6 rounded-2xl px-0 pb-1 overflow-hidden">
-        {rows.length === 0 && (
-          <div className="px-[18px] py-10 text-[12.5px] text-mc-faint">
-            Nothing pending approval right now. PRs and agent requests land here live.
-          </div>
-        )}
-        {rows.map((row, i) => {
-          const icon = KIND_ICON[row.kind] ?? { glyph: '?', color: 'var(--mc-faint)' }
-          const meta = row.meta
-          const isOpen = expanded === row.id
-          return (
-            <div key={row.id}>
-              <div className={`flex items-center px-[18px] py-4 ${i < rows.length - 1 || isOpen ? 'border-b border-mc-border2' : ''}`}>
-                <button type="button" onClick={() => setExpanded(isOpen ? null : row.id)} className="flex items-center flex-1 min-w-0 text-left">
-                  <Inner className="w-9 h-9 rounded-[9px] flex items-center justify-center text-[13px] font-semibold mr-4 shrink-0">
-                    <span style={{ color: icon.color }}>{icon.glyph}</span>
-                  </Inner>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: icon.color }}>{row.tag}</div>
-                    <div className="text-[13px] font-medium mt-0.5 truncate">{row.desc}</div>
-                    {meta?.repo && (
-                      <div className="text-[11px] text-mc-faint mt-0.5 font-mono truncate">{meta.repo}{meta.branch ? ` · ${meta.branch}` : ''}{meta.number ? ` · #${meta.number}` : ''}</div>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-mc-faint mr-4 whitespace-nowrap">{isOpen ? '▾' : '▸'}</span>
-                </button>
-                <PillButton label="Approve" on className="mr-2 shrink-0" style={{ backgroundColor: 'var(--mc-green)' }} onClick={() => void decide(row.id, 'approve')} />
-                <PillButton label="Reject" className="shrink-0" onClick={() => void decide(row.id, 'reject')} />
-              </div>
-              {isOpen && (
-                <div className="px-[18px] py-4 bg-mc-inner border-b border-mc-border2">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mc-faint">Details</div>
-                  <div className="mt-2 text-[12.5px] text-mc-text leading-relaxed">{row.desc}</div>
-                  {meta && (
-                    <div className="mt-3 space-y-1.5 text-[12px]">
-                      {meta.repo && <div><span className="text-mc-faint">Repo: </span><span className="font-mono">{meta.repo}</span></div>}
-                      {meta.number != null && <div><span className="text-mc-faint">PR: </span><span className="font-mono">#{meta.number}</span></div>}
-                      {meta.branch && <div><span className="text-mc-faint">Branch: </span><span className="font-mono">{meta.branch}</span></div>}
-                      {meta.url && (
-                        <div>
-                          <span className="text-mc-faint">GitHub: </span>
-                          <a href={meta.url} target="_blank" rel="noreferrer" className="text-mc-bluetext hover:underline font-mono">{meta.url.replace('https://', '')}</a>
-                        </div>
-                      )}
+      {tab === 0 && (
+        <div className="mx-auto max-w-3xl">
+          {pendingQ.data && pending.length === 0 && (
+            <EmptyState title="Nothing is waiting on you" body="When an agent needs a decision, it shows up here. Approve merges a pull request on GitHub when that is what was asked." />
+          )}
+          {pending.length > 0 && <Kicker tone="red">Needs you</Kicker>}
+          <div className="mt-3 space-y-8">
+            {pending.map((row, i) => {
+              const who = guessAgent(row, roster)
+              const cap = agentCaption(who.name, who.role)
+              const meta = row.meta
+              return (
+                <div key={row.id}>
+                  {i === 1 && <div className="mb-3"><Kicker>Coming up</Kicker></div>}
+                  <SoftCard className="px-5 py-5">
+                    <div className="flex gap-4">
+                      <span className="mt-1 w-1 self-stretch rounded-full bg-mc-red" aria-hidden />
+                      <Face agent={{ ...who, status: 'blocked' }} agents={roster} px={64} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[20px] font-bold tracking-tight">{row.tag || row.desc}</div>
+                        <p className="mt-1 text-[14px] text-mc-sub2">
+                          <span className="font-semibold text-mc-text">{cap.name}</span>
+                          <span className="text-mc-sub"> · {cap.role}</span>
+                          {' '}{row.desc}
+                        </p>
+                        <p className="mt-1 text-[12.5px] text-mc-sub">
+                          {row.kind} · asked {new Date(row.createdAt).toLocaleString()}
+                        </p>
+                      </div>
                     </div>
-                  )}
-                  <div className="mt-3 text-[11.5px] text-mc-faint">Approving a PR merges it on GitHub and deletes its branch.</div>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-mc-sep pt-3">
+                      <button type="button" onClick={() => setOpen(open === row.id ? null : row.id)} className="text-[13px] font-semibold text-mc-accent-text">
+                        {open === row.id ? 'Hide details' : 'Show details'}
+                      </button>
+                      <div className="flex gap-2">
+                        <Btn kind="plain" disabled={busy === row.id} onClick={() => void decide(row.id, 'reject')}>Deny</Btn>
+                        <Btn kind="primary" disabled={busy === row.id} onClick={() => void decide(row.id, 'approve')}>Approve</Btn>
+                      </div>
+                    </div>
+                    {open === row.id && (
+                      <div className="mt-3 text-[13px] text-mc-sub2">
+                        <div>{row.desc}</div>
+                        {meta?.repo && <div className="mt-1 font-mono text-[12px]">Repo {meta.repo}{meta.branch ? ` · ${meta.branch}` : ''}{meta.number ? ` · #${meta.number}` : ''}</div>}
+                        {meta?.url && <a className="mt-1 block text-mc-accent-text" href={meta.url} target="_blank" rel="noreferrer">{meta.url}</a>}
+                        {row.kind === 'pr' && <p className="mt-2 text-[12px] text-mc-sub">Approving a pull request merges it on GitHub.</p>}
+                      </div>
+                    )}
+                  </SoftCard>
                 </div>
-              )}
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === 1 && (
+        <div className="mx-auto max-w-3xl">
+          <Kicker>Decided</Kicker>
+          {decided.length === 0 ? (
+            <div className="mt-3">
+              <EmptyState title="No decisions yet" body="Approved and declined requests stay here. A fresh database has none until you decide one, or until seed:demo inserts a sample." />
             </div>
-          )
-        })}
-      </Card>
+          ) : (
+            <SoftCard className="mt-3 divide-y divide-mc-sep">
+              {decided.map((row) => {
+                const ok = row.status === 'approved'
+                const who = guessAgent(row, roster)
+                return (
+                  <div key={row.id} className="flex items-center gap-3 px-4 py-3">
+                    <Face agent={who} agents={roster} px={36} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-semibold">{row.tag || row.desc}</div>
+                      <div className="truncate text-[12.5px] text-mc-sub">{row.desc}</div>
+                    </div>
+                    <StatusChip label={ok ? 'Approved' : 'Declined'} tone={ok ? 'green' : 'gray'} />
+                    <span className="whitespace-nowrap text-[12px] text-mc-sub">{new Date(row.createdAt).toLocaleDateString()}</span>
+                  </div>
+                )
+              })}
+            </SoftCard>
+          )}
+        </div>
+      )}
     </div>
   )
 }

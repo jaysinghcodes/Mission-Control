@@ -23,13 +23,23 @@ export class HealthController {
    * clients, and whether the database is reachable.
    */
   @Get()
-  getHealth() {
+  async getHealth() {
     const db = this.prisma.dbReady;
+    let lastIngestAt: string | null = null;
+    if (db) {
+      const row = await this.prisma.activityEvent.findFirst({
+        where: { source: 'openclaw' },
+        orderBy: { ts: 'desc' },
+        select: { ts: true },
+      });
+      lastIngestAt = row?.ts ? row.ts.toISOString() : null;
+    }
     return {
       status: db ? 'ok' : 'degraded',
       uptimeSeconds: Math.round(process.uptime()),
       connectedClients: this.gateway.clientCount,
       database: db ? 'connected' : 'unavailable',
+      lastIngestAt,
       ts: Date.now(),
     };
   }

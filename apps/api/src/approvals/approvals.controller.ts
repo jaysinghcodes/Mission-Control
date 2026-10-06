@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { GitHubService } from '../github/github.service';
@@ -18,9 +18,17 @@ export class ApprovalsController {
   ) {}
 
   @Get()
-  async list() {
+  async list(@Query('status') status = 'pending') {
+    // Default stays pending so existing clients are unchanged. `decided`
+    // is the Approvals "Decided" tab (approved + rejected already stored).
+    const where =
+      status === 'decided'
+        ? { status: { in: ['approved', 'rejected'] } }
+        : status === 'all'
+          ? {}
+          : { status: 'pending' };
     const approvals = await this.prisma.approval.findMany({
-      where: { status: 'pending' },
+      where,
       orderBy: { createdAt: 'desc' },
     });
     return { approvals, ts: Date.now() };

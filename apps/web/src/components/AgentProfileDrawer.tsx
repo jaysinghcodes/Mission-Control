@@ -100,7 +100,7 @@ export function AgentProfileDrawer({
           <AgentAvatar agent={agent} agents={agents} size={1.8} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[16px] font-semibold leading-tight text-mc-text">{name}</div>
-            <div className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${chief ? 'text-mc-primary' : 'text-mc-sub'}`}>
+            <div className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${chief ? 'text-mc-accent-text' : 'text-mc-sub'}`}>
               {roleTitle}
             </div>
             <div className="mt-1.5 flex items-center gap-1.5">
@@ -167,7 +167,7 @@ export function AgentProfileDrawer({
               target="_blank"
               rel="noreferrer"
               aria-label={`Open ${name}'s channel (new tab)`}
-              className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-full bg-mc-primary px-4 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary"
+              className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-full bg-mc-accent-fill px-4 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-accent-text"
             >
               Open channel
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

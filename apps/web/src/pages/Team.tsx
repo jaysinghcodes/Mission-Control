@@ -1,200 +1,173 @@
-import { useCallback, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import { useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
-import type { Agent, AgentsResp } from '../types'
-import { Card, SectionLabel } from '../components/ui'
-import { AgentAvatar } from '../components/AgentAvatar'
-import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
-import { rosterDisplayName, rosterIdentity } from '../data/roster'
+import type { AgentsResp } from '../types'
+import { PageHeader, SoftCard, Btn, Face, StatusChip, Kicker, EmptyState } from '../components/shell'
+import { OPERATOR_NAME, operatorInitial } from '../config'
 
 /**
- * Team (MC-201) — the roster as a *team*, not a list of processes.
- *
- * Org-chart header with the root agent (Chief of Staff) on top and the rest of the
- * real OpenClaw roster as member cards below, fed by GET /agents (polled).
- * Nothing here is hardcoded: whoever the API reports is the team — the root
- * agent (no parentId) becomes the org header, everyone else fills the roster
- * grid. Status dots keep the honest working/idle semantics of the old Agents
- * page; movement/stage logic lives in Office and is untouched.
- *
- * Identity display (MC-201): agent names + roles read through the approved
- * roster map (data/roster.ts) — Lead → Chief of Staff, Atlas → Scrum Master,
- * Nova → Development, … — so cards show human names and role titles. Unknown
- * agents render their real API name + role (fallback "agent" when role is
- * null). MC-200 profile fields (emoji, currentTask, …) are all optional on
- * the wire and every render path is null-safe.
- *
- * MC-202: each member card is a <button> wired to open the profile drawer
- * for that agent (AgentProfileDrawer) — name/role/status, personality tags,
- * current task, stats, recent activity, and the chat-channel deep link
- * (only when the bridge supplies one).
- * Ticket 12: AgentAvatar draws the 12 hand-tuned robots (robots.tsx).
- * Past 12 agents, a child is a small numbered copy of its parent's robot —
- * pass the full `agents` list so the picker can see the parent.
+ * Team — the mission, the person who owns the dashboard, the agents (a link
+ * to the roster), and the machines we can actually see. Invite and pairing
+ * open this page's own sheets; they do not create accounts.
  */
 
-/** Status dot color — live honest semantics: working = green, otherwise faint. */
-const statusColor = (status: string) => (status === 'working' ? 'var(--mc-green)' : 'var(--mc-faint)')
+const MISSION_KEY = 'mc-mission'
+const DEFAULT_MISSION = 'Ship an open-source mission control anyone can clone and run in five minutes.'
 
-/** Roster member card. Root (chief) variant gets the distinct org-header styling. */
-function MemberCard({
-  agent,
-  agents,
-  chief = false,
-  parentName = null,
-  onOpen,
-}: {
-  agent: Agent
-  /** Whole roster — AgentAvatar needs it to number children past 12 robots. */
-  agents: Agent[]
-  chief?: boolean
-  parentName?: string | null
-  onOpen?: (agent: Agent, e: ReactMouseEvent<HTMLButtonElement>) => void
-}) {
-  // MC-202: onClick opens the agent profile drawer. Focus return is handled
-  // by Team (trigger ref) so the card keeps keyboard focus after ESC/backdrop.
-  const identity = rosterIdentity(agent.name, agent.role)
-  const name = rosterDisplayName(agent.name, agent.role)
-  const roleTitle = identity?.role ?? agent.role ?? 'agent'
-  const working = agent.status === 'working'
-
-  if (chief) {
-    return (
-      <button
-        type="button"
-        aria-label={`${name} — ${roleTitle}`}
-        aria-haspopup="dialog"
-        onClick={(e) => onOpen?.(agent, e)}
-        className="cursor-pointer rounded-xl bg-mc-card px-6 py-4 flex flex-col items-center gap-2 min-w-[220px] text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary transition-colors"
-        style={{ border: '1px solid color-mix(in srgb, var(--mc-primary) 55%, transparent)' }}
-      >
-        <AgentAvatar agent={agent} agents={agents} size={1.9} />
-        <div>
-          <div className="text-[15px] font-semibold leading-tight">{name}</div>
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-mc-primary">{roleTitle}</div>
-        </div>
-        <span className="w-[6px] h-[6px] rounded-full" style={{ backgroundColor: statusColor(agent.status) }} />
-        <span className="text-[10px] text-mc-faint">{working ? 'working' : 'idle'}</span>
-      </button>
-    )
-  }
-
-  return (
-    <button
-      type="button"
-      aria-label={`${name} — ${roleTitle}${parentName ? `, reports to ${parentName}` : ''}`}
-      aria-haspopup="dialog"
-      onClick={(e) => onOpen?.(agent, e)}
-      className="cursor-pointer rounded-xl border border-mc-border bg-mc-card px-3 py-2.5 min-w-[160px] w-[170px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary transition-colors hover:border-mc-primary/60"
-    >
-      <div className="flex items-center gap-2">
-        <AgentAvatar agent={agent} agents={agents} size={1} />
-        <div className="min-w-0 flex-1">
-          <div className="text-[12.5px] font-semibold leading-tight truncate">{name}</div>
-          <div className="text-[11px] text-mc-sub truncate">{roleTitle}</div>
-        </div>
-        <span
-          className="w-[4.5px] h-[4.5px] rounded-full shrink-0"
-          title={working ? 'working' : 'idle'}
-          style={{ backgroundColor: statusColor(agent.status) }}
-        />
-      </div>
-      {parentName && <div className="mt-1 text-[10px] text-mc-faint truncate">↑ {parentName}</div>}
-    </button>
-  )
+interface SystemResp {
+  os: { hostname: string; platform: string }
 }
 
 export default function Team() {
-  const { data, error } = useApi<AgentsResp>('/agents', { pollMs: 30000 })
-  const agents = data?.agents ?? []
-  // Org root: the agent with no parent. Shape-tolerant: if the API
-  // ever reports a roster without a root, the first agent leads instead.
-  const chief = agents.find((a) => !a.parentId) ?? agents[0]
-  const team = chief ? agents.filter((a) => a.id !== chief.id) : []
-  const displayNameById = new Map(agents.map((a) => [a.id, rosterDisplayName(a.name, a.role)]))
+  const agentsQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const sys = useApi<SystemResp>('/system', { pollMs: 30000 })
+  const agents = agentsQ.data?.agents ?? []
+  const working = agents.filter((a) => a.status === 'working').length
+  const [mission, setMission] = useState(() => localStorage.getItem(MISSION_KEY) || DEFAULT_MISSION)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(mission)
+  const [invite, setInvite] = useState(false)
+  const [pair, setPair] = useState(false)
+  const owner = OPERATOR_NAME || 'Operator'
+  const initial = operatorInitial() ?? owner.slice(0, 1).toUpperCase()
 
-  const workingCount = agents.filter((a) => a.status === 'working').length
-
-  // MC-202: selected agent feeds the profile drawer; the trigger button is
-  // remembered so focus returns to the card when the drawer closes (a11y).
-  const [selected, setSelected] = useState<Agent | null>(null)
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const openProfile = (agent: Agent, e: ReactMouseEvent<HTMLButtonElement>) => {
-    triggerRef.current = e.currentTarget
-    setSelected(agent)
+  function saveMission() {
+    const next = draft.trim() || DEFAULT_MISSION
+    setMission(next)
+    try { localStorage.setItem(MISSION_KEY, next) } catch { /* ignore */ }
+    setEditing(false)
   }
-  const closeProfile = useCallback(() => {
-    setSelected(null)
-    // Focus return after the drawer unmounts (card stays mounted in the grid).
-    requestAnimationFrame(() => triggerRef.current?.focus())
-  }, [])
+
+  const devices: { name: string; desc: string; on: boolean; status: string }[] = [
+    { name: 'This browser', desc: 'The dashboard you are looking at', on: true, status: 'Online · now' },
+  ]
+  if (sys.data?.os?.hostname) {
+    devices.unshift({
+      name: sys.data.os.hostname,
+      desc: `API host · ${sys.data.os.platform}`,
+      on: true,
+      status: 'Online · now',
+    })
+  }
 
   return (
-    <div className="p-6">
-      <div className="text-[22px] font-semibold">Team</div>
-      <div className="mt-1 text-[13px] text-mc-sub">Meet the team — the real roster on this OpenClaw instance, who's working right now.</div>
+    <div>
+      <PageHeader
+        title="Team"
+        summary={`${owner} + ${agents.length} agents · ${devices.filter((d) => d.on).length} online`}
+        tools={<Btn kind="primary" onClick={() => setInvite(true)}>Invite</Btn>}
+      />
 
-      {error && (
-        <Card className="mt-10 px-4 py-8 text-[12.5px] text-mc-faint">API unreachable — can't load the team roster.</Card>
-      )}
-
-      {!error && agents.length === 0 && (
-        <Card className="mt-10 px-4 py-8 text-[12.5px] text-mc-faint">
-          No roster synced yet. The bridge pushes the live agent tree every few minutes.
-        </Card>
-      )}
-
-      {!error && chief && (
-        <div className="mt-10 flex flex-col items-center">
-          {/* Org-chart header — root agent (Chief of Staff) on top */}
-          <MemberCard agent={chief} agents={agents} chief onOpen={openProfile} />
-          {team.length === 0 ? (
-            <div className="mt-8 text-[12px] text-mc-faint text-center max-w-sm">
-              No sub-agents running right now. Spawn one (sessions_spawn or a task) and it appears here live.
-            </div>
-          ) : (
-            <>
-              {/* Connectors down to the team */}
-              <div className="w-px h-7 bg-mc-faint/60" />
-              <div className="h-px w-[min(900px,92%)] bg-mc-faint/60" />
-              {/* Roster cards — one per live agent, any count */}
-              <div className="mt-5 flex flex-wrap justify-center gap-3 max-w-[1060px]">
-                {team.map((a) => {
-                  const parent = a.parentId ? agents.find((p) => p.id === a.parentId) : null
-                  const parentName = parent && parent.id !== chief.id ? displayNameById.get(parent.id) ?? null : null
-                  return <MemberCard key={a.id} agent={a} agents={agents} parentName={parentName} onOpen={openProfile} />
-                })}
-              </div>
-            </>
-          )}
+      <SoftCard className="px-7 py-6">
+        <div className="flex items-center justify-between">
+          <Kicker>Mission</Kicker>
+          <button type="button" className="text-[13px] font-semibold text-mc-accent-text" onClick={() => { setDraft(mission); setEditing(true) }}>Edit</button>
         </div>
-      )}
-
-      {!error && agents.length > 0 && (
-        <Card className="mt-10 px-4 py-5 max-w-[520px]">
-          <SectionLabel>Team Status</SectionLabel>
-          <div className="flex gap-10 mt-4">
-            <div className="flex items-center gap-2">
-              <span className="w-[5px] h-[5px] rounded-full bg-mc-green" />
-              <span className="text-[12px] text-mc-sub">Working</span>
-              <span className="text-[12px] font-semibold">{workingCount}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-[5px] h-[5px] rounded-full bg-mc-faint" />
-              <span className="text-[12px] text-mc-sub">Idle</span>
-              <span className="text-[12px] font-semibold">{agents.length - workingCount}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-[5px] h-[5px] rounded-full bg-mc-text" />
-              <span className="text-[12px] text-mc-sub">Total agents</span>
-              <span className="text-[12px] font-semibold">{agents.length}</span>
+        {editing ? (
+          <div className="mt-3">
+            <textarea value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Mission" className="h-20 w-full rounded-lg bg-mc-ctl px-3 py-2 text-[16px] outline-none" />
+            <div className="mt-2 flex gap-2">
+              <Btn kind="primary" onClick={saveMission}>Save</Btn>
+              <Btn kind="plain" onClick={() => setEditing(false)}>Cancel</Btn>
             </div>
           </div>
-        </Card>
-      )}
+        ) : (
+          <>
+            <p className="mt-3 text-[20px] font-semibold tracking-tight">{mission}</p>
+            <p className="mt-2 text-[13px] text-mc-sub">Agents see this as the line under the work. Saved in this browser.</p>
+          </>
+        )}
+      </SoftCard>
 
-      {/* MC-202: profile drawer — rendered for the clicked agent only */}
-      {selected && <AgentProfileDrawer agent={selected} agents={agents} onClose={closeProfile} />}
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <SoftCard className="px-6 py-5">
+          <div className="flex items-center justify-between">
+            <span className="text-[15px] font-semibold">People</span>
+            <span className="text-[12.5px] text-mc-sub">1 person</span>
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="grid h-12 w-12 place-items-center rounded-full bg-[#6e6e73] text-[16px] font-semibold text-white">{initial}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-semibold">{owner}</div>
+              <div className="text-[12.5px] text-mc-sub">Owner · approves deploys and merges</div>
+            </div>
+            <StatusChip label="You" tone="blue" />
+          </div>
+          <button type="button" onClick={() => setInvite(true)} className="mt-5 text-[13px] font-semibold text-mc-accent-text">
+            Invite a teammate <span className="font-medium text-mc-sub">to share approvals</span>
+          </button>
+        </SoftCard>
+
+        <SoftCard className="px-6 py-5">
+          <div className="flex items-center justify-between">
+            <span className="text-[15px] font-semibold">Agents</span>
+            <span className="text-[12.5px] text-mc-sub">{agents.length} · {working} working</span>
+          </div>
+          {agents.length === 0 ? (
+            <p className="mt-4 text-[13px] text-mc-sub">No agents yet. Seed or connect the bridge.</p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {agents.slice(0, 12).map((agent) => (
+                <Face key={agent.id} agent={agent} agents={agents} px={46} />
+              ))}
+            </div>
+          )}
+          <Link to="/agents" className="mt-4 inline-block text-[13px] font-semibold text-mc-accent-text">See who's doing what</Link>
+        </SoftCard>
+      </div>
+
+      <SoftCard className="mt-5 px-6 py-5">
+        <div className="flex items-center justify-between">
+          <span className="text-[15px] font-semibold">Devices</span>
+          <button type="button" className="text-[13px] font-semibold text-mc-accent-text" onClick={() => setPair(true)}>Pair a device</button>
+        </div>
+        {devices.length === 0 ? (
+          <EmptyState title="No devices" body="The API host shows up here when /system answers." />
+        ) : (
+          <ul className="mt-2 divide-y divide-mc-sep">
+            {devices.map((d) => (
+              <li key={d.name} className="flex items-center gap-3 py-3">
+                <span className="grid h-10 w-10 place-items-center rounded-[10px] bg-mc-fill text-mc-sub2" aria-hidden>
+                  <span className="h-3 w-5 rounded-sm border-2 border-current" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14.5px] font-semibold">{d.name}</span>
+                  <span className="block text-[12.5px] text-mc-sub">{d.desc}</span>
+                </span>
+                <span className="flex items-center gap-2 whitespace-nowrap text-[12.5px]">
+                  <span className="h-2 w-2 rounded-full" style={{ background: d.on ? 'var(--mc-green)' : 'var(--mc-gray)' }} />
+                  {d.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SoftCard>
+
+      {invite && (
+        <Sheet title="Invite a teammate" onClose={() => setInvite(false)}>
+          <p className="text-[14px] text-mc-sub2">This build does not send invites. Share the setup guide — they connect with the SSH tunnel in ONBOARDING.md.</p>
+          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setInvite(false)}>Open setup</Link>
+        </Sheet>
+      )}
+      {pair && (
+        <Sheet title="Pair a device" onClose={() => setPair(false)}>
+          <p className="text-[14px] text-mc-sub2">Pairing is the SSH tunnel from another machine. Step 7 of setup has the command for your OS and a live API check.</p>
+          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setPair(false)}>Open setup</Link>
+        </Sheet>
+      )}
+    </div>
+  )
+}
+
+function Sheet({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4" onClick={onClose}>
+      <div className="mc-card w-full max-w-md px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}>
+        <div className="text-[17px] font-semibold">{title}</div>
+        <div className="mt-3">{children}</div>
+        <button type="button" onClick={onClose} className="mt-4 text-[13px] font-semibold text-mc-sub">Close</button>
+      </div>
     </div>
   )
 }

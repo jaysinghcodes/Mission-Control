@@ -9,15 +9,19 @@
  * bridge pushes — `role: "development"`, `role: "Dev"`, name "Nova", … —
  * resolves to the same card identity.
  *
- * Roster (locked):
- *   Lead     → Chief of Staff (root agent; was a personal agent name — ticket 3)
- *   Atlas    → Scrum Master   (scrummaster)
- *   Nova     → Development    (development)
- *   Nox      → QA             (qa)
- *   Sage     → Research       (research)
- *   Pixel    → Design         (design)
- *   Scribe   → Summary        (summary)
- *   Sentinel → Alerts         (alerts)
+ * Roster (ticket 13 — cool name · function, same 12 robots):
+ *   Speedy   · Chief of Staff
+ *   Atlas    · Product        (also the old scrum-master lane)
+ *   Forge    · Engineer       (development / Nova)
+ *   Sentinel · QA
+ *   Echo     · Research
+ *   Pixel    · Designer
+ *   Bolt     · Ops
+ *   Ledger   · Data
+ *   Quill    · Writer         (summary / Scribe)
+ *   Aegis    · Security       (alerts)
+ *   Patch    · Support
+ *   Scout    · Trends
  *
  * MC-211 will consume the same identities when it wires Pixel's robot
  * avatars. MC-202 adds the channel deep-link helper below.
@@ -26,7 +30,7 @@
 export interface RosterIdentity {
   /** Human-facing display name (Lead, Atlas, Nova, …). */
   name: string
-  /** Human-facing role label (Chief of Staff, Scrum Master, Development, …). */
+  /** Human-facing function (Chief of Staff, Engineer, Security, …). */
   role: string
 }
 
@@ -39,51 +43,67 @@ interface RosterEntry extends RosterIdentity {
 
 export const ROSTER: RosterEntry[] = [
   {
-    // Neutral display name for the root agent. Only shown when the API name
-    // is generic (e.g. OpenClaw's default agent "main"); a real name pushed
-    // by the bridge always wins (see rosterDisplayName). Ticket 3 replaced a
-    // personal agent name here and dropped its name-match key — the role
-    // keys below already match any chief-of-staff/main agent. nameKeys stays
-    // EMPTY on purpose: a substring key like 'lead' would mis-tag agents such
-    // as "Lead Designer" as Chief of Staff.
-    name: 'Lead', role: 'Chief of Staff',
+    // Root agent. A real name pushed by the bridge still wins (see
+    // rosterDisplayName). nameKeys stays off a substring like "lead" so
+    // "Lead Designer" is not retagged as Chief of Staff. "speedy" is exact.
+    name: 'Speedy', role: 'Chief of Staff',
     roleKeys: ['chief of staff', 'chief-of-staff', 'main agent', 'operator', 'main'],
-    nameKeys: [],
+    nameKeys: ['speedy'],
   },
   {
-    name: 'Atlas', role: 'Scrum Master',
-    roleKeys: ['scrum master', 'scrummaster', 'scrum-master'],
+    name: 'Atlas', role: 'Product',
+    roleKeys: ['product', 'scrum master', 'scrummaster', 'scrum-master'],
     nameKeys: ['atlas'],
   },
   {
-    name: 'Nova', role: 'Development',
-    roleKeys: ['development', 'developer', 'dev'],
-    nameKeys: ['nova'],
+    name: 'Forge', role: 'Engineer',
+    roleKeys: ['engineer', 'engineering', 'development', 'developer', 'dev'],
+    nameKeys: ['forge', 'nova'],
   },
   {
-    name: 'Nox', role: 'QA',
+    name: 'Sentinel', role: 'QA',
     roleKeys: ['qa', 'quality assurance'],
-    nameKeys: ['nox'],
+    nameKeys: ['sentinel', 'nox'],
   },
   {
-    name: 'Sage', role: 'Research',
+    name: 'Echo', role: 'Research',
     roleKeys: ['research', 'researcher'],
-    nameKeys: ['sage'],
+    nameKeys: ['echo', 'sage'],
   },
   {
-    name: 'Pixel', role: 'Design',
+    name: 'Pixel', role: 'Designer',
     roleKeys: ['design', 'designer'],
     nameKeys: ['pixel'],
   },
   {
-    name: 'Scribe', role: 'Summary',
-    roleKeys: ['summary', 'summarizer', 'scribe'],
-    nameKeys: ['scribe'],
+    name: 'Bolt', role: 'Ops',
+    roleKeys: ['ops', 'operations'],
+    nameKeys: ['bolt'],
   },
   {
-    name: 'Sentinel', role: 'Alerts',
-    roleKeys: ['alerts', 'alert', 'watchtower', 'sentinel'],
-    nameKeys: ['sentinel'],
+    name: 'Ledger', role: 'Data',
+    roleKeys: ['data'],
+    nameKeys: ['ledger'],
+  },
+  {
+    name: 'Quill', role: 'Writer',
+    roleKeys: ['writer', 'summary', 'summarizer', 'scribe'],
+    nameKeys: ['quill', 'scribe'],
+  },
+  {
+    name: 'Aegis', role: 'Security',
+    roleKeys: ['security', 'alerts', 'alert', 'watchtower'],
+    nameKeys: ['aegis'],
+  },
+  {
+    name: 'Patch', role: 'Support',
+    roleKeys: ['support'],
+    nameKeys: ['patch'],
+  },
+  {
+    name: 'Scout', role: 'Trends',
+    roleKeys: ['trends', 'trend', 'scout'],
+    nameKeys: ['scout'],
   },
 ]
 
@@ -126,6 +146,18 @@ export function rosterIdentity(name: string | null | undefined, role: string | n
  * comes from the identity when matched; callers fall back to `role ?? 'agent'`
  * when there is no match (MC-201 acceptance: role title fallback "agent").
  */
+/** Cool name + function tag for a card: "Forge" and "Engineer". */
+export function agentCaption(
+  name: string | null | undefined,
+  role: string | null | undefined,
+): { name: string; role: string } {
+  const identity = rosterIdentity(name, role)
+  return {
+    name: rosterDisplayName(name, role),
+    role: identity?.role ?? (role?.trim() || 'Agent'),
+  }
+}
+
 export function rosterDisplayName(name: string | null | undefined, role: string | null | undefined): string {
   const identity = rosterIdentity(name, role)
   if (!identity) return name?.trim() || 'agent'

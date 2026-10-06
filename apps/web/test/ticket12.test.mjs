@@ -284,15 +284,21 @@ test('board and backlog scroll sideways and wrap actions (layout only)', async (
   assert.match(tickets, /flex-wrap/)
   assert.match(tickets, /break-words/)
   assert.match(tickets, /whitespace-nowrap/)
-  assert.match(tickets, /AgentAvatar/)
+  // Cards use Face, which renders the shipped AgentAvatar robots.
+  assert.match(tickets, /<Face/)
+  const shell = await readFile(new URL('../src/components/shell.tsx', import.meta.url), 'utf8')
+  assert.match(shell, /AgentAvatar/)
   // Titles must not be ellipsized, and the generic bot glyph is gone.
   assert.equal(tickets.includes('truncate'), false)
   assert.equal(tickets.includes('<Bot'), false)
   assert.equal(activity.includes('<Bot'), false)
   assert.match(activity, /AgentAvatar/)
-  // Same-room agents drop by STACK_STEP instead of sharing one left point.
-  assert.match(office, /STACK_STEP/)
-  assert.match(office, /place\.i \* STACK_STEP/)
+  // Office is the desk floor (Build / QA / Ship / Deploy + Commons), still robots.
+  assert.match(office, /Build/)
+  assert.match(office, /Commons/)
+  assert.match(office, /<Face/)
+  assert.equal(office.includes('<Bot'), false)
+  assert.equal(office.includes('STACK_STEP'), false)
   assert.match(backlog, /overflow-x-auto/)
   assert.match(backlog, /min-w-\[1020px\]/)
   assert.match(backlog, /flex-wrap/)
