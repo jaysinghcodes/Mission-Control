@@ -33,10 +33,13 @@ describe('renderMarkdown', () => {
         '[caps](JAVASCRIPT:alert(1))',
         '[encoded](&#106;avascript:alert(1))',
         '[data](data:text/html,<script>alert(1)</script>)',
+        '[vb](vbscript:msgbox(1))',
+        '<iframe src="https://evil.example"></iframe>',
         '[ok](https://example.com)',
       ].join('\n\n'),
     );
     expect(html).not.toMatch(/<script[\s>]/i);
+    expect(html).not.toMatch(/<iframe[\s>]/i);
     expect(html).not.toMatch(/<[^>]*\son[a-z]+\s*=/i);
     for (const href of hrefs(html)) {
       expect(isSafeLink(href)).toBe(true);
@@ -45,6 +48,40 @@ describe('renderMarkdown', () => {
     }
     expect(html).toContain('href="https://example.com"');
     expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('&lt;iframe');
+    expect(html).toContain('onerror');
+  });
+
+  it('keeps a link title and the text after it', () => {
+    const html = renderMarkdown(
+      'Read the [setup guide](https://example.com/setup "See onclick=") then continue.',
+    );
+    expect(html).toContain('href="https://example.com/setup"');
+    expect(html).toContain('title="See onclick="');
+    expect(html).toContain('>setup guide</a>');
+    expect(html).toContain('then continue.');
+  });
+
+  it('keeps onclick="y" inside inline code and a fenced block', () => {
+    const html = renderMarkdown(
+      [
+        'Call `onclick="y"` from the handler.',
+        '',
+        '```html',
+        '<button onclick="y">Go</button>',
+        '```',
+      ].join('\n'),
+    );
+    expect(html).toContain('<code>onclick=&quot;y&quot;</code>');
+    expect(html).toContain('&lt;button onclick=&quot;y&quot;&gt;');
+    expect(html.match(/<\/code>/g)).toHaveLength(2);
+    expect(html).not.toMatch(/<button[\s>]/i);
+  });
+
+  it('keeps onion=1 in prose', () => {
+    const html = renderMarkdown('Set onion=1 before you restart the service.');
+    expect(html).toContain('onion=1');
+    expect(html).toContain('before you restart the service.');
   });
 
   it('does not throw on deliberately broken markdown', () => {

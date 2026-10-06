@@ -3,11 +3,12 @@ import MarkdownIt from 'markdown-it';
 /**
  * Markdown → HTML for the Docs reader (ticket 6).
  *
- * markdown-it with `html: false` escapes raw HTML, so a `<script>` in a
- * note is text, not an element. `validateLink` plus a pass over the
- * finished HTML drop `javascript:`, `vbscript:`, `data:`, and `file:`
+ * markdown-it with `html: false` escapes raw HTML, so a `<script>`,
+ * `<iframe>`, or `onerror` handler in a note is text, not an element.
+ * `validateLink` drops `javascript:`, `vbscript:`, `data:`, and `file:`
  * links, including ones hidden with whitespace or HTML entities.
- * A broken note returns escaped text instead of throwing.
+ * A later pass only rewrites real `href` and `src` attributes (never
+ * text or code). A broken note returns escaped text instead of throwing.
  */
 
 const UNSAFE_PROTO = /^(javascript|vbscript|data|file):/i;
@@ -55,12 +56,13 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Drop event handlers and unsafe href/src after markdown-it has rendered. */
-export function hardenHtml(html: string): string {
-  const stripped = html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-  return stripped.replace(
+/**
+ * Rewrite unsafe href/src on real tags. Raw HTML is already escaped by
+ * markdown-it, so this does not scan text or code for `on...=` patterns
+ * (that pass ate link titles, `</code>`, and prose like `onion=1`).
+ */
+function rewriteUnsafeAttrs(tag: string): string {
+  return tag.replace(
     /\s(href|src)\s*=\s*("([^"]*)"|'([^']*)')/gi,
     (full, attr: string, _quoted: string, doubleQ: string | undefined, singleQ: string | undefined) => {
       const raw = doubleQ ?? singleQ ?? '';
@@ -69,6 +71,11 @@ export function hardenHtml(html: string): string {
       return ` ${attr}=${quote}#${quote}`;
     },
   );
+}
+
+export function hardenHtml(html: string): string {
+  const stripped = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  return stripped.replace(/<[^>]+>/g, rewriteUnsafeAttrs);
 }
 
 export function renderMarkdown(source: string): string {
