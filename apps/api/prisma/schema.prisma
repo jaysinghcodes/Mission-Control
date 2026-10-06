@@ -49,6 +49,12 @@ model Run {
   startedAt  DateTime?
   finishedAt DateTime?
   createdAt  DateTime  @default(now())
+  /// Pipeline matches a run to a ticket by this id only (QA-13). Null when
+  /// the run is not tied to a ticket; the page then uses the ticket's createdAt.
+  ticketId   String?
+  ticket     Ticket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
 }
 
 /// A named group of tickets (ticket 4).
@@ -89,6 +95,7 @@ model Ticket {
   projectId String?
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
+  runs      Run[]
 
   @@index([projectId])
 }
@@ -149,6 +156,26 @@ model Approval {
   status    String   @default("pending") // pending | approved | rejected
   meta      Json?
   createdAt DateTime @default(now())
+}
+
+/// One remembered note. Written by memory.snapshot (bridge) or seed:demo.
+/// The web app reads this table and does not open OpenClaw files.
+/// `id` is stable (agent + path, or a fixed demo id) so a re-sync updates
+/// the same row. Day groups are not stored: the API buckets `createdAt`
+/// into America/Chicago calendar days.
+model MemoryEntry {
+  id        String   @id
+  title     String
+  body      String
+  agent     String
+  createdAt DateTime
+  kind      String // long-term | daily | other
+  source    String? // openclaw | demo
+  ref       String? // workspace-relative path when the bridge has one
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([kind])
 }
 
 /// User-configured models for usage tracking — added from the Usage page (+).

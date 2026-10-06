@@ -81,6 +81,9 @@ export class IngestController {
       case 'approvals.snapshot':
         await this.snapshots.applyApprovals(payload);
         break;
+      case 'memory.snapshot':
+        await this.snapshots.applyMemory(payload);
+        break;
       default:
         break;
     }
@@ -128,4 +131,5 @@ const KNOWN_TYPES: ActivityEventType[] = [
   'calendar.snapshot',
   'usage.snapshot',
   'approvals.snapshot',
+  'memory.snapshot',
 ];

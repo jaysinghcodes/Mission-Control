@@ -10,6 +10,7 @@
  *   - 3 projects (Onboarding 1 of 2 done, Pipeline 0 of 3, Ideas empty)
  *   - 10 activity events (run.* + approvals) so Activity/Office have history
  *   - 1 pending approval (matches the `approval.new` activity event)
+ *   - sample memories across several America/Chicago days (ticket 5)
  *
  * IDEMPOTENT — safe to run any number of times:
  *   - Every row has a FIXED id (prefix `demo-`) or a unique natural key
@@ -50,6 +51,7 @@ import {
   demoProjectIdForTicket,
 } from '../src/projects/demo-catalog';
 import { projectNameKey } from '../src/projects/project-name';
+import { DEMO_MEMORIES } from '../src/memory/demo-memories';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -201,12 +203,13 @@ const USAGE = [
   },
 ];
 
+// ticketId is the pipeline link (QA-13). A matching title is not the link.
 const RUNS = [
-  { id: 'demo-run-1', name: 'Deploy preview build', agent: 'Aegis', status: 'needs_approval', progress: 80 },
-  { id: 'demo-run-2', name: 'Wire calendar week view', agent: 'Forge', status: 'running', progress: 40 },
-  { id: 'demo-run-3', name: 'Regression pass on Tickets', agent: 'Sentinel', status: 'running', progress: 55 },
-  { id: 'demo-run-4', name: 'Release notes for the next cut', agent: 'Quill', status: 'running', progress: 90 },
-  { id: 'demo-run-5', name: 'Morning Brief', agent: 'Speedy', status: 'done', progress: 100 },
+  { id: 'demo-run-1', name: 'Deploy preview build', agent: 'Aegis', status: 'needs_approval', progress: 80, ticketId: null as string | null },
+  { id: 'demo-run-2', name: 'Wire calendar week view', agent: 'Forge', status: 'running', progress: 40, ticketId: 'demo-ticket-3' },
+  { id: 'demo-run-3', name: 'Regression pass on Tickets', agent: 'Sentinel', status: 'running', progress: 55, ticketId: 'demo-ticket-4' },
+  { id: 'demo-run-4', name: 'Release notes for the next cut', agent: 'Quill', status: 'running', progress: 90, ticketId: 'demo-ticket-5' },
+  { id: 'demo-run-5', name: 'Morning Brief', agent: 'Speedy', status: 'done', progress: 100, ticketId: null },
 ];
 
 async function main(): Promise<void> {
@@ -223,7 +226,7 @@ async function main(): Promise<void> {
   // Pipeline "0 of 3", and an empty Ideas project. See demo-catalog.ts.
   assertDemoSeedProjects(TICKETS);
 
-  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0 };
+  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0, memories: 0 };
 
   // Rename a previous demo roster in place when the cool name is free.
   // If both rows already exist, leave both — the seed never deletes.
@@ -365,11 +368,42 @@ async function main(): Promise<void> {
         agent: r.agent,
         status: r.status,
         progress: r.progress,
+        ticketId: r.ticketId,
         startedAt: r.status === 'queued' ? null : runNow,
         finishedAt: r.status === 'done' || r.status === 'failed' ? runNow : null,
       },
     });
     if (!before) counts.runs++;
+    // A database seeded before ticketId existed keeps the row (update: {}).
+    // Fill the link only while it is still null, so a second run inserts 0.
+    if (r.ticketId) {
+      await prisma.run.updateMany({
+        where: { id: r.id, ticketId: null },
+        data: { ticketId: r.ticketId },
+      });
+    }
+  }
+
+  // Memories. Fixed ids + update: {} — a second seed inserts 0 and does not
+  // rewrite a note you already have. A later memory.snapshot from the bridge
+  // replaces this table (same contract as agents and calendar).
+  for (const m of DEMO_MEMORIES) {
+    const before = await prisma.memoryEntry.findUnique({ where: { id: m.id }, select: { id: true } });
+    await prisma.memoryEntry.upsert({
+      where: { id: m.id },
+      update: {},
+      create: {
+        id: m.id,
+        title: m.title,
+        body: m.body,
+        agent: m.agent,
+        createdAt: new Date(m.createdAt),
+        kind: m.kind,
+        source: m.source,
+        ref: m.ref,
+      },
+    });
+    if (!before) counts.memories++;
   }
 
   // Demo activity that still names a retired agent gets the cool name.
@@ -388,22 +422,23 @@ async function main(): Promise<void> {
   // What THIS run inserted (0 everywhere on a re-run = already seeded).
   console.log(
     `[seed:demo] inserted agents=${counts.agents} cronJobs=${counts.cronJobs} projects=${counts.projects} tickets=${counts.tickets} ` +
-      `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} (0 everywhere = already seeded; re-running is safe)`,
+      `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} memories=${counts.memories} (0 everywhere = already seeded; re-running is safe)`,
   );
 
   // Table totals AFTER the run — the idempotency check is simply "these
   // numbers do not change when you run seed:demo a second time" (as long as
   // nothing else, e.g. a running api/bridge, writes in between).
-  const [agents, cronJobs, projects, tickets, activity, approvals] = await Promise.all([
+  const [agents, cronJobs, projects, tickets, activity, approvals, memories] = await Promise.all([
     prisma.agent.count(),
     prisma.cronJob.count(),
     prisma.project.count(),
     prisma.ticket.count(),
     prisma.activityEvent.count(),
     prisma.approval.count(),
+    prisma.memoryEntry.count(),
   ]);
   console.log(
-    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} projects=${projects} tickets=${tickets} activity=${activity} approvals=${approvals}`,
+    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} projects=${projects} tickets=${tickets} activity=${activity} approvals=${approvals} memories=${memories}`,
   );
 }
 

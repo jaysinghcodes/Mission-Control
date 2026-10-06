@@ -6,6 +6,7 @@ import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { OPERATOR_ASSIGNEE } from '../config'
 import { STAGES, stageCounts, stageIndexForStatus, ticketNeedsYou, type ApprovalLike } from '../lib/board'
+import { startedIso } from '../lib/started'
 
 /**
  * Pipeline — the same tickets as the board, in Build → QA → Ship → Deploy.
@@ -23,7 +24,7 @@ interface Ticket {
 }
 interface TicketsResp { tickets: Ticket[] }
 interface ApprovalsResp { approvals: ApprovalLike[] }
-interface RunRow { id: string; name: string; startedAt: string | null; createdAt: string }
+interface RunRow { id: string; name: string; ticketId?: string | null; startedAt: string | null; createdAt: string }
 interface RunsResp { runs: RunRow[] }
 
 const STAGE_COLOR = ['var(--mc-blue)', 'var(--mc-orange)', 'var(--mc-green)', 'var(--mc-teal)']
@@ -31,13 +32,6 @@ const STAGE_COLOR = ['var(--mc-blue)', 'var(--mc-orange)', 'var(--mc-green)', 'v
 function fmt(iso: string | null): string {
   if (!iso) return ''
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-}
-
-/** Run start when a run matches the ticket, otherwise the ticket was created. */
-function startedIso(ticket: { title: string; key: string | null; createdAt: string }, runs: RunRow[]): string {
-  const run = runs.find((row) => row.name === ticket.title || (!!ticket.key && row.name.includes(ticket.key)))
-  if (run) return run.startedAt || run.createdAt
-  return ticket.createdAt
 }
 
 export default function Pipeline() {

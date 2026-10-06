@@ -16,6 +16,7 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
                                           + run.* for job-state changes
   (derived from sessions token counts) →  usage.snapshot × 3 (24h, 7d, month)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
+  agent workspace MEMORY.md + memory/*.md → memory.snapshot
 
 Design rules (why the code looks the way it does):
   * stdlib only — runs under any python3 >= 3.8 with zero installs.
@@ -34,12 +35,14 @@ Usage:
   python3 bridge/mc-bridge-sync.py              # collect + post
   python3 bridge/mc-bridge-sync.py --dry-run    # collect + print payloads, post nothing
   python3 bridge/mc-bridge-sync.py --from-dir bridge/examples   # use JSON files instead of the CLI
+  python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw-memory
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -447,6 +450,183 @@ def usage_from_sessions(
     }
 
 
+# ── Memory (OpenClaw workspace files → memory.snapshot) ────────────────────
+# Confirmed from OpenClaw docs (docs.openclaw.ai/concepts/memory and
+# concepts/agent-workspace):
+#   * Each agent has one workspace. `openclaw agents list --json` includes
+#     `workspace` (default ~/.openclaw/workspace, or agents.entries.*.workspace).
+#   * MEMORY.md at the workspace root is curated long-term memory.
+#   * memory/YYYY-MM-DD.md and memory/YYYY-MM-DD-<slug>.md are daily notes.
+#     Slugged files are what the session-memory hook writes next to the
+#     date-only file. Nested dirs (memory/.dreams, memory/imports) are not
+#     daily notes and are not walked.
+# The web app never reads these files. This bridge posts them.
+
+DAILY_NOTE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:-.+)?\.md$")
+MAX_MEMORY_BYTES = 1_000_000
+
+
+def memory_stable_id(agent_id: str, rel: str) -> str:
+    """Stable across re-syncs. Same agent + relative path → same id."""
+    digest = hashlib.sha256(f"{agent_id}\n{rel}".encode("utf-8")).hexdigest()[:24]
+    return f"mem-{digest}"
+
+
+def iso_utc(mtime: float) -> str:
+    dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).replace(microsecond=0)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def memory_title(body: str, fallback: str) -> str:
+    for line in body.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if text.startswith("#"):
+            text = text.lstrip("#").strip()
+        if text:
+            return text[:200]
+    return fallback[:200] or "Note"
+
+
+def is_real_day(day: str) -> bool:
+    try:
+        datetime.datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
+def resolve_workspace(raw: str, base: Optional[Path]) -> Path:
+    path = Path(os.path.expanduser(raw))
+    if not path.is_absolute() and base is not None:
+        path = base / path
+    return path
+
+
+def is_memory_workspace(path: Path) -> bool:
+    return (path / "MEMORY.md").is_file() or (path / "memory").is_dir()
+
+
+def agents_from_memory_dir(root: Path) -> Optional[List[Dict[str, Any]]]:
+    """
+    A sample OpenClaw memory dir is either one workspace (MEMORY.md or
+    memory/ inside it) or a folder of per-agent workspaces. None if `root`
+    does not exist — the caller skips the snapshot instead of posting [].
+    """
+    if not root.is_dir():
+        return None
+    if is_memory_workspace(root):
+        return [{"id": root.name, "name": root.name, "identityName": root.name, "workspace": str(root)}]
+    agents: List[Dict[str, Any]] = []
+    for child in sorted(root.iterdir()):
+        if child.name.startswith(".") or not child.is_dir():
+            continue
+        if is_memory_workspace(child):
+            agents.append({
+                "id": child.name,
+                "name": child.name,
+                "identityName": child.name,
+                "workspace": str(child),
+            })
+    return agents
+
+
+def _read_memory_text(path: Path) -> Optional[str]:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        log(f"{path}: {exc} — skipping")
+        return None
+    if size > MAX_MEMORY_BYTES:
+        log(f"{path}: over 1MB — skipping")
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        log(f"{path}: {exc} — skipping")
+        return None
+
+
+def entry_from_file(
+    agent_id: str,
+    agent_name: str,
+    workspace: Path,
+    path: Path,
+    kind: str,
+) -> Optional[Dict[str, Any]]:
+    text = _read_memory_text(path)
+    if text is None:
+        return None
+    body = text.strip()
+    if not body:
+        return None
+    rel = path.relative_to(workspace).as_posix()
+    try:
+        created = iso_utc(path.stat().st_mtime)
+    except OSError as exc:
+        log(f"{path}: {exc} — skipping")
+        return None
+    return {
+        "id": memory_stable_id(agent_id, rel),
+        "title": memory_title(body, path.stem),
+        "body": body,
+        "agent": agent_name,
+        "createdAt": created,
+        "kind": kind,
+        "source": "openclaw",
+        "ref": rel,
+    }
+
+
+def collect_memory(
+    agents: List[Dict[str, Any]],
+    base: Optional[Path] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Read each agent's MEMORY.md and memory/YYYY-MM-DD*.md.
+
+    Returns None when agents were given but no workspace directory could be
+    read (skip the snapshot — do not wipe). Returns [] when the source was
+    readable and empty (a real empty memory dir still posts []).
+    """
+    if not agents:
+        return []
+    readable = 0
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for agent in agents:
+        raw = agent.get("workspace")
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        workspace = resolve_workspace(raw, base)
+        if not workspace.is_dir():
+            log(f"memory workspace missing: {workspace} — skipping agent")
+            continue
+        readable += 1
+        agent_id = str(first(agent, "id", "name") or workspace.name)
+        agent_name = str(first(agent, "identityName", "name", "id") or agent_id)
+        long_term = workspace / "MEMORY.md"
+        if long_term.is_file():
+            row = entry_from_file(agent_id, agent_name, workspace, long_term, "long-term")
+            if row:
+                by_id[row["id"]] = row
+        daily_dir = workspace / "memory"
+        if not daily_dir.is_dir():
+            continue
+        for path in sorted(daily_dir.iterdir()):
+            if not path.is_file():
+                continue
+            match = DAILY_NOTE.match(path.name)
+            if not match or not is_real_day(match.group(1)):
+                continue
+            row = entry_from_file(agent_id, agent_name, workspace, path, "daily")
+            if row:
+                by_id[row["id"]] = row
+    if readable == 0:
+        return None
+    return sorted(by_id.values(), key=lambda row: (row["createdAt"], row["id"]), reverse=True)
+
+
 # ── Transport ───────────────────────────────────────────────────────────────
 
 def post(api_url: str, token: str, etype: str, payload: Dict[str, Any]) -> bool:
@@ -479,6 +659,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="OpenClaw → Mission Control bridge (one sync per run)")
     ap.add_argument("--dry-run", action="store_true", help="print events as JSON lines; post nothing")
     ap.add_argument("--from-dir", type=Path, help="read <dir>/{agents,sessions,cron,approvals}.json instead of the CLI")
+    ap.add_argument(
+        "--memory-dir",
+        type=Path,
+        help="read an OpenClaw memory tree (one workspace, or one subdirectory per agent)",
+    )
     args = ap.parse_args()
 
     # Repo-root .env is the single source of truth for INGEST_TOKEN (same file
@@ -528,6 +713,21 @@ def main() -> int:
              "desc": str(a.get("desc", "")), "meta": a.get("meta")}
             for a in approvals_rows
         ]}))
+
+    # Memory is its own source. --memory-dir is a sample (or explicit) tree.
+    # Otherwise use workspace paths from `openclaw agents list --json`.
+    # Unreadable workspaces skip the event so a broken path cannot wipe notes.
+    memory_entries: Optional[List[Dict[str, Any]]] = None
+    if args.memory_dir is not None:
+        mem_agents = agents_from_memory_dir(args.memory_dir)
+        if mem_agents is None:
+            log(f"memory dir {args.memory_dir} not found — skipping memory.snapshot")
+        else:
+            memory_entries = collect_memory(mem_agents)
+    elif agents_rows is not None:
+        memory_entries = collect_memory(agents_rows, base=args.from_dir)
+    if memory_entries is not None:
+        events.append(("memory.snapshot", {"entries": memory_entries}))
 
     if not events:
         log("no OpenClaw sources available — nothing to post (dashboard data left untouched)")
