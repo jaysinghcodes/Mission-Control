@@ -212,3 +212,18 @@ model Device {
   lastSeenAt DateTime?
   updatedAt  DateTime  @updatedAt
 }
+
+/// Experimental custom tool (ticket 10). A named prompt template plus the
+/// inputs it fills. `name` is unique after the API trims it. `inputs` is a
+/// JSON array of `{ name, label? }`. Placeholders in `promptTemplate` use
+/// `{{name}}` and must match an input name. A preview substitutes those
+/// values in-process — this table is not a license to call OpenClaw.
+model CustomTool {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  description    String   @default("")
+  promptTemplate String
+  inputs         Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

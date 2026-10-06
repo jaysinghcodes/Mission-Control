@@ -96,7 +96,7 @@ Migrations are a security red line: schema changes are human-reviewed and never 
                                         └────────────────────────────────────────┘
 ```
 
-Without OpenClaw, `npm run seed:demo` fills agents, cron jobs, tickets, activity, memories, and a pending approval so Board / Calendar / Team / Office / Memory are clickable. The same command writes sample markdown into the docs folder so Docs is clickable too. Docs do not use the bridge.
+Without OpenClaw, `npm run seed:demo` fills agents, cron jobs, tickets, activity, memories, a pending approval, and one experimental custom tool (System → Custom tools) so Board / Calendar / Team / Office / Memory are clickable. The same command writes sample markdown into the docs folder so Docs is clickable too. Docs do not use the bridge. A custom-tool test run only fills `{{name}}` placeholders inside the app.
 
 ### Docs
 

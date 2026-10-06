@@ -13,7 +13,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run start:prod` | `node dist/main` |
 | `npm test` | Jest unit tests (`src/**/*.spec.ts`, no DB needed) |
 | `npm run test:e2e` | e2e tests — needs a migrated Postgres at `DATABASE_URL` |
-| `npm run seed:demo` | Idempotent sample data (agents, cron jobs, tickets, activity, approval, memories, and markdown docs under `DOCS_ROOT`). Also `npm run seed:demo` from the root. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
+| `npm run seed:demo` | Idempotent sample data (agents, cron jobs, tickets, activity, approval, memories, one experimental custom tool, and markdown docs under `DOCS_ROOT`). Also `npm run seed:demo` from the root. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run lint` | ESLint |
 
 Schema: `npx prisma migrate deploy` (Docker does this on boot). Schema changes are human-reviewed — never auto-applied.

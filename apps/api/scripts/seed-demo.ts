@@ -13,6 +13,8 @@
  *   - sample memories across several America/Chicago days (ticket 5)
  *   - sample markdown docs in DOCS_ROOT (ticket 6; default <repo>/data/docs)
  *   - a sample mission statement and 3 devices (ticket 7)
+ *   - 1 experimental custom tool (ticket 10; a prompt template only — the
+ *     seed does not run it, and a test run never calls out of the app)
  *
  * IDEMPOTENT — safe to run any number of times:
  *   - Every row has a FIXED id (prefix `demo-`) or a unique natural key
@@ -257,7 +259,7 @@ async function main(): Promise<void> {
     `[seed:demo] docs root=${docsRoot} written=${docCounts.written} skipped=${docCounts.skipped} (skipped = already there; a re-run does not overwrite)`,
   );
 
-  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0, memories: 0, devices: 0, mission: 0 };
+  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0, memories: 0, devices: 0, mission: 0, customTools: 0 };
 
   // Rename a previous demo roster in place when the cool name is free.
   // If both rows already exist, leave both — the seed never deletes.
@@ -531,17 +533,43 @@ async function main(): Promise<void> {
     }
   }
 
+  // One sample tool. Fixed id + update: {} so a second seed inserts 0 and
+  // does not overwrite a template you already edited. If that name was taken
+  // by a different row, leave the existing row (still idempotent).
+  const demoTool = {
+    id: 'demo-custom-tool-brief',
+    name: 'Demo brief',
+    description: 'Sample prompt. A test run only fills the template inside this app.',
+    promptTemplate: 'Write a short brief about {{topic}} for {{audience}}.',
+    inputs: [
+      { name: 'topic', label: 'Topic' },
+      { name: 'audience', label: 'Audience' },
+    ],
+  };
+  try {
+    const beforeTool = await prisma.customTool.findUnique({ where: { id: demoTool.id }, select: { id: true } });
+    await prisma.customTool.upsert({
+      where: { id: demoTool.id },
+      update: {},
+      create: demoTool,
+    });
+    if (!beforeTool) counts.customTools++;
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'P2002') throw err;
+    console.log('[seed:demo] custom tool name already taken — left the existing row');
+  }
+
   // What THIS run inserted (0 everywhere on a re-run = already seeded).
   console.log(
     `[seed:demo] inserted agents=${counts.agents} cronJobs=${counts.cronJobs} projects=${counts.projects} tickets=${counts.tickets} ` +
       `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} memories=${counts.memories} ` +
-      `devices=${counts.devices} mission=${counts.mission} docs=${docCounts.written} (0 everywhere = already seeded; re-running is safe)`,
+      `devices=${counts.devices} mission=${counts.mission} customTools=${counts.customTools} docs=${docCounts.written} (0 everywhere = already seeded; re-running is safe)`,
   );
 
   // Table totals AFTER the run — the idempotency check is simply "these
   // numbers do not change when you run seed:demo a second time" (as long as
   // nothing else, e.g. a running api/bridge, writes in between).
-  const [agents, cronJobs, projects, tickets, activity, approvals, memories, devices] = await Promise.all([
+  const [agents, cronJobs, projects, tickets, activity, approvals, memories, devices, customTools] = await Promise.all([
     prisma.agent.count(),
     prisma.cronJob.count(),
     prisma.project.count(),
@@ -550,9 +578,10 @@ async function main(): Promise<void> {
     prisma.approval.count(),
     prisma.memoryEntry.count(),
     prisma.device.count(),
+    prisma.customTool.count(),
   ]);
   console.log(
-    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} projects=${projects} tickets=${tickets} activity=${activity} approvals=${approvals} memories=${memories} devices=${devices}`,
+    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} projects=${projects} tickets=${tickets} activity=${activity} approvals=${approvals} memories=${memories} devices=${devices} customTools=${customTools}`,
   );
 }
 
