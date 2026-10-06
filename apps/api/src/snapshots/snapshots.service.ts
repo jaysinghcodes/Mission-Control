@@ -170,31 +170,44 @@ export class SnapshotsService {
   /**
    * Replace memory with the bridge snapshot.
    *
-   * Ids are the caller's stable ids (agent + path). Re-posting the same id
-   * updates that row. Ids missing from this payload are removed, so a file
-   * that went away does not linger. A payload without an `entries` array is
-   * ignored — a malformed event must not wipe the table. An empty array is
-   * a real empty workspace and clears the table.
+   * Ids are the caller's stable ids (agent + path), namespaced so they
+   * cannot land on a demo id. Re-posting the same id updates that row.
+   * Ids missing from this payload are removed only for agents that appear
+   * in the payload, so a Forge sync cannot drop Aegis.
+   *
+   * A payload without an `entries` array is ignored. An empty array — a
+   * readable workspace with zero notes, or a sync that names nobody — is
+   * a no-op. It must not delete every agent's rows. Demo and seed rows
+   * are never updated, even when the payload reuses their id.
    */
   async applyMemory(payload: Record<string, unknown>): Promise<void> {
     if (!Array.isArray(payload.entries)) return;
     const rows = dedupeMemory(payload.entries.map(normalizeMemory).filter(isMemoryRow));
+    // No storable rows means there is nobody to replace. Deleting here
+    // would be a delete-all of every bridge note.
+    if (rows.length === 0) return;
     const ids = rows.map((row) => row.id);
     const agents = [...new Set(rows.map((row) => row.agent))];
     await this.prisma.$transaction(async (tx) => {
-      // Replace bridge rows only. Seed rows (source=demo) stay. When the
-      // snapshot names agents, only those agents are replaced, so a Forge
-      // sync cannot drop Aegis. An empty list is a readable workspace with
-      // no notes: clear every bridge row, still not the demo set. Legacy
-      // source=openclaw is the same writer from before this was named bridge.
+      // Replace bridge rows only, and only for agents named in this
+      // payload. Legacy source=openclaw is the same writer from before
+      // this was named bridge. `agent: { in }` is required: an empty
+      // agent list must not match every row.
       await tx.memoryEntry.deleteMany({
         where: {
           source: { in: ['bridge', 'openclaw'] },
-          ...(agents.length > 0 ? { agent: { in: agents } } : {}),
-          ...(ids.length > 0 ? { id: { notIn: ids } } : {}),
+          agent: { in: agents },
+          id: { notIn: ids },
         },
       });
       for (const row of rows) {
+        const existing = await tx.memoryEntry.findUnique({
+          where: { id: row.id },
+          select: { source: true },
+        });
+        // A demo/seed row keeps its id, body, and source. Live ingest
+        // cannot overwrite it by reusing the id.
+        if (isDemoMemory(existing?.source, row.id)) continue;
         await tx.memoryEntry.upsert({
           where: { id: row.id },
           create: row,
@@ -237,15 +250,36 @@ function dedupeMemory(rows: MemoryWrite[]): MemoryWrite[] {
 }
 
 /**
+ * Live ids live outside the demo namespace.
+ * `mem-` is the bridge's own stable prefix. Anything else is stored as
+ * `bridge-…`. A `demo-` id is refused so ingest cannot take a seed row's key.
+ */
+export function namespaceBridgeId(id: string): string | null {
+  if (!id || id.startsWith('demo-')) return null;
+  if (id.startsWith('bridge-') || id.startsWith('mem-')) return id;
+  const namespaced = `bridge-${id}`;
+  return namespaced.length > 200 ? null : namespaced;
+}
+
+function isDemoMemory(source: string | null | undefined, id: string): boolean {
+  if (id.startsWith('demo-')) return true;
+  const src = (source ?? '').toLowerCase();
+  return src === 'demo' || src === 'seed';
+}
+
+/**
  * One snapshot entry → a row, or null when the entry cannot be stored.
  * Missing id, title, body, or a createdAt that is not a real instant is
  * dropped. Unknown kinds become `other` so a future file shape still lands.
+ * A demo id is dropped here so it never reaches the upsert.
  */
 function normalizeMemory(value: unknown): MemoryWrite | null {
   if (!value || typeof value !== 'object') return null;
   const entry = value as Record<string, unknown>;
-  const id = typeof entry.id === 'string' ? entry.id.trim() : '';
-  if (!id || id.length > 200) return null;
+  const rawId = typeof entry.id === 'string' ? entry.id.trim() : '';
+  if (!rawId || rawId.length > 200) return null;
+  const id = namespaceBridgeId(rawId);
+  if (!id) return null;
   const title = String(entry.title ?? '').trim().slice(0, 200);
   const body = typeof entry.body === 'string' ? entry.body : '';
   if (!title || !body.trim()) return null;

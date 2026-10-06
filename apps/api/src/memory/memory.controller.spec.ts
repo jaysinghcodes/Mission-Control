@@ -27,21 +27,30 @@ function row(partial: Partial<Row> & Pick<Row, 'id' | 'createdAt'>): Row {
 
 function makePrisma(rows: Row[]) {
   const calls: unknown[] = [];
+  const orderBys: unknown[] = [];
   const memoryEntry = {
-    findMany: jest.fn(async ({ where, take, skip }: { where?: Record<string, unknown>; take?: number; skip?: number }) => {
+    findMany: jest.fn(async ({ where, orderBy, take, skip }: { where?: Record<string, unknown>; orderBy?: unknown; take?: number; skip?: number }) => {
       calls.push(where);
+      orderBys.push(orderBy);
       const matched = rows
         .filter((item) => matches(item, where))
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        .sort((a, b) => {
+          const byTime = b.createdAt.getTime() - a.createdAt.getTime();
+          if (byTime !== 0) return byTime;
+          if (a.id === b.id) return 0;
+          return a.id < b.id ? 1 : -1;
+        });
       const start = skip ?? 0;
       return take == null ? matched.slice(start) : matched.slice(start, start + take);
     }),
-    count: jest.fn(async () => rows.length),
+    count: jest.fn(async (args?: { where?: Record<string, unknown> }) => {
+      return rows.filter((item) => matches(item, args?.where)).length;
+    }),
     findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
       return rows.find((item) => item.id === where.id) ?? null;
     }),
   };
-  return { prisma: { memoryEntry } as unknown as PrismaService, calls };
+  return { prisma: { memoryEntry } as unknown as PrismaService, calls, orderBys };
 }
 
 function matches(item: Row, where?: Record<string, unknown>): boolean {
@@ -131,23 +140,48 @@ describe('MemoryController', () => {
     expect(where.OR[0].title.contains).toBe('100\\%');
   });
 
-  it('honors limit and offset without changing the unfiltered total', async () => {
-    const { prisma } = makePrisma(rows);
+  it('honors limit and offset and reports the size of the filtered list', async () => {
+    const { prisma, orderBys } = makePrisma(rows);
     const controller = new MemoryController(prisma);
     const page = await controller.list(undefined, undefined, undefined, '1', '1');
     expect(page.entries).toHaveLength(1);
     expect(page.entries[0].id).toBe('late-cdt');
     expect(page.total).toBe(rows.length);
+    expect(orderBys[0]).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
     await expect(controller.list(undefined, undefined, undefined, '500')).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.list(undefined, undefined, undefined, 'nope')).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.list(undefined, undefined, undefined, undefined, '-1')).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('filters kind without hiding the unfiltered total', async () => {
+  it('breaks createdAt ties by id and counts only rows matching day, kind, and q', async () => {
+    const same = new Date('2026-10-06T15:00:00.000Z');
+    const tied = [
+      row({ id: 'a', createdAt: same, title: 'Alpha', kind: 'daily' }),
+      row({ id: 'b', createdAt: same, title: 'Beta', kind: 'daily' }),
+      row({ id: 'c', createdAt: same, title: 'Gamma other', kind: 'other' }),
+      row({ id: 'd', createdAt: new Date('2026-10-05T15:00:00.000Z'), title: 'Older match', kind: 'daily' }),
+    ];
+    const { prisma, orderBys } = makePrisma(tied);
+    const controller = new MemoryController(prisma);
+    const page = await controller.list(undefined, 'daily', undefined, '2', '0');
+    expect(page.entries.map((entry) => entry.id)).toEqual(['b', 'a']);
+    expect(page.total).toBe(3);
+    expect(orderBys[0]).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+
+    const searched = await controller.list(undefined, undefined, 'Gamma');
+    expect(searched.entries.map((entry) => entry.id)).toEqual(['c']);
+    expect(searched.total).toBe(1);
+
+    const day = await controller.list('2026-10-06');
+    expect(day.total).toBe(3);
+    expect(day.entries.map((entry) => entry.id).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('filters kind and reports the filtered total', async () => {
     const { prisma } = makePrisma(rows);
     const controller = new MemoryController(prisma);
     const res = await controller.list(undefined, 'long-term');
     expect(res.entries.map((entry) => entry.id)).toEqual(['late-cdt']);
-    expect(res.total).toBe(rows.length);
+    expect(res.total).toBe(1);
   });
 });

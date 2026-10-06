@@ -39,6 +39,7 @@ function makePrisma() {
       rows.set(where.id, next);
       return next;
     }),
+    findUnique: jest.fn(async ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null),
   };
   const prisma = {
     memoryEntry,
@@ -103,14 +104,43 @@ describe('SnapshotsService.applyMemory', () => {
     expect(rows.size).toBe(1);
   });
 
-  it('clears bridge rows on an empty snapshot and leaves demo rows', async () => {
+  it('treats an empty entries list as a no-op and does not delete every agent', async () => {
     const { client, rows } = makePrisma();
     rows.set('demo-1', demoRow('demo-1'));
     const service = new SnapshotsService(client);
-    await service.applyMemory({ entries: [entry('mem-1', 'bye')] });
+    await service.applyMemory({
+      entries: [entry('mem-forge', 'keep', 'Forge'), entry('mem-aegis', 'keep', 'Aegis')],
+    });
     await service.applyMemory({ entries: [] });
-    expect([...rows.keys()]).toEqual(['demo-1']);
+    expect(rows.get('mem-forge')?.body).toBe('keep');
+    expect(rows.get('mem-aegis')?.body).toBe('keep');
     expect(rows.get('demo-1')?.source).toBe('demo');
+    expect(rows.get('demo-1')?.body).toBe('from seed:demo');
+    // A payload that stores nothing (no body) is the same no-op.
+    await service.applyMemory({ entries: [{ id: 'mem-forge', title: 'no body' }] });
+    expect(rows.get('mem-forge')?.body).toBe('keep');
+    expect(rows.get('mem-aegis')?.body).toBe('keep');
+  });
+
+  it('does not overwrite a demo row when ingest reuses its id', async () => {
+    const { client, rows } = makePrisma();
+    rows.set('demo-memory-1', demoRow('demo-memory-1'));
+    rows.set('mem-shared', { ...demoRow('mem-shared'), body: 'seeded' });
+    const service = new SnapshotsService(client);
+    await service.applyMemory({
+      entries: [
+        entry('demo-memory-1', 'hijack'),
+        entry('mem-shared', 'hijack too'),
+        entry('note-9', 'live'),
+      ],
+    });
+    expect(rows.get('demo-memory-1')?.body).toBe('from seed:demo');
+    expect(rows.get('demo-memory-1')?.source).toBe('demo');
+    expect(rows.get('mem-shared')?.body).toBe('seeded');
+    expect(rows.get('mem-shared')?.source).toBe('demo');
+    expect(rows.get('bridge-note-9')?.body).toBe('live');
+    expect(rows.get('bridge-note-9')?.source).toBe('bridge');
+    expect(rows.has('note-9')).toBe(false);
   });
 
   it('replaces bridge rows only for agents in the snapshot', async () => {
@@ -121,11 +151,11 @@ describe('SnapshotsService.applyMemory', () => {
       entries: [entry('forge-1', 'old', 'Forge'), entry('aegis-1', 'keep', 'Aegis')],
     });
     await service.applyMemory({ entries: [entry('forge-2', 'new', 'Forge')] });
-    expect(rows.has('forge-1')).toBe(false);
-    expect(rows.has('forge-2')).toBe(true);
-    expect(rows.get('aegis-1')?.body).toBe('keep');
+    expect(rows.has('bridge-forge-1')).toBe(false);
+    expect(rows.has('bridge-forge-2')).toBe(true);
+    expect(rows.get('bridge-aegis-1')?.body).toBe('keep');
     expect(rows.get('demo-forge')?.source).toBe('demo');
-    expect(rows.get('forge-2')?.source).toBe('bridge');
+    expect(rows.get('bridge-forge-2')?.source).toBe('bridge');
   });
 
   it('skips an entry that has no id and stores an unknown kind as other', async () => {

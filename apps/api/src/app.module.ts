@@ -6,6 +6,7 @@ import { HealthController } from './health/health.controller';
 import { HealthTickerService } from './health/health.ticker';
 import { IngestController } from './ingest/ingest.controller';
 import { SnapshotsService } from './snapshots/snapshots.service';
+import { DocsService } from './docs/docs.service';
 import { AgentsController } from './agents/agents.controller';
 import { RunsController } from './runs/runs.controller';
 import { TicketsController } from './tickets/tickets.controller';
@@ -20,6 +21,7 @@ import { SearchController } from './search/search.controller';
 import { SystemController } from './system/system.controller';
 import { ModelsController } from './models/models.controller';
 import { MemoryController } from './memory/memory.controller';
+import { DocsController } from './docs/docs.controller';
 import { GitHubService } from './github/github.service';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -51,6 +53,7 @@ import { PrismaService } from './prisma/prisma.service';
     SystemController,
     ModelsController,
     MemoryController,
+    DocsController,
   ],
   providers: [
     AppService,
@@ -58,6 +61,7 @@ import { PrismaService } from './prisma/prisma.service';
     PrismaService,
     HealthTickerService,
     SnapshotsService,
+    DocsService,
     GitHubService,
   ],
   exports: [PrismaService, LiveActivityGateway],

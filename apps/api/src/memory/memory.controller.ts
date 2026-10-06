@@ -58,11 +58,13 @@ export class MemoryController {
     const [rows, total] = await Promise.all([
       this.prisma.memoryEntry.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        // id is the tie-break so two notes saved in the same instant
+        // stay in a stable order across pages.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         ...(take != null ? { take } : {}),
         ...(skip ? { skip } : {}),
       }),
-      this.prisma.memoryEntry.count(),
+      this.prisma.memoryEntry.count({ where }),
     ]);
     return {
       entries: rows.map(toListEntry),

@@ -60,6 +60,16 @@ services:
       # Display-only: default assignee for new tickets/runs. Blank → "Operator".
       OPERATOR_NAME: ${OPERATOR_NAME:-}
       NODE_ENV: production
+      # Docs library. This is the path INSIDE the container. The host folder
+      # is the bind below, so `npm run seed:demo` on the host (DOCS_ROOT unset
+      # → ./data/docs) and the api read the same files. A missing folder is
+      # an empty Docs page, not a crash.
+      DOCS_ROOT: /data/docs
+    volumes:
+      # ${DOCS_ROOT} here is the HOST path from the project .env (compose
+      # interpolation), not the container path set just above. `:-` keeps
+      # ./data/docs when that variable is unset or empty.
+      - ${DOCS_ROOT:-./data/docs}:/data/docs
     ports:
       # Host port overridable (item 6); the api still listens on 3000 inside.
       - "127.0.0.1:${MC_API_PORT:-3000}:3000"

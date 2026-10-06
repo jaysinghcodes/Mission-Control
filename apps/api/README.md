@@ -13,7 +13,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run start:prod` | `node dist/main` |
 | `npm test` | Jest unit tests (`src/**/*.spec.ts`, no DB needed) |
 | `npm run test:e2e` | e2e tests — needs a migrated Postgres at `DATABASE_URL` |
-| `npm run seed:demo` | Idempotent sample data (agents, cron jobs, tickets, activity, approval). Also `npm run seed:demo` from the root. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
+| `npm run seed:demo` | Idempotent sample data (agents, cron jobs, tickets, activity, approval, memories, and markdown docs under `DOCS_ROOT`). Also `npm run seed:demo` from the root. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run lint` | ESLint |
 
 Schema: `npx prisma migrate deploy` (Docker does this on boot). Schema changes are human-reviewed — never auto-applied.
@@ -33,6 +33,7 @@ The api has **no `.env` loader**: it reads `process.env`. Docker Compose injects
 | `GITHUB_TOKEN` | — | Optional: PR approvals → auto-merge. |
 | `DEEPSEEK_API_KEY` / `ZAI_API_KEY` | — | Optional: live provider balances on Health/Usage. |
 | `HEALTH_TICK_MS` | `30000` | `health.tick` broadcast interval; `0` disables. |
+| `DOCS_ROOT` | `<repo>/data/docs` | Markdown library for `GET /docs`. Absolute, or relative to the repo root. The browser never receives a filesystem path. Missing or empty → `{ docs: [] }`. Compose sets the container value to `/data/docs` and bind-mounts the host path. |
 
 ## Layout
 
