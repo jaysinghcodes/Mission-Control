@@ -86,7 +86,7 @@ export default function Team() {
             <span className="text-[12.5px] text-mc-sub">1 person</span>
           </div>
           <div className="mt-4 flex items-center gap-3">
-            <span className="grid h-12 w-12 place-items-center rounded-full bg-[#8e8e93] text-[16px] font-semibold text-white">{initial}</span>
+            <span className="grid h-12 w-12 place-items-center rounded-full bg-[#6e6e73] text-[16px] font-semibold text-white">{initial}</span>
             <div className="min-w-0 flex-1">
               <div className="text-[15px] font-semibold">{owner}</div>
               <div className="text-[12.5px] text-mc-sub">Owner · approves deploys and merges</div>

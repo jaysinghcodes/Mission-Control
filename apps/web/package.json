@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test test/*.mjs"
+    "test": "node --test test/*.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

@@ -159,7 +159,7 @@ const ACTIVITY = [
 // Note: a later real `approvals.snapshot` from the bridge drops all PENDING
 // rows (snapshot contract), which is exactly what we want for demo data.
 const APPROVALS = [
-  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4' } },
+  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Sentinel' } },
   { id: 'demo-approval-2', kind: 'pr', tag: 'Merge the roster update', desc: 'You approved. Sample decision so the Decided tab is not empty.', status: 'approved' },
 ];
 
@@ -328,7 +328,7 @@ async function main(): Promise<void> {
   // already taken stays decided). Prose in `desc` is not the link.
   await prisma.approval.updateMany({
     where: { id: 'demo-approval-1' },
-    data: { meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4' } },
+    data: { meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Sentinel' } },
   });
   await prisma.activityEvent.updateMany({
     where: { id: 'demo-act-08' },

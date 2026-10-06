@@ -1,4 +1,4 @@
-import { monthStartUtc } from './period-window'
+import { monthStartUtc, usagePeriodLabel } from './period-window'
 
 describe('monthStartUtc', () => {
   it('is the first instant of the UTC month, not 30 days back', () => {
@@ -8,5 +8,11 @@ describe('monthStartUtc', () => {
     expect(new Date(start).toISOString()).toBe('2023-11-01T00:00:00.000Z')
     expect(now - start).toBeLessThan(30 * 86_400_000)
     expect(now - 20 * 86_400_000).toBeLessThan(start)
+  })
+
+  it('calls the rolling day Last 24 hours', () => {
+    expect(usagePeriodLabel('24h')).toBe('Last 24 hours')
+    expect(usagePeriodLabel('7d')).toBe('Last 7 days')
+    expect(usagePeriodLabel('month')).toBe('Month to date')
   })
 })

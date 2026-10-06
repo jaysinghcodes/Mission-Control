@@ -164,7 +164,7 @@ export default function Connect() {
                   aria-current={current ? 'step' : undefined}
                   aria-label={`Step ${s.id}: ${s.title}`}
                   className={`grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold ${
-                    current ? 'bg-mc-accent-fill text-white ring-4 ring-mc-accent/20' : done ? 'bg-mc-green text-white' : 'border border-mc-sub bg-mc-card text-mc-sub'
+                    current ? 'bg-mc-accent-fill text-white ring-4 ring-mc-accent/20' : done ? 'mc-check' : 'border border-mc-sub bg-mc-card text-mc-sub'
                   }`}
                 >
                   {done && !current ? '✓' : s.id}

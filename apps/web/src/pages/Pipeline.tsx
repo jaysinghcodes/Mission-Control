@@ -23,6 +23,8 @@ interface Ticket {
 }
 interface TicketsResp { tickets: Ticket[] }
 interface ApprovalsResp { approvals: ApprovalLike[] }
+interface RunRow { id: string; name: string; startedAt: string | null; createdAt: string }
+interface RunsResp { runs: RunRow[] }
 
 const STAGE_COLOR = ['var(--mc-blue)', 'var(--mc-orange)', 'var(--mc-green)', 'var(--mc-teal)']
 
@@ -31,10 +33,18 @@ function fmt(iso: string | null): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
+/** Run start when a run matches the ticket, otherwise the ticket was created. */
+function startedIso(ticket: { title: string; key: string | null; createdAt: string }, runs: RunRow[]): string {
+  const run = runs.find((row) => row.name === ticket.title || (!!ticket.key && row.name.includes(ticket.key)))
+  if (run) return run.startedAt || run.createdAt
+  return ticket.createdAt
+}
+
 export default function Pipeline() {
   const { data, refetch } = useApi<TicketsResp>('/tickets', { pollMs: 10000 })
   const approvalsQ = useApi<ApprovalsResp>('/approvals', { pollMs: 15000 })
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const runsQ = useApi<RunsResp>('/runs', { pollMs: 15000 })
   const { events } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
   const [title, setTitle] = useState('')
@@ -44,6 +54,7 @@ export default function Pipeline() {
   const [showDone, setShowDone] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
   const roster = rosterQ.data?.agents ?? []
+  const runs = runsQ.data?.runs ?? []
   const pending = approvalsQ.data?.approvals ?? []
 
   useEffect(() => {
@@ -96,7 +107,7 @@ export default function Pipeline() {
       <PageHeader
         title="Pipeline"
         summary={summary}
-        tools={<Segmented labels={['Live', 'Today', 'Week']} active={range} onChange={setRange} ariaLabel="Pipeline range" />}
+        tools={<Segmented labels={['Live', 'Last 24 hours', 'Week']} active={range} onChange={setRange} ariaLabel="Pipeline range" />}
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -161,6 +172,7 @@ export default function Pipeline() {
                       <div className="min-w-0 flex-1">
                         <div className="text-[15px] font-semibold">{ticket.title}</div>
                         <AgentName name={who.name} role={who.role} />
+                        <div className="text-[12.5px] text-mc-sub">Started · {fmt(startedIso(ticket, runs))}</div>
                       </div>
                       <div className="hidden min-w-[280px] items-center md:flex">
                         <div className="relative h-8 flex-1">
@@ -185,7 +197,7 @@ export default function Pipeline() {
                     </div>
                     {open && (
                       <div className="mt-3 pl-16 text-[12.5px] text-mc-sub">
-                        {ticket.key ?? 'No key'} · queued {fmt(ticket.createdAt) || '—'}
+                        {ticket.key ?? 'No key'} · started {fmt(startedIso(ticket, runs)) || '—'}
                         {blocked ? ' · paused until you decide in Approvals' : ''}
                       </div>
                     )}
@@ -204,7 +216,7 @@ export default function Pipeline() {
               {done.map((ticket) => (
                 <div key={ticket.id} className="flex items-center justify-between px-5 py-3 text-[13px]">
                   <span className="font-medium">{ticket.title}</span>
-                  <span className="text-mc-sub">Started · {fmt(ticket.createdAt)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-mc-sub">Started · {fmt(startedIso(ticket, runs))}</span>
                 </div>
               ))}
             </SoftCard>

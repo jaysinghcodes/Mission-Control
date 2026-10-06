@@ -11,8 +11,9 @@ import Settings from './Settings'
 
 /**
  * System — health, models and spend, and the old observe pages behind a click.
- * Today / week / month read GET /usage?period=24h|7d|month. Those windows are
- * what the bridge posts. With no snapshot, the card says the bridge is absent.
+ * Last 24 hours / last 7 days / month to date read GET /usage?period=24h|7d|month.
+ * 24h is a rolling day, not the calendar date. With no snapshot, the card says
+ * the bridge is absent.
  */
 
 interface HealthResp { status: string; database: string; uptimeSeconds: number; lastIngestAt?: string | null }
@@ -40,7 +41,7 @@ interface UsageResp { usage: Usage | null }
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
 
 const PERIODS = [
-  { id: '24h', label: 'Today' },
+  { id: '24h', label: 'Last 24 hours' },
   { id: '7d', label: 'Last 7 days' },
   { id: 'month', label: 'Month to date' },
 ] as const
@@ -172,7 +173,7 @@ export default function System() {
       {!any && (day.data || week.data || month.data) && (
         <EmptyState
           title="No model spend yet"
-          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. Today, the last 7 days, and the month to date stay empty until a snapshot exists. A per-model price override is not part of this build."
+          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. The last 24 hours, the last 7 days, and the month to date stay empty until a snapshot exists. A per-model price override is not part of this build."
         />
       )}
       {!day.data && !week.data && !month.data && (
@@ -189,62 +190,104 @@ export default function System() {
               return (
                 <button key={p.id} type="button" onClick={() => setPeriod(i)} className={`rounded-xl px-3 py-2 text-left ${on ? 'bg-mc-sel' : ''}`}>
                   <div className="text-[12.5px] font-semibold text-mc-sub">{p.label}</div>
-                  <div className="mt-1 text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost) : '—'}</div>
+                  <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost) : '—'}</div>
                   <div className="text-[12.5px] text-mc-sub">{tok === null ? 'No snapshot' : `${tokens(tok)} tokens`}</div>
                 </button>
               )
             })}
           </div>
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left">
-              <thead>
-                <tr className="text-[11.5px] text-mc-sub">
-                  <th className="px-4 py-2 font-semibold">Model</th>
-                  <th className="px-4 py-2 text-right font-semibold">Tokens · {PERIODS[period].label.toLowerCase()}</th>
-                  <th className="px-4 py-2 text-right font-semibold">Today</th>
-                  <th className="px-4 py-2 text-right font-semibold">Last 7 days</th>
-                  <th className="px-4 py-2 text-right font-semibold">Month to date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.map((model) => {
-                  const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
-                  const focus = cells[period]
-                  const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
-                  const open = modelOpen === model
-                  return (
-                    <Fragment key={model}>
-                      <tr className="border-t border-mc-sep">
-                        <td className="px-4 py-3">
-                          <button type="button" onClick={() => setModelOpen(open ? null : model)} className="text-left">
-                            <div className="text-[14.5px] font-semibold">{model}</div>
-                            <div className="text-[12px] text-mc-sub">{focus?.name || 'session'} · OpenClaw cost</div>
-                          </button>
-                          <div className="mt-1 flex items-center gap-1">
-                            {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
-                            <span className="text-[12px] text-mc-sub">{who.length ? `${who.length} agents` : 'No agent tagged'}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right text-[14px]">{tokens((focus?.tokensIn ?? 0) + (focus?.tokensOut ?? 0))}</td>
-                        {cells.map((c, i) => (
-                          <td key={PERIODS[i].id} className={`px-4 py-3 text-right text-[14px] ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
-                            {c ? money(c.cost) : '—'}
+          <div className="mc-spend mt-2">
+            <div className="mc-spend-cards">
+              {models.map((model) => {
+                const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
+                const focus = cells[period]
+                const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
+                const open = modelOpen === model
+                return (
+                  <div key={model} className="border-t border-mc-sep px-4 py-3">
+                    <button type="button" onClick={() => setModelOpen(open ? null : model)} className="text-left">
+                      <div className="text-[14.5px] font-semibold break-words">{model}</div>
+                      <div className="text-[12px] text-mc-sub">{focus?.name || 'session'} · OpenClaw cost</div>
+                    </button>
+                    <div className="mt-1 flex items-center gap-1">
+                      {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
+                      <span className="text-[12px] text-mc-sub">{who.length ? `${who.length} agents` : 'No agent tagged'}</span>
+                    </div>
+                    <div className="mt-3 space-y-1.5">
+                      {PERIODS.map((p, i) => (
+                        <div key={p.id} className="flex items-baseline justify-between gap-4 text-[13px]">
+                          <span className="shrink-0">{p.label}</span>
+                          <span className={`shrink-0 whitespace-nowrap tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
+                            {cells[i] ? money(cells[i]?.cost) : '—'}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex items-baseline justify-between gap-4 text-[12.5px] text-mc-sub">
+                        <span className="shrink-0">Tokens</span>
+                        <span className="shrink-0 whitespace-nowrap">{tokens((focus?.tokensIn ?? 0) + (focus?.tokensOut ?? 0))}</span>
+                      </div>
+                    </div>
+                    {open && (
+                      <p className="mt-3 text-[13px] text-mc-sub">
+                        Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month (UTC). A long session counts in the window of its last activity.
+                        Price override is later — this build does not store a per-token price.
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="mc-spend-table overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[11.5px] text-mc-sub">
+                    <th className="whitespace-nowrap px-4 py-2 font-semibold">Model</th>
+                    <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Tokens · {PERIODS[period].label.toLowerCase()}</th>
+                    {PERIODS.map((p) => (
+                      <th key={p.id} className="whitespace-nowrap px-4 py-2 text-right font-semibold">{p.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {models.map((model) => {
+                    const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
+                    const focus = cells[period]
+                    const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
+                    const open = modelOpen === model
+                    return (
+                      <Fragment key={model}>
+                        <tr className="border-t border-mc-sep">
+                          <td className="px-4 py-3">
+                            <button type="button" onClick={() => setModelOpen(open ? null : model)} className="text-left">
+                              <div className="whitespace-nowrap text-[14.5px] font-semibold">{model}</div>
+                              <div className="text-[12px] text-mc-sub">{focus?.name || 'session'} · OpenClaw cost</div>
+                            </button>
+                            <div className="mt-1 flex items-center gap-1">
+                              {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
+                              <span className="text-[12px] text-mc-sub">{who.length ? `${who.length} agents` : 'No agent tagged'}</span>
+                            </div>
                           </td>
-                        ))}
-                      </tr>
-                      {open && (
-                        <tr className="border-t border-mc-sep bg-mc-bg">
-                          <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
-                            Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month (UTC). A long session counts in the window of its last activity.
-                            Price override is later — this build does not store a per-token price.
-                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right text-[14px]">{tokens((focus?.tokensIn ?? 0) + (focus?.tokensOut ?? 0))}</td>
+                          {cells.map((c, i) => (
+                            <td key={PERIODS[i].id} className={`whitespace-nowrap px-4 py-3 text-right text-[14px] tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
+                              {c ? money(c.cost) : '—'}
+                            </td>
+                          ))}
                         </tr>
-                      )}
-                    </Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
+                        {open && (
+                          <tr className="border-t border-mc-sep bg-mc-bg">
+                            <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
+                              Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month (UTC). A long session counts in the window of its last activity.
+                              Price override is later — this build does not store a per-token price.
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
           <p className="px-4 py-3 text-[12.5px] text-mc-sub">
             Estimates use the cost OpenClaw reports for each session. Showing <span className="font-semibold text-mc-text">{PERIODS[period].label}</span>

@@ -86,6 +86,7 @@ export default function AppLayout() {
   const needs = approvals.data?.approvals.length ?? 0
   const navEl = useRef<HTMLElement>(null)
   const asideRef = useRef<HTMLElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
   const menuOpenRef = useRef(false)
 
@@ -111,7 +112,10 @@ export default function AppLayout() {
     return () => mq.removeEventListener('change', apply)
   }, [])
 
-  useEffect(() => { setSidebarOpen(false) }, [pathname])
+  useEffect(() => {
+    setSidebarOpen(false)
+    mainRef.current?.scrollTo(0, 0)
+  }, [pathname])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -381,7 +385,7 @@ export default function AppLayout() {
               {api.lastOkAt ? ` (last update ${new Date(api.lastOkAt).toLocaleTimeString()})` : ''}; retrying automatically.
             </div>
           )}
-          <main className="mc-scroll min-h-0 flex-1 overflow-y-auto px-7 py-6">
+          <main ref={mainRef} className="mc-scroll min-h-0 flex-1 overflow-y-auto px-7 py-6">
             <Outlet />
           </main>
         </div>

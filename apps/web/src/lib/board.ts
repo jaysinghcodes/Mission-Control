@@ -84,15 +84,32 @@ export function ticketNeedsYou(
   )
 }
 
+function sameAgent(agent: { id?: string; name: string }, id: string | null | undefined): boolean {
+  return !!id && (id === agent.id || id === agent.name)
+}
+
 export function agentNeedsYou(
   agent: { id?: string; name: string },
   rows: ApprovalLike[],
   tickets: { id?: string | null; key?: string | null; assignee?: string | null }[],
 ): boolean {
-  return tickets.some((ticket) => {
-    if (!ticketNeedsYou(ticket, rows) || !ticket.assignee) return false
-    return ticket.assignee === agent.name || ticket.assignee === agent.id
-  })
+  for (const row of rows) {
+    const meta = row.meta
+    if (!meta || typeof meta !== 'object') continue
+    // agentId is the assignee link when the approval carries one.
+    if (meta.agentId) {
+      if (sameAgent(agent, meta.agentId)) return true
+      continue
+    }
+    const assigned = tickets.some((ticket) => {
+      const linked =
+        (!!meta.ticketId && !!ticket.id && meta.ticketId === ticket.id) ||
+        (!!meta.ticketKey && !!ticket.key && meta.ticketKey === ticket.key)
+      return linked && sameAgent(agent, ticket.assignee)
+    })
+    if (assigned) return true
+  }
+  return false
 }
 
 export function activityNeedsYou(

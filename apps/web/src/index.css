@@ -242,3 +242,24 @@ textarea:focus-visible,
   background: var(--mc-fill);
   box-shadow: none;
 }
+
+/* White on #248a3d is 4.40:1. The same green on a dark card is 3.17:1,
+   and on the light toast (#f5f5f7) is 4.04:1. */
+.mc-check {
+  background: #248a3d;
+  color: #fff;
+}
+.mc-toast-check {
+  color: #248a3d;
+}
+
+/* Models & spend: cards until the card itself is wide enough for every header. */
+.mc-spend {
+  container-type: inline-size;
+}
+.mc-spend-cards { display: block; }
+.mc-spend-table { display: none; }
+@container (min-width: 880px) {
+  .mc-spend-cards { display: none; }
+  .mc-spend-table { display: block; }
+}

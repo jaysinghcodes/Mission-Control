@@ -20,5 +20,6 @@ describe('UsageController', () => {
   it('omits the cutoff for a duration window', async () => {
     const res = await controller().get('24h');
     expect(res).not.toHaveProperty('windowStart');
+    expect(res.label).toBe('Last 24 hours');
   });
 });

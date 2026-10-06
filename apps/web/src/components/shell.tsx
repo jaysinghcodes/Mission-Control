@@ -236,7 +236,7 @@ export function Toast({ message, onDismiss }: { message: string; onDismiss: () =
       role="status"
       className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-mc-text px-4 py-2 text-[13px] font-medium text-mc-win shadow-lg"
     >
-      <span className="text-mc-green">✓</span>
+      <span className="mc-toast-check">✓</span>
       <span>{message}</span>
       <button type="button" onClick={onDismiss} className="text-[11px] font-semibold opacity-70">
         Dismiss

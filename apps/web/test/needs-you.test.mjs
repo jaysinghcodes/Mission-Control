@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import ts from 'typescript'
 
-const board = await import('../src/lib/board.ts')
-const when = await import('../src/lib/when.ts')
+/** Node 20.17+ cannot import TypeScript. Transpile with the compiler the app already ships. */
+async function loadTs(rel) {
+  const src = await readFile(new URL(rel, import.meta.url), 'utf8')
+  const { outputText } = ts.transpileModule(src, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  })
+  return import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'))
+}
+
+const board = await loadTs('../src/lib/board.ts')
+const when = await loadTs('../src/lib/when.ts')
 
 const pending = [{
   id: 'demo-approval-1',
@@ -27,6 +37,16 @@ test('needs-you follows the approval id, not a name in the text', () => {
   assert.equal(board.activityNeedsYou({ ticket: 'DEMO-6' }, pending), false)
   assert.equal(board.activityNeedsYou({ name: 'security patch' }, pending), false)
   assert.equal(board.activityNeedsYou({ ticket: 'demo-ticket-4' }, pending), true)
+})
+
+test('agentId is the assignee link and the ticket assignee is only the fallback', () => {
+  const named = [{ meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Aegis' } }]
+  assert.equal(board.agentNeedsYou({ id: 'aegis', name: 'Aegis' }, named, tickets), true)
+  assert.equal(board.agentNeedsYou({ id: 'sentinel', name: 'Sentinel' }, named, tickets), false)
+  assert.equal(board.ticketNeedsYou(tickets[0], named), true)
+  const prose = [{ desc: 'Apply the security patch', meta: { agentId: 'patch-id' } }]
+  assert.equal(board.agentNeedsYou({ id: 'patch-id', name: 'Patch' }, prose, tickets), true)
+  assert.equal(board.agentNeedsYou({ id: 'other', name: 'Aegis' }, prose, tickets), false)
 })
 
 test('working is status, including an agent who also needs a decision', () => {
