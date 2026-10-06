@@ -8,6 +8,7 @@ import type { Agent, AgentsResp } from '../types'
 import Logs from './Logs'
 import Sessions from './Sessions'
 import Settings from './Settings'
+import CustomTools from './CustomTools'
 
 /**
  * System — health, models and spend, and the old observe pages behind a click.
@@ -110,13 +111,14 @@ export default function System() {
 
   const issue = (activity.data?.events ?? []).find((e) => /fail|error|timeout/i.test(`${e.type} ${e.payload?.name ?? ''} ${e.payload?.summary ?? ''}`))
 
-  if (panel === 'logs' || panel === 'sessions' || panel === 'settings' || panel === 'connection') {
+  if (panel === 'logs' || panel === 'sessions' || panel === 'settings' || panel === 'connection' || panel === 'tools') {
     return (
       <div>
         <Link to="/system" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">← System</Link>
         {panel === 'logs' && <Logs />}
         {panel === 'sessions' && <Sessions />}
         {panel === 'settings' && <Settings />}
+        {panel === 'tools' && <CustomTools />}
         {panel === 'connection' && (
           <div>
             <PageHeader title="Connection" summary="How this browser reaches the API." />
@@ -317,6 +319,7 @@ export default function System() {
           ['Sessions', `${sessions.data?.sessions.length ?? 0} active`, 'sessions'],
           ['Connection', 'SSH tunnel', 'connection'],
           ['Settings', 'Theme, account', 'settings'],
+          ['Custom tools', 'Experimental', 'tools'],
         ].map(([label, hint, id]) => (
           <Link key={id} to={`/system/${id}`} className="mc-card flex items-center justify-between px-4 py-3">
             <span className="text-[14px] font-semibold">{label}</span>
