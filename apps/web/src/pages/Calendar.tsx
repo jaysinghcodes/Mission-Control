@@ -3,11 +3,32 @@ import { useApi, apiPost } from '../hooks/useApi'
 import { PageHeader, Segmented, SoftCard, Face, StatusChip, Btn, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
+import { chicagoDay } from '../lib/chicago-day'
+import {
+  chicagoClock,
+  formatDayHeading,
+  formatSideDate,
+  formatWeekdayLong,
+  formatWeekdayShort,
+  formatWeekRange,
+  jobOccursOn,
+  monthGrid,
+  nextOccurrence,
+  parseClock,
+  shiftWeek,
+  startOfWeekKey,
+  weekDays,
+  type CalendarDay,
+} from '../lib/calendar-days'
 
 /**
  * Calendar — week of scheduled cron jobs. Owner robots come from the demo
  * job names (and any agent whose current task names the job). Day and month
  * are the same jobs, not a second data source.
+ *
+ * Columns are America/Chicago dates. The week starts on Monday; there is
+ * no week-start setting. Each label is that column's weekday, and a clock
+ * time such as 23:30 is Chicago wall time (it does not roll to the next UTC day).
  */
 
 interface Job { id: string; name: string; schedule: string | null; day: number | null; time: string | null; color: string | null; enabled: boolean }
@@ -15,7 +36,6 @@ interface CalendarResp { jobs: Job[] }
 interface EventApi { type: string; payload: { name?: string; agent?: string; status?: string; summary?: string } | null; ts: string }
 interface ActivityResp { events: EventApi[] }
 
-const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 const START_HOUR = 6
 const END_HOUR = 20
 const HOUR_H = 52
@@ -29,35 +49,9 @@ const OWNERS: { test: RegExp; name: string; tone: 'blue' | 'orange' | 'green' | 
   { test: /inbox|poll|bridge/i, name: 'Patch', tone: 'teal' },
 ]
 
-function startOfWeek(d: Date): Date {
-  const x = new Date(d)
-  const day = (x.getDay() + 6) % 7
-  x.setHours(0, 0, 0, 0)
-  x.setDate(x.getDate() - day)
-  return x
-}
-
 function parseTime(t: string | null): { h: number; m: number } | null {
-  if (!t) return null
-  const m = t.match(/^(\d{1,2}):(\d{2})/)
-  if (!m) return null
-  return { h: Number(m[1]), m: Number(m[2]) }
-}
-
-function colOf(d: Date): number {
-  return (d.getDay() + 6) % 7
-}
-
-function sameDay(a: Date, b: Date): boolean {
-  return a.toDateString() === b.toDateString()
-}
-
-function fmtRange(start: Date): string {
-  const end = new Date(start)
-  end.setDate(start.getDate() + 6)
-  const left = start.toLocaleDateString([], { month: 'short', day: 'numeric' })
-  const right = end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
-  return `${left} – ${right}`
+  const clock = parseClock(t)
+  return clock ? { h: clock.hour, m: clock.minute } : null
 }
 
 function clock(h: number, m = 0): string {
@@ -70,10 +64,6 @@ function ownerOf(name: string): { name: string; tone: 'blue' | 'orange' | 'green
   return OWNERS.find((o) => o.test.test(name)) ?? { name: 'Speedy', tone: 'blue' }
 }
 
-function onColumn(job: Job, col: number): boolean {
-  return job.day == null || job.day === col
-}
-
 export default function Calendar() {
   const { data, error } = useApi<CalendarResp>('/calendar', { pollMs: 30000 })
   const agentsQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
@@ -83,22 +73,16 @@ export default function Calendar() {
   const events = activityQ.data?.events ?? []
 
   const [view, setView] = useState(1)
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()))
-  const [selected, setSelected] = useState<Date>(() => {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    return d
-  })
+  const [weekStartKey, setWeekStartKey] = useState(() => startOfWeekKey(chicagoDay(new Date())))
+  const [selectedKey, setSelectedKey] = useState(() => chicagoDay(new Date()))
   const [openId, setOpenId] = useState<string | null>(null)
   const [ran, setRan] = useState<string | null>(null)
 
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart)
-    d.setDate(weekStart.getDate() + i)
-    return d
-  }), [weekStart])
+  const days = useMemo(() => weekDays(weekStartKey), [weekStartKey])
 
   const now = new Date()
+  const todayKey = chicagoDay(now)
+  const clockNow = chicagoClock(now)
   const timed = jobs.filter((j) => parseTime(j.time))
   const overnight = timed.filter((j) => {
     const t = parseTime(j.time)
@@ -119,28 +103,18 @@ export default function Calendar() {
     return events.some((e) => /fail/i.test(e.type) && (e.payload?.name ?? '').toLowerCase().includes(job.name.toLowerCase()))
   }
 
-  function occurs(job: Job, day: Date): boolean {
-    return onColumn(job, colOf(day))
+  function occurs(job: Job, day: CalendarDay): boolean {
+    return jobOccursOn(job, day.key)
   }
 
-  function nextRun(job: Job, from: Date): Date | null {
-    const t = parseTime(job.time)
-    if (!t) return null
-    for (let i = 0; i < 14; i++) {
-      const d = new Date(from)
-      d.setDate(from.getDate() + i)
-      d.setHours(t.h, t.m, 0, 0)
-      if (!onColumn(job, colOf(d))) continue
-      if (d.getTime() > from.getTime()) return d
-    }
-    return null
-  }
-
-  const todayJobs = [...timed, ...allday].filter((j) => occurs(j, selected))
+  const todayJobs = [...timed, ...allday].filter((j) => jobOccursOn(j, selectedKey))
   const upcoming = jobs
-    .map((job) => ({ job, at: nextRun(job, now) }))
-    .filter((row): row is { job: Job; at: Date } => row.at != null)
-    .sort((a, b) => a.at.getTime() - b.at.getTime())
+    .map((job) => ({ job, at: nextOccurrence(job, now) }))
+    .filter((row): row is { job: Job; at: { dayKey: string; hour: number; minute: number } } => row.at != null)
+    .sort((a, b) => {
+      if (a.at.dayKey !== b.at.dayKey) return a.at.dayKey < b.at.dayKey ? -1 : 1
+      return a.at.hour - b.at.hour || a.at.minute - b.at.minute
+    })
     .slice(0, 3)
 
   const open = jobs.find((j) => j.id === openId) ?? null
@@ -156,18 +130,13 @@ export default function Calendar() {
     : 'Loading the schedule…'
 
   function jumpToday() {
-    const n = new Date()
-    setWeekStart(startOfWeek(n))
-    n.setHours(0, 0, 0, 0)
-    setSelected(n)
+    const key = chicagoDay(new Date())
+    setWeekStartKey(startOfWeekKey(key))
+    setSelectedKey(key)
   }
 
   function shift(dir: number) {
-    setWeekStart((w) => {
-      const x = new Date(w)
-      x.setDate(x.getDate() + dir * 7)
-      return x
-    })
+    setWeekStartKey((key) => shiftWeek(key, dir))
   }
 
   async function runNow(job: Job) {
@@ -177,8 +146,8 @@ export default function Calendar() {
   }
 
   const hours = END_HOUR - START_HOUR
-  const showNow = days.some((d) => sameDay(d, now)) && now.getHours() >= START_HOUR && now.getHours() < END_HOUR
-  const nowTop = ((now.getHours() - START_HOUR) + now.getMinutes() / 60) * HOUR_H
+  const showNow = days.some((d) => d.key === todayKey) && clockNow.hour >= START_HOUR && clockNow.hour < END_HOUR
+  const nowTop = ((clockNow.hour - START_HOUR) + clockNow.minute / 60) * HOUR_H
 
   return (
     <div>
@@ -190,7 +159,7 @@ export default function Calendar() {
             <Segmented labels={['Day', 'Week', 'Month']} active={view} onChange={setView} ariaLabel="Calendar range" />
             <Btn onClick={jumpToday}>Today</Btn>
             <div className="flex items-center gap-1">
-              <span className="mr-1 whitespace-nowrap text-[14px] font-semibold">{fmtRange(weekStart)}</span>
+              <span className="mr-1 whitespace-nowrap text-[14px] font-semibold">{formatWeekRange(weekStartKey)}</span>
               <button type="button" aria-label="Previous week" onClick={() => shift(-1)} className="grid h-8 w-8 place-items-center rounded-lg bg-mc-ctl text-mc-text">‹</button>
               <button type="button" aria-label="Next week" onClick={() => shift(1)} className="grid h-8 w-8 place-items-center rounded-lg bg-mc-ctl text-mc-text">›</button>
             </div>
@@ -207,10 +176,10 @@ export default function Calendar() {
       {jobs.length > 0 && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           {view === 2 ? (
-            <MonthGrid weekStart={weekStart} jobs={jobs} selected={selected} onPick={(d) => { setSelected(d); setWeekStart(startOfWeek(d)); setView(0) }} />
+            <MonthGrid weekStartKey={weekStartKey} jobs={jobs} selectedKey={selectedKey} onPick={(key) => { setSelectedKey(key); setWeekStartKey(startOfWeekKey(key)); setView(0) }} />
           ) : view === 0 ? (
             <DayList
-              day={selected}
+              dayKey={selectedKey}
               jobs={todayJobs}
               agents={agents}
               faceFor={faceFor}
@@ -221,14 +190,14 @@ export default function Calendar() {
             <SoftCard className="overflow-hidden px-0 py-0">
               <div className="grid" style={{ gridTemplateColumns: '64px repeat(7, minmax(0, 1fr))' }}>
                 <div />
-                {days.map((d, i) => {
-                  const on = sameDay(d, selected)
-                  const today = sameDay(d, now)
+                {days.map((d) => {
+                  const on = d.key === selectedKey
+                  const today = d.key === todayKey
                   return (
-                    <button key={i} type="button" onClick={() => setSelected(d)} className="border-l border-mc-sep py-2 text-center">
-                      <div className={`text-[10.5px] font-semibold tracking-[0.06em] ${today ? 'text-mc-accent-text' : 'text-mc-sub'}`}>{DAY_LABELS[i]}</div>
+                    <button key={d.key} type="button" onClick={() => setSelectedKey(d.key)} className="border-l border-mc-sep py-2 text-center">
+                      <div className={`text-[10.5px] font-semibold tracking-[0.06em] ${today ? 'text-mc-accent-text' : 'text-mc-sub'}`}>{d.label}</div>
                       <div className={`mx-auto mt-1 grid h-7 w-7 place-items-center rounded-full text-[15px] font-semibold ${today ? 'bg-mc-accent-fill text-white' : 'text-mc-text'} ${on && !today ? 'ring-2 ring-mc-accent' : ''}`}>
-                        {d.getDate()}
+                        {d.date}
                       </div>
                     </button>
                   )
@@ -253,8 +222,8 @@ export default function Calendar() {
               {overnight.length > 0 && (
                 <div className="grid border-t border-mc-sep" style={{ gridTemplateColumns: '64px repeat(7, minmax(0, 1fr))' }}>
                   <div className="px-2 py-2 text-right text-[10.5px] font-medium text-mc-sub">overnight</div>
-                  {days.map((d, i) => (
-                    <div key={i} className="min-h-10 border-l border-mc-sep p-1">
+                  {days.map((d) => (
+                    <div key={d.key} className="min-h-10 border-l border-mc-sep p-1">
                       {overnight.filter((j) => occurs(j, d)).map((j) => (
                         <JobBlock key={j.id} job={j} agents={agents} faceFor={faceFor} past={false} failed={failed(j)} onOpen={() => setOpenId(j.id)} />
                       ))}
@@ -269,19 +238,19 @@ export default function Calendar() {
                   </div>
                 ))}
                 <div className="absolute inset-y-0 left-16 right-0 grid grid-cols-7">
-                  {days.map((d, col) => (
-                    <div key={col} className="relative border-l border-mc-sep">
+                  {days.map((d) => (
+                    <div key={d.key} className="relative border-l border-mc-sep">
                       {daytime.filter((j) => occurs(j, d)).map((j) => {
                         const t = parseTime(j.time)!
                         const top = ((t.h - START_HOUR) + t.m / 60) * HOUR_H + 2
-                        const past = sameDay(d, now) && (t.h < now.getHours() || (t.h === now.getHours() && t.m <= now.getMinutes()))
+                        const past = d.key === todayKey && (t.h < clockNow.hour || (t.h === clockNow.hour && t.m <= clockNow.minute))
                         return (
                           <div key={j.id} className="absolute inset-x-1" style={{ top, height: HOUR_H - 4 }}>
-                            <JobBlock job={j} agents={agents} faceFor={faceFor} past={past} failed={failed(j) && sameDay(d, now)} onOpen={() => setOpenId(j.id)} />
+                            <JobBlock job={j} agents={agents} faceFor={faceFor} past={past} failed={failed(j) && d.key === todayKey} onOpen={() => setOpenId(j.id)} />
                           </div>
                         )
                       })}
-                      {showNow && sameDay(d, now) && (
+                      {showNow && d.key === todayKey && (
                         <div className="pointer-events-none absolute inset-x-0 z-10" style={{ top: nowTop }}>
                           <div className="relative h-0.5 bg-mc-accent">
                             <span className="absolute -left-1 -top-1 h-2.5 w-2.5 rounded-full bg-mc-accent" />
@@ -297,8 +266,8 @@ export default function Calendar() {
 
           <aside>
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[15px] font-semibold">{sameDay(selected, now) ? 'Today' : selected.toLocaleDateString([], { weekday: 'long' })}</span>
-              <span className="text-[12px] text-mc-sub">{selected.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+              <span className="text-[15px] font-semibold">{selectedKey === todayKey ? 'Today' : formatWeekdayLong(selectedKey)}</span>
+              <span className="text-[12px] text-mc-sub">{formatSideDate(selectedKey)}</span>
             </div>
             <div className="rounded-[14px] bg-mc-inner">
               {todayJobs.length === 0 && <p className="px-4 py-6 text-[13px] text-mc-sub">Nothing scheduled this day.</p>}
@@ -306,8 +275,8 @@ export default function Calendar() {
                 const who = ownerOf(j.name)
                 const cap = agentCaption(who.name, faceFor(who.name).role)
                 const t = parseTime(j.time)
-                const past = sameDay(selected, now) && t != null && (t.h < now.getHours() || (t.h === now.getHours() && t.m <= now.getMinutes()))
-                const bad = failed(j) && sameDay(selected, now)
+                const past = selectedKey === todayKey && t != null && (t.h < clockNow.hour || (t.h === clockNow.hour && t.m <= clockNow.minute))
+                const bad = failed(j) && selectedKey === todayKey
                 const tone = bad ? 'orange' : past ? 'green' : 'blue'
                 const label = bad ? 'Timed out' : past ? 'Done' : 'Up next'
                 return (
@@ -329,9 +298,9 @@ export default function Calendar() {
               {upcoming.map(({ job, at }, i) => {
                 const who = ownerOf(job.name)
                 const cap = agentCaption(who.name, faceFor(who.name).role)
-                const when = sameDay(at, now)
-                  ? `Today · ${clock(at.getHours(), at.getMinutes())}`
-                  : `${at.toLocaleDateString([], { weekday: 'short' })} · ${clock(at.getHours(), at.getMinutes())}`
+                const when = at.dayKey === todayKey
+                  ? `Today · ${clock(at.hour, at.minute)}`
+                  : `${formatWeekdayShort(at.dayKey)} · ${clock(at.hour, at.minute)}`
                 return (
                   <button key={job.id} type="button" onClick={() => setOpenId(job.id)} className={`flex w-full items-center gap-3 px-3 py-3 text-left ${i > 0 ? 'border-t border-mc-sep' : ''}`}>
                     <Face agent={faceFor(who.name)} agents={agents} px={32} />
@@ -408,14 +377,14 @@ function JobBlock({
 }
 
 function DayList({
-  day,
+  dayKey,
   jobs,
   agents,
   faceFor,
   failed,
   onOpen,
 }: {
-  day: Date
+  dayKey: string
   jobs: Job[]
   agents: Agent[]
   faceFor: (name: string) => Agent | { id: string; name: string; status: string; role: string | null }
@@ -424,7 +393,7 @@ function DayList({
 }) {
   return (
     <SoftCard className="px-4 py-4">
-      <div className="text-[15px] font-semibold">{day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+      <div className="text-[15px] font-semibold">{formatDayHeading(dayKey)}</div>
       {jobs.length === 0 && <p className="mt-3 text-[13px] text-mc-sub">Nothing scheduled.</p>}
       <div className="mt-3 space-y-2">
         {jobs.map((j) => {
@@ -446,37 +415,30 @@ function DayList({
 }
 
 function MonthGrid({
-  weekStart,
+  weekStartKey,
   jobs,
-  selected,
+  selectedKey,
   onPick,
 }: {
-  weekStart: Date
+  weekStartKey: string
   jobs: Job[]
-  selected: Date
-  onPick: (d: Date) => void
+  selectedKey: string
+  onPick: (dayKey: string) => void
 }) {
-  const first = new Date(weekStart.getFullYear(), weekStart.getMonth(), 1)
-  const start = startOfWeek(first)
-  const cells = Array.from({ length: 42 }, (_, i) => {
-    const d = new Date(start)
-    d.setDate(start.getDate() + i)
-    return d
-  })
+  const grid = monthGrid(weekStartKey)
   return (
     <SoftCard className="px-4 py-4">
-      <div className="mb-3 text-[15px] font-semibold">{weekStart.toLocaleDateString([], { month: 'long', year: 'numeric' })}</div>
+      <div className="mb-3 text-[15px] font-semibold">{grid.title}</div>
       <div className="grid grid-cols-7 gap-1 text-center text-[10.5px] font-semibold text-mc-sub">
-        {DAY_LABELS.map((d) => <div key={d}>{d}</div>)}
+        {grid.header.map((label) => <div key={label}>{label}</div>)}
       </div>
       <div className="mt-2 grid grid-cols-7 gap-1">
-        {cells.map((d, i) => {
-          const count = jobs.filter((j) => j.day == null || j.day === colOf(d)).length
-          const inMonth = d.getMonth() === weekStart.getMonth()
-          const on = sameDay(d, selected)
+        {grid.cells.map(({ day, inMonth }) => {
+          const count = jobs.filter((j) => jobOccursOn(j, day.key)).length
+          const on = day.key === selectedKey
           return (
-            <button key={i} type="button" onClick={() => onPick(d)} className={`h-14 rounded-lg text-left ${on ? 'bg-mc-accent-fill text-white' : 'bg-mc-inner text-mc-text'} ${inMonth ? '' : 'opacity-40'}`}>
-              <span className="block px-2 pt-1 text-[12px] font-semibold">{d.getDate()}</span>
+            <button key={day.key} type="button" onClick={() => onPick(day.key)} className={`h-14 rounded-lg text-left ${on ? 'bg-mc-accent-fill text-white' : 'bg-mc-inner text-mc-text'} ${inMonth ? '' : 'opacity-40'}`}>
+              <span className="block px-2 pt-1 text-[12px] font-semibold">{day.date}</span>
               {count > 0 && <span className={`block px-2 text-[10px] ${on ? 'text-white' : 'text-mc-sub'}`}>{count} jobs</span>}
             </button>
           )
