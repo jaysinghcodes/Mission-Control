@@ -22,6 +22,7 @@ import { SystemController } from './system/system.controller';
 import { ModelsController } from './models/models.controller';
 import { MemoryController } from './memory/memory.controller';
 import { DocsController } from './docs/docs.controller';
+import { DevicesController, MissionController } from './team/team.controller';
 import { GitHubService } from './github/github.service';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -54,6 +55,8 @@ import { PrismaService } from './prisma/prisma.service';
     ModelsController,
     MemoryController,
     DocsController,
+    MissionController,
+    DevicesController,
   ],
   providers: [
     AppService,

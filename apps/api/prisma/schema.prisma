@@ -187,3 +187,28 @@ model ModelConfig {
   label     String? // friendly name shown in the UI
   createdAt DateTime @default(now())
 }
+
+/// Dashboard settings. Ticket 7 stores the team mission on one row
+/// (`id` = "default"). The API upserts that row. An empty mission is
+/// valid; the Team page shows its placeholder instead of a saved line.
+/// Length is enforced in the controller (400), not with a CHECK, so a
+/// too-long value cannot surface as 500.
+model Setting {
+  id        String   @id
+  mission   String   @default("")
+  updatedAt DateTime @updatedAt
+}
+
+/// A machine listed on the Team page. `npm run seed:demo` writes three
+/// sample rows. The bridge has no devices channel, so this table is the
+/// source — the page works with no OpenClaw. `online` is the status flag.
+/// `lastSeenAt` is when we last saw an offline machine (the page renders
+/// that instant in America/Chicago).
+model Device {
+  id         String    @id
+  name       String
+  type       String
+  online     Boolean   @default(false)
+  lastSeenAt DateTime?
+  updatedAt  DateTime  @updatedAt
+}

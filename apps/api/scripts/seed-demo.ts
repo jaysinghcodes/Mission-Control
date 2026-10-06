@@ -12,6 +12,7 @@
  *   - 1 pending approval (matches the `approval.new` activity event)
  *   - sample memories across several America/Chicago days (ticket 5)
  *   - sample markdown docs in DOCS_ROOT (ticket 6; default <repo>/data/docs)
+ *   - a sample mission statement and 3 devices (ticket 7)
  *
  * IDEMPOTENT — safe to run any number of times:
  *   - Every row has a FIXED id (prefix `demo-`) or a unique natural key
@@ -55,6 +56,8 @@ import { projectNameKey } from '../src/projects/project-name';
 import { buildDemoMemories } from '../src/memory/demo-memories';
 import { writeDemoDocs } from '../src/docs/demo-docs';
 import { configuredDocsRoot } from '../src/docs/docs-path';
+import { DEMO_DEVICES, DEMO_MISSION } from '../src/team/demo-team';
+import { SETTING_ID } from '../src/team/mission';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -238,7 +241,7 @@ async function main(): Promise<void> {
     `[seed:demo] docs root=${docsRoot} written=${docCounts.written} skipped=${docCounts.skipped} (skipped = already there; a re-run does not overwrite)`,
   );
 
-  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0, memories: 0 };
+  const counts = { agents: 0, cronJobs: 0, tickets: 0, projects: 0, activity: 0, approvals: 0, usage: 0, runs: 0, memories: 0, devices: 0, mission: 0 };
 
   // Rename a previous demo roster in place when the cool name is free.
   // If both rows already exist, leave both — the seed never deletes.
@@ -449,6 +452,37 @@ async function main(): Promise<void> {
     }
   }
 
+  // Mission. One settings row. update: {} so a mission you edited (including
+  // a cleared one, which the page shows as the placeholder) is not restored
+  // on the next seed. A fresh database gets the sample sentence.
+  const missionBefore = await prisma.setting.findUnique({ where: { id: SETTING_ID }, select: { id: true } });
+  await prisma.setting.upsert({
+    where: { id: SETTING_ID },
+    update: {},
+    create: { id: SETTING_ID, mission: DEMO_MISSION },
+  });
+  if (!missionBefore) counts.mission++;
+
+  // Devices. Fixed ids + update: {}. The bridge has no devices channel, so
+  // these rows stay until someone deletes them. Online machines have no
+  // last-seen; the offline one records minutes before this seed.
+  const deviceNow = Date.now();
+  for (const d of DEMO_DEVICES) {
+    const before = await prisma.device.findUnique({ where: { id: d.id }, select: { id: true } });
+    await prisma.device.upsert({
+      where: { id: d.id },
+      update: {},
+      create: {
+        id: d.id,
+        name: d.name,
+        type: d.type,
+        online: d.online,
+        lastSeenAt: d.lastSeenMinAgo == null ? null : new Date(deviceNow - d.lastSeenMinAgo * 60_000),
+      },
+    });
+    if (!before) counts.devices++;
+  }
+
   // Demo activity that still names a retired agent gets the cool name.
   for (const e of ACTIVITY) {
     const row = await prisma.activityEvent.findUnique({ where: { id: e.id }, select: { payload: true } });
@@ -465,13 +499,14 @@ async function main(): Promise<void> {
   // What THIS run inserted (0 everywhere on a re-run = already seeded).
   console.log(
     `[seed:demo] inserted agents=${counts.agents} cronJobs=${counts.cronJobs} projects=${counts.projects} tickets=${counts.tickets} ` +
-      `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} memories=${counts.memories} docs=${docCounts.written} (0 everywhere = already seeded; re-running is safe)`,
+      `activity=${counts.activity} approvals=${counts.approvals} usage=${counts.usage} runs=${counts.runs} memories=${counts.memories} ` +
+      `devices=${counts.devices} mission=${counts.mission} docs=${docCounts.written} (0 everywhere = already seeded; re-running is safe)`,
   );
 
   // Table totals AFTER the run — the idempotency check is simply "these
   // numbers do not change when you run seed:demo a second time" (as long as
   // nothing else, e.g. a running api/bridge, writes in between).
-  const [agents, cronJobs, projects, tickets, activity, approvals, memories] = await Promise.all([
+  const [agents, cronJobs, projects, tickets, activity, approvals, memories, devices] = await Promise.all([
     prisma.agent.count(),
     prisma.cronJob.count(),
     prisma.project.count(),
@@ -479,9 +514,10 @@ async function main(): Promise<void> {
     prisma.activityEvent.count(),
     prisma.approval.count(),
     prisma.memoryEntry.count(),
+    prisma.device.count(),
   ]);
   console.log(
-    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} projects=${projects} tickets=${tickets} activity=${activity} approvals=${approvals} memories=${memories}`,
+    `[seed:demo] totals agents=${agents} cronJobs=${cronJobs} projects=${projects} tickets=${tickets} activity=${activity} approvals=${approvals} memories=${memories} devices=${devices}`,
   );
 }
 
