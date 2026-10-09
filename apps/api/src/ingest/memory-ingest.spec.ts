@@ -25,7 +25,7 @@ describe('POST /events memory.snapshot', () => {
     const controller = new IngestController(gateway, prisma, snapshots);
     const payload = { entries: [{ id: 'mem-1' }] };
 
-    const res = await controller.ingest(undefined, { type: 'memory.snapshot', payload });
+    const res = await controller.ingest({ type: 'memory.snapshot', payload });
 
     expect(res.accepted).toBe(true);
     expect(res.type).toBe('memory.snapshot');
@@ -43,7 +43,7 @@ describe('POST /events memory.snapshot', () => {
       { applyMemory: jest.fn() } as unknown as SnapshotsService,
     );
     await expect(
-      controller.ingest(undefined, { type: 'memory.write', payload: {} }),
+      controller.ingest({ type: 'memory.write', payload: {} }),
     ).rejects.toMatchObject({ status: 400 });
   });
 });

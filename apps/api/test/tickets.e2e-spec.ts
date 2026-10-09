@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
+import { applyWriteToken } from './write-token';
 
 /**
  * Tickets e2e — real Nest app + REAL Postgres (PR #20 QA findings A–E + QA-1).
@@ -36,9 +37,29 @@ describe('Tickets (e2e)', () => {
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+  /**
+   * Writes send x-ingest-token when INGEST_TOKEN is set. Reads stay plain.
+   * A fresh test run with no token still posts, matching loopback dev.
+   */
+  function call() {
+    const base = request(app.getHttpServer());
+    const token = process.env.INGEST_TOKEN;
+    if (typeof token !== 'string' || token.trim() === '') return base;
+    const wrap = (method: 'post' | 'put' | 'patch' | 'delete') => {
+      const original = base[method].bind(base);
+      base[method] = ((url: string) =>
+        applyWriteToken(original(url))) as (typeof base)[typeof method];
+    };
+    wrap('post');
+    wrap('put');
+    wrap('patch');
+    wrap('delete');
+    return base;
+  }
+
   /** POST a ticket and remember its id for cleanup. */
   async function createTicket(body: Record<string, unknown>) {
-    const res = await request(app.getHttpServer()).post('/tickets').send(body);
+    const res = await call().post('/tickets').send(body);
     if (res.body?.ticket?.id) created.push(res.body.ticket.id);
     return res;
   }
@@ -126,7 +147,7 @@ describe('Tickets (e2e)', () => {
       const { body } = await createTicket({ title: 'e2e loop' });
       const id = body.ticket.id as string;
       for (const status of ['todo', 'build', 'qa', 'review', 'done']) {
-        const res = await request(app.getHttpServer())
+        const res = await call()
           .patch(`/tickets/${id}`)
           .send({ status });
         expect(res.status).toBe(200);
@@ -141,7 +162,7 @@ describe('Tickets (e2e)', () => {
         title: 'e2e banana',
         status: 'todo',
       });
-      const res = await request(app.getHttpServer())
+      const res = await call()
         .patch(`/tickets/${body.ticket.id}`)
         .send({ status: 'banana' });
       expect(res.status).toBe(400);
@@ -152,7 +173,7 @@ describe('Tickets (e2e)', () => {
     });
 
     it('E: unknown id → 404 (was 200 {error})', async () => {
-      const res = await request(app.getHttpServer())
+      const res = await call()
         .patch('/tickets/does-not-exist')
         .send({ status: 'todo' });
       expect(res.status).toBe(404);
@@ -187,19 +208,19 @@ describe('Tickets (e2e)', () => {
           });
           const id = body.ticket.id as string;
           stallNext = true;
-          const first = request(app.getHttpServer())
+          const first = call()
             .patch(`/tickets/${id}`)
             .send({ status: 'build' });
           const firstP = first.then((r) => r); // start it now
           await sleep(15); // ensure the server has received #1 before #2
-          const secondP = request(app.getHttpServer())
+          const secondP = call()
             .patch(`/tickets/${id}`)
             .send({ status: 'done' })
             .then((r) => r);
           const [r1, r2] = await Promise.all([firstP, secondP]);
           expect([r1.status, r2.status]).toEqual([200, 200]);
           // What a browser refresh would show:
-          const get = await request(app.getHttpServer()).get('/tickets');
+          const get = await call().get('/tickets');
           const row = (
             get.body.tickets as { id: string; status: string }[]
           ).find((t) => t.id === id);
@@ -223,11 +244,11 @@ describe('Tickets (e2e)', () => {
           payload: { path: ['ticket'], equals: key },
         },
       });
-      const first = await request(app.getHttpServer())
+      const first = await call()
         .patch(`/tickets/${id}`)
         .send({ status: 'build' });
       expect(first.status).toBe(200);
-      const second = await request(app.getHttpServer())
+      const second = await call()
         .patch(`/tickets/${id}`)
         .send({ status: 'build' }); // double-click ▶ Start
       expect(second.status).toBe(200);
@@ -247,7 +268,7 @@ describe('Tickets (e2e)', () => {
     it('10 parallel POSTs → 10 unique MC-N keys', async () => {
       const settled = await Promise.all(
         Array.from({ length: 10 }, (_, i) =>
-          request(app.getHttpServer())
+          call()
             .post('/tickets')
             .send({ title: `e2e parallel ${i}`, status: 'todo' }),
         ),

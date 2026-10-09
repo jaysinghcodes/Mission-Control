@@ -127,7 +127,7 @@ export const STEP_DATA: ConnectStep[] = [
       },
       {
         name: 'INGEST_TOKEN',
-        desc: 'Shared secret for the event bridge. You MAY generate this one locally with `openssl rand -hex 24` (a random secret, not an account credential); it also goes into your OpenClaw bridge config. Blank → compose falls back to `dev-ingest-token`.',
+        desc: 'Shared secret for every API write, including POST /events. The dashboard does not put this value in browser code or local storage. The dev server and nginx attach it for you. You MAY generate one with `openssl rand -hex 24`. If it is blank and the API is on loopback, writes stay open and the API logs a warning. If it is blank and the API binds anywhere else, the API refuses to start. Compose fills a blank value with `dev-ingest-token`.',
       },
       {
         name: 'SOCKET_TOKEN',
@@ -182,7 +182,7 @@ export const STEP_DATA: ConnectStep[] = [
     // instead of a private per-machine cron script. Text-only change.
     body: [
       'Optional — skip without OpenClaw. The bridge ships in this repo: `bridge/mc-bridge-sync.py` (Python 3, stdlib only) reads OpenClaw via the `openclaw` CLI and POSTs agents/sessions/calendar/usage/approvals snapshots + `run.*` events to `http://127.0.0.1:3000/events`.',
-      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token`. Set it explicitly — the bridge refuses a blank token.',
+      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events. Every other write route checks that same header. Set it explicitly. The bridge refuses a blank token.',
       'Try `--dry-run` first, then a real sync, then schedule it every ~5 min (system cron or an OpenClaw cron job — see `bridge/README.md`). A 401 means the bridge and api disagree on the token (blank `INGEST_TOKEN` → compose uses `dev-ingest-token`).',
       'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). Mission Control’s starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these — they cap OpenClaw fan-out.',
     ],

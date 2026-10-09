@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, HttpException, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpException, HttpStatus, Post } from '@nestjs/common';
 import { LiveActivityGateway, ActivityEventType } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { SnapshotsService } from '../snapshots/snapshots.service';
@@ -11,13 +11,10 @@ import { SnapshotsService } from '../snapshots/snapshots.service';
  * gateway broadcasts it to every connected client over Socket.IO, and the
  * event is PERSISTED so pages can load history (v2).
  *
- * Security (vibe-dev-workflow red lines — same posture as the socket guard):
- *  - Production REQUIRES `INGEST_TOKEN` and refuses requests without a
- *    matching `x-ingest-token` header (fail closed, never an open endpoint).
- *  - Dev allows token-less calls when INGEST_TOKEN is unset (localhost dev
- *    convenience, mirrors the WebSocket gateway's dev behavior).
- *  - Event `type` is validated against the typed union — producers cannot
- *    invent arbitrary event names (GLM review 🟡 #4 posture).
+ * Auth lives in WriteAuthMiddleware, the same check as every other write.
+ * Send header `x-ingest-token` when INGEST_TOKEN is set. This controller
+ * only validates the event. Event `type` is a fixed list, so producers
+ * cannot invent arbitrary event names.
  */
 @Controller('events')
 export class IngestController {
@@ -34,11 +31,8 @@ export class IngestController {
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
   async ingest(
-    @Headers('x-ingest-token') token: string | undefined,
     @Body() body: { type?: string; payload?: Record<string, unknown> },
   ) {
-    this.assertAuthorized(token);
-
     const type = body?.type;
     if (!type || !this.isKnownType(type)) {
       throw new HttpException(
@@ -86,21 +80,6 @@ export class IngestController {
         break;
       default:
         break;
-    }
-  }
-
-  /** Production fails closed: a missing INGEST_TOKEN means no intake at all. */
-  private assertAuthorized(token: string | undefined): void {
-    const expected = process.env.INGEST_TOKEN;
-    if (process.env.NODE_ENV === 'production') {
-      if (!expected || !token || token !== expected) {
-        throw new HttpException('unauthorized', HttpStatus.UNAUTHORIZED);
-      }
-      return;
-    }
-    // Dev: allow the token if set; otherwise allow (localhost-only posture).
-    if (expected && (!token || token !== expected)) {
-      throw new HttpException('unauthorized', HttpStatus.UNAUTHORIZED);
     }
   }
 

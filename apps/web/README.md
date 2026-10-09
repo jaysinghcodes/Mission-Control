@@ -26,7 +26,7 @@ Vite inlines `VITE_*` at build time. For `npm run dev`, export the root `.env` o
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `VITE_API_URL` | `http://localhost:3000` | REST and socket base URL |
+| `VITE_API_URL` | `http://localhost:3000` | Read and socket base URL. Writes use same origin `/api`, where Vite or nginx attaches `x-ingest-token`. Do not set a `VITE_` copy of `INGEST_TOKEN`. |
 | `VITE_SOCKET_TOKEN` | empty | Must match `SOCKET_TOKEN` when the API runs with `NODE_ENV=production` |
 | `VITE_OPERATOR_NAME` | blank | Display only. Account chip. Blank stays Operator |
 | `VITE_DISCORD_GUILD_ID` | blank | Optional. Turns a bare channel id into a link. Blank means no link |

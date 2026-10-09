@@ -50,12 +50,23 @@ describe('IngestController (POST /events)', () => {
   });
 
   it('fails closed in production without a token', async () => {
+    delete process.env.INGEST_TOKEN;
     process.env.NODE_ENV = 'production';
-    process.env.INGEST_TOKEN = 'secret';
     const res = await request(app.getHttpServer())
       .post('/events')
       .send({ type: 'run.started' });
     expect(res.status).toBe(401);
+    expect(res.body).toEqual({ statusCode: 401, message: 'unauthorized' });
+  });
+
+  it('fails closed in production without a token on POST /tickets', async () => {
+    delete process.env.INGEST_TOKEN;
+    process.env.NODE_ENV = 'production';
+    const res = await request(app.getHttpServer())
+      .post('/tickets')
+      .send({ title: 'closed' });
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ statusCode: 401, message: 'unauthorized' });
   });
 
   it('accepts a valid token in production', async () => {

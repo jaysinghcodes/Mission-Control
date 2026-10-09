@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { bindHost, evaluateWriteBind } from './auth/write-token';
 import { webOrigins } from './cors-origins';
 
 /**
@@ -12,6 +13,22 @@ import { webOrigins } from './cors-origins';
  * the only allowed consumer.
  */
 async function bootstrap() {
+  const host = bindHost();
+  const decision = evaluateWriteBind();
+  if (decision.action === 'refuse') {
+    // eslint-disable-next-line no-console
+    console.error(decision.message);
+    process.exit(1);
+  }
+  if (decision.action === 'warn') {
+    // eslint-disable-next-line no-console
+    console.warn(decision.message);
+  }
+  if (decision.action === 'log') {
+    // eslint-disable-next-line no-console
+    console.log(decision.message);
+  }
+
   // Default JSON limit is 100kb. A memory.snapshot carries full note bodies
   // (MEMORY.md can be long), so the parser is raised to 2mb. The bridge
   // still skips a single file over 1MB.
@@ -29,8 +46,8 @@ async function bootstrap() {
     origin: webOrigins(),
   });
 
-  await app.listen(process.env.PORT ?? 3000, process.env.HOST ?? '127.0.0.1');
+  await app.listen(process.env.PORT ?? 3000, host);
   // eslint-disable-next-line no-console
-  console.log(`mission-control api listening on ${process.env.HOST ?? '127.0.0.1'}:${process.env.PORT ?? 3000}`);
+  console.log(`mission-control api listening on ${host}:${process.env.PORT ?? 3000}`);
 }
 bootstrap();

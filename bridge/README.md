@@ -52,8 +52,7 @@ python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw
 
 Transport: `POST {MC_API_URL}/events`, headers `content-type: application/json`
 and `x-ingest-token: <INGEST_TOKEN>`, body `{ "type": <event>, "payload": {…} }`.
-The api answers `202 {accepted:true}`; `401` = token mismatch (production fails
-closed); `400` = unknown type / non-object payload. The allowed types are the
+The api answers `202 {accepted:true}`. When `INGEST_TOKEN` is set, a missing or wrong `x-ingest-token` is `401` with JSON `{"statusCode":401,"message":"unauthorized"}`. The same header is required on every other write route. `400` means an unknown type or a non object payload. The allowed types are the
 `KNOWN_TYPES` union in `apps/api/src/ingest/ingest.controller.ts`; snapshot
 handling lives in `apps/api/src/snapshots/snapshots.service.ts`. **Every event is
 also persisted to `ActivityEvent` and broadcast on the socket.**

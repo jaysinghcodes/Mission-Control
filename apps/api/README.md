@@ -13,7 +13,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run dev` | `nest start --watch`. Export the root `.env` first. This process does not load `.env` itself. |
 | `npm run build` | `nest build` |
 | `npm run start:prod` | `node dist/main` |
-| `npm test` | Jest. Most suites mock Prisma and need no database. Six of the eight tests in `src/ingest/ingest.controller.spec.ts` write through the real app and need a migrated Postgres at `DATABASE_URL` (a known event, a valid production token, and the four agent snapshot cases). The unknown type check and the production missing token check do not. Export the root `.env` (`set -a; . ./.env; set +a`), generate the client, and run `npx prisma migrate deploy` in this directory before `npm test` when that database is not already up. |
+| `npm test` | Jest. Most suites mock Prisma and need no database. Six of the nine tests in `src/ingest/ingest.controller.spec.ts` write through the real app and need a migrated Postgres at `DATABASE_URL` (a known event, a valid production token, and the four agent snapshot cases). The unknown type check and the production missing token checks (`POST /events` and `POST /tickets`) do not. Export the root `.env` (`set -a; . ./.env; set +a`), generate the client, and run `npx prisma migrate deploy` in this directory before `npm test` when that database is not already up. |
 | `npm run test:e2e` | Separate Jest config under `test/`. Also needs a migrated Postgres at `DATABASE_URL`. |
 | `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run lint` | ESLint |
@@ -29,7 +29,7 @@ Template: [`../../.env.example`](../../.env.example). For `npm run dev`, `set -a
 | `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mission_control` | Required when `NODE_ENV=production` |
 | `PORT` / `HOST` | `3000` / `127.0.0.1` | Compose sets `HOST=0.0.0.0` inside the container and publishes `127.0.0.1` only |
 | `WEB_ORIGIN` | `http://localhost:5173,http://127.0.0.1:5173` | Comma separated CORS list. Never `*` |
-| `INGEST_TOKEN` | empty in code, placeholder in the example file | `x-ingest-token` for `POST /events`. Production fails closed |
+| `INGEST_TOKEN` | empty in code, placeholder in the example file | `x-ingest-token` for every POST, PUT, PATCH, and DELETE, including `POST /events`. Unset on loopback when `NODE_ENV` is not `production`: writes open, one warning. Unset in production, including loopback: process starts, logs how to set the token, and every write returns 401. Unset on any other `HOST`: process refuses to start |
 | `SOCKET_TOKEN` | empty | Required for the socket handshake when `NODE_ENV=production` |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |

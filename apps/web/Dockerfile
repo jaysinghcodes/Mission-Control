@@ -22,6 +22,9 @@ RUN cd apps/web && npm run build
 
 FROM nginx:alpine
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+# Runtime only. The entrypoint substitutes INGEST_TOKEN. It is not a build arg
+# and it is not in the JS bundle. The filter keeps nginx $host intact.
+COPY apps/web/nginx.conf.template /etc/nginx/templates/default.conf.template
+ENV NGINX_ENVSUBST_FILTER=^INGEST_TOKEN$
 EXPOSE 5173
 CMD ["nginx", "-g", "daemon off;"]
