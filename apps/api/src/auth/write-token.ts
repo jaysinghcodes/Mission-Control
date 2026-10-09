@@ -60,6 +60,10 @@ export function isLoopbackHost(host: string): boolean {
 export const WRITE_AUTH_WARNING =
   'WARNING: INGEST_TOKEN is not set. Write routes are unauthenticated while the API listens on loopback only. Set INGEST_TOKEN before you expose this API.';
 
+/** One plain startup line when production has no token and still listens on loopback. */
+export const PRODUCTION_NO_TOKEN_LINE =
+  'INGEST_TOKEN is not set. NODE_ENV is production, so every write route returns 401 until you set INGEST_TOKEN. Example: INGEST_TOKEN=$(openssl rand -hex 24)';
+
 export function refuseMessage(host: string): string {
   return (
     `Refusing to start. The API is bound to ${host}, which is not a loopback address, and INGEST_TOKEN is not set. ` +
@@ -70,9 +74,16 @@ export function refuseMessage(host: string): string {
 export type WriteBindDecision =
   | { action: 'allow' }
   | { action: 'warn'; message: string }
+  | { action: 'log'; message: string }
   | { action: 'refuse'; message: string };
 
-/** What main.ts should do before it listens. */
+/**
+ * What main.ts should do before it listens.
+ *
+ * No token off loopback refuses to start. No token on loopback warns and
+ * stays open, except NODE_ENV=production, which still starts and logs how
+ * to set the token. Writes then fail closed.
+ */
 export function evaluateWriteBind(
   env: NodeJS.ProcessEnv = process.env,
 ): WriteBindDecision {
@@ -80,6 +91,9 @@ export function evaluateWriteBind(
   const token = configuredWriteToken(env);
   if (!token && !isLoopbackHost(host)) {
     return { action: 'refuse', message: refuseMessage(host) };
+  }
+  if (!token && env.NODE_ENV === 'production') {
+    return { action: 'log', message: PRODUCTION_NO_TOKEN_LINE };
   }
   if (!token) return { action: 'warn', message: WRITE_AUTH_WARNING };
   return { action: 'allow' };

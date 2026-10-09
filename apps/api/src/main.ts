@@ -24,6 +24,10 @@ async function bootstrap() {
     // eslint-disable-next-line no-console
     console.warn(decision.message);
   }
+  if (decision.action === 'log') {
+    // eslint-disable-next-line no-console
+    console.log(decision.message);
+  }
 
   // Default JSON limit is 100kb. A memory.snapshot carries full note bodies
   // (MEMORY.md can be long), so the parser is raised to 2mb. The bridge

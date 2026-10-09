@@ -118,7 +118,7 @@ A missing or wrong token is HTTP 401 and this JSON body:
 
 A checked call without the header, and a checked call with a wrong token, both returned that body. A call with the matching token was not 401.
 
-When `INGEST_TOKEN` is unset and the API is bound to a loopback address (`127.0.0.1`, `localhost`, or `::1`), writes are allowed and the process logs one warning that writes are unauthenticated. The bundled web UI keeps working.
+When `INGEST_TOKEN` is unset and the API is bound to a loopback address (`127.0.0.1`, `localhost`, or `::1`), writes are allowed and the process logs one warning that writes are unauthenticated, for any `NODE_ENV` other than `production`. The bundled web UI keeps working. With `NODE_ENV=production` and no `INGEST_TOKEN`, the process still starts on loopback, logs one line that shows how to set `INGEST_TOKEN`, and every write returns 401, including `POST /events`.
 
 When `INGEST_TOKEN` is unset and the API binds to any other address, the process refuses to start. The message tells you to set `INGEST_TOKEN`. Example from that message: `INGEST_TOKEN=$(openssl rand -hex 24)`.
 

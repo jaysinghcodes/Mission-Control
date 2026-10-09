@@ -238,7 +238,7 @@ npm test
 npm run build
 ```
 
-On this clone, after that generate, `npm test` passed (API Jest: 29 suites, 206 tests; web: 51 tests) and `npm run build` passed. This pass used Node 22.14.0. Six of the eight tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres stopped, that file is the only API failure: 6 failed, 200 passed, 206 total. The unknown event type check and the production missing token check return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
+On this clone, after that generate, `npm test` passed (API Jest: 29 suites, 208 tests; web: 51 tests) and `npm run build` passed. This pass used Node 22.14.0. Six of the nine tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres stopped, that file is the only API failure: 6 failed, 202 passed, 208 total. The unknown event type check and the production missing token checks (`POST /events` and `POST /tickets` with no token) return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
 
 `npm run lint` is `oxlint` for the web app (warnings, exit 0) and `eslint --fix` for the API. The API lint exits 1 on the current sources (mostly `prettier/prettier`, plus typescript-eslint `no-unsafe-*` and `require-await`). That failure is in the existing API tree. Do not treat `eslint --fix` as safe to commit: it rewrites a lot of files. `npm run test:e2e` needs Postgres and was not part of this pass.
 
@@ -306,7 +306,8 @@ Still open:
 Read this before you open a port.
 
 * When `INGEST_TOKEN` is set, every write requires header `x-ingest-token`. That is `POST`, `PUT`, `PATCH`, and `DELETE`: `POST /events`, `POST /tickets`, `PATCH /tickets/:id`, `POST /projects`, `PATCH /projects/:id`, `POST /runs`, `PATCH /runs/:id`, `PUT /mission`, `POST /approvals/:id/decide`, `POST /models`, `DELETE /models/:id`, and the custom tool writes. A missing or wrong token is 401 JSON `{"statusCode":401,"message":"unauthorized"}`. Reads do not check the token.
-* With no `INGEST_TOKEN` and `HOST` on loopback (`127.0.0.1` by default for `npm run dev`), writes stay open and the API logs one warning. The web UI still works.
+* With no `INGEST_TOKEN` and `HOST` on loopback (`127.0.0.1` by default for `npm run dev`), writes stay open and the API logs one warning, for any `NODE_ENV` other than `production`. The web UI still works.
+* With `NODE_ENV=production` and no `INGEST_TOKEN`, the API still starts on loopback and logs one line that shows how to set `INGEST_TOKEN`. Every write returns 401, including `POST /events`.
 * With no `INGEST_TOKEN` and `HOST` on any other address, the API refuses to start. Set `INGEST_TOKEN` to a long random string (`openssl rand -hex 24`) and start again. Compose sets `HOST=0.0.0.0` inside the api container, so it always has a token: your `.env` value, or `dev-ingest-token` when that value is blank.
 * The browser never receives the token. Dev Vite and compose nginx add `x-ingest-token` on same origin `/api` writes. Do not put `INGEST_TOKEN` in a `VITE_` variable or in local storage. `npm run seed:demo` writes through Prisma and does not send the header. The bridge still posts `POST /events` with the header.
 * Do not publish port 3000 beyond loopback without a token. `npm run dev` binds `127.0.0.1` (`HOST` in the root `.env`). Compose publishes the API on `127.0.0.1` as well.

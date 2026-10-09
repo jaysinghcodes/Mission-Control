@@ -1,4 +1,5 @@
 import {
+  PRODUCTION_NO_TOKEN_LINE,
   WRITE_AUTH_WARNING,
   bindHost,
   configuredWriteToken,
@@ -46,9 +47,28 @@ describe('write token', () => {
   it('warns once on loopback when no token is set', () => {
     const decision = evaluateWriteBind({ HOST: '127.0.0.1' });
     expect(decision).toEqual({ action: 'warn', message: WRITE_AUTH_WARNING });
+    expect(
+      evaluateWriteBind({ HOST: '127.0.0.1', NODE_ENV: 'development' }),
+    ).toEqual({ action: 'warn', message: WRITE_AUTH_WARNING });
     expect(WRITE_AUTH_WARNING).toMatch(/unauthenticated/i);
     expect(WRITE_AUTH_WARNING).toMatch(/loopback/i);
     expect(WRITE_AUTH_WARNING).toMatch(/INGEST_TOKEN/);
+  });
+
+  it('logs how to set the token in production on loopback and still starts', () => {
+    const decision = evaluateWriteBind({
+      HOST: '127.0.0.1',
+      NODE_ENV: 'production',
+    });
+    expect(decision).toEqual({
+      action: 'log',
+      message: PRODUCTION_NO_TOKEN_LINE,
+    });
+    expect(PRODUCTION_NO_TOKEN_LINE).toContain('openssl rand -hex 24');
+    expect(PRODUCTION_NO_TOKEN_LINE).not.toMatch(/[—–]/);
+    expect(
+      evaluateWriteBind({ HOST: '0.0.0.0', NODE_ENV: 'production' }).action,
+    ).toBe('refuse');
   });
 
   it('allows any bind when a token is set', () => {

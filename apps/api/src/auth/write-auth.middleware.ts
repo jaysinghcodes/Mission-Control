@@ -10,8 +10,9 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * Registered for the whole app in AppModule. A new POST, PUT, PATCH, or
  * DELETE cannot skip it. GET, HEAD, and OPTIONS pass through.
  *
- * When INGEST_TOKEN is unset, the request continues. main.ts has already
- * refused to start if that process is bound off loopback.
+ * When INGEST_TOKEN is unset and NODE_ENV is production, every write is
+ * 401, including on loopback. Any other NODE_ENV with no token continues.
+ * main.ts has already refused to start if that process is bound off loopback.
  */
 @Injectable()
 export class WriteAuthMiddleware implements NestMiddleware {
@@ -23,6 +24,10 @@ export class WriteAuthMiddleware implements NestMiddleware {
     }
     const expected = configuredWriteToken();
     if (!expected) {
+      if (process.env.NODE_ENV === 'production') {
+        res.status(401).json({ statusCode: 401, message: 'unauthorized' });
+        return;
+      }
       next();
       return;
     }
