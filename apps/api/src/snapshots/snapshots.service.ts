@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { usageBucketsFromPayload } from '../usage/usage-points';
 
 /**
  * SnapshotsService — applies state snapshots pushed by the OpenClaw bridge.
@@ -119,25 +121,33 @@ export class SnapshotsService {
     ]);
   }
 
-  /** Upsert the usage snapshot for a period (24h | 7d | 30d | month). */
+  /**
+   * Upsert daily usage points. A payload without timestamps is ignored,
+   * including a bare 7d or month total. Days that are not in this payload
+   * stay, so a later sync cannot wipe the days already collected.
+   */
   async applyUsage(payload: Record<string, unknown>): Promise<void> {
-    const period = String(payload.period ?? '24h');
-    await this.prisma.usageSnapshot.upsert({
-      where: { period },
-      create: {
-        period,
-        totalCost: Number(payload.totalCost ?? 0),
-        tokensIn: Number(payload.tokensIn ?? 0),
-        tokensOut: Number(payload.tokensOut ?? 0),
-        providers: payload.providers ?? undefined,
-      },
-      update: {
-        totalCost: Number(payload.totalCost ?? 0),
-        tokensIn: Number(payload.tokensIn ?? 0),
-        tokensOut: Number(payload.tokensOut ?? 0),
-        providers: payload.providers ?? undefined,
-      },
-    });
+    const buckets = usageBucketsFromPayload(payload);
+    for (const bucket of buckets) {
+      await this.prisma.usageBucket.upsert({
+        where: { day: bucket.day },
+        create: {
+          day: bucket.day,
+          at: bucket.at,
+          totalCost: bucket.totalCost,
+          tokensIn: bucket.tokensIn,
+          tokensOut: bucket.tokensOut,
+          providers: bucket.providers as unknown as Prisma.InputJsonValue,
+        },
+        update: {
+          at: bucket.at,
+          totalCost: bucket.totalCost,
+          tokensIn: bucket.tokensIn,
+          tokensOut: bucket.tokensOut,
+          providers: bucket.providers as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
   }
 
   /** Sync pending approvals — PRESERVES decided ones (approve/reject history). */

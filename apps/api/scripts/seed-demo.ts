@@ -15,6 +15,8 @@
  *   - a sample mission statement and 3 devices (ticket 7)
  *   - 1 experimental custom tool (ticket 10; a prompt template only — the
  *     seed does not run it, and a test run never calls out of the app)
+ *   - 30 America/Chicago days of usage so System 24h, 7 day, and month
+ *     views are populated on a fresh database
  *
  * IDEMPOTENT — safe to run any number of times:
  *   - Every row has a FIXED id (prefix `demo-`) or a unique natural key
@@ -62,6 +64,7 @@ import { writeDemoDocs } from '../src/docs/demo-docs';
 import { configuredDocsRoot } from '../src/docs/docs-path';
 import { DEMO_DEVICES, DEMO_MISSION } from '../src/team/demo-team';
 import { SETTING_ID } from '../src/team/mission';
+import { demoUsageBuckets } from '../src/usage/demo-usage';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -191,44 +194,6 @@ const ACTIVITY = [
 const APPROVALS = [
   { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Aegis' } },
   { id: 'demo-approval-2', kind: 'pr', tag: 'Merge the roster update', desc: 'You approved. Sample decision so the Decided tab is not empty.', status: 'approved' },
-];
-
-// Usage snapshots for Today / This week / This month. Fixed by period.
-// update: {} so a real bridge snapshot is never overwritten by a re-seed.
-const USAGE = [
-  {
-    period: '24h',
-    totalCost: 0.84,
-    tokensIn: 400_000,
-    tokensOut: 200_000,
-    providers: [
-      { name: 'zai', model: 'glm-5.2', cost: 0.53, tokensIn: 250_000, tokensOut: 110_000, agents: ['Speedy', 'Atlas', 'Quill'] },
-      { name: 'deepseek', model: 'deepseek-v4-flash', cost: 0.31, tokensIn: 130_000, tokensOut: 80_000, agents: ['Forge', 'Sentinel', 'Pixel', 'Aegis'] },
-      { name: 'ollama', model: 'qwen3:8b', cost: 0, tokensIn: 20_000, tokensOut: 10_000, agents: ['Ledger', 'Bolt'] },
-    ],
-  },
-  {
-    period: '7d',
-    totalCost: 3.1,
-    tokensIn: 2_800_000,
-    tokensOut: 1_500_000,
-    providers: [
-      { name: 'zai', model: 'glm-5.2', cost: 2.05, tokensIn: 1_600_000, tokensOut: 800_000, agents: ['Speedy', 'Atlas', 'Quill'] },
-      { name: 'deepseek', model: 'deepseek-v4-flash', cost: 1.05, tokensIn: 1_000_000, tokensOut: 600_000, agents: ['Forge', 'Sentinel', 'Pixel', 'Aegis'] },
-      { name: 'ollama', model: 'qwen3:8b', cost: 0, tokensIn: 200_000, tokensOut: 100_000, agents: ['Ledger', 'Bolt'] },
-    ],
-  },
-  {
-    period: 'month',
-    totalCost: 12.4,
-    tokensIn: 12_000_000,
-    tokensOut: 6_600_000,
-    providers: [
-      { name: 'zai', model: 'glm-5.2', cost: 8.3, tokensIn: 4_200_000, tokensOut: 1_900_000, agents: ['Speedy', 'Atlas', 'Quill'] },
-      { name: 'deepseek', model: 'deepseek-v4-flash', cost: 4.1, tokensIn: 7_000_000, tokensOut: 4_200_000, agents: ['Forge', 'Sentinel', 'Pixel', 'Aegis'] },
-      { name: 'ollama', model: 'qwen3:8b', cost: 0, tokensIn: 800_000, tokensOut: 500_000, agents: ['Ledger', 'Bolt'] },
-    ],
-  },
 ];
 
 // ticketId is the pipeline link (QA-13). A matching title is not the link.
@@ -394,15 +359,16 @@ async function main(): Promise<void> {
     data: { payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis', ticket: 'DEMO-4' } },
   });
 
-  // Usage windows. update: {} so a bridge snapshot already stored for that
-  // period is left alone. A fresh database gets today / week / month.
-  for (const u of USAGE) {
-    const before = await prisma.usageSnapshot.findUnique({ where: { period: u.period }, select: { id: true } });
-    await prisma.usageSnapshot.upsert({
-      where: { period: u.period },
+  // Thirty Chicago days of usage. update: {} so a bridge bucket already
+  // stored for that day is left alone. A fresh database gets every day.
+  for (const u of demoUsageBuckets(new Date())) {
+    const before = await prisma.usageBucket.findUnique({ where: { day: u.day }, select: { id: true } });
+    await prisma.usageBucket.upsert({
+      where: { day: u.day },
       update: {},
       create: {
-        period: u.period,
+        day: u.day,
+        at: u.at,
         totalCost: u.totalCost,
         tokensIn: u.tokensIn,
         tokensOut: u.tokensOut,

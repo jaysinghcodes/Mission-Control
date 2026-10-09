@@ -11,10 +11,11 @@ import Settings from './Settings'
 import CustomTools from './CustomTools'
 
 /**
- * System — health, models and spend, and the old observe pages behind a click.
+ * System. Health, models and spend, and the old observe pages behind a click.
  * Last 24 hours / last 7 days / month to date read GET /usage?period=24h|7d|month.
- * 24h is a rolling day, not the calendar date. With no snapshot, the card says
- * the bridge is absent.
+ * Those windows are sums of daily points. 24h is a rolling day. A short range
+ * shows the API note (for example "Showing 3 days of data so far") and only
+ * the days that were collected.
  */
 
 interface HealthResp { status: string; database: string; uptimeSeconds: number; lastIngestAt?: string | null }
@@ -38,7 +39,11 @@ interface Usage {
   tokensOut: number
   providers: Provider[] | Record<string, Provider> | null
 }
-interface UsageResp { usage: Usage | null }
+interface UsageResp {
+  usage: Usage | null
+  note?: string | null
+  days?: { day: string; totalCost: number }[]
+}
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
 
 const PERIODS = [
@@ -65,16 +70,51 @@ function ingestFact(iso: string | null | undefined): { value: string; ok: boolea
 }
 
 function money(n: number | undefined): string {
-  if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
+  if (typeof n !== 'number' || !Number.isFinite(n)) return 'No data'
   if (n === 0) return '$0'
   return `$${n.toFixed(2)}`
 }
 
 function tokens(n: number | undefined): string {
-  if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
+  if (typeof n !== 'number' || !Number.isFinite(n)) return 'No data'
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${Math.round(n / 1000)}k`
   return String(n)
+}
+
+function barLabel(day: string, count: number): string {
+  const [, month, date] = day.split('-').map(Number)
+  if (!month || !date) return day
+  if (count > 10) return String(date)
+  const name = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short' }).format(new Date(Date.UTC(2026, month - 1, date)))
+  return `${name} ${date}`
+}
+
+function SpendBars({ days, label }: { days: { day: string; totalCost: number }[]; label: string }) {
+  if (days.length === 0) return null
+  const max = Math.max(...days.map((d) => d.totalCost), 0)
+  const summary = days.map((d) => `${barLabel(d.day, days.length)} ${money(d.totalCost)}`).join(', ')
+  return (
+    <div className="px-4 pb-3" role="img" aria-label={`Daily spend for ${label}. ${summary}`}>
+      <div className="flex h-16 items-end gap-1">
+        {days.map((d) => {
+          const pct = max <= 0 ? 12 : Math.max(12, Math.round((d.totalCost / max) * 100))
+          return (
+            <div key={d.day} className="flex h-full min-w-0 flex-1 flex-col justify-end">
+              <div className="w-full rounded-t bg-mc-accent" style={{ height: `${pct}%` }} />
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-1 flex gap-1">
+        {days.map((d) => (
+          <div key={d.day} className="min-w-0 flex-1 truncate text-center text-[10px] text-mc-sub">
+            {barLabel(d.day, days.length)}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function System() {
@@ -92,7 +132,10 @@ export default function System() {
   const [modelOpen, setModelOpen] = useState<string | null>(null)
 
   const snaps = [day.data?.usage ?? null, week.data?.usage ?? null, month.data?.usage ?? null]
+  const responses = [day.data, week.data, month.data]
   const selected = snaps[period]
+  const selectedNote = responses[period]?.note || ''
+  const selectedDays = responses[period]?.days ?? []
   const any = snaps.some(Boolean)
   const roster = rosterQ.data?.agents ?? []
 
@@ -132,8 +175,8 @@ export default function System() {
     )
   }
 
-  const latency = api.latencyMs !== null ? `${api.latencyMs} ms` : '—'
-  const host = sys.data ? `${sys.data.os.hostname}` : '—'
+  const latency = api.latencyMs !== null ? `${api.latencyMs} ms` : 'Waiting'
+  const host = sys.data ? `${sys.data.os.hostname}` : 'Waiting'
   const cpu = sys.data ? `CPU ${sys.data.cpu.pct}% · Mem ${sys.data.memory.pct}%` : 'Waiting on /system'
 
   return (
@@ -175,7 +218,7 @@ export default function System() {
       {!any && (day.data || week.data || month.data) && (
         <EmptyState
           title="No model spend yet"
-          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. The last 24 hours, the last 7 days, and the month to date stay empty until a snapshot exists. A per-model price override is not part of this build."
+          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. The last 24 hours, the last 7 days, and the month to date stay empty until a daily point exists. A per model price override is not part of this build."
         />
       )}
       {!day.data && !week.data && !month.data && (
@@ -192,12 +235,16 @@ export default function System() {
               return (
                 <button key={p.id} type="button" onClick={() => setPeriod(i)} className={`rounded-xl px-3 py-2 text-left ${on ? 'bg-mc-sel' : ''}`}>
                   <div className="text-[12.5px] font-semibold text-mc-sub">{p.label}</div>
-                  <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost) : '—'}</div>
-                  <div className="text-[12.5px] text-mc-sub">{tok === null ? 'No snapshot' : `${tokens(tok)} tokens`}</div>
+                  <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost) : 'No data'}</div>
+                  <div className="text-[12.5px] text-mc-sub">{tok === null ? 'No data yet' : `${tokens(tok)} tokens`}</div>
                 </button>
               )
             })}
           </div>
+          {selectedNote ? <p className="px-4 pb-1 text-[13px] text-mc-sub">{selectedNote}</p> : null}
+          {!selected ? <p className="px-4 pb-2 text-[13px] text-mc-sub">No data for this range yet</p> : (
+            <SpendBars days={selectedDays} label={PERIODS[period].label} />
+          )}
           <div className="mc-spend mt-2">
             <div className="mc-spend-cards">
               {models.map((model) => {
@@ -220,7 +267,7 @@ export default function System() {
                         <div key={p.id} className="flex items-baseline justify-between gap-4 text-[13px]">
                           <span className="shrink-0">{p.label}</span>
                           <span className={`shrink-0 whitespace-nowrap tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
-                            {cells[i] ? money(cells[i]?.cost) : '—'}
+                            {cells[i] ? money(cells[i]?.cost) : 'No data'}
                           </span>
                         </div>
                       ))}
@@ -231,8 +278,7 @@ export default function System() {
                     </div>
                     {open && (
                       <p className="mt-3 text-[13px] text-mc-sub">
-                        Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month (UTC). A long session counts in the window of its last activity.
-                        Price override is later — this build does not store a per-token price.
+                        Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
                       </p>
                     )}
                   </div>
@@ -272,15 +318,14 @@ export default function System() {
                           <td className="whitespace-nowrap px-4 py-3 text-right text-[14px]">{tokens((focus?.tokensIn ?? 0) + (focus?.tokensOut ?? 0))}</td>
                           {cells.map((c, i) => (
                             <td key={PERIODS[i].id} className={`whitespace-nowrap px-4 py-3 text-right text-[14px] tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
-                              {c ? money(c.cost) : '—'}
+                              {c ? money(c.cost) : 'No data'}
                             </td>
                           ))}
                         </tr>
                         {open && (
                           <tr className="border-t border-mc-sep bg-mc-bg">
                             <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
-                              Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month (UTC). A long session counts in the window of its last activity.
-                              Price override is later — this build does not store a per-token price.
+                              Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
                             </td>
                           </tr>
                         )}

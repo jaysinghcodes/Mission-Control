@@ -145,7 +145,7 @@ Snapshot types write tables. **Warning:** several replace a whole table, so neve
 | `agents.snapshot` | `{ agents: [{ name, role?, color?, status?: "working" or "idle", parent?: name, emoji?, personalityTags?, currentTask?, tasksCompleted?, totalCost?, recentActivity?, channel? }] }` | Replaces every Agent row |
 | `sessions.snapshot` | `{ sessions: [{ name, agent, model?, ctx?: 0 to 100, lastActivity?, hot? }] }` | Replaces every Session row |
 | `calendar.snapshot` | `{ jobs: [{ name, schedule?, day?: 0 Mon to 6 Sun or null, time?: "HH:MM" or null, color?, enabled? }] }` | Replaces every CronJob row |
-| `usage.snapshot` | `{ period: "24h" or "7d" or "30d" or "month", totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }` | Upserts the row for that period |
+| `usage.snapshot` | `{ points: [{ at: ISO timestamp, totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }] }` | Upserts one America/Chicago day per point. Days not in the payload stay. A period total with no `at` is ignored |
 | `approvals.snapshot` | `{ approvals: [{ kind, tag, desc, status?, meta? }] }` | Deletes pending approvals, keeps decided ones, inserts these. `kind` is exec, pair, msg, sess or pr. A `pr` approval needs `meta: { repo, number, branch? }` to merge on approve |
 | `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term" or "daily" or "other", source?, ref? }] }` | Upserts by `id`; removes bridge sourced rows for the agents present that are not in the payload. An empty storable list is a no op and does not wipe the table |
 
@@ -161,7 +161,7 @@ python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw
 
 With no `openclaw` binary, `--dry-run` exits 0, skips sessions, agents, and cron, and posts nothing. The same command with `--memory-dir bridge/examples/openclaw-memory` prints one `memory.snapshot` and still does not post.
 
-It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` (default `http://127.0.0.1:3000`). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts `usage.snapshot` three times: `24h`, `7d`, and `month`. Schedule it every 5 minutes with an OpenClaw cron job or system cron:
+It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` (default `http://127.0.0.1:3000`). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts one `usage.snapshot` of daily points (up to 30 days on first connect when sessions have timestamps). It does not post separate 7 day or month totals. Schedule it every 5 minutes with an OpenClaw cron job or system cron:
 
 ```cron
 */5 * * * * /usr/bin/python3 /path/to/mission-control/bridge/mc-bridge-sync.py >> /tmp/mc-bridge.log 2>&1
@@ -199,7 +199,7 @@ Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves sh
 ### 4.7 Models and spend
 
 * `GET /models`, `POST /models` with `{ provider, model, label? }`, `DELETE /models/:id`. This is a list of models to track. **Nothing reads it yet:** the bridge does not call `GET /models`. The API does not call DeepSeek or Z.ai, so those keys do not produce a live balance.
-* Spend shown on System comes only from `usage.snapshot`. `GET /usage?period=24h|7d|month` reads it back. `period=30d` is accepted and returns `usage: null` because nothing posts that period. The bridge, when it can read sessions, posts `24h`, `7d`, and `month`. `npm run seed:demo` also writes those three rows, so a seeded System page is not empty on 7d or month. If the bridge cannot read sessions, it posts no usage snapshot, and all three cards stay empty together.
+* Spend shown on System comes only from `usage.snapshot` daily points. `GET /usage?period=24h|7d|month` sums them. 24h is a rolling day. The 7 day and month windows use America/Chicago. A short range returns `note` (for example `Showing 3 days of data so far`) and does not fill the gap with zero. `period=30d` returns `usage: null`. The bridge posts points, not 7 day or month totals. On first connect it backfills up to 30 days when session timestamps exist. Otherwise it records the days it has synced. `npm run seed:demo` writes 30 days, so a fresh System page shows all three windows. If the bridge cannot read sessions, it posts no usage snapshot.
 * Per agent cost on profiles comes from `totalCost` in `agents.snapshot`.
 
 ### 4.8 Memory

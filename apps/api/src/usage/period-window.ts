@@ -1,7 +1,6 @@
 /**
- * Usage windows. `month` is the calendar month to date in UTC, not the
- * trailing 30 days. The bridge uses the same cutoff when it posts
- * usage.snapshot.
+ * UTC month start. Aggregation tests use this for the UTC window.
+ * The System page displays America/Chicago, not this instant.
  */
 export function monthStartUtc(nowMs: number): number {
   const d = new Date(nowMs)

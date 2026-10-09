@@ -130,7 +130,7 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `D
 | `bridge` | `bridge` | Optional Python 3 standard library sync from the OpenClaw CLI |
 | workspaces | repo root | npm workspaces and Turbo 2. `packageManager` is `npm@11.17.0` |
 
-Prisma models, 14 counted in `apps/api/prisma/schema.prisma`: `Agent`, `Run`, `Project`, `Ticket`, `Session`, `CronJob`, `UsageSnapshot`, `ActivityEvent`, `Approval`, `MemoryEntry`, `ModelConfig`, `Setting`, `Device`, `CustomTool`.
+Prisma models, 14 counted in `apps/api/prisma/schema.prisma`: `Agent`, `Run`, `Project`, `Ticket`, `Session`, `CronJob`, `UsageBucket`, `ActivityEvent`, `Approval`, `MemoryEntry`, `ModelConfig`, `Setting`, `Device`, `CustomTool`.
 
 The API has 21 controllers (`@Controller` in `apps/api/src`). `team.controller.ts` registers two of them, `mission` and `devices`. The others are sessions, runs, activity, logs, calendar, models, approvals, custom tools, projects, search, usage, events, tickets, docs, health, memory, agents, the root app controller, and system.
 
@@ -175,7 +175,7 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW
 * Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
 * `memory.snapshot` upserts notes by id and drops bridge sourced rows for the agents in the payload when those ids are missing. An empty `entries` list is a no op. It does not wipe Memory. Demo rows stay.
 * `agents.snapshot` replaces the whole roster. There is no endpoint that registers one agent.
-* `usage.snapshot` is what System spends. The bridge posts `24h`, `7d`, and `month` when it can read OpenClaw sessions (`bridge/mc-bridge-sync.py`). `npm run seed:demo` writes the same three periods. `GET /usage?period=30d` returns `usage: null` because nothing posts `30d`. If the bridge cannot read sessions, it posts no usage snapshot, and the 24h, 7d, and month cards stay empty together.
+* `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers? }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` sums those points. 24h is a rolling day. The 7 day and month windows use the America/Chicago calendar. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. `npm run seed:demo` writes 30 days, so a fresh database shows all three windows. `period=30d` is not a window and returns `usage: null`. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced.
 * `GET /models` is a stored list. The bridge does not read it. The API does not call DeepSeek or Z.ai. The comment that used to say otherwise in `apps/api/src/models/models.controller.ts` was wrong and has been corrected.
 * `run.*` events are activity and a socket broadcast. They do not insert tickets or runs, and they do not move office seats. Seats come from role text and status.
 * The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` and `PATCH /runs/:id`. Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. Those routes require `x-ingest-token` when `INGEST_TOKEN` is set. A missing run name is 400. An unknown run id is 404.
@@ -280,7 +280,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 * Memory notes, from seeded rows. Docs do not use the bridge. The seed writes sample markdown under `data/docs`.
 * Team mission, from `GET /mission`. People come from the seeded roster. Devices come from the seed. There is no device write route.
 * Custom tools, one seeded tool on `/#/system/tools`.
-* Office, Calendar, Approvals, and System spend for 24h, 7d, and month, from the same seed.
+* Office, Calendar, Approvals, and System spend for 24h, 7 day, and month, summed from 30 seeded days.
 
 Sessions and gateway logs stay empty until a real bridge posts them.
 
@@ -291,7 +291,7 @@ What this tree already does:
 * ✅ Tasks, Agents, Approvals, Projects, Office, Pipeline
 * ✅ Calendar, Memory, Docs, Team (mission, people, devices), System
 * ✅ System panels for logs, sessions, settings, connection, and custom tools
-* ✅ `POST /events` intake, including `memory.snapshot` and `usage.snapshot` for 24h, 7d, and month
+* ✅ `POST /events` intake, including `memory.snapshot` and `usage.snapshot` daily points (24h, 7 day, and month are summed on read)
 * ✅ Idempotent `seed:demo` so the UI works with no OpenClaw
 * ✅ Optional `bridge/` sync from the OpenClaw CLI
 
@@ -299,7 +299,7 @@ Still open:
 
 * Devices have no write route.
 * `GET /models` is stored and unused by the bridge.
-* `GET /usage?period=30d` stays empty. Nothing posts that period.
+* `GET /usage?period=30d` stays empty. That query is not a window.
 
 ## Security notes
 
