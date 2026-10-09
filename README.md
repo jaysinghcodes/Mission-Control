@@ -6,7 +6,7 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 
 It also runs with no OpenClaw at all. Seed the demo data and click through the UI.
 
-**OpenClaw agents start here:** [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). That file is meant to be pasted to an agent. It has the base URL placeholder, the `x-ingest-token` header, and the exact requests this API accepts.
+**OpenClaw agents start here:** [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). That file is meant to be pasted to an agent. It has the base URL placeholder, the `x-ingest-token` header, and the exact requests this API accepts. Every write route uses that header when `INGEST_TOKEN` is set.
 
 The web app uses hash routes. A page looks like `http://localhost:5173/#/tasks`. A path with no hash, such as `/tasks`, is not a client route.
 
@@ -169,7 +169,7 @@ These paths are redirects, not pages: `/tickets` to `/tasks`, `/backlog` to `/ta
 Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). Short version, matching the code:
 
 * Endpoint: `POST /events` on the API (port 3000).
-* Header: `x-ingest-token: <INGEST_TOKEN>` where `<INGEST_TOKEN>` equals `INGEST_TOKEN` in the root `.env`.
+* Header: `x-ingest-token: <INGEST_TOKEN>` where `<INGEST_TOKEN>` equals `INGEST_TOKEN` in the root `.env`. The same header is required on every `POST`, `PUT`, `PATCH`, and `DELETE` when that variable is set, not only on `POST /events`.
 * Body: `{ "type": "<one of KNOWN_TYPES>", "payload": { } }`. The list lives in `apps/api/src/ingest/ingest.controller.ts`.
 * Success is `202` with `{ "accepted": true, "type", "ts" }`.
 * Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
@@ -178,7 +178,7 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW
 * `usage.snapshot` is what System spends. The bridge posts `24h`, `7d`, and `month` when it can read OpenClaw sessions (`bridge/mc-bridge-sync.py`). `npm run seed:demo` writes the same three periods. `GET /usage?period=30d` returns `usage: null` because nothing posts `30d`. If the bridge cannot read sessions, it posts no usage snapshot, and the 24h, 7d, and month cards stay empty together.
 * `GET /models` is a stored list. The bridge does not read it. The API does not call DeepSeek or Z.ai. The comment that used to say otherwise in `apps/api/src/models/models.controller.ts` was wrong and has been corrected.
 * `run.*` events are activity and a socket broadcast. They do not insert tickets or runs, and they do not move office seats. Seats come from role text and status.
-* The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` and `PATCH /runs/:id`. Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. Those routes do not check the ingest token. A missing run name is 400. An unknown run id is 404.
+* The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` and `PATCH /runs/:id`. Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. Those routes require `x-ingest-token` when `INGEST_TOKEN` is set. A missing run name is 400. An unknown run id is 404.
 * The office floor has no endpoint. It reads agents, tickets, approvals, and activity.
 * The server broadcasts its own `health.tick` on the socket about every 30 seconds. A client can also POST `health.tick`. The System bridge chip follows the newest activity row with source `openclaw`.
 
@@ -238,7 +238,7 @@ npm test
 npm run build
 ```
 
-On this clone, after that generate, `npm test` passed (API Jest: 27 suites, 195 tests; web: 49 tests) and `npm run build` passed. The web suite also passed on Node 20.19.2. Six of the eight tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres stopped, that file is the only API failure: 6 failed, 189 passed, 195 total. The unknown event type check and the production missing token check return before they write. Web tests do not use Postgres.
+On this clone, after that generate, `npm test` passed (API Jest: 29 suites, 206 tests; web: 51 tests) and `npm run build` passed. This pass used Node 22.14.0. Six of the eight tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres stopped, that file is the only API failure: 6 failed, 200 passed, 206 total. The unknown event type check and the production missing token check return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
 
 `npm run lint` is `oxlint` for the web app (warnings, exit 0) and `eslint --fix` for the API. The API lint exits 1 on the current sources (mostly `prettier/prettier`, plus typescript-eslint `no-unsafe-*` and `require-await`). That failure is in the existing API tree. Do not treat `eslint --fix` as safe to commit: it rewrites a lot of files. `npm run test:e2e` needs Postgres and was not part of this pass.
 
@@ -252,7 +252,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 **Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or it is up on a different host than `VITE_API_URL` (default `http://localhost:3000`). Start Postgres, export `.env`, then `npm run dev`. A later health failure does not redirect again.
 
-**`POST /events` returns 401 `unauthorized`.** `INGEST_TOKEN` is set (the template ships a placeholder) and the `x-ingest-token` header is missing or different. Send the same value the API process has. A wrong token failed the same way.
+**A write returns 401 `unauthorized`.** `INGEST_TOKEN` is set (the template ships `change-me`) and the `x-ingest-token` header is missing or different. This is every `POST`, `PUT`, `PATCH`, and `DELETE`, including `POST /events` and `POST /tickets`. The body is `{"statusCode":401,"message":"unauthorized"}`. Send the same value the API process has. A wrong token failed the same way. Reads such as `GET /health` do not check the header.
 
 **`POST /events` returns 400 unknown event type.** `type` is not in `KNOWN_TYPES`. The response body lists the allowed names.
 
@@ -297,7 +297,6 @@ What this tree already does:
 
 Still open:
 
-* REST write routes do not check a token. See Security notes.
 * Devices have no write route.
 * `GET /models` is stored and unused by the bridge.
 * `GET /usage?period=30d` stays empty. Nothing posts that period.
@@ -306,8 +305,11 @@ Still open:
 
 Read this before you open a port.
 
-* REST write routes have no token check. `POST /tickets`, `PATCH /tickets/:id`, `POST /projects`, `PATCH /projects/:id`, `POST /runs`, `PATCH /runs/:id`, `PUT /mission`, `POST /approvals/:id/decide`, and the custom tool writes all succeed with no `x-ingest-token`. Only `POST /events` checks that header.
-* Do not expose port 3000. The API binds to `127.0.0.1` on the `npm run dev` path (`HOST` in the root `.env`). Compose publishes the API on `127.0.0.1` as well. A public bind would leave those writes open.
+* When `INGEST_TOKEN` is set, every write requires header `x-ingest-token`. That is `POST`, `PUT`, `PATCH`, and `DELETE`: `POST /events`, `POST /tickets`, `PATCH /tickets/:id`, `POST /projects`, `PATCH /projects/:id`, `POST /runs`, `PATCH /runs/:id`, `PUT /mission`, `POST /approvals/:id/decide`, `POST /models`, `DELETE /models/:id`, and the custom tool writes. A missing or wrong token is 401 JSON `{"statusCode":401,"message":"unauthorized"}`. Reads do not check the token.
+* With no `INGEST_TOKEN` and `HOST` on loopback (`127.0.0.1` by default for `npm run dev`), writes stay open and the API logs one warning. The web UI still works.
+* With no `INGEST_TOKEN` and `HOST` on any other address, the API refuses to start. Set `INGEST_TOKEN` to a long random string (`openssl rand -hex 24`) and start again. Compose sets `HOST=0.0.0.0` inside the api container, so it always has a token: your `.env` value, or `dev-ingest-token` when that value is blank.
+* The browser never receives the token. Dev Vite and compose nginx add `x-ingest-token` on same origin `/api` writes. Do not put `INGEST_TOKEN` in a `VITE_` variable or in local storage. `npm run seed:demo` writes through Prisma and does not send the header. The bridge still posts `POST /events` with the header.
+* Do not publish port 3000 beyond loopback without a token. `npm run dev` binds `127.0.0.1` (`HOST` in the root `.env`). Compose publishes the API on `127.0.0.1` as well.
 * There is no agent self registration endpoint. `agents.snapshot` replaces the whole roster. Posting a snapshot that contains only one agent deletes every other agent.
 
 ## Layout

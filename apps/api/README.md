@@ -29,7 +29,7 @@ Template: [`../../.env.example`](../../.env.example). For `npm run dev`, `set -a
 | `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mission_control` | Required when `NODE_ENV=production` |
 | `PORT` / `HOST` | `3000` / `127.0.0.1` | Compose sets `HOST=0.0.0.0` inside the container and publishes `127.0.0.1` only |
 | `WEB_ORIGIN` | `http://localhost:5173,http://127.0.0.1:5173` | Comma separated CORS list. Never `*` |
-| `INGEST_TOKEN` | empty in code, placeholder in the example file | `x-ingest-token` for `POST /events`. Production fails closed |
+| `INGEST_TOKEN` | empty in code, placeholder in the example file | `x-ingest-token` for every POST, PUT, PATCH, and DELETE, including `POST /events`. Unset on loopback: writes open, one warning. Unset on any other `HOST`: process refuses to start |
 | `SOCKET_TOKEN` | empty | Required for the socket handshake when `NODE_ENV=production` |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |

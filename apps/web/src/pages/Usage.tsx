@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { useApi, apiPost } from '../hooks/useApi'
+import { useApi, apiPost, apiSend } from '../hooks/useApi'
 import { Card, Chip, PillButton, Progress, SectionLabel } from '../components/ui'
-import { API_URL } from '../lib/apiBase'
 
 /**
  * Usage & Cost — real usage snapshot pushed by the bridge (usage.snapshot)
@@ -73,12 +72,8 @@ export default function Usage() {
   }
 
   async function removeModel(id: string) {
-    try {
-      const res = await fetch(`${API_URL}/models/${id}`, { method: 'DELETE' })
-      if (res.ok) models.refetch()
-    } catch {
-      // ignore — list refreshes on next poll
-    }
+    const res = await apiSend('DELETE', `/models/${id}`)
+    if (res.ok) models.refetch()
   }
 
   return (

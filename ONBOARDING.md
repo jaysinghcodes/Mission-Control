@@ -53,7 +53,7 @@ cp .env.example .env
 Walk each variable. Ask the operator for real values. Do not invent one.
 
 * `DATABASE_URL`: leave the template unless their Postgres user or password differs.
-* `INGEST_TOKEN`: shared secret for `POST /events`. You may generate one with `openssl rand -hex 24` and show it once. The template placeholder is not a production secret. Replace it before anyone else can reach the port. The bridge reads this same variable and exits if it is blank.
+* `INGEST_TOKEN`: shared secret for every API write, including `POST /events`. Send it as `x-ingest-token`. You may generate one with `openssl rand -hex 24` and show it once. The template placeholder is not a production secret. Replace it before anyone else can reach the port. The bridge reads this same variable and exits if it is blank. The web UI does not put the value in the browser. If it is unset and `HOST` is not loopback, the API refuses to start.
 * `SOCKET_TOKEN`: optional for `npm run dev`. Required when `NODE_ENV=production` (the Compose API sets that). If they set one, set `VITE_SOCKET_TOKEN` to the same value before a production web build. A blank value is fine for the dev server verified here.
 * `WEB_ORIGIN`: leave commented unless they need another origin. The API default is `http://localhost:5173` and `http://127.0.0.1:5173`.
 * `OPERATOR_NAME`: display only, not a secret. Blank means the chip says Operator. For `npm run dev`, set `VITE_OPERATOR_NAME` to the same string if the browser should show the name.

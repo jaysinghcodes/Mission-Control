@@ -98,6 +98,10 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+    environment:
+      # Same value the api uses, including the blank-token fallback.
+      # nginx attaches it on /api writes. It is not baked into the JS bundle.
+      INGEST_TOKEN: ${INGEST_TOKEN:-dev-ingest-token}
     ports:
       # Host port overridable (item 6); nginx still listens on 5173 inside.
       - "127.0.0.1:${MC_WEB_PORT:-5173}:5173"

@@ -1,4 +1,5 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
+import { WriteAuthMiddleware } from './auth/write-auth.middleware';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { LiveActivityGateway } from './live-activity/live-activity.gateway';
@@ -71,4 +72,12 @@ import { PrismaService } from './prisma/prisma.service';
   ],
   exports: [PrismaService, LiveActivityGateway],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Every route, so a new write handler cannot skip the token check.
+    consumer.apply(WriteAuthMiddleware).forRoutes({
+      path: '{*path}',
+      method: RequestMethod.ALL,
+    });
+  }
+}

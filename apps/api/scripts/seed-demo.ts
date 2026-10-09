@@ -38,6 +38,8 @@
  *
  * Runs on the HOST against the compose Postgres (127.0.0.1:5432) using
  * DATABASE_URL from the env or the repo-root .env, same as the api.
+ * Writes go through Prisma, not the HTTP API, so x-ingest-token is not
+ * sent. A configured INGEST_TOKEN does not block this script.
  * SECURITY: refuses NODE_ENV=production unless SEED_DEMO_ALLOW_PROD=1 —
  * demo rows should never silently land in a real instance.
  */
@@ -86,6 +88,8 @@ if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO_ALLOW_PROD !=
   console.error('[seed:demo] NODE_ENV=production — refusing to write demo data (set SEED_DEMO_ALLOW_PROD=1 to override).');
   process.exit(2);
 }
+
+console.log('[seed:demo] writing through Prisma, not HTTP, so no x-ingest-token is sent');
 
 // Same default as PrismaService / prisma.config.ts (local dev + compose port).
 const url = process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/mission_control';

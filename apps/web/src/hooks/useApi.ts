@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { API_URL } from '../lib/apiBase'
+import { API_URL, writeUrl } from '../lib/apiBase'
 import { reportOutcome } from '../lib/apiStatus'
 
 /**
@@ -198,7 +198,9 @@ function errorMessage(body: unknown, status: number): string {
 export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<ApiResult<T>> {
   let res: Response
   try {
-    res = await fetch(`${API}${path}`, {
+    // Same origin `/api`. The dev proxy or nginx adds x-ingest-token.
+    // This bundle does not contain the token and does not store it.
+    res = await fetch(writeUrl(path), {
       method,
       headers: { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),

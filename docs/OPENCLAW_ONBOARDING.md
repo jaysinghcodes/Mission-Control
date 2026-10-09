@@ -19,7 +19,7 @@ It is a turbo monorepo:
 Data reaches Mission Control two ways:
 
 1. **Snapshot and event intake:** `POST /events` with a shared token. This is how OpenClaw state (agents, sessions, cron, usage, approvals, memory) gets in. The bundled bridge does this for you.
-2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work.
+2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. When `INGEST_TOKEN` is set, those writes use the same `x-ingest-token` header as `POST /events`.
 
 Every event is stored in the `ActivityEvent` table and broadcast live over Socket.IO to open dashboards.
 
@@ -37,7 +37,7 @@ cp .env.example .env
 Edit `.env` before starting. Rules for you:
 
 * **Never invent secrets.** Ask your operator for any real key.
-* `INGEST_TOKEN`: the template value is `change-me`. Replace it with a random value (`openssl rand -hex 24` is fine) and tell your operator. The bridge refuses to run if this is blank.
+* `INGEST_TOKEN`: the template value is `change-me`. Replace it with a random value (`openssl rand -hex 24` is fine) and tell your operator. Every write route checks it when it is set, including `POST /events`. The bridge refuses to run if this is blank. The web UI does not receive the value. Vite and nginx attach it.
 * `OPERATOR_NAME`: display only. It becomes the default assignee for new tickets and runs.
 * `SOCKET_TOKEN`: optional on the local stack. If set, it must be set before the first build because it is baked into the web bundle.
 * `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
@@ -108,8 +108,25 @@ API base URL: `http://127.0.0.1:3000` unless your operator moved it. All bodies 
 
 ### 4.1 Auth
 
-* Only `POST /events` checks a token, via header `x-ingest-token: <INGEST_TOKEN>`. In production mode (compose sets `NODE_ENV=production`) a missing or wrong token is 401. In development, a set `INGEST_TOKEN` is also required: a missing header and a wrong token both returned 401 `unauthorized` against a running API. If `INGEST_TOKEN` is blank in `.env`, compose gives the api `dev-ingest-token`. If it is blank outside production, development intake stays open.
-* The REST routes for tickets, projects, runs, models and mission have **no auth**. They are protected only by the api binding to loopback. Do not expose port 3000 publicly.
+Every mutating route (`POST`, `PUT`, `PATCH`, `DELETE`) uses one check. When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>`. That includes `POST /events` and the REST writes (tickets, projects, runs, models, mission, approvals, custom tools). `GET` and the other reads do not require the header.
+
+A missing or wrong token is HTTP 401 and this JSON body:
+
+```json
+{"statusCode":401,"message":"unauthorized"}
+```
+
+A checked call without the header, and a checked call with a wrong token, both returned that body. A call with the matching token was not 401.
+
+When `INGEST_TOKEN` is unset and the API is bound to a loopback address (`127.0.0.1`, `localhost`, or `::1`), writes are allowed and the process logs one warning that writes are unauthenticated. The bundled web UI keeps working.
+
+When `INGEST_TOKEN` is unset and the API binds to any other address, the process refuses to start. The message tells you to set `INGEST_TOKEN`. Example from that message: `INGEST_TOKEN=$(openssl rand -hex 24)`.
+
+Compose sets `HOST=0.0.0.0` inside the api container, so a token is required there. If `INGEST_TOKEN` is blank in `.env`, compose gives the api and the web proxy `dev-ingest-token`. Nginx attaches that value on `/api` writes. The browser bundle does not contain the token.
+
+`npm run dev` does the same through the Vite proxy: the page calls same origin `/api/...`, and Vite adds `x-ingest-token` from the environment. Do not put the token in client code, a `VITE_` variable, or local storage.
+
+OpenClaw stays optional. The bridge still posts `POST /events` with `x-ingest-token`. `npm run seed:demo` writes through Prisma, not HTTP, so it does not send the header.
 
 ### 4.2 Events: `POST /events`
 
@@ -160,7 +177,7 @@ Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merg
 | `POST /tickets` | `{ title, status?, priority?, assignee?, tags?: string[], projectId? }` | 201. `title` required. `status` only `backlog` (default) or `todo`. `priority` defaults `med` (high, med, low). Key auto assigned as `MC-150`, `MC-151`... |
 | `PATCH /tickets/:id` | `{ status?, assignee?, priority?, projectId? }` | `:id` is the ticket id, not the key. Status must be one of `backlog`, `todo`, `build`, `qa`, `review`, `done` (`inprogress` is a legacy alias of `build`). `projectId: null` unassigns |
 
-Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. A checked create with `{"title":"Onboarding check","status":"todo"}` returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
+Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Send `x-ingest-token` on both calls when `INGEST_TOKEN` is set (see section 4.1 and the checklist). A checked create with `{"title":"Onboarding check","status":"todo"}` and that header returned 201, and PATCH `{"status":"done"}` with the same header returned 200 with status `done`.
 
 ### 4.5 Projects
 
@@ -211,7 +228,7 @@ These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/se
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it.
 * Devices have no write route; only `seed:demo` fills them.
-* REST writes have no auth. Do not expose port 3000.
+* Do not publish port 3000 on a non loopback address without `INGEST_TOKEN`. The API refuses that start. With the token set, a write that omits `x-ingest-token` is 401.
 
 ## 7. First read checklist
 
@@ -243,12 +260,16 @@ Run these in order and report the results to your operator. The file stops at st
    curl -s 'http://127.0.0.1:3000/activity?limit=5'
    ```
    Your event should be first. A checked call returned 200, and the first row was `run.completed` with name `onboarding check`. Ask your operator to open http://localhost:5173/#/office and look for that name in the activity list. The floor seats will not move because of this event.
-6. **File a test ticket and move it.**
+6. **File a test ticket and move it.** The same header as `POST /events` is required when `INGEST_TOKEN` is set. Without it the create is 401 `unauthorized`.
    ```bash
-   curl -s -X POST http://127.0.0.1:3000/tickets -H 'content-type: application/json' \
+   curl -sS -X POST http://127.0.0.1:3000/tickets \
+     -H 'content-type: application/json' \
+     -H "x-ingest-token: $MC_TOKEN" \
      -d '{"title":"Onboarding check","status":"todo","assignee":"YOUR_NAME"}'
-   curl -s -X PATCH http://127.0.0.1:3000/tickets/<id from above> -H 'content-type: application/json' \
+   curl -sS -X PATCH http://127.0.0.1:3000/tickets/<id from above> \
+     -H 'content-type: application/json' \
+     -H "x-ingest-token: $MC_TOKEN" \
      -d '{"status":"done"}'
    ```
-   Confirm it lands in Done on http://localhost:5173/#/tasks. A checked create returned 201 and the following PATCH returned status `done`.
+   Confirm it lands in Done on http://localhost:5173/#/tasks. A checked create returned 201 and the following PATCH returned status `done`. A create with no `x-ingest-token` returned 401 `{"statusCode":401,"message":"unauthorized"}`.
 7. **Schedule the bridge** every 5 minutes, then tell your operator what you set up.

@@ -730,7 +730,11 @@ def collect_memory(
 # ── Transport ───────────────────────────────────────────────────────────────
 
 def post(api_url: str, token: str, etype: str, payload: Dict[str, Any]) -> bool:
-    """POST one event. True on 2xx. Logs the status, never the token."""
+    """POST one event. True on 2xx. Logs the status, never the token.
+
+    The API applies the same x-ingest-token check to every write route.
+    This bridge only calls POST /events, and it always sends that header.
+    """
     req = urllib.request.Request(
         f"{api_url.rstrip('/')}/events",
         data=json.dumps({"type": etype, "payload": payload}).encode(),

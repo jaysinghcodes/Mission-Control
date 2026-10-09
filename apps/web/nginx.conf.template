@@ -1,0 +1,20 @@
+server {
+    listen 5173;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Same origin writes. The browser calls /api/... and nginx attaches the
+    # token. The static bundle does not contain INGEST_TOKEN.
+    location /api/ {
+        proxy_pass http://api:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header x-ingest-token "${INGEST_TOKEN}";
+    }
+
+    # SPA fallback (HashRouter also works, but keep this for safety)
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
