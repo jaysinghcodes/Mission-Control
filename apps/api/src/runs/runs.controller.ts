@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { operatorName } from '../config/operator';
@@ -28,15 +28,21 @@ export class RunsController {
   }
 
   @Post()
-  async create(@Body() body: { name?: string; agent?: string }) {
+  async create(@Body() body: { name?: string; agent?: string; ticketId?: string | null } = {}) {
     const name = body?.name?.trim();
     if (!name) {
-      return { error: 'name is required' };
+      throw new BadRequestException('name is required');
     }
+    const ticketId = await this.ticketLink(body.ticketId);
     const run = await this.prisma.run.create({
       // Default agent = the configured operator (OPERATOR_NAME env, neutral
       // "Operator" fallback) — no personal name baked into a fresh clone.
-      data: { name, agent: body.agent ?? operatorName(), status: 'queued' },
+      data: {
+        name,
+        agent: body.agent ?? operatorName(),
+        status: 'queued',
+        ...(ticketId ? { ticketId } : {}),
+      },
     });
     await this.persist('run.queued', { id: run.id, name: run.name });
     this.gateway.broadcast('run.queued', { id: run.id, name: run.name });
@@ -46,13 +52,14 @@ export class RunsController {
   @Patch(':id')
   async update(
     @Param('id') id: string,
-    @Body() body: { status?: string; progress?: number; agent?: string },
+    @Body() body: { status?: string; progress?: number; agent?: string; ticketId?: string | null } = {},
   ) {
     const existing = await this.prisma.run.findUnique({ where: { id } });
     if (!existing) {
-      return { error: 'run not found' };
+      throw new NotFoundException('run not found');
     }
     const status = body.status ?? existing.status;
+    const ticketId = body.ticketId !== undefined ? await this.ticketLink(body.ticketId) : undefined;
     const run = await this.prisma.run.update({
       where: { id },
       data: {
@@ -61,6 +68,7 @@ export class RunsController {
         progress: body.progress ?? existing.progress,
         startedAt: status === 'running' && !existing.startedAt ? new Date() : existing.startedAt,
         finishedAt: ['done', 'failed'].includes(status) ? new Date() : null,
+        ...(ticketId !== undefined ? { ticketId } : {}),
       },
     });
     // Broadcast the transition so every open dashboard updates instantly.
@@ -78,6 +86,19 @@ export class RunsController {
     await this.persist(eventType, payload);
     this.gateway.broadcast(eventType, payload);
     return { run, ts: Date.now() };
+  }
+
+  /**
+   * Pipeline links a run to a ticket by id only. Blank means no link.
+   * An unknown id is 400 so a typo does not create an orphan pointer.
+   */
+  private async ticketLink(ticketId: string | null | undefined): Promise<string | null> {
+    if (ticketId == null) return null;
+    const id = ticketId.trim();
+    if (!id) return null;
+    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) throw new BadRequestException('ticket not found');
+    return id;
   }
 
   /** Write a run.* event to the persisted activity stream. */

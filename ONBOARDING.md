@@ -35,7 +35,7 @@ Confirm each of these:
 ### Step 2. Clone and install
 
 ```sh
-git clone https://github.com/jaysinghcodes/mission-control.git
+git clone https://github.com/jaysinghcodes/Mission-Control.git
 cd mission-control
 npm ci
 ```
@@ -57,7 +57,7 @@ Walk each variable. Ask the operator for real values. Do not invent one.
 * `SOCKET_TOKEN`: optional for `npm run dev`. Required when `NODE_ENV=production` (the Compose API sets that). If they set one, set `VITE_SOCKET_TOKEN` to the same value before a production web build. A blank value is fine for the dev server verified here.
 * `WEB_ORIGIN`: leave commented unless they need another origin. The API default is `http://localhost:5173` and `http://127.0.0.1:5173`.
 * `OPERATOR_NAME`: display only, not a secret. Blank means the chip says Operator. For `npm run dev`, set `VITE_OPERATOR_NAME` to the same string if the browser should show the name.
-* `GITHUB_TOKEN`, `DEEPSEEK_API_KEY`, `ZAI_API_KEY`: optional. Ask only if they want pull request merge or live provider balances.
+* `GITHUB_TOKEN`: optional. Ask only if they want pull request merge from Approvals. `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them.
 
 `.env` is gitignored. Never commit it.
 

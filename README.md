@@ -2,6 +2,8 @@
 
 You host this command center yourself. It is the dashboard for an OpenClaw setup: a task board, agents, approvals, projects, an office floor, a pipeline, a calendar of cron jobs, memory, docs, a team page, and system health.
 
+The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then Calendar, Memory, Docs, Team, System. Overview is not a route. `/` redirects to `/tasks`.
+
 It also runs with no OpenClaw at all. Seed the demo data and click through the UI.
 
 **OpenClaw agents start here:** [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). That file is meant to be pasted to an agent. It has the base URL placeholder, the `x-ingest-token` header, and the exact requests this API accepts.
@@ -14,7 +16,7 @@ Verified on a fresh clone with **Node v22.14.0** and **npm 11.17.0** (the `packa
 
 ## Screenshots
 
-These are the current screens after `npm run seed:demo`. Sessions and gateway logs stay empty until a real OpenClaw bridge posts them. That empty state is what a fresh clone shows.
+These are the current screens after `npm run seed:demo`. The sidebar has no Overview page, so there is no Overview shot. Sessions and gateway logs stay empty until a real OpenClaw bridge posts them. That empty state is what a fresh clone shows.
 
 | Tasks | Backlog |
 | --- | --- |
@@ -67,7 +69,7 @@ Create the database the template expects if it is not there yet: database `missi
 `docker` was not installed in the environment where these commands were run, so Docker Compose was not part of the verified path. `docker-compose.yml` is still in the repo for a host that has Docker. The steps below are the ones that were executed on a fresh clone.
 
 ```bash
-git clone https://github.com/jaysinghcodes/mission-control.git
+git clone https://github.com/jaysinghcodes/Mission-Control.git
 cd mission-control
 npm ci
 cp .env.example .env
@@ -93,7 +95,7 @@ What each step is doing:
 | `npm run seed:demo` | Idempotent sample agents, cron jobs, tickets, projects, activity, approvals, memories, docs, devices, a mission line, and one custom tool. Safe to repeat. Refuses to run when `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run dev` | Turbo starts the API (`nest start --watch`) and the web app (`vite`) together. |
 
-Leave `GITHUB_TOKEN`, `DEEPSEEK_API_KEY`, and `ZAI_API_KEY` empty unless you want those optional features. Do not commit `.env`.
+Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template and are not read by the API. Do not commit `.env`.
 
 `OPERATOR_NAME` is a display name, not a secret. Blank means the account chip says Operator. For `npm run dev`, also set `VITE_OPERATOR_NAME` to the same value if you want the browser bundle to see it. Vite only exposes `VITE_*` variables.
 
@@ -128,7 +130,9 @@ Leave `GITHUB_TOKEN`, `DEEPSEEK_API_KEY`, and `ZAI_API_KEY` empty unless you wan
 | `bridge` | `bridge` | Optional Python 3 standard library sync from the OpenClaw CLI |
 | workspaces | repo root | npm workspaces and Turbo 2. `packageManager` is `npm@11.17.0` |
 
-Prisma models: `Agent`, `Run`, `Project`, `Ticket`, `Session`, `CronJob`, `UsageSnapshot`, `ActivityEvent`, `Approval`, `MemoryEntry`, `ModelConfig`, `Setting`, `Device`, `CustomTool`.
+Prisma models, 14 counted in `apps/api/prisma/schema.prisma`: `Agent`, `Run`, `Project`, `Ticket`, `Session`, `CronJob`, `UsageSnapshot`, `ActivityEvent`, `Approval`, `MemoryEntry`, `ModelConfig`, `Setting`, `Device`, `CustomTool`.
+
+The API has 21 controllers (`@Controller` in `apps/api/src`). `team.controller.ts` registers two of them, `mission` and `devices`. The others are sessions, runs, activity, logs, calendar, models, approvals, custom tools, projects, search, usage, events, tickets, docs, health, memory, agents, the root app controller, and system.
 
 Schema changes stay human reviewed. The app does not auto migrate on the `npm run dev` path.
 
@@ -156,7 +160,7 @@ Schema changes stay human reviewed. The app does not auto migrate on the `npm ru
 | `/#/system/tools` | Experimental custom tools |
 | `/#/connect` | Setup sheet (no sidebar) |
 
-Old paths redirect: `/tickets` to `/tasks`, `/backlog` to `/tasks?view=backlog`, `/factory` and `/activity` to `/office`, `/health` and `/usage` to `/system`, `/logs` to `/system/logs`, `/sessions` to `/system/sessions`, `/settings` to `/system/settings`.
+These paths are redirects, not pages: `/tickets` to `/tasks`, `/backlog` to `/tasks?view=backlog`, `/factory` and `/activity` to `/office`, `/health` and `/usage` to `/system`, `/logs` to `/system/logs`, `/sessions` to `/system/sessions`, `/settings` to `/system/settings`. The URL table above lists only routes that render a screen.
 
 ---
 
@@ -168,9 +172,13 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW
 * Header: `x-ingest-token: <INGEST_TOKEN>` where `<INGEST_TOKEN>` equals `INGEST_TOKEN` in the root `.env`.
 * Body: `{ "type": "<one of KNOWN_TYPES>", "payload": { } }`. The list lives in `apps/api/src/ingest/ingest.controller.ts`.
 * Success is `202` with `{ "accepted": true, "type", "ts" }`.
-* Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
-* `run.*` events are activity and a socket broadcast. They do not insert tickets or runs.
-* The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` and `PATCH /runs/:id`. Those two routes do not check the ingest token.
+* Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
+* `memory.snapshot` upserts notes by id and drops bridge sourced rows for the agents in the payload when those ids are missing. An empty `entries` list is a no op. It does not wipe Memory. Demo rows stay.
+* `agents.snapshot` replaces the whole roster. There is no endpoint that registers one agent.
+* `usage.snapshot` is what System spends. The bridge posts `24h`, `7d`, and `month` when it can read OpenClaw sessions (`bridge/mc-bridge-sync.py`). `npm run seed:demo` writes the same three periods. `GET /usage?period=30d` returns `usage: null` because nothing posts `30d`. If the bridge cannot read sessions, it posts no usage snapshot, and the 24h, 7d, and month cards stay empty together.
+* `GET /models` is a stored list. The bridge does not read it. The API does not call DeepSeek or Z.ai. The comment that used to say otherwise in `apps/api/src/models/models.controller.ts` was wrong and has been corrected.
+* `run.*` events are activity and a socket broadcast. They do not insert tickets or runs, and they do not move office seats. Seats come from role text and status.
+* The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` and `PATCH /runs/:id`. Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. Those routes do not check the ingest token. A missing run name is 400. An unknown run id is 404.
 * The office floor has no endpoint. It reads agents, tickets, approvals, and activity.
 * The server broadcasts its own `health.tick` on the socket about every 30 seconds. A client can also POST `health.tick`. The System bridge chip follows the newest activity row with source `openclaw`.
 
@@ -262,6 +270,46 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 ---
 
+## What works without OpenClaw
+
+`npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI.
+
+* Tasks and the backlog view, from seeded tickets.
+* Projects, including ticket counts, from seeded projects.
+* Pipeline, the same tickets as Build, QA, Ship, Deploy.
+* Memory notes, from seeded rows. Docs do not use the bridge. The seed writes sample markdown under `data/docs`.
+* Team mission, from `GET /mission`. People come from the seeded roster. Devices come from the seed. There is no device write route.
+* Custom tools, one seeded tool on `/#/system/tools`.
+* Office, Calendar, Approvals, and System spend for 24h, 7d, and month, from the same seed.
+
+Sessions and gateway logs stay empty until a real bridge posts them.
+
+## Roadmap
+
+What this tree already does:
+
+* ✅ Tasks, Agents, Approvals, Projects, Office, Pipeline
+* ✅ Calendar, Memory, Docs, Team (mission, people, devices), System
+* ✅ System panels for logs, sessions, settings, connection, and custom tools
+* ✅ `POST /events` intake, including `memory.snapshot` and `usage.snapshot` for 24h, 7d, and month
+* ✅ Idempotent `seed:demo` so the UI works with no OpenClaw
+* ✅ Optional `bridge/` sync from the OpenClaw CLI
+
+Still open:
+
+* REST write routes do not check a token. See Security notes.
+* Devices have no write route.
+* `GET /models` is stored and unused by the bridge.
+* `GET /usage?period=30d` stays empty. Nothing posts that period.
+
+## Security notes
+
+Read this before you open a port.
+
+* REST write routes have no token check. `POST /tickets`, `PATCH /tickets/:id`, `POST /projects`, `PATCH /projects/:id`, `POST /runs`, `PATCH /runs/:id`, `PUT /mission`, `POST /approvals/:id/decide`, and the custom tool writes all succeed with no `x-ingest-token`. Only `POST /events` checks that header.
+* Do not expose port 3000. The API binds to `127.0.0.1` on the `npm run dev` path (`HOST` in the root `.env`). Compose publishes the API on `127.0.0.1` as well. A public bind would leave those writes open.
+* There is no agent self registration endpoint. `agents.snapshot` replaces the whole roster. Posting a snapshot that contains only one agent deletes every other agent.
+
 ## Layout
 
 ```
@@ -269,6 +317,10 @@ apps/web/                  React dashboard
 apps/api/                  NestJS API, Prisma schema, seed script
 bridge/                    Optional OpenClaw sync
 docs/OPENCLAW_ONBOARDING.md   Paste this to an OpenClaw agent
-docs/screenshots/          PNGs embedded above
+docs/screenshots/          Current screen PNGs embedded above
+wireframes/                Static wireframe art, not the running UI
+LOG.md                     Change log
 ONBOARDING.md              Human install steps for an agent to walk through
 ```
+
+The running UI is `apps/web`. `wireframes/` is the drawing set. `design/` is older reference art and is not the screenshot source.
