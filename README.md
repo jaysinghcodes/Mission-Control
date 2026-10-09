@@ -1,216 +1,274 @@
 # Mission Control
 
-**Self-hostable command center for agent orchestration.** Manage tickets and tasks, review approvals, watch a live Office floor and calendar of cron jobs, and stream real agent activity — either from your OpenClaw instance via the vendored bridge, or from the built-in demo seed on a cold clone.
+You host this command center yourself. It is the dashboard for an OpenClaw setup: a task board, agents, approvals, projects, an office floor, a pipeline, a calendar of cron jobs, memory, docs, a team page, and system health.
 
-Works standalone: `docker compose up --build` → `npm run seed:demo` → open the dashboard. No OpenClaw required to explore the UI.
+It also runs with no OpenClaw at all. Seed the demo data and click through the UI.
 
-**Status:** 15 web pages (14 dashboard routes + `/#/connect` onboarding), NestJS API (15 controllers) with Socket.IO live feed, 9 Prisma models, vendored OpenClaw bridge, idempotent demo seed, MIT license. Clone-and-run via Docker.
+**OpenClaw agents start here:** [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). That file is meant to be pasted to an agent. It has the base URL placeholder, the `x-ingest-token` header, and the exact requests this API accepts.
 
-> **Hash routes:** the web app uses React `HashRouter`. Deep links look like `http://localhost:5173/#/tickets`. A plain path such as `/tickets` (no hash) falls through to Overview — always use `/#/…` URLs.
+The web app uses hash routes. A page looks like `http://localhost:5173/#/tasks`. A path with no hash, such as `/tasks`, is not a client route.
 
----
-
-## Screenshots (seeded demo)
-
-After `npm run seed:demo`, the Board, Calendar, Team, and Office are populated with generic sample data:
-
-| Overview | Tickets board |
-| --- | --- |
-| ![Overview](docs/screenshots/overview.png) | ![Tickets](docs/screenshots/tickets.png) |
-
-| Calendar | Team |
-| --- | --- |
-| ![Calendar](docs/screenshots/calendar.png) | ![Team](docs/screenshots/team.png) |
+Verified on a fresh clone with **Node v22.14.0** and **npm 11.17.0** (the `packageManager` field in `package.json`). This repo does not use pnpm. Postgres was **16.15**.
 
 ---
 
-## Quickstart
+## Screenshots
 
-Prereqs: Docker + Docker Compose, Node 20.17+ (or 22.9+), npm, git.
+These are the current screens after `npm run seed:demo`. Sessions and gateway logs stay empty until a real OpenClaw bridge posts them. That empty state is what a fresh clone shows.
+
+| Tasks | Backlog |
+| --- | --- |
+| ![Tasks board](docs/screenshots/tasks.png) | ![Tasks backlog](docs/screenshots/tasks-backlog.png) |
+
+| Agents | Approvals |
+| --- | --- |
+| ![Agents](docs/screenshots/agents.png) | ![Approvals](docs/screenshots/approvals.png) |
+
+| Projects | Project detail |
+| --- | --- |
+| ![Projects](docs/screenshots/projects.png) | ![Project detail](docs/screenshots/project-detail.png) |
+
+| Office | Pipeline |
+| --- | --- |
+| ![Office](docs/screenshots/office.png) | ![Pipeline](docs/screenshots/pipeline.png) |
+
+| Calendar | Memory |
+| --- | --- |
+| ![Calendar](docs/screenshots/calendar.png) | ![Memory](docs/screenshots/memory.png) |
+
+| Docs | Team |
+| --- | --- |
+| ![Docs](docs/screenshots/docs.png) | ![Team](docs/screenshots/team.png) |
+
+| System | Setup |
+| --- | --- |
+| ![System](docs/screenshots/system.png) | ![Setup](docs/screenshots/connect.png) |
+
+System panels:
+
+| Logs | Sessions |
+| --- | --- |
+| ![Logs](docs/screenshots/system-logs.png) | ![Sessions](docs/screenshots/system-sessions.png) |
+
+| Settings | Connection |
+| --- | --- |
+| ![Settings](docs/screenshots/system-settings.png) | ![Connection](docs/screenshots/system-connection.png) |
+
+![Custom tools](docs/screenshots/system-tools.png)
+
+---
+
+## Install and run
+
+Prerequisites that this run used: git, Node.js 22.14.0 (Node 20.17+ or 22.9+ satisfies the npm 11.17.0 engines range), npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`.
+
+Create the database the template expects if it is not there yet: database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret. Change it before you expose the machine.
+
+`docker` was not installed in the environment where these commands were run, so Docker Compose was not part of the verified path. `docker-compose.yml` is still in the repo for a host that has Docker. The steps below are the ones that were executed on a fresh clone.
 
 ```bash
 git clone https://github.com/jaysinghcodes/mission-control.git
 cd mission-control
 npm ci
-cp .env.example .env          # replace INGEST_TOKEN=change-me with your own (blank → compose uses dev-ingest-token)
-docker compose up --build     # Postgres :5432, API :3000, web :5173
-npm run seed:demo             # optional but recommended — sample agents, tickets, calendar, memories, and docs
-```
-
-Open **http://localhost:5173/#/** — green "Connected" dot in the topbar means the live socket is up.
-
-| Service | URL |
-| --- | --- |
-| Web (dashboard) | http://localhost:5173/#/ |
-| API health | http://localhost:3000/health |
-| Tickets board | http://localhost:5173/#/tickets |
-| Calendar | http://localhost:5173/#/calendar |
-| Team / Office | http://localhost:5173/#/team · http://localhost:5173/#/office |
-
-### Operator name (optional)
-
-Set `OPERATOR_NAME` in the root `.env` (display only — **not** a secret, never used for auth). Compose passes it to the API and bakes it into the web bundle as `VITE_OPERATOR_NAME`. Blank → neutral first run (`Good evening` / default assignee `Operator`).
-
-For non-Docker `npm run dev`, also set `VITE_OPERATOR_NAME` (Vite only exposes `VITE_*` to the browser).
-
----
-
-## What this is
-
-| App | Path | Stack | Role |
-| --- | --- | --- | --- |
-| `web` | [`apps/web`](apps/web) | React 19 + Vite 8 + Tailwind CSS v4 | 14 dashboard routes (Overview, Tasks, Tickets, Backlog, Calendar, Approvals, Team, Office, Activity, Health, Sessions, Usage, Logs, Settings) + `/#/connect` onboarding = 15 pages |
-| `api` | [`apps/api`](apps/api) | NestJS 11 + Socket.IO + Prisma 7 (Postgres) | REST + live event bus, ticket/run lifecycle, ingest for the OpenClaw bridge |
-| `bridge` | [`bridge`](bridge) | Python 3 stdlib | Optional OpenClaw → Mission Control sync (`mc-bridge-sync.py`) |
-
-### Pages (15)
-
-Workspace: Overview · Tasks · Tickets · Backlog · Calendar · Approvals  
-Team: Team · Office · Live Activity  
-Observe: Health · Sessions · Usage & Cost · Logs · Settings  
-Onboarding: Connect (`/#/connect`)
-
-### Data model (9 Prisma models)
-
-`Agent` · `Run` · `Ticket` · `Session` · `CronJob` · `UsageSnapshot` · `ActivityEvent` · `Approval` · `ModelConfig`
-
-Migrations are a security red line: schema changes are human-reviewed and never auto-applied by the app. Compose runs `prisma migrate deploy` on api boot.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────┐         ┌──────────────────────────────────────────┐
-│         OpenClaw            │         │              Mission Control             │
-│  (agent runtime, cron jobs) │         │                                          │
-│                             │         │  ┌──────────────┐   Socket.IO (WS)   ┌───┴───────┐
-│  bridge/mc-bridge-sync.py   │────────▶│  │   api :3000  │──────────────────▶ │  web:5173 │
-│  (every ~5m, optional)      │  POST   │  │              │  broadcast events  │  React UI │
-│                             │  /events│  │  ingest →     │                    │  15 pages │
-└─────────────────────────────┘  token  │  │  gateway →    │◀── hello / health  │  (hash)   │
-                                        │  │  socket.io    │    tick (30s)      └──────────┘
-                                        │  │  Prisma 7 +   │
-                                        │  │  Postgres     │
-                                        │  └──────────────┘
-                                        └────────────────────────────────────────┘
-```
-
-Without OpenClaw, `npm run seed:demo` fills agents, cron jobs, tickets, activity, memories, a pending approval, and one experimental custom tool (System → Custom tools) so Board / Calendar / Team / Office / Memory are clickable. The same command writes sample markdown into the docs folder so Docs is clickable too. Docs do not use the bridge. A custom-tool test run only fills `{{name}}` placeholders inside the app.
-
-### Docs
-
-The Docs page reads markdown through the API. Set `DOCS_ROOT` to a host directory (see [`.env.example`](.env.example)); leave it unset and both the API and `npm run seed:demo` use `<repo>/data/docs`. Docker Compose bind-mounts that host path at `/data/docs` in the api container. The browser only ever asks for a server-issued id or a root-relative slug — it does not read the disk. A missing or empty folder is an empty page with a link to Setup (`/#/connect`) and `npm run seed:demo`, not an error. There is no editor on this page.
-
-### Event flow
-
-1. **Producers** — the vendored [`bridge/`](bridge/README.md) (or any trusted client) POSTs typed events to `POST /events` with `x-ingest-token`.
-2. **Ingest** — validates token + closed event-type union; rejects unknowns (400) and unauthenticated requests (401, fail-closed in production).
-3. **Gateway** — broadcasts to every connected Socket.IO client with a server timestamp; events also persist as `ActivityEvent`.
-4. **Dashboard** — `useLiveActivity` keeps recent events; topbar connection dot is honest (green only when the socket is up).
-
-### Security posture
-
-- **Loopback by default** — API binds `127.0.0.1` locally; compose publishes only on `127.0.0.1`.
-- **Fail-closed auth** — production needs `DATABASE_URL`; socket needs `SOCKET_TOKEN`; ingest needs `INGEST_TOKEN`.
-- **Locked CORS** — HTTP + WS locked to `WEB_ORIGIN` (never `*`).
-- **No secrets in code** — see [`.env.example`](.env.example).
-
----
-
-## Running locally
-
-### Docker (clone-and-run)
-
-```bash
 cp .env.example .env
-docker compose up --build
-npm run seed:demo
-# → http://localhost:5173/#/
-```
-
-- Postgres 16 on `127.0.0.1:5432` (volume `mc-db`)
-- API on `http://localhost:3000` (`prisma migrate deploy` on boot)
-- Web on `http://localhost:5173`
-
-### Manual (no Docker)
-
-Prereqs: Node 20+, npm, Postgres 16.
-
-```bash
-npm ci
+set -a; . ./.env; set +a
 (cd apps/api && npx prisma generate)
-# create DB, then:
 (cd apps/api && npx prisma migrate deploy)
-cp .env.example .env
-set -a; . ./.env; set +a          # api has no .env loader — export into the shell
-npm run dev                       # turbo: api + web
+npm run seed:demo
+npm run dev
 ```
 
-### Build / test / lint
+Then open **http://localhost:5173/#/tasks**.
 
-```bash
-npm run build
-npm test              # api jest unit tests (no DB)
-npm run test:e2e      # needs migrated Postgres at DATABASE_URL
-npm run lint
-```
+`npm ci` prints an `allow-scripts` warning for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. The following `npx prisma generate` still completed, and migrate deployed 7 migrations.
+
+What each step is doing:
+
+| Command | Why |
+| --- | --- |
+| `cp .env.example .env` | The API does not load `.env` by itself. Compose would, but this path exports the file into the shell. |
+| `set -a; . ./.env; set +a` | Puts `DATABASE_URL`, `INGEST_TOKEN`, `PORT`, `HOST`, and the rest into the environment. `turbo.json` only forwards listed variables into `npm run dev`. |
+| `npx prisma generate` | Builds the Prisma client. Run it from `apps/api`. |
+| `npx prisma migrate deploy` | Applies `apps/api/prisma/migrations`. The API does not migrate on this path. (The API container runs migrate on boot.) |
+| `npm run seed:demo` | Idempotent sample agents, cron jobs, tickets, projects, activity, approvals, memories, docs, devices, a mission line, and one custom tool. Safe to repeat. Refuses to run when `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
+| `npm run dev` | Turbo starts the API (`nest start --watch`) and the web app (`vite`) together. |
+
+Leave `GITHUB_TOKEN`, `DEEPSEEK_API_KEY`, and `ZAI_API_KEY` empty unless you want those optional features. Do not commit `.env`.
+
+`OPERATOR_NAME` is a display name, not a secret. Blank means the account chip says Operator. For `npm run dev`, also set `VITE_OPERATOR_NAME` to the same value if you want the browser bundle to see it. Vite only exposes `VITE_*` variables.
+
+### Ports
+
+| Service | Where it listened in this run |
+| --- | --- |
+| Web | `http://localhost:5173` (Vite on `::1:5173`). `http://127.0.0.1:5173` was connection refused. Use `localhost`. |
+| API | `http://127.0.0.1:3000` (`HOST` from `.env.example`). `GET /health` also answered on `http://localhost:3000`. |
+| Postgres | `127.0.0.1:5432`, database `mission_control` |
+
+`docker-compose.yml` publishes the same three ports on `127.0.0.1` only (`MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` override the host side). Inside Compose the API binds `0.0.0.0:3000` and the web image serves on `5173`.
+
+### First run
+
+1. `npm run dev` starts the API and the web app.
+2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar account chip says **Connected** plus the health latency when `GET /health` succeeds and the Socket.IO feed is up. **API only** means health is up and the socket is still reconnecting. **Offline** means the health probe failed.
+3. If the first health probe fails, the shell sends the browser to `/#/connect`. Later failures do not keep redirecting.
+4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, SSH tunnel, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks.
+5. The setup sheet text still tells you to look for an Overview page and for `/#/health`. Those routes are redirects now: `/#/` goes to Tasks, `/#/health` goes to System. Trust the sidebar chip and `/#/system`.
+
+`npm run seed:demo` is what fills the screenshots. Without it the board is empty, which is a valid first run, not a crash.
 
 ---
 
-## OpenClaw integration (optional)
+## Stack
 
-Fed by OpenClaw through the vendored bridge — see [`bridge/README.md`](bridge/README.md):
+| Piece | Path | What it is |
+| --- | --- | --- |
+| `web` | `apps/web` | React 19, Vite 8, Tailwind CSS v4, React Router hash routes, Socket.IO client |
+| `api` | `apps/api` | NestJS 11, Socket.IO, Prisma 7.9, Postgres 16 |
+| `bridge` | `bridge` | Optional Python 3 standard library sync from the OpenClaw CLI |
+| workspaces | repo root | npm workspaces and Turbo 2. `packageManager` is `npm@11.17.0` |
+
+Prisma models: `Agent`, `Run`, `Project`, `Ticket`, `Session`, `CronJob`, `UsageSnapshot`, `ActivityEvent`, `Approval`, `MemoryEntry`, `ModelConfig`, `Setting`, `Device`, `CustomTool`.
+
+Schema changes stay human reviewed. The app does not auto migrate on the `npm run dev` path.
+
+### Pages
+
+| Route | Screen |
+| --- | --- |
+| `/#/tasks` | Task board. Home. |
+| `/#/tasks?view=backlog` | Backlog list for the same tickets |
+| `/#/agents` | Agent cards |
+| `/#/approvals` | Pending and decided approvals |
+| `/#/projects` | Project list |
+| `/#/projects/<id>` | One project and its tickets |
+| `/#/office` | Office floor |
+| `/#/pipeline` | The same tickets as Build, QA, Ship, Deploy |
+| `/#/calendar` | Cron jobs for the week |
+| `/#/memory` | Memory notes |
+| `/#/docs` | Markdown library from `DOCS_ROOT` |
+| `/#/team` | Mission, people, devices |
+| `/#/system` | Health, spend, links to the panels below |
+| `/#/system/logs` | Gateway log tail, or an empty state |
+| `/#/system/sessions` | Sessions from `sessions.snapshot` |
+| `/#/system/settings` | Connection and log out |
+| `/#/system/connection` | How this browser reaches the API |
+| `/#/system/tools` | Experimental custom tools |
+| `/#/connect` | Setup sheet (no sidebar) |
+
+Old paths redirect: `/tickets` to `/tasks`, `/backlog` to `/tasks?view=backlog`, `/factory` and `/activity` to `/office`, `/health` and `/usage` to `/system`, `/logs` to `/system/logs`, `/sessions` to `/system/sessions`, `/settings` to `/system/settings`.
+
+---
+
+## How OpenClaw reports in
+
+Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). Short version, matching the code:
+
+* Endpoint: `POST /events` on the API (port 3000).
+* Header: `x-ingest-token: <INGEST_TOKEN>` where `<INGEST_TOKEN>` equals `INGEST_TOKEN` in the root `.env`.
+* Body: `{ "type": "<one of KNOWN_TYPES>", "payload": { } }`. The list lives in `apps/api/src/ingest/ingest.controller.ts`.
+* Success is `202` with `{ "accepted": true, "type", "ts" }`.
+* Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
+* `run.*` events are activity and a socket broadcast. They do not insert tickets or runs.
+* The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` and `PATCH /runs/:id`. Those two routes do not check the ingest token.
+* The office floor has no endpoint. It reads agents, tickets, approvals, and activity.
+* The server broadcasts its own `health.tick` on the socket about every 30 seconds. A client can also POST `health.tick`. The System bridge chip follows the newest activity row with source `openclaw`.
+
+Example that returned `202` against the running API (token redacted):
 
 ```bash
-python3 bridge/mc-bridge-sync.py            # one sync; reads INGEST_TOKEN from root .env
-python3 bridge/mc-bridge-sync.py --dry-run  # print events, post nothing
+curl -sS -X POST "http://127.0.0.1:3000/events" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: <INGEST_TOKEN>" \
+  -d '{"type":"health.tick","payload":{"uptimeSeconds":1,"connectedClients":0}}'
 ```
 
-Schedule every ~5 minutes (system cron or an OpenClaw cron job). Each run can post `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `run.*` events.
+Roster example, the object the ingest tests persist (send the whole roster, not one agent, or you wipe the table):
 
-**What works without OpenClaw / the bridge**
+```json
+{
+  "type": "agents.snapshot",
+  "payload": {
+    "agents": [
+      {
+        "name": "Nova",
+        "color": "#4DD0E1",
+        "role": "development",
+        "status": "working",
+        "emoji": "🔧",
+        "personalityTags": ["builder", "daily"],
+        "currentTask": "MC-200 agent data model",
+        "tasksCompleted": 42,
+        "totalCost": 12.4,
+        "recentActivity": "merged PR #11",
+        "channel": "#development"
+      }
+    ]
+  }
+}
+```
 
-- Tickets loop: Backlog → To-Do → Build → QA → Review → Done (persisted)
-- Seeded demo Calendar, Team, Office, Activity, Approvals
-- Overview KPIs from the API + live socket (`hello` / `health.tick`)
+Optional bridge, from this repo, with no `openclaw` binary on `PATH`:
 
-**What needs the bridge**
+```bash
+python3 bridge/mc-bridge-sync.py --dry-run
+```
 
-- Live roster / cron jobs / sessions / usage from a real OpenClaw instance
-- Live `run.*` movement on the Office floor from real cron runs
-- Live Activity enriched by real agent work (ticket moves still emit `run.*` locally)
+That exited 0 and printed that it was skipping sessions, agents, and cron, and posting nothing. A real sync is the same command without `--dry-run`, after `openclaw` is installed and `INGEST_TOKEN` is set. Details: [bridge/README.md](bridge/README.md).
+
+---
+
+## Scripts
+
+There is no separate `typecheck` script. `npm run build` typechecks both apps (`tsc -b` in web, `nest build` in api).
+
+Generate the Prisma client first. npm 11.17.0 does not run the Prisma install scripts, so `npm test` and `npm run build` cannot see `.prisma/client` until you do:
+
+```bash
+(cd apps/api && npx prisma generate)
+npm test
+npm run build
+```
+
+On this clone, after that generate, `npm test` passed (API Jest: 26 suites, 190 tests; web: 49 tests) and `npm run build` passed.
+
+`npm run lint` is `oxlint` for the web app (warnings, exit 0) and `eslint --fix` for the API. The API lint exits 1 on the current sources (mostly `prettier/prettier`, plus typescript-eslint `no-unsafe-*` and `require-await`). That failure is in the existing API tree. Do not treat `eslint --fix` as safe to commit: it rewrites a lot of files. `npm run test:e2e` needs Postgres and was not part of this pass.
+
+---
+
+## Troubleshooting
+
+These are the failures hit while bringing up a fresh clone. Commands were run from the repo root unless noted.
+
+**`http://127.0.0.1:5173` connection refused, `http://localhost:5173` loads.** Vite 8 bound to `::1:5173` only. The API, with `HOST=127.0.0.1`, bound to IPv4 port 3000. Open the dashboard as `http://localhost:5173`. Call the API as `http://127.0.0.1:3000` or `http://localhost:3000` (localhost reached the IPv4 API).
+
+**Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or it is up on a different host than `VITE_API_URL` (default `http://localhost:3000`). Start Postgres, export `.env`, then `npm run dev`. A later health failure does not redirect again.
+
+**`POST /events` returns 401 `unauthorized`.** `INGEST_TOKEN` is set (the template ships a placeholder) and the `x-ingest-token` header is missing or different. Send the same value the API process has. A wrong token failed the same way.
+
+**`POST /events` returns 400 unknown event type.** `type` is not in `KNOWN_TYPES`. The response body lists the allowed names.
+
+**`POST /events` returns 400 `payload must be a JSON object`.** `payload` was an array or some other non object. Omit it or send `{}`.
+
+**`POST /tickets` returns 400 `title is required`.** The title was missing or blank. Create status must be `backlog` or `todo` if you send one.
+
+**`npm ci` warns that install scripts are not covered by allowScripts.** Seen for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. Until `(cd apps/api && npx prisma generate)`, `npm test` and `npm run build` fail with `Cannot find module '.prisma/client/default'`. Generate succeeded after the warning. If generate cannot find query engines, allow those scripts (`npm approve-scripts` in the npm 11 docs) and generate again.
+
+**`npm run lint` exits 1.** The web oxlint step finishes. The API eslint step reports existing `prettier/prettier` and typescript-eslint errors and exits 1. That is the current tree, not a missing env var.
+
+**`python3 bridge/mc-bridge-sync.py` says `openclaw` is not on PATH and posts nothing.** Expected on a machine without the OpenClaw CLI. Exit code was 0. Demo data stays. Install the CLI, or POST `/events` yourself using the onboarding file.
+
+**Setup sheet mentions Overview and `/#/health`.** The current home is `/#/tasks`. `/#/health` redirects to `/#/system`. The Connected chip is in the sidebar under the account name.
 
 ---
 
 ## Layout
 
 ```
-apps/web/                  React dashboard (HashRouter, 15 pages)
-apps/api/                  NestJS backend + Prisma schema (9 models)
-bridge/                    OpenClaw → Mission Control sync (optional)
-design/                    IA flow, wireframes, design tokens
-docs/screenshots/          Seeded-demo PNGs embedded above
-logos/                     Brand explorations
-ONBOARDING.md              Guided install (agent-pasteable)
+apps/web/                  React dashboard
+apps/api/                  NestJS API, Prisma schema, seed script
+bridge/                    Optional OpenClaw sync
+docs/OPENCLAW_ONBOARDING.md   Paste this to an OpenClaw agent
+docs/screenshots/          PNGs embedded above
+ONBOARDING.md              Human install steps for an agent to walk through
 ```
-
----
-
-## Dev workflow
-
-- **No direct merges to `main`** — everything lands via PR.
-- Merge → delete the source branch (local and remote).
-- Keep PRs small; heavy inline comments on new code.
-- Security red lines: auth, DB schema, and secrets are human-reviewed line by line.
-
-## Roadmap
-
-1. ✅ Monorepo + design tokens + Overview shell
-2. ✅ NestJS API, Socket.IO gateway, Prisma, health
-3. ✅ Live activity feed (web ↔ socket)
-4. ✅ Tickets kanban, Tasks/runs, Approvals, Calendar, Team, Office, Observe pages
-5. ✅ OpenClaw ingest + health ticker + vendored `bridge/`
-6. ✅ Idempotent `seed:demo` for clone-without-OpenClaw
-7. ✅ OSS reposition — MIT, neutral operator config (`OPERATOR_NAME`), docs/screenshots
-8. 🔜 Next: see open issues / PRs
