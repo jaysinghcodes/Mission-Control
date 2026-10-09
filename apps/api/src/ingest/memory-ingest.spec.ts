@@ -6,13 +6,16 @@ import type { SnapshotsService } from '../snapshots/snapshots.service';
 describe('POST /events memory.snapshot', () => {
   const saved = { ...process.env };
 
+  beforeEach(() => {
+    delete process.env.INGEST_TOKEN;
+    process.env.NODE_ENV = 'development';
+  });
+
   afterEach(() => {
     process.env = { ...saved };
   });
 
   it('accepts memory.snapshot and applies it through the snapshot service', async () => {
-    delete process.env.INGEST_TOKEN;
-    process.env.NODE_ENV = 'development';
     const applyMemory = jest.fn(async () => undefined);
     const snapshots = { applyMemory } as unknown as SnapshotsService;
     const prisma = {
@@ -34,8 +37,6 @@ describe('POST /events memory.snapshot', () => {
   });
 
   it('still rejects an unknown type', async () => {
-    delete process.env.INGEST_TOKEN;
-    process.env.NODE_ENV = 'development';
     const controller = new IngestController(
       { broadcast: jest.fn() } as unknown as LiveActivityGateway,
       { activityEvent: { create: jest.fn() } } as unknown as PrismaService,

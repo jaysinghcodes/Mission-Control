@@ -13,7 +13,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run dev` | `nest start --watch`. Export the root `.env` first. This process does not load `.env` itself. |
 | `npm run build` | `nest build` |
 | `npm run start:prod` | `node dist/main` |
-| `npm test` | Jest. Most suites mock Prisma and need no database. `src/ingest/ingest.controller.spec.ts` boots the real app: the ingest door tests and the agent snapshot tests need a migrated Postgres at `DATABASE_URL`. Export the root `.env` (`set -a; . ./.env; set +a`), generate the client, and run `npx prisma migrate deploy` in this directory before `npm test` when that database is not already up. |
+| `npm test` | Jest. Most suites mock Prisma and need no database. Six of the eight tests in `src/ingest/ingest.controller.spec.ts` write through the real app and need a migrated Postgres at `DATABASE_URL` (a known event, a valid production token, and the four agent snapshot cases). The unknown type check and the production missing token check do not. Export the root `.env` (`set -a; . ./.env; set +a`), generate the client, and run `npx prisma migrate deploy` in this directory before `npm test` when that database is not already up. |
 | `npm run test:e2e` | Separate Jest config under `test/`. Also needs a migrated Postgres at `DATABASE_URL`. |
 | `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run lint` | ESLint |

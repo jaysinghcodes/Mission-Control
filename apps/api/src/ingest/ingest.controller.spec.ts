@@ -15,6 +15,10 @@ describe('IngestController (POST /events)', () => {
   const savedEnv = { ...process.env };
 
   beforeEach(async () => {
+    // A root .env copied from .env.example sets INGEST_TOKEN. Auth runs
+    // before type checks, so that value would turn "unknown type" into 401.
+    // Each test sets the token itself when it wants one. afterEach restores it.
+    delete process.env.INGEST_TOKEN;
     jest.resetModules();
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],

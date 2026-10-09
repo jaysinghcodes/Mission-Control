@@ -35,11 +35,16 @@
         "VITE_*"
       ]
     },
-    // `npm test` → every workspace that has a `test` script (today: api jest
-    // unit tests — no database needed). Workspaces without one are skipped.
-    // No build artifacts to cache (coverage only appears with test:cov).
+    // `npm test` runs each workspace `test` script. The ingest specs boot the
+    // real API and need Postgres, so DATABASE_URL must reach the process.
+    // It is not hashed. The task is not cached, because a live database
+    // can change the result. INGEST_TOKEN is not forwarded: those specs
+    // clear it and set their own value. Workspaces without a test script
+    // are skipped.
     "test": {
-      "outputs": []
+      "cache": false,
+      "outputs": [],
+      "passThroughEnv": ["DATABASE_URL"]
     },
     // `npm run test:e2e` → api e2e against a real, migrated Postgres at
     // DATABASE_URL. Never cached: the result depends on live DB state.

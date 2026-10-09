@@ -238,7 +238,7 @@ npm test
 npm run build
 ```
 
-On this clone, after that generate, `npm test` passed (API Jest: 27 suites, 195 tests; web: 49 tests) and `npm run build` passed. The web suite also passed on Node 20.19.2. Seven tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. The rest of `npm test` does not.
+On this clone, after that generate, `npm test` passed (API Jest: 27 suites, 195 tests; web: 49 tests) and `npm run build` passed. The web suite also passed on Node 20.19.2. Six of the eight tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres stopped, that file is the only API failure: 6 failed, 189 passed, 195 total. The unknown event type check and the production missing token check return before they write. Web tests do not use Postgres.
 
 `npm run lint` is `oxlint` for the web app (warnings, exit 0) and `eslint --fix` for the API. The API lint exits 1 on the current sources (mostly `prettier/prettier`, plus typescript-eslint `no-unsafe-*` and `require-await`). That failure is in the existing API tree. Do not treat `eslint --fix` as safe to commit: it rewrites a lot of files. `npm run test:e2e` needs Postgres and was not part of this pass.
 
