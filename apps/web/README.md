@@ -12,7 +12,7 @@ Data comes from the [API](../api/README.md) over REST (`useApi`) and Socket.IO (
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | Vite on port 5173. In the verified run, `localhost` worked and `127.0.0.1` did not. |
+| `npm run dev` | Vite on `127.0.0.1:5173` (`server.host` in `vite.config.ts`). |
 | `npm run build` | `tsc -b` then `vite build` |
 | `npm run preview` | Serve the production build |
 | `npm run lint` | oxlint |

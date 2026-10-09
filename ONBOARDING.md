@@ -35,7 +35,7 @@ Confirm each of these:
 ### Step 2. Clone and install
 
 ```sh
-git clone https://github.com/jaysinghcodes/Mission-Control.git
+git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
 cd mission-control
 npm ci
 ```
@@ -85,7 +85,7 @@ Ask the operator to open `http://localhost:5173/#/tasks`.
 
 * The task board loads. The sidebar chip says Connected when health and the socket are up.
 * `http://127.0.0.1:3000/health` returns `"status":"ok"` and `"database":"connected"`.
-* Do not use `http://127.0.0.1:5173`. On this Vite version that address was connection refused. `localhost` worked.
+* `http://127.0.0.1:5173/#/tasks` loads. Vite listens on `127.0.0.1`, the same loopback address as the API.
 
 `/#/` redirects to tasks. `/#/health` redirects to `/#/system`. The setup sheet inside the app still mentions an Overview page. Ignore that sentence and use Tasks and System.
 
@@ -116,7 +116,7 @@ Optional. The API and the dev server listen on loopback. From a laptop:
 ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000 ubuntu@<your-server-ip>
 ```
 
-Keep the SSH session open. `/#/connect` repeats this command per operating system. Note the dev server bind: the browser on the server used `localhost`, not `127.0.0.1`, for port 5173.
+Keep the SSH session open. `/#/connect` and the Health page repeat this command per operating system. Vite listens on `127.0.0.1:5173`, which is the address this tunnel forwards to. On the laptop, open `http://127.0.0.1:5173/#/tasks`.
 
 ### Step 8. Smoke test
 

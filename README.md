@@ -69,7 +69,7 @@ Create the database the template expects if it is not there yet: database `missi
 `docker` was not installed in the environment where these commands were run, so Docker Compose was not part of the verified path. `docker-compose.yml` is still in the repo for a host that has Docker. The steps below are the ones that were executed on a fresh clone.
 
 ```bash
-git clone https://github.com/jaysinghcodes/Mission-Control.git
+git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
 cd mission-control
 npm ci
 cp .env.example .env
@@ -103,7 +103,7 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `D
 
 | Service | Where it listened in this run |
 | --- | --- |
-| Web | `http://localhost:5173` (Vite on `::1:5173`). `http://127.0.0.1:5173` was connection refused. Use `localhost`. |
+| Web | `http://127.0.0.1:5173` (Vite `server.host` is `127.0.0.1`, same loopback bind as the API). `http://localhost:5173` also works when localhost resolves to that address. |
 | API | `http://127.0.0.1:3000` (`HOST` from `.env.example`). `GET /health` also answered on `http://localhost:3000`. |
 | Postgres | `127.0.0.1:5432`, database `mission_control` |
 
@@ -238,7 +238,7 @@ npm test
 npm run build
 ```
 
-On this clone, after that generate, `npm test` passed (API Jest: 26 suites, 190 tests; web: 49 tests) and `npm run build` passed.
+On this clone, after that generate, `npm test` passed (API Jest: 27 suites, 195 tests; web: 49 tests) and `npm run build` passed. The web suite also passed on Node 20.19.2. Seven tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. The rest of `npm test` does not.
 
 `npm run lint` is `oxlint` for the web app (warnings, exit 0) and `eslint --fix` for the API. The API lint exits 1 on the current sources (mostly `prettier/prettier`, plus typescript-eslint `no-unsafe-*` and `require-await`). That failure is in the existing API tree. Do not treat `eslint --fix` as safe to commit: it rewrites a lot of files. `npm run test:e2e` needs Postgres and was not part of this pass.
 
@@ -248,7 +248,7 @@ On this clone, after that generate, `npm test` passed (API Jest: 26 suites, 190 
 
 These are the failures hit while bringing up a fresh clone. Commands were run from the repo root unless noted.
 
-**`http://127.0.0.1:5173` connection refused, `http://localhost:5173` loads.** Vite 8 bound to `::1:5173` only. The API, with `HOST=127.0.0.1`, bound to IPv4 port 3000. Open the dashboard as `http://localhost:5173`. Call the API as `http://127.0.0.1:3000` or `http://localhost:3000` (localhost reached the IPv4 API).
+**The dev server listens on `127.0.0.1:5173`.** Vite `server.host` is `127.0.0.1`. The tunnel `ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000` forwards to that address. Open `http://127.0.0.1:5173/#/tasks` on the machine that opened the tunnel. The API, with `HOST=127.0.0.1`, listens on `127.0.0.1:3000`. `http://localhost:3000` also reaches it when localhost resolves to IPv4.
 
 **Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or it is up on a different host than `VITE_API_URL` (default `http://localhost:3000`). Start Postgres, export `.env`, then `npm run dev`. A later health failure does not redirect again.
 

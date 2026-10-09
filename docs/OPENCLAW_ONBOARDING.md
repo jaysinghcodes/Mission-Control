@@ -79,7 +79,7 @@ Useful URLs (the web app uses hash routes, so always include `/#/`):
 | Web app (redirects to Tasks) | http://localhost:5173/#/ |
 | API health | http://localhost:3000/health |
 
-`http://localhost:5173` is the Vite address that answered in the checked run. `http://127.0.0.1:5173` was connection refused on that machine. Call the API at `http://127.0.0.1:3000` or `http://localhost:3000`.
+Vite listens on `127.0.0.1:5173`. `http://127.0.0.1:5173` and `http://localhost:5173` both reach it when localhost resolves to that address. Call the API at `http://127.0.0.1:3000` or `http://localhost:3000`.
 
 Other repo commands: `npm run build`, `npm test`, `npm run test:e2e` (needs a migrated Postgres), `npm run lint`.
 

@@ -199,7 +199,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'YOU ARE HERE',
     body: [
       'Run the exact command for the OS you are on, replacing `<your-server-ip>` with your OpenClaw host (public IP or tailnet name).',
-      'Port 5173 = this dashboard, port 3000 = the API. Keep the SSH session open while you browse.',
+      'Port 5173 is the dashboard. Port 3000 is the API. Vite listens on 127.0.0.1:5173, so this tunnel reaches it. Keep the SSH session open while you browse.',
     ],
     probe: 'health',
     confirmable: false,

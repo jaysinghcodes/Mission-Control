@@ -159,8 +159,7 @@ export default function Health() {
         <SectionLabel>Access · Your Machine ({client})</SectionLabel>
         <pre className="mt-3 whitespace-pre-wrap font-mono text-[12px] text-mc-sub bg-mc-inner rounded-lg p-3">{SSH_STEPS[client]}</pre>
         <p className="mt-3 text-[12px] text-mc-faint">
-          Mission Control binds to loopback only. The SSH tunnel forwards ports 5173 (dashboard) and 3000 (API) to your machine;
-          keep the session open while you browse.
+          Mission Control binds to loopback only. Vite listens on 127.0.0.1:5173 and the API listens on 127.0.0.1:3000. The SSH tunnel forwards those ports to your machine. Keep the session open while you browse.
         </p>
       </Card>
     </div>
