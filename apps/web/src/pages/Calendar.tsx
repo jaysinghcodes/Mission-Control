@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useApi, apiPost } from '../hooks/useApi'
+import { useApi, apiSend } from '../hooks/useApi'
 import { PageHeader, Segmented, SoftCard, Face, StatusChip, Btn, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
@@ -141,8 +141,18 @@ export default function Calendar() {
 
   async function runNow(job: Job) {
     const who = ownerOf(job.name).name
-    const res = await apiPost<{ run?: { id: string } }>('/runs', { name: job.name, agent: who })
-    setRan(res ? 'Queued on the pipeline' : 'Could not start a run')
+    // Create is 201. 400 names the bad field. 404 is an unknown ticket.
+    // A 200 body with an error key is a failure, same as any non 2xx.
+    const res = await apiSend<{ run?: { id: string } }>('POST', '/runs', { name: job.name, agent: who })
+    if (res.ok && res.status === 201 && res.data?.run?.id) {
+      setRan('Queued on the pipeline')
+      return
+    }
+    if (res.status === 400 || res.status === 404) {
+      setRan(res.error ?? 'Could not start a run')
+      return
+    }
+    setRan('Could not start a run')
   }
 
   const hours = END_HOUR - START_HOUR

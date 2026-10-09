@@ -7,6 +7,8 @@ import type { Agent, AgentsResp } from '../types'
 import { OPERATOR_ASSIGNEE } from '../config'
 import { STAGES, stageCounts, stageIndexForStatus, ticketNeedsYou, type ApprovalLike } from '../lib/board'
 import { startedIso } from '../lib/started'
+import { TicketRuns } from '../components/TicketRuns'
+import { runsForTicket } from '../lib/ticket-runs'
 
 /**
  * Pipeline — the same tickets as the board, in Build → QA → Ship → Deploy.
@@ -24,7 +26,16 @@ interface Ticket {
 }
 interface TicketsResp { tickets: Ticket[] }
 interface ApprovalsResp { approvals: ApprovalLike[] }
-interface RunRow { id: string; name: string; ticketId?: string | null; startedAt: string | null; createdAt: string }
+interface RunRow {
+  id: string
+  name: string
+  agent?: string | null
+  status: string
+  progress?: number | null
+  ticketId?: string | null
+  startedAt: string | null
+  createdAt: string
+}
 interface RunsResp { runs: RunRow[] }
 
 const STAGE_COLOR = ['var(--mc-blue)', 'var(--mc-orange)', 'var(--mc-green)', 'var(--mc-teal)']
@@ -193,6 +204,7 @@ export default function Pipeline() {
                       <div className="mt-3 pl-16 text-[12.5px] text-mc-sub">
                         {ticket.key ?? 'No key'} · started {fmt(startedIso(ticket, runs)) || '—'}
                         {blocked ? ' · paused until you decide in Approvals' : ''}
+                        <TicketRuns runs={runsForTicket(runs, ticket.id)} />
                       </div>
                     )}
                   </button>

@@ -190,10 +190,12 @@ function errorMessage(body: unknown, status: number): string {
 /**
  * Core write helper: send JSON with any method and get an ApiResult back.
  *
- * Non-2xx responses are failures (obviously), and so is a 2xx whose body is a
- * bare `{ error }` — that legacy shape is what some controllers returned
- * before they adopted HttpExceptions (tickets did until PR #20; runs and
- * approvals still do), and treating it as success hid real failures.
+ * Non-2xx responses are failures, and so is a 2xx whose body is a bare
+ * `{ error }`. That legacy shape is what some controllers returned before
+ * they adopted HttpExceptions (tickets did until PR #20). Runs now return
+ * 400, 404, 201, and 200, and a success body has no error key. Approvals
+ * still use the old shape. Treating a 2xx `{ error }` as failure still
+ * guards that leftover.
  */
 export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<ApiResult<T>> {
   let res: Response
