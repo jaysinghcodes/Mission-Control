@@ -2,12 +2,10 @@ import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Post }
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * ModelsController — user-configured models for usage tracking.
+ * ModelsController: a stored list of provider and model names.
  *
- * The Usage page "+" flow: the user adds a provider+model they want to track
- * (e.g. deepseek/deepseek-v4-flash, zai/glm-5.2). The bridge cron reads this
- * list and fetches a live balance/usage per configured model, which then
- * shows up in /usage and the Health provider cards.
+ * The bridge does not read GET /models. This API does not call DeepSeek
+ * or Z.ai. Spend on System comes from usage.snapshot.
  */
 @Controller('models')
 export class ModelsController {

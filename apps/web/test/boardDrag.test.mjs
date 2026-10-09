@@ -17,6 +17,10 @@ function installGlobal(key, value) {
 }
 installGlobal('window', dom)
 installGlobal('document', dom.document)
+// Node 22 already has navigator. Node 20 does not, and React reads it while rendering.
+if (typeof globalThis.navigator === 'undefined') {
+  installGlobal('navigator', dom.navigator)
+}
 installGlobal('HTMLElement', dom.HTMLElement)
 installGlobal('Element', dom.Element)
 installGlobal('Node', dom.Node)
