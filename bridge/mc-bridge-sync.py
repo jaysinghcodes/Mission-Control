@@ -31,6 +31,9 @@ Design rules (why the code looks the way it does):
     activity feed is not flooded with duplicates every 5 minutes.
   * A 404 for an unknown ticketId on POST /runs or PATCH /runs is retried
     once without ticketId. The run is still recorded. The token is not logged.
+  * POST /runs clips name to 200 characters and agent to 100, counting
+    Unicode code points, so a long OpenClaw name still records a run.
+  * One failed run does not block saving state for the runs that succeeded.
   * Secrets: INGEST_TOKEN comes from the environment or the repo-root .env.
     It is sent only as the x-ingest-token header and is NEVER printed, even
     with --dry-run.
@@ -58,7 +61,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # ── Paths / config ──────────────────────────────────────────────────────────
 
@@ -366,10 +369,26 @@ def ticket_id_of(job: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+# Same caps as POST /runs. Counted in Unicode code points, which is what
+# Python str indexing already does and what the API checks with [...text].
+RUN_NAME_MAX = 200
+RUN_AGENT_MAX = 100
+
+
+def _clip_chars(value: str, limit: int) -> str:
+    """Trim, then keep the first `limit` code points. Empty stays empty."""
+    text = value.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit]
+
+
 def _run_create_body(name: str, agent: Any, ticket_id: Optional[str]) -> Dict[str, Any]:
-    body: Dict[str, Any] = {"name": name}
-    if isinstance(agent, str) and agent.strip():
-        body["agent"] = agent.strip()
+    body: Dict[str, Any] = {"name": _clip_chars(name, RUN_NAME_MAX)}
+    if isinstance(agent, str):
+        clipped = _clip_chars(agent, RUN_AGENT_MAX)
+        if clipped:
+            body["agent"] = clipped
     if ticket_id:
         body["ticketId"] = ticket_id
     return body
@@ -937,16 +956,25 @@ def apply_run_calls(
     token: str,
     calls: List[Dict[str, Any]],
     state: Dict[str, Any],
+    failed_jobs: Optional[Set[str]] = None,
 ) -> int:
     """POST /runs (expect 201) and PATCH /runs/:id (expect 200).
 
     Returns how many calls failed. A 201 whose body has an error key is a
     failure. A 404 for an unknown ticketId is retried once without ticketId
     and does not count as a failure when that retry succeeds. On create, the
-    new id is stored on the job so the next sync can PATCH it. The token is
+    new id is stored on the job so the next sync can PATCH it. Job ids that
+    failed are added to `failed_jobs` when that set is passed. The token is
     never logged.
     """
     failures = 0
+
+    def fail(job_id: str) -> None:
+        nonlocal failures
+        failures += 1
+        if failed_jobs is not None and job_id:
+            failed_jobs.add(job_id)
+
     for call in calls:
         job_id = str(call.get("jobId") or "")
         if call.get("op") == "patch":
@@ -955,18 +983,18 @@ def apply_run_calls(
             if _accepted(ok, status, 200):
                 continue
             log(f"PATCH {path}: expected HTTP 200, got {status} {_error_message(body)}".rstrip())
-            failures += 1
+            fail(job_id)
             continue
         ok, status, body = write_run(api_url, token, "POST", "/runs", call.get("body") or {})
         if not _accepted(ok, status, 201) or not isinstance(body, dict):
             log(f"POST /runs: expected HTTP 201, got {status} {_error_message(body)}".rstrip())
-            failures += 1
+            fail(job_id)
             continue
         run = body.get("run")
         run_id = run.get("id") if isinstance(run, dict) else None
         if not isinstance(run_id, str) or not run_id:
             log("POST /runs: HTTP 201 had no run id")
-            failures += 1
+            fail(job_id)
             continue
         slot = state.get(job_id)
         if isinstance(slot, dict):
@@ -979,8 +1007,44 @@ def apply_run_calls(
         if _accepted(ok2, status2, 200):
             continue
         log(f"PATCH {path}: expected HTTP 200, got {status2} {_error_message(body2)}".rstrip())
-        failures += 1
+        fail(job_id)
     return failures
+
+
+def keep_successful_run_state(
+    prior: Dict[str, Any],
+    state: Dict[str, Any],
+    failed_jobs: Set[str],
+) -> None:
+    """Leave successful jobs as planned. Roll a failed job back.
+
+    A create that landed keeps its new runId, so the next sync patches that
+    row instead of inserting another one. A failure that stored nothing
+    restores the previous slot, and the same transition is tried again.
+    """
+    for jid in failed_jobs:
+        current = state.get(jid) if isinstance(state.get(jid), dict) else None
+        prev = prior.get(jid) if isinstance(prior.get(jid), dict) else None
+        prev_run = prev.get("runId") if prev else None
+        current_run = current.get("runId") if isinstance(current, dict) else None
+        if current_run and current_run != prev_run:
+            continue
+        if prev is None:
+            state.pop(jid, None)
+        else:
+            state[jid] = dict(prev)
+
+
+def persist_run_state(state_file: Path, state: Dict[str, Any], event_failures: int) -> None:
+    """Write the run-diff file unless an activity post failed.
+
+    A failed POST /runs or PATCH /runs does not skip this. Those jobs were
+    already rolled back. The runs that succeeded stay in the file.
+    """
+    if event_failures != 0:
+        return
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(state))
 
 
 def post(api_url: str, token: str, etype: str, payload: Dict[str, Any]) -> bool:
@@ -1051,6 +1115,7 @@ def main() -> int:
     cron_rows = as_list(src.cron(), "jobs", "cron")
     state_file = Path(os.environ.get("MC_BRIDGE_STATE_FILE", DEFAULT_STATE_FILE))
     state: Dict[str, Any] = {}
+    prior_state: Dict[str, Any] = {}
     run_calls: List[Dict[str, Any]] = []
     if cron_rows is not None:
         events.append(("calendar.snapshot", {"jobs": map_cron(cron_rows)}))
@@ -1058,6 +1123,9 @@ def main() -> int:
             state = json.loads(state_file.read_text()) if state_file.is_file() else {}
         except (OSError, json.JSONDecodeError):
             state = {}
+        if not isinstance(state, dict):
+            state = {}
+        prior_state = {k: dict(v) for k, v in state.items() if isinstance(v, dict)}
         run_events, run_calls = cron_run_plan(cron_rows, state)
         events.extend(run_events)
 
@@ -1100,19 +1168,22 @@ def main() -> int:
             print(json.dumps({"type": etype, "payload": payload}))
         return 0  # dry-run never writes the state file either
 
-    failures = sum(0 if post(api_url, token, t, p) else 1 for t, p in events)
+    event_failures = sum(0 if post(api_url, token, t, p) else 1 for t, p in events)
     # Run rows are separate from the activity events. 201 create, 200 update.
     # A 404 for an unknown ticketId is retried once without ticketId inside
-    # apply_run_calls, so that case is not a failure. Any other 400 or 404
-    # counts as a failure so the state file is not saved and the next sync
-    # retries. The token stays in the header only.
+    # apply_run_calls, so that case is not a failure. Any other failed run
+    # is rolled back to its previous slot. The runs that succeeded are still
+    # written, so one bad job cannot duplicate a healthy one or leave it
+    # running. The token stays in the header only. A failed activity post
+    # still skips the file so that run.* event is retried next sync.
+    run_failures = 0
     if run_calls:
-        failures += apply_run_calls(api_url, token, run_calls, state)
-    # Persist run-diff state only after a successful pass so a failed post
-    # doesn't swallow run.* transitions.
-    if cron_rows is not None and failures == 0:
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(json.dumps(state))
+        failed_jobs: Set[str] = set()
+        run_failures = apply_run_calls(api_url, token, run_calls, state, failed_jobs)
+        keep_successful_run_state(prior_state, state, failed_jobs)
+    if cron_rows is not None:
+        persist_run_state(state_file, state, event_failures)
+    failures = event_failures + run_failures
     log(f"posted {len(events) - failures}/{len(events)} events to {api_url}/events")
     return 1 if failures else 0
 

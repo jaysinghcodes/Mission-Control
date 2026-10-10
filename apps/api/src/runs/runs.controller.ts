@@ -1,14 +1,31 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { operatorName } from '../config/operator';
 import { isRunStatus, RUN_STATUSES } from './run-status';
 
-/** Stored run name. Longer input is 400 and the message names `name`. */
+/** Stored run name, in Unicode code points. Longer input is 400 and the message names `name`. */
 const NAME_MAX = 200;
 
-/** Stored run agent. Longer input is 400 and the message names `agent`. */
+/** Stored run agent, in Unicode code points. Longer input is 400 and the message names `agent`. */
 const AGENT_MAX = 100;
+
+/** One emoji is one character. `String.length` would count it as two UTF-16 units. */
+function codePointLength(value: string): number {
+  return [...value].length;
+}
 
 /** POST /runs fields. `status` is not one of them: create always queues. */
 const CREATE_FIELDS = new Set(['name', 'agent', 'ticketId']);
@@ -34,10 +51,15 @@ export class RunsController {
   ) {}
 
   @Get()
-  async list(@Query('status') status?: string, @Query('ticketId') ticketId?: string) {
+  async list(
+    @Query('status') status?: string,
+    @Query('ticketId') ticketId?: string,
+  ) {
     const where: { status?: string; ticketId?: string } = {};
-    if (typeof status === 'string' && status.trim()) where.status = status.trim();
-    if (typeof ticketId === 'string' && ticketId.trim()) where.ticketId = ticketId.trim();
+    if (typeof status === 'string' && status.trim())
+      where.status = status.trim();
+    if (typeof ticketId === 'string' && ticketId.trim())
+      where.ticketId = ticketId.trim();
     const runs = await this.prisma.run.findMany({
       where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: 'desc' },
@@ -52,8 +74,10 @@ export class RunsController {
     const payload = this.payload(body);
     this.rejectUnknown(payload, CREATE_FIELDS);
     const name = this.requireName(payload.name);
-    const agent = 'agent' in payload ? this.requireAgent(payload.agent) : operatorName();
-    const ticketId = 'ticketId' in payload ? await this.resolveTicket(payload.ticketId) : null;
+    const agent =
+      'agent' in payload ? this.requireAgent(payload.agent) : operatorName();
+    const ticketId =
+      'ticketId' in payload ? await this.resolveTicket(payload.ticketId) : null;
     const run = await this.prisma.run.create({
       // Default agent = the configured operator (OPERATOR_NAME env, neutral
       // "Operator" fallback). No personal name baked into a fresh clone.
@@ -64,7 +88,11 @@ export class RunsController {
         ...(ticketId ? { ticketId } : {}),
       },
     });
-    const event = { id: run.id, name: run.name, ...(run.ticketId ? { ticketId: run.ticketId } : {}) };
+    const event = {
+      id: run.id,
+      name: run.name,
+      ...(run.ticketId ? { ticketId: run.ticketId } : {}),
+    };
     await this.persist('run.queued', event);
     this.gateway.broadcast('run.queued', event);
     return { run, ts: Date.now() };
@@ -77,7 +105,10 @@ export class RunsController {
     // Shape checks first so a bad field is 400 even when the id is also wrong.
     this.rejectUnknown(payload, UPDATE_FIELDS);
     const status = this.parseStatus(payload.status, 'status' in payload);
-    const progress = this.parseProgress(payload.progress, 'progress' in payload);
+    const progress = this.parseProgress(
+      payload.progress,
+      'progress' in payload,
+    );
     const agent = this.parseAgent(payload.agent, 'agent' in payload);
     const ticketRaw = 'ticketId' in payload ? payload.ticketId : undefined;
 
@@ -85,7 +116,8 @@ export class RunsController {
     if (!existing) {
       throw new NotFoundException('run not found');
     }
-    const ticketId = ticketRaw !== undefined ? await this.resolveTicket(ticketRaw) : undefined;
+    const ticketId =
+      ticketRaw !== undefined ? await this.resolveTicket(ticketRaw) : undefined;
     const nextStatus = status ?? existing.status;
     const nextAgent = agent ?? existing.agent;
     const nextProgress = progress ?? existing.progress;
@@ -106,7 +138,10 @@ export class RunsController {
         status: nextStatus,
         agent: nextAgent,
         progress: nextProgress,
-        startedAt: nextStatus === 'running' && !existing.startedAt ? new Date() : existing.startedAt,
+        startedAt:
+          nextStatus === 'running' && !existing.startedAt
+            ? new Date()
+            : existing.startedAt,
         finishedAt: ['done', 'failed'].includes(nextStatus) ? new Date() : null,
         ...(ticketId !== undefined ? { ticketId } : {}),
       },
@@ -140,7 +175,10 @@ export class RunsController {
   }
 
   /** A key this route does not accept is 400. The message names the field. */
-  private rejectUnknown(body: Record<string, unknown>, allowed: ReadonlySet<string>): void {
+  private rejectUnknown(
+    body: Record<string, unknown>,
+    allowed: ReadonlySet<string>,
+  ): void {
     const unknown = Object.keys(body).filter((key) => !allowed.has(key));
     if (unknown.length === 0) return;
     const label = unknown.length === 1 ? 'unknown field' : 'unknown fields';
@@ -150,13 +188,16 @@ export class RunsController {
   /** Missing or blank is 400. A non string is 400. The message names `name`. */
   private requireName(raw: unknown): string {
     if (typeof raw !== 'string') {
-      if (raw === undefined || raw === null) throw new BadRequestException('name is required');
+      if (raw === undefined || raw === null)
+        throw new BadRequestException('name is required');
       throw new BadRequestException('name must be a string');
     }
     const name = raw.trim();
     if (!name) throw new BadRequestException('name is required');
-    if (name.length > NAME_MAX) {
-      throw new BadRequestException(`name must be ${NAME_MAX} characters or fewer`);
+    if (codePointLength(name) > NAME_MAX) {
+      throw new BadRequestException(
+        `name must be ${NAME_MAX} characters or fewer`,
+      );
     }
     return name;
   }
@@ -168,21 +209,27 @@ export class RunsController {
 
   private parseAgent(raw: unknown, present: boolean): string | undefined {
     if (!present) return undefined;
-    if (typeof raw !== 'string') throw new BadRequestException('agent must be a string');
+    if (typeof raw !== 'string')
+      throw new BadRequestException('agent must be a string');
     const agent = raw.trim();
     if (!agent) throw new BadRequestException('agent is required');
-    if (agent.length > AGENT_MAX) {
-      throw new BadRequestException(`agent must be ${AGENT_MAX} characters or fewer`);
+    if (codePointLength(agent) > AGENT_MAX) {
+      throw new BadRequestException(
+        `agent must be ${AGENT_MAX} characters or fewer`,
+      );
     }
     return agent;
   }
 
   private parseStatus(raw: unknown, present: boolean): string | undefined {
     if (!present) return undefined;
-    if (typeof raw !== 'string') throw new BadRequestException('status must be a string');
+    if (typeof raw !== 'string')
+      throw new BadRequestException('status must be a string');
     const status = raw.trim();
     if (!isRunStatus(status)) {
-      throw new BadRequestException(`status must be one of ${RUN_STATUSES.join(', ')}`);
+      throw new BadRequestException(
+        `status must be one of ${RUN_STATUSES.join(', ')}`,
+      );
     }
     return status;
   }
@@ -192,7 +239,8 @@ export class RunsController {
     if (typeof raw !== 'number' || !Number.isInteger(raw)) {
       throw new BadRequestException('progress must be an integer');
     }
-    if (raw < 0 || raw > 100) throw new BadRequestException('progress must be from 0 to 100');
+    if (raw < 0 || raw > 100)
+      throw new BadRequestException('progress must be from 0 to 100');
     return raw;
   }
 
@@ -202,7 +250,8 @@ export class RunsController {
    */
   private async resolveTicket(raw: unknown): Promise<string | null> {
     if (raw === null) return null;
-    if (typeof raw !== 'string') throw new BadRequestException('ticketId must be a string or null');
+    if (typeof raw !== 'string')
+      throw new BadRequestException('ticketId must be a string or null');
     const id = raw.trim();
     if (!id) return null;
     const ticket = await this.prisma.ticket.findUnique({ where: { id } });
@@ -211,9 +260,14 @@ export class RunsController {
   }
 
   /** Write a run.* event to the persisted activity stream. */
-  private async persist(type: string, payload: Record<string, unknown>): Promise<void> {
+  private async persist(
+    type: string,
+    payload: Prisma.InputJsonValue,
+  ): Promise<void> {
     try {
-      await this.prisma.activityEvent.create({ data: { type, payload: payload as object, source: 'api' } });
+      await this.prisma.activityEvent.create({
+        data: { type, payload, source: 'api' },
+      });
     } catch {
       // Persistence is best-effort. Never fail a state transition over it.
     }
