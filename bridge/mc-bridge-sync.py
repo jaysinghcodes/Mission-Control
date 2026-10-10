@@ -29,6 +29,8 @@ Design rules (why the code looks the way it does):
     demo seed). An instance that genuinely has zero items still posts [].
   * run.* events are emitted only on CHANGE, using a small state file, so the
     activity feed is not flooded with duplicates every 5 minutes.
+  * A 404 for an unknown ticketId on POST /runs or PATCH /runs is retried
+    once without ticketId. The run is still recorded. The token is not logged.
   * Secrets: INGEST_TOKEN comes from the environment or the repo-root .env.
     It is sent only as the x-ingest-token header and is NEVER printed, even
     with --dry-run.
@@ -897,6 +899,39 @@ def _accepted(ok: bool, status: int, expected: int) -> bool:
     return bool(ok) and status == expected
 
 
+def _unknown_ticket(status: int, body: Any) -> bool:
+    """True when the API rejected the call because ticketId is not a ticket."""
+    return status == 404 and "ticketId" in _error_message(body)
+
+
+def _without_ticket(body: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in body.items() if key != "ticketId"}
+
+
+def write_run(
+    api_url: str,
+    token: str,
+    method: str,
+    path: str,
+    body: Dict[str, Any],
+) -> Tuple[bool, int, Any]:
+    """POST or PATCH one run. A 404 for an unknown ticketId is retried once.
+
+    The retry drops ticketId and logs a warning. The run is still recorded,
+    so a job is not dropped and is not left stuck in running. Any other
+    status is returned as-is. The token is never logged.
+    """
+    payload = body if isinstance(body, dict) else {}
+    ok, status, parsed = write_json(api_url, token, method, path, payload)
+    if ok or "ticketId" not in payload or not _unknown_ticket(status, parsed):
+        return ok, status, parsed
+    log(
+        f"warning: {method} {path} unknown ticketId {payload.get('ticketId')}. "
+        "Retrying once without ticketId"
+    )
+    return write_json(api_url, token, method, path, _without_ticket(payload))
+
+
 def apply_run_calls(
     api_url: str,
     token: str,
@@ -906,21 +941,23 @@ def apply_run_calls(
     """POST /runs (expect 201) and PATCH /runs/:id (expect 200).
 
     Returns how many calls failed. A 201 whose body has an error key is a
-    failure. On create, the new id is stored on the job so the next sync
-    can PATCH it. The token is never logged.
+    failure. A 404 for an unknown ticketId is retried once without ticketId
+    and does not count as a failure when that retry succeeds. On create, the
+    new id is stored on the job so the next sync can PATCH it. The token is
+    never logged.
     """
     failures = 0
     for call in calls:
         job_id = str(call.get("jobId") or "")
         if call.get("op") == "patch":
             path = "/runs/" + urllib.parse.quote(str(call.get("runId") or ""), safe="")
-            ok, status, body = write_json(api_url, token, "PATCH", path, call.get("body") or {})
+            ok, status, body = write_run(api_url, token, "PATCH", path, call.get("body") or {})
             if _accepted(ok, status, 200):
                 continue
             log(f"PATCH {path}: expected HTTP 200, got {status} {_error_message(body)}".rstrip())
             failures += 1
             continue
-        ok, status, body = write_json(api_url, token, "POST", "/runs", call.get("body") or {})
+        ok, status, body = write_run(api_url, token, "POST", "/runs", call.get("body") or {})
         if not _accepted(ok, status, 201) or not isinstance(body, dict):
             log(f"POST /runs: expected HTTP 201, got {status} {_error_message(body)}".rstrip())
             failures += 1
@@ -938,7 +975,7 @@ def apply_run_calls(
         if not isinstance(follow, dict):
             continue
         path = "/runs/" + urllib.parse.quote(run_id, safe="")
-        ok2, status2, body2 = write_json(api_url, token, "PATCH", path, follow)
+        ok2, status2, body2 = write_run(api_url, token, "PATCH", path, follow)
         if _accepted(ok2, status2, 200):
             continue
         log(f"PATCH {path}: expected HTTP 200, got {status2} {_error_message(body2)}".rstrip())
@@ -1065,8 +1102,10 @@ def main() -> int:
 
     failures = sum(0 if post(api_url, token, t, p) else 1 for t, p in events)
     # Run rows are separate from the activity events. 201 create, 200 update.
-    # A 400 or 404 counts as a failure so the state file is not saved and the
-    # next sync retries. The token stays in the header only.
+    # A 404 for an unknown ticketId is retried once without ticketId inside
+    # apply_run_calls, so that case is not a failure. Any other 400 or 404
+    # counts as a failure so the state file is not saved and the next sync
+    # retries. The token stays in the header only.
     if run_calls:
         failures += apply_run_calls(api_url, token, run_calls, state)
     # Persist run-diff state only after a successful pass so a failed post

@@ -4,13 +4,27 @@ import { PrismaService } from '../prisma/prisma.service';
 import { operatorName } from '../config/operator';
 import { isRunStatus, RUN_STATUSES } from './run-status';
 
+/** Stored run name. Longer input is 400 and the message names `name`. */
+const NAME_MAX = 200;
+
+/** Stored run agent. Longer input is 400 and the message names `agent`. */
+const AGENT_MAX = 100;
+
+/** POST /runs fields. `status` is not one of them: create always queues. */
+const CREATE_FIELDS = new Set(['name', 'agent', 'ticketId']);
+
+/** PATCH /runs/:id fields. Anything else, including `name`, is 400. */
+const UPDATE_FIELDS = new Set(['status', 'progress', 'agent', 'ticketId']);
+
 /**
  * RunsController — task rows the board and the bridge share.
  *  - GET /runs              → list (optional ?status= and ?ticketId=)
  *  - POST /runs             → 201 { run, ts }. Missing name is 400. Unknown ticketId is 404.
  *  - PATCH /runs/:id        → 200 { run, ts }. Unknown run or ticketId is 404.
  * Success bodies have no `error` key. Failures throw, so they are not HTTP 200.
- * Every mutation broadcasts a run.* event so open dashboards update live.
+ * A real change broadcasts a run.* event so open dashboards update live.
+ * A PATCH that changes nothing returns the same run and writes no activity event.
+ * Unknown fields are 400 and are not stored.
  */
 @Controller('runs')
 export class RunsController {
@@ -36,6 +50,7 @@ export class RunsController {
   @HttpCode(201)
   async create(@Body() body: unknown = {}) {
     const payload = this.payload(body);
+    this.rejectUnknown(payload, CREATE_FIELDS);
     const name = this.requireName(payload.name);
     const agent = 'agent' in payload ? this.requireAgent(payload.agent) : operatorName();
     const ticketId = 'ticketId' in payload ? await this.resolveTicket(payload.ticketId) : null;
@@ -60,6 +75,7 @@ export class RunsController {
   async update(@Param('id') id: string, @Body() body: unknown = {}) {
     const payload = this.payload(body);
     // Shape checks first so a bad field is 400 even when the id is also wrong.
+    this.rejectUnknown(payload, UPDATE_FIELDS);
     const status = this.parseStatus(payload.status, 'status' in payload);
     const progress = this.parseProgress(payload.progress, 'progress' in payload);
     const agent = this.parseAgent(payload.agent, 'agent' in payload);
@@ -71,12 +87,25 @@ export class RunsController {
     }
     const ticketId = ticketRaw !== undefined ? await this.resolveTicket(ticketRaw) : undefined;
     const nextStatus = status ?? existing.status;
+    const nextAgent = agent ?? existing.agent;
+    const nextProgress = progress ?? existing.progress;
+    const nextTicketId = ticketId !== undefined ? ticketId : existing.ticketId;
+    // Same values are a no-op: 200 with the row already stored, and no
+    // activity event. A repeat click must not look like a new transition.
+    if (
+      nextStatus === existing.status &&
+      nextAgent === existing.agent &&
+      nextProgress === existing.progress &&
+      nextTicketId === existing.ticketId
+    ) {
+      return { run: existing, ts: Date.now() };
+    }
     const run = await this.prisma.run.update({
       where: { id },
       data: {
         status: nextStatus,
-        agent: agent ?? existing.agent,
-        progress: progress ?? existing.progress,
+        agent: nextAgent,
+        progress: nextProgress,
         startedAt: nextStatus === 'running' && !existing.startedAt ? new Date() : existing.startedAt,
         finishedAt: ['done', 'failed'].includes(nextStatus) ? new Date() : null,
         ...(ticketId !== undefined ? { ticketId } : {}),
@@ -110,6 +139,14 @@ export class RunsController {
     return body as Record<string, unknown>;
   }
 
+  /** A key this route does not accept is 400. The message names the field. */
+  private rejectUnknown(body: Record<string, unknown>, allowed: ReadonlySet<string>): void {
+    const unknown = Object.keys(body).filter((key) => !allowed.has(key));
+    if (unknown.length === 0) return;
+    const label = unknown.length === 1 ? 'unknown field' : 'unknown fields';
+    throw new BadRequestException(`${label} ${unknown.join(', ')}`);
+  }
+
   /** Missing or blank is 400. A non string is 400. The message names `name`. */
   private requireName(raw: unknown): string {
     if (typeof raw !== 'string') {
@@ -118,6 +155,9 @@ export class RunsController {
     }
     const name = raw.trim();
     if (!name) throw new BadRequestException('name is required');
+    if (name.length > NAME_MAX) {
+      throw new BadRequestException(`name must be ${NAME_MAX} characters or fewer`);
+    }
     return name;
   }
 
@@ -131,6 +171,9 @@ export class RunsController {
     if (typeof raw !== 'string') throw new BadRequestException('agent must be a string');
     const agent = raw.trim();
     if (!agent) throw new BadRequestException('agent is required');
+    if (agent.length > AGENT_MAX) {
+      throw new BadRequestException(`agent must be ${AGENT_MAX} characters or fewer`);
+    }
     return agent;
   }
 

@@ -182,6 +182,102 @@ describe('RunsController', () => {
     expect(cleared.run.ticketId).toBeNull();
   });
 
+  it('rejects a name over 200 characters or an agent over 100 with 400 that names the field', async () => {
+    const { controller, prisma } = make();
+    const huge = 'n'.repeat(20 * 1024);
+    await expect(controller.create({ name: huge })).rejects.toMatchObject({
+      message: 'name must be 200 characters or fewer',
+      status: 400,
+    });
+    await expect(controller.create({ name: 'n'.repeat(201) })).rejects.toMatchObject({
+      message: 'name must be 200 characters or fewer',
+      status: 400,
+    });
+    await expect(controller.create({ name: 'ok', agent: huge })).rejects.toMatchObject({
+      message: 'agent must be 100 characters or fewer',
+      status: 400,
+    });
+    await expect(controller.create({ name: 'ok', agent: 'a'.repeat(101) })).rejects.toMatchObject({
+      message: 'agent must be 100 characters or fewer',
+      status: 400,
+    });
+    expect(prisma.run.create).not.toHaveBeenCalled();
+
+    const created = await controller.create({ name: 'n'.repeat(200), agent: 'a'.repeat(100) });
+    expect(created.run.name).toHaveLength(200);
+    expect(created.run.agent).toHaveLength(100);
+    await expect(controller.update(created.run.id, { agent: 'a'.repeat(101) })).rejects.toMatchObject({
+      message: 'agent must be 100 characters or fewer',
+      status: 400,
+    });
+    expect(prisma.run.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown fields, including status on create, with 400 that names the field', async () => {
+    const { controller, prisma } = make();
+    await expect(controller.create({ name: 'Ship', status: 'running' })).rejects.toMatchObject({
+      message: 'unknown field status',
+      status: 400,
+    });
+    await expect(controller.create({ name: 'Ship', progress: 10 })).rejects.toMatchObject({
+      message: 'unknown field progress',
+      status: 400,
+    });
+    await expect(controller.create({ name: 'Ship', extra: true })).rejects.toMatchObject({
+      message: 'unknown field extra',
+      status: 400,
+    });
+    expect(prisma.run.create).not.toHaveBeenCalled();
+
+    const created = await controller.create({ name: 'Ship' });
+    await expect(controller.update(created.run.id, { name: 'Renamed' })).rejects.toMatchObject({
+      message: 'unknown field name',
+      status: 400,
+    });
+    await expect(controller.update(created.run.id, { name: 'Renamed', bogus: 1 })).rejects.toMatchObject({
+      message: 'unknown fields name, bogus',
+      status: 400,
+    });
+    await expect(controller.update('missing', { extra: 1 })).rejects.toMatchObject({
+      message: 'unknown field extra',
+      status: 400,
+    });
+    expect(prisma.run.update).not.toHaveBeenCalled();
+    expect(created.run.status).toBe('queued');
+  });
+
+  it('writes no activity event when a PATCH changes nothing', async () => {
+    const { controller, prisma, gateway } = make();
+    const created = await controller.create({ name: 'Morning brief', agent: 'Quill' });
+    const eventsAfterCreate = prisma.activityEvent.create.mock.calls.length;
+    const broadcastsAfterCreate = gateway.broadcast.mock.calls.length;
+
+    const same = await controller.update(created.run.id, {});
+    expect(same).not.toHaveProperty('error');
+    expect(same.run).toEqual(created.run);
+    expect(same.run.status).toBe('queued');
+
+    const repeated = await controller.update(created.run.id, {
+      status: 'queued',
+      progress: 0,
+      agent: 'Quill',
+      ticketId: null,
+    });
+    expect(repeated).not.toHaveProperty('error');
+    expect(repeated.run.status).toBe('queued');
+    expect(repeated.run.agent).toBe('Quill');
+    expect(repeated.run.progress).toBe(0);
+    expect(repeated.run.ticketId).toBeNull();
+    expect(prisma.activityEvent.create).toHaveBeenCalledTimes(eventsAfterCreate);
+    expect(gateway.broadcast).toHaveBeenCalledTimes(broadcastsAfterCreate);
+    expect(prisma.run.update).not.toHaveBeenCalled();
+
+    const moved = await controller.update(created.run.id, { status: 'running' });
+    expect(moved.run.status).toBe('running');
+    expect(prisma.activityEvent.create).toHaveBeenCalledTimes(eventsAfterCreate + 1);
+    expect(gateway.broadcast).toHaveBeenCalledTimes(broadcastsAfterCreate + 1);
+  });
+
   it('filters the list by ticketId', async () => {
     const { controller } = make();
     await controller.create({ name: 'Linked', ticketId: 'ticket-1' });

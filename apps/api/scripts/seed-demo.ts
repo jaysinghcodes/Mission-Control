@@ -253,7 +253,7 @@ async function main(): Promise<void> {
       `invalid demo ticket status: ${bad.map((t) => `${t.key}=${t.status}`).join(', ')} — expected one of ${TICKET_STATUSES.join(', ')}`,
     );
   }
-  // Same allowlist as POST /runs and PATCH /runs. This script writes rows
+  // Same allowlist as PATCH /runs. This script writes rows
   // through Prisma, so it never sees 201, 200, 400, or 404. A status the
   // API would 400, or a ticketId the API would 404, fails here instead.
   const badRuns = RUNS.filter((r) => !isRunStatus(r.status));

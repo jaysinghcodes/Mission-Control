@@ -123,6 +123,46 @@ describe('Runs (e2e)', () => {
       runs.push(res.body.run.id);
     });
 
+    it('a 20KB name or agent is 400 and the message names the field', async () => {
+      const huge = 'n'.repeat(20 * 1024);
+      const before = await prisma.run.count();
+      const name = await call().post('/runs').send({ name: huge });
+      expect(name.status).toBe(400);
+      expect(String(name.body.message)).toMatch(/name/);
+      const agent = await call().post('/runs').send({ name: 'Short', agent: huge });
+      expect(agent.status).toBe(400);
+      expect(String(agent.body.message)).toMatch(/agent/);
+      expect(await prisma.run.count()).toBe(before);
+    });
+
+    it('a name over 200 or an agent over 100 is 400, and the cap itself is accepted', async () => {
+      const over = await call().post('/runs').send({ name: 'n'.repeat(201), agent: 'a'.repeat(101) });
+      expect(over.status).toBe(400);
+      expect(String(over.body.message)).toMatch(/name/);
+
+      const res = await call().post('/runs').send({ name: 'n'.repeat(200), agent: 'a'.repeat(100) });
+      expect(res.status).toBe(201);
+      noError(res.body);
+      expect(res.body.run.name).toHaveLength(200);
+      expect(res.body.run.agent).toHaveLength(100);
+      runs.push(res.body.run.id);
+
+      const agent = await call().patch(`/runs/${res.body.run.id}`).send({ agent: 'a'.repeat(101) });
+      expect(agent.status).toBe(400);
+      expect(String(agent.body.message)).toMatch(/agent/);
+    });
+
+    it('an unknown field, including status, is 400 and nothing is inserted', async () => {
+      const before = await prisma.run.count();
+      const status = await call().post('/runs').send({ name: 'No status here', status: 'running' });
+      expect(status.status).toBe(400);
+      expect(String(status.body.message)).toMatch(/status/);
+      const extra = await call().post('/runs').send({ name: 'No extra', extra: true });
+      expect(extra.status).toBe(400);
+      expect(String(extra.body.message)).toMatch(/extra/);
+      expect(await prisma.run.count()).toBe(before);
+    });
+
     it('creates 201 and persists a real ticketId', async () => {
       const ticketId = await createTicket('e2e run parent');
       const res = await call().post('/runs').send({ name: 'Linked run', agent: 'Forge', ticketId });
@@ -176,6 +216,69 @@ describe('Runs (e2e)', () => {
       const row = await prisma.run.findUnique({ where: { id: created.body.run.id } });
       expect(row?.status).toBe('queued');
       expect(row?.ticketId).toBeNull();
+    });
+
+    it('an unknown field is 400 and the row stays unchanged', async () => {
+      const created = await call().post('/runs').send({ name: 'Stay put', agent: 'Quill' });
+      expect(created.status).toBe(201);
+      runs.push(created.body.run.id);
+      const before = await prisma.run.findUnique({ where: { id: created.body.run.id } });
+      const res = await call().patch(`/runs/${created.body.run.id}`).send({ status: 'done', bogus: 1 });
+      expect(res.status).toBe(400);
+      expect(String(res.body.message)).toMatch(/bogus/);
+      const after = await prisma.run.findUnique({ where: { id: created.body.run.id } });
+      expect(after?.status).toBe(before?.status);
+      expect(after?.agent).toBe('Quill');
+    });
+
+    it('a no-op PATCH is 200, leaves the run unchanged, and writes no activity event', async () => {
+      const created = await call().post('/runs').send({ name: 'Already queued', agent: 'Quill' });
+      expect(created.status).toBe(201);
+      runs.push(created.body.run.id);
+      const id = created.body.run.id as string;
+      const beforeRow = await prisma.run.findUnique({ where: { id } });
+      const beforeEvents = await prisma.activityEvent.count({
+        where: { payload: { path: ['id'], equals: id } },
+      });
+      expect(beforeEvents).toBeGreaterThan(0);
+
+      const empty = await call().patch(`/runs/${id}`).send({});
+      expect(empty.status).toBe(200);
+      noError(empty.body);
+      expect(empty.body.run.status).toBe('queued');
+      expect(empty.body.run.agent).toBe('Quill');
+      expect(empty.body.run.progress).toBe(0);
+      expect(empty.body.run.ticketId).toBeNull();
+
+      const repeated = await call().patch(`/runs/${id}`).send({
+        status: 'queued',
+        progress: 0,
+        agent: 'Quill',
+        ticketId: null,
+      });
+      expect(repeated.status).toBe(200);
+      noError(repeated.body);
+      expect(repeated.body.run.status).toBe('queued');
+
+      const afterRow = await prisma.run.findUnique({ where: { id } });
+      expect(afterRow?.status).toBe(beforeRow?.status);
+      expect(afterRow?.progress).toBe(beforeRow?.progress);
+      expect(afterRow?.agent).toBe(beforeRow?.agent);
+      expect(afterRow?.ticketId).toBe(beforeRow?.ticketId);
+      expect(afterRow?.startedAt).toEqual(beforeRow?.startedAt);
+      expect(afterRow?.finishedAt).toEqual(beforeRow?.finishedAt);
+      const afterEvents = await prisma.activityEvent.count({
+        where: { payload: { path: ['id'], equals: id } },
+      });
+      expect(afterEvents).toBe(beforeEvents);
+
+      const moved = await call().patch(`/runs/${id}`).send({ status: 'running' });
+      expect(moved.status).toBe(200);
+      expect(moved.body.run.status).toBe('running');
+      const afterMove = await prisma.activityEvent.count({
+        where: { payload: { path: ['id'], equals: id } },
+      });
+      expect(afterMove).toBe(beforeEvents + 1);
     });
 
     it('updates 200 with no error key and can set then clear ticketId', async () => {

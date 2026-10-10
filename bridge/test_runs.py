@@ -2,6 +2,7 @@
 import importlib.util
 import io
 import json
+import sys
 import unittest
 import urllib.error
 from pathlib import Path
@@ -260,6 +261,152 @@ class WriteTest(unittest.TestCase):
             self.mod.urllib.request.urlopen = original
         self.assertEqual(failed, 1)
         self.assertIsNone(state["j1"]["runId"])
+
+    def _http_error(self, req, status, payload):
+        return urllib.error.HTTPError(
+            req.full_url,
+            status,
+            "error",
+            hdrs=None,
+            fp=io.BytesIO(json.dumps(payload).encode()),
+        )
+
+    def test_unknown_ticket_is_retried_once_and_then_fails(self):
+        calls = []
+
+        def urlopen(req, timeout=15):
+            body = json.loads(req.data.decode())
+            calls.append(body)
+            self.assertNotIn(b"super-secret", req.data)
+            raise self._http_error(req, 404, {"message": "ticketId not found", "statusCode": 404})
+
+        state = {"j1": {"runId": None}}
+        original = self.mod.urllib.request.urlopen
+        stderr = io.StringIO()
+        old_err = sys.stderr
+        sys.stderr = stderr
+        self.mod.urllib.request.urlopen = urlopen
+        try:
+            failed = self.mod.apply_run_calls(
+                "http://127.0.0.1:3000",
+                "super-secret",
+                [{"jobId": "j1", "op": "create", "body": {"name": "Morning Brief", "ticketId": "missing"}}],
+                state,
+            )
+        finally:
+            self.mod.urllib.request.urlopen = original
+            sys.stderr = old_err
+        self.assertEqual(failed, 1)
+        self.assertIsNone(state["j1"]["runId"])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["ticketId"], "missing")
+        self.assertNotIn("ticketId", calls[1])
+        text = stderr.getvalue()
+        self.assertIn("warning:", text)
+        self.assertIn("Retrying once without ticketId", text)
+        self.assertNotIn("super-secret", text)
+
+    def test_a_missing_run_404_is_not_retried_as_a_missing_ticket(self):
+        calls = []
+
+        def urlopen(req, timeout=15):
+            calls.append(json.loads(req.data.decode()))
+            raise self._http_error(req, 404, {"message": "run not found", "statusCode": 404})
+
+        state = {"j1": {"runId": "run-missing"}}
+        original = self.mod.urllib.request.urlopen
+        self.mod.urllib.request.urlopen = urlopen
+        try:
+            failed = self.mod.apply_run_calls(
+                "http://127.0.0.1:3000",
+                "tok",
+                [{
+                    "jobId": "j1",
+                    "op": "patch",
+                    "runId": "run-missing",
+                    "body": {"status": "done", "progress": 100, "ticketId": "t1"},
+                }],
+                state,
+            )
+        finally:
+            self.mod.urllib.request.urlopen = original
+        self.assertEqual(failed, 1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["ticketId"], "t1")
+
+    def test_missing_openclaw_ticket_records_the_run_and_the_job_completes(self):
+        """OpenClaw has a ticket Mission Control does not. The run is stored
+        with no ticket, a warning is logged, and the job reaches done."""
+        seen = []
+
+        class Resp:
+            def __init__(self, status, payload):
+                self.status = status
+                self.payload = payload
+
+            def read(self):
+                return json.dumps(self.payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def urlopen(req, timeout=15):
+            body = json.loads(req.data.decode())
+            self.assertEqual(req.get_header("X-ingest-token"), "super-secret")
+            self.assertNotIn(b"super-secret", req.data)
+            seen.append((req.get_method(), body))
+            if "ticketId" in body:
+                raise self._http_error(req, 404, {"message": "ticketId not found", "statusCode": 404})
+            if req.get_method() == "POST":
+                return Resp(201, {"run": {"id": "run-kept", "ticketId": None, "status": "queued"}, "ts": 1})
+            return Resp(200, {
+                "run": {"id": "run-kept", "status": body.get("status"), "ticketId": None},
+                "ts": 2,
+            })
+
+        stderr = io.StringIO()
+        old_err = sys.stderr
+        sys.stderr = stderr
+        original = self.mod.urllib.request.urlopen
+        self.mod.urllib.request.urlopen = urlopen
+        try:
+            state = {"j1": {"running": False, "lastRunAtMs": None, "runId": None}}
+            _events, calls = self.mod.cron_run_plan(
+                [job("j1", "Morning Brief", running=True, ticket_id="missing-ticket")],
+                state,
+            )
+            failed = self.mod.apply_run_calls("http://127.0.0.1:3000", "super-secret", calls, state)
+            self.assertEqual(failed, 0)
+            self.assertEqual(state["j1"]["runId"], "run-kept")
+            self.assertTrue(state["j1"]["running"])
+
+            _events, calls = self.mod.cron_run_plan(
+                [job("j1", "Morning Brief", running=False, last_at=50, status="ok", ticket_id="missing-ticket")],
+                state,
+            )
+            failed = self.mod.apply_run_calls("http://127.0.0.1:3000", "super-secret", calls, state)
+        finally:
+            self.mod.urllib.request.urlopen = original
+            sys.stderr = old_err
+
+        self.assertEqual(failed, 0)
+        self.assertFalse(state["j1"]["running"])
+        self.assertEqual(state["j1"]["runId"], "run-kept")
+        posts = [body for method, body in seen if method == "POST" and "ticketId" not in body]
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0]["name"], "Morning Brief")
+        done = [body for method, body in seen if method == "PATCH" and body.get("status") == "done" and "ticketId" not in body]
+        self.assertEqual(len(done), 1)
+        self.assertEqual(done[0]["progress"], 100)
+        running = [body for method, body in seen if method == "PATCH" and body.get("status") == "running" and "ticketId" not in body]
+        self.assertEqual(len(running), 1)
+        text = stderr.getvalue()
+        self.assertIn("warning:", text)
+        self.assertIn("Retrying once without ticketId", text)
+        self.assertNotIn("super-secret", text)
 
 
 if __name__ == "__main__":
