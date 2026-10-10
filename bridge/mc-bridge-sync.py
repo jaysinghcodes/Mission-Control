@@ -16,17 +16,18 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
                                           + run.* for job-state changes
                                           + POST /runs and PATCH /runs/:id
                                             (ticketId when the job has one)
-  (derived from sessions token counts) →  usage.snapshot × 3 (24h, 7d, month)
+  (derived from sessions token counts) →  usage.snapshot (daily points, up to 30 days)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
   agent workspace MEMORY.md + memory/*.md → memory.snapshot
 
 Design rules (why the code looks the way it does):
   * stdlib only — runs under any python3 >= 3.8 with zero installs.
-  * NEVER WIPE ON FAILURE. Snapshots are replace-semantics on the API side
-    (SnapshotsService deletes + re-inserts). If a source is unavailable (no
-    `openclaw` on PATH, non-zero exit, bad JSON) that snapshot is SKIPPED, not
-    sent empty — otherwise a broken bridge would erase the dashboard (or the
-    demo seed). An instance that genuinely has zero items still posts [].
+  * NEVER WIPE ON FAILURE. Most snapshots replace a table on the API side.
+    usage.snapshot does not: it upserts daily points and leaves other days
+    alone. If a source is unavailable (no `openclaw` on PATH, non-zero exit,
+    bad JSON) that snapshot is SKIPPED, not sent empty — otherwise a broken
+    bridge would erase the dashboard (or the demo seed). An instance that
+    genuinely has zero items still posts [].
   * run.* events are emitted only on CHANGE, using a small state file, so the
     activity feed is not flooded with duplicates every 5 minutes.
   * A 404 for an unknown ticketId on POST /runs or PATCH /runs is retried
@@ -502,78 +503,159 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
     return events
 
 
-# 24h and 7d are trailing durations. `month` is the UTC calendar month to
-# date (not the last 30 days). Session counters are cumulative, so a long
-# session is counted in the window of its last activity (the UI says "estimated").
-USAGE_WINDOWS = (
-    ("24h", 86_400_000),
-    ("7d", 7 * 86_400_000),
-)
+# Session counters are cumulative. The first sync places each session on the
+# America/Chicago day of its last activity, up to 30 days back, when that
+# timestamp exists. Later syncs post only the increase, on the day of the
+# sync. Sessions with no timestamp are collected on the sync day only.
+# The payload is daily points. It does not include a 7d or month total.
+USAGE_BACKFILL_DAYS = 30
 
 
-def month_start_utc_ms(now_ms: int) -> int:
-    """00:00:00.000 UTC on the first day of the month that contains now_ms."""
-    dt = datetime.datetime.fromtimestamp(now_ms / 1000.0, datetime.timezone.utc)
-    start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    return int(start.timestamp() * 1000)
+def _usage_num(v: Any) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
 
 
-def usage_from_sessions(
+def _iso_utc_ms(ms: int) -> str:
+    dt = datetime.datetime.fromtimestamp(ms / 1000.0, datetime.timezone.utc).replace(microsecond=0)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _chicago_day_ms(ms: int) -> str:
+    dt = datetime.datetime.fromtimestamp(ms / 1000.0, datetime.timezone.utc)
+    return chicago_day_of(dt)
+
+
+def _shift_day(day: str, delta: int) -> str:
+    year, month, date = (int(part) for part in day.split("-"))
+    return (datetime.date(year, month, date) + datetime.timedelta(days=delta)).isoformat()
+
+
+def _recent_chicago_days(today: str, n: int = USAGE_BACKFILL_DAYS) -> set:
+    return {_shift_day(today, -i) for i in range(n)}
+
+
+def _blank_usage_day(at_ms: int) -> Dict[str, Any]:
+    return {"at": _iso_utc_ms(at_ms), "totalCost": 0.0, "tokensIn": 0, "tokensOut": 0, "providers": []}
+
+
+def _add_usage_provider(providers: List[Dict[str, Any]], model: str, cost: float, tin: float, tout: float) -> None:
+    if cost == 0 and tin == 0 and tout == 0:
+        return
+    name = model.split("/", 1)[0] if "/" in model else model
+    for row in providers:
+        if row.get("model") == model:
+            row["cost"] = round(float(row.get("cost") or 0) + cost, 4)
+            row["tokensIn"] = int(row.get("tokensIn") or 0) + int(tin)
+            row["tokensOut"] = int(row.get("tokensOut") or 0) + int(tout)
+            return
+    providers.append({
+        "name": name,
+        "model": model,
+        "cost": round(cost, 4),
+        "tokensIn": int(tin),
+        "tokensOut": int(tout),
+    })
+
+
+def usage_points_from_sessions(
     sessions: List[Dict[str, Any]],
     now_ms: int,
-    period: str = "24h",
-    window_ms: Optional[int] = None,
-    since_ms: Optional[int] = None,
-) -> Dict[str, Any]:
-    """Usage rolled up from per-session token/cost counters.
+    prior: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Build `{points: [...]}` and the usage state to keep for the next run.
 
-    `period` is the UsageSnapshot key (24h | 7d | month). A duration window
-    keeps sessions whose last activity is within `window_ms`. `month` with
-    no explicit window uses the UTC calendar month (`_updatedMs >= month start`).
-    Callers that only want the original 24h snapshot can keep calling
-    usage_from_sessions(sessions, now_ms).
+    `prior` is the `_mcUsage` object from the bridge state file, or None on
+    the first connect. The returned payload has no period total.
     """
-    if period == "month" and since_ms is None and window_ms is None:
-        since_ms = month_start_utc_ms(now_ms)
-    if since_ms is not None:
-        day = [s for s in sessions if s["_updatedMs"] and s["_updatedMs"] >= since_ms]
-    else:
-        if window_ms is None:
-            window_ms = dict(USAGE_WINDOWS).get(period, 86_400_000)
-        day = [s for s in sessions if s["_updatedMs"] and now_ms - s["_updatedMs"] < window_ms]
+    prior = prior if isinstance(prior, dict) else {}
+    seen: Dict[str, Dict[str, float]] = {}
+    for key, value in (prior.get("seen") or {}).items():
+        if isinstance(value, dict):
+            seen[str(key)] = {
+                "cost": _usage_num(value.get("cost")),
+                "in": _usage_num(value.get("in")),
+                "out": _usage_num(value.get("out")),
+            }
+    days: Dict[str, Dict[str, Any]] = {}
+    for key, value in (prior.get("days") or {}).items():
+        if not isinstance(value, dict):
+            continue
+        days[str(key)] = {
+            "at": str(value.get("at") or _iso_utc_ms(now_ms)),
+            "totalCost": _usage_num(value.get("totalCost")),
+            "tokensIn": int(_usage_num(value.get("tokensIn"))),
+            "tokensOut": int(_usage_num(value.get("tokensOut"))),
+            "providers": [dict(p) for p in (value.get("providers") or []) if isinstance(p, dict)],
+        }
+    started = bool(prior.get("started"))
+    today = _chicago_day_ms(now_ms)
+    allowed = _recent_chicago_days(today)
 
-    def num(v: Any) -> float:
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return 0.0
+    def ensure(day: str, at_ms: int) -> Optional[Dict[str, Any]]:
+        if day not in allowed:
+            return None
+        stamp = _iso_utc_ms(at_ms)
+        bucket = days.get(day)
+        if bucket is None:
+            bucket = _blank_usage_day(at_ms)
+            days[day] = bucket
+        elif stamp > str(bucket.get("at") or ""):
+            bucket["at"] = stamp
+        return bucket
 
-    # Per-model rollup. Usage.tsx / Health.tsx render each provider card from
-    # {name, model, cost, tokensIn, tokensOut} (all optional), so we fill those.
-    by_model: Dict[str, Dict[str, float]] = {}
-    for s in day:
-        m = s["model"] or "unknown"
-        agg = by_model.setdefault(m, {"cost": 0.0, "in": 0.0, "out": 0.0})
-        agg["cost"] += num(s["_cost"])
-        agg["in"] += num(s["_in"])
-        agg["out"] += num(s["_out"])
+    def add(day: str, at_ms: int, model: str, cost: float, tin: float, tout: float) -> None:
+        bucket = ensure(day, at_ms)
+        if bucket is None:
+            return
+        bucket["totalCost"] = round(float(bucket["totalCost"]) + cost, 4)
+        bucket["tokensIn"] = int(bucket["tokensIn"]) + int(tin)
+        bucket["tokensOut"] = int(bucket["tokensOut"]) + int(tout)
+        _add_usage_provider(bucket["providers"], model, cost, tin, tout)
 
-    def provider_name(model: str) -> str:
-        # OpenClaw model ids are usually "<provider>/<model>" — the prefix is
-        # the card title; bare ids fall back to the whole string.
-        return model.split("/", 1)[0] if "/" in model else model
+    for s in sessions:
+        name = str(s.get("name") or s.get("model") or "session")
+        model = str(s.get("model") or "unknown")
+        cost = _usage_num(s.get("_cost"))
+        tin = _usage_num(s.get("_in"))
+        tout = _usage_num(s.get("_out"))
+        updated = s.get("_updatedMs")
+        prev = seen.get(name)
+        if not started or prev is None:
+            if isinstance(updated, (int, float)) and not isinstance(updated, bool) and updated > 0:
+                day = _chicago_day_ms(int(updated))
+                at_ms = int(updated)
+            else:
+                day = today
+                at_ms = now_ms
+            if day in allowed:
+                add(day, at_ms, model, cost, tin, tout)
+        else:
+            add(
+                today,
+                now_ms,
+                model,
+                max(0.0, cost - prev["cost"]),
+                max(0.0, tin - prev["in"]),
+                max(0.0, tout - prev["out"]),
+            )
+        seen[name] = {"cost": cost, "in": tin, "out": tout}
 
-    return {
-        "period": period,
-        "totalCost": round(sum(num(s["_cost"]) for s in day), 4),
-        "tokensIn": int(sum(num(s["_in"]) for s in day)),
-        "tokensOut": int(sum(num(s["_out"]) for s in day)),
-        "providers": [
-            {"name": provider_name(m), "model": m, "cost": round(a["cost"], 4),
-             "tokensIn": int(a["in"]), "tokensOut": int(a["out"])}
-            for m, a in sorted(by_model.items())
-        ],
-    }
+    ensure(today, now_ms)
+    days = {day: bucket for day, bucket in days.items() if day in allowed}
+    points = []
+    for day in sorted(days):
+        bucket = days[day]
+        points.append({
+            "at": bucket["at"],
+            "totalCost": round(float(bucket["totalCost"]), 4),
+            "tokensIn": int(bucket["tokensIn"]),
+            "tokensOut": int(bucket["tokensOut"]),
+            "providers": sorted(bucket["providers"], key=lambda row: str(row.get("model") or "")),
+        })
+    return {"points": points}, {"started": True, "seen": seen, "days": days}
 
 
 # ── Memory (OpenClaw workspace files → memory.snapshot) ────────────────────
@@ -1051,7 +1133,7 @@ def post(api_url: str, token: str, etype: str, payload: Dict[str, Any]) -> bool:
     """POST one event. True on 2xx. Logs the status, never the token.
 
     The API applies the same x-ingest-token check to every write route.
-    This bridge only calls POST /events, and it always sends that header.
+    POST /events, POST /runs, and PATCH /runs/:id all send that header.
     """
     req = urllib.request.Request(
         f"{api_url.rstrip('/')}/events",
@@ -1117,22 +1199,22 @@ def main() -> int:
     state: Dict[str, Any] = {}
     prior_state: Dict[str, Any] = {}
     run_calls: List[Dict[str, Any]] = []
+    try:
+        loaded = json.loads(state_file.read_text()) if state_file.is_file() else {}
+        state = loaded if isinstance(loaded, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        state = {}
     if cron_rows is not None:
         events.append(("calendar.snapshot", {"jobs": map_cron(cron_rows)}))
-        try:
-            state = json.loads(state_file.read_text()) if state_file.is_file() else {}
-        except (OSError, json.JSONDecodeError):
-            state = {}
-        if not isinstance(state, dict):
-            state = {}
         prior_state = {k: dict(v) for k, v in state.items() if isinstance(v, dict)}
         run_events, run_calls = cron_run_plan(cron_rows, state)
         events.extend(run_events)
 
     if sessions is not None:
-        for period, window_ms in USAGE_WINDOWS:
-            events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms, period, window_ms)))
-        events.append(("usage.snapshot", usage_from_sessions(sessions, now_ms, "month")))
+        usage_payload, usage_state = usage_points_from_sessions(sessions, now_ms, state.get("_mcUsage"))
+        state["_mcUsage"] = usage_state
+        if usage_payload["points"]:
+            events.append(("usage.snapshot", usage_payload))
 
     approvals_rows = as_list(src.approvals(), "approvals")
     if approvals_rows is not None:
@@ -1181,9 +1263,12 @@ def main() -> int:
         failed_jobs: Set[str] = set()
         run_failures = apply_run_calls(api_url, token, run_calls, state, failed_jobs)
         keep_successful_run_state(prior_state, state, failed_jobs)
-    if cron_rows is not None:
-        persist_run_state(state_file, state, event_failures)
     failures = event_failures + run_failures
+    # Usage deltas share this file. A failed activity post skips the write so
+    # a delta is not counted twice. A failed run does not: that job was rolled
+    # back, and the runs that succeeded stay saved.
+    if event_failures == 0 and (cron_rows is not None or sessions is not None):
+        persist_run_state(state_file, state, 0)
     log(f"posted {len(events) - failures}/{len(events)} events to {api_url}/events")
     return 1 if failures else 0
 
