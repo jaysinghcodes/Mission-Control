@@ -1,14 +1,21 @@
 import { aggregateUsage, partialUsageNote } from './aggregate-usage';
 
-const DAY = 86_400_000;
-
 function point(at: string, cost: number, tokensIn = 10, tokensOut = 4) {
   return {
     at,
     totalCost: cost,
     tokensIn,
     tokensOut,
-    providers: [{ name: 'zai', model: 'glm-5.2', cost, tokensIn, tokensOut, agents: ['Speedy'] }],
+    providers: [
+      {
+        name: 'zai',
+        model: 'glm-5.2',
+        cost,
+        tokensIn,
+        tokensOut,
+        agents: ['Speedy'],
+      },
+    ],
   };
 }
 
@@ -53,7 +60,9 @@ describe('aggregateUsage boundaries', () => {
 
     const utc = aggregateUsage(rows, 'month', now, 'UTC');
     expect(utc.usage?.totalCost).toBe(12);
-    expect(new Date(utc.windowStart).toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    expect(new Date(utc.windowStart).toISOString()).toBe(
+      '2026-10-01T00:00:00.000Z',
+    );
   });
 
   it('splits November on the Chicago month start while UTC already counts it', () => {
@@ -63,7 +72,12 @@ describe('aggregateUsage boundaries', () => {
     const novemberBoth = point('2026-11-01T05:00:00.000Z', 7);
     const rows = [octoberChicago, novemberBoth];
 
-    const chicago = aggregateUsage(rows, 'month', novemberNow, 'America/Chicago');
+    const chicago = aggregateUsage(
+      rows,
+      'month',
+      novemberNow,
+      'America/Chicago',
+    );
     expect(chicago.usage?.totalCost).toBe(7);
     expect(chicago.days.map((d) => d.day)).toEqual(['2026-11-01']);
 
@@ -78,7 +92,12 @@ describe('aggregateUsage boundaries', () => {
     const januaryBoth = point('2026-01-01T06:00:00.000Z', 9);
     const rows = [decemberChicago, januaryBoth];
 
-    const chicago = aggregateUsage(rows, 'month', januaryNow, 'America/Chicago');
+    const chicago = aggregateUsage(
+      rows,
+      'month',
+      januaryNow,
+      'America/Chicago',
+    );
     expect(chicago.usage?.totalCost).toBe(9);
     expect(chicago.days[0].day).toBe('2026-01-01');
 
@@ -86,16 +105,55 @@ describe('aggregateUsage boundaries', () => {
     expect(utc.usage?.totalCost).toBe(12);
   });
 
-  it('includes the rolling 24h boundary and excludes the millisecond before it', () => {
-    const at = 1_700_000_000_000;
+  it('counts Today as the calendar day in Chicago and in UTC', () => {
+    const morning = Date.parse('2026-10-10T12:58:00.000Z');
+    const evening = Date.parse('2026-10-11T04:30:00.000Z');
     const rows = [
-      point(new Date(at - DAY).toISOString(), 1),
-      point(new Date(at - DAY - 1).toISOString(), 20),
+      point('2026-10-10T04:30:00.000Z', 10),
+      point('2026-10-10T05:00:00.000Z', 0.65),
+      point('2026-10-10T12:58:00.000Z', 1),
     ];
-    const view = aggregateUsage(rows, '24h', at, 'UTC');
-    expect(view.usage?.totalCost).toBe(1);
-    expect(view.note).toBeNull();
-    expect(view.daysExpected).toBe(1);
+
+    const early = aggregateUsage(rows, '24h', morning, 'America/Chicago');
+    expect(early.usage?.totalCost).toBe(1.65);
+    expect(early.days.map((d) => d.day)).toEqual(['2026-10-10']);
+    expect(early.daysCovered).toBe(1);
+    expect(early.daysExpected).toBe(1);
+    expect(early.note).toBeNull();
+    expect(early.windowStart).toBe(Date.parse('2026-10-10T05:00:00.000Z'));
+
+    const late = aggregateUsage(rows, '24h', evening, 'America/Chicago');
+    expect(late.usage?.totalCost).toBe(1.65);
+    expect(late.daysCovered).toBe(1);
+    expect(late.daysExpected).toBe(1);
+
+    const utc = aggregateUsage(
+      [
+        point('2026-10-09T23:59:00.000Z', 4),
+        point('2026-10-10T00:00:00.000Z', 6),
+      ],
+      '24h',
+      morning,
+      'UTC',
+    );
+    expect(utc.usage?.totalCost).toBe(6);
+    expect(utc.days.map((d) => d.day)).toEqual(['2026-10-10']);
+    expect(utc.windowStart).toBe(Date.parse('2026-10-10T00:00:00.000Z'));
+    expect(utc.daysCovered).toBe(1);
+    expect(utc.daysExpected).toBe(1);
+
+    const chicagoFromUtcMidnight = aggregateUsage(
+      [
+        point('2026-10-09T23:59:00.000Z', 4),
+        point('2026-10-10T00:00:00.000Z', 6),
+      ],
+      '24h',
+      morning,
+      'America/Chicago',
+    );
+    expect(chicagoFromUtcMidnight.usage).toBeNull();
+    expect(chicagoFromUtcMidnight.daysCovered).toBe(0);
+    expect(chicagoFromUtcMidnight.daysExpected).toBe(1);
   });
 
   it('says how many days it has and does not zero fill the gap', () => {
@@ -128,7 +186,12 @@ describe('aggregateUsage boundaries', () => {
   });
 
   it('leaves an unknown period empty', () => {
-    const view = aggregateUsage([point('2026-10-09T17:00:00.000Z', 5)], '30d', now, 'UTC');
+    const view = aggregateUsage(
+      [point('2026-10-09T17:00:00.000Z', 5)],
+      '30d',
+      now,
+      'UTC',
+    );
     expect(view.usage).toBeNull();
   });
 });

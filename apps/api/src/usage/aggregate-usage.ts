@@ -4,8 +4,6 @@ import { monthStartUtc } from './period-window';
 /** Operator-facing calendar. Memory and Approvals use the same zone. */
 export const USAGE_DISPLAY_TZ = 'America/Chicago';
 
-const DAY_MS = 86_400_000;
-
 export interface UsageProvider {
   name?: string;
   model?: string;
@@ -66,7 +64,10 @@ export function shiftCalendarDay(day: string, deltaDays: number): string {
  * Copy when a window is missing days. Zero covered days is not a sentence:
  * the caller shows an empty range instead of a zero.
  */
-export function partialUsageNote(covered: number, expected: number): string | null {
+export function partialUsageNote(
+  covered: number,
+  expected: number,
+): string | null {
   if (covered <= 0 || expected <= 0 || covered >= expected) return null;
   const unit = covered === 1 ? 'day' : 'days';
   return `Showing ${covered} ${unit} of data so far`;
@@ -82,7 +83,8 @@ function num(v: unknown): number {
 }
 
 export function providerList(value: UsagePoint['providers']): UsageProvider[] {
-  if (Array.isArray(value)) return value.filter((p) => p && typeof p === 'object');
+  if (Array.isArray(value))
+    return value.filter((p) => p && typeof p === 'object');
   if (value && typeof value === 'object') return Object.values(value);
   return [];
 }
@@ -109,7 +111,9 @@ export function mergeProviders(groups: UsageProvider[][]): UsageProvider[] {
       byKey.set(model, prev);
     }
   }
-  return [...byKey.values()].sort((a, b) => (a.model || '').localeCompare(b.model || ''));
+  return [...byKey.values()].sort((a, b) =>
+    (a.model || '').localeCompare(b.model || ''),
+  );
 }
 
 function expectedDays(period: string, now: Date, timeZone: string): string[] {
@@ -151,10 +155,11 @@ function blank(nowMs: number): AggregateResult {
 }
 
 /**
- * Sum timestamped points into a System window.
+ * Sum daily buckets into a System window.
  *
- * `24h` is a rolling day (inclusive of the instant 24h ago). `7d` is the
- * last 7 calendar days through today in `timeZone`. `month` is that
+ * `24h` is Today: the calendar day of `now` in `timeZone`. It is read from
+ * the same day buckets as the other windows. There is no hourly series.
+ * `7d` is the last 7 calendar days through today. `month` is that
  * timezone's calendar month to date. A day with no point is absent, not zero.
  */
 export function aggregateUsage(
@@ -163,12 +168,12 @@ export function aggregateUsage(
   nowMs: number,
   timeZone: string,
 ): AggregateResult {
-  if (period !== '24h' && period !== '7d' && period !== 'month') return blank(nowMs);
+  if (period !== '24h' && period !== '7d' && period !== 'month')
+    return blank(nowMs);
   const now = new Date(nowMs);
   const calendar = expectedDays(period, now, timeZone);
-  const windowStart = period === '24h'
-    ? nowMs - DAY_MS
-    : period === 'month' && (timeZone === 'UTC' || timeZone === 'Etc/UTC')
+  const windowStart =
+    period === 'month' && (timeZone === 'UTC' || timeZone === 'Etc/UTC')
       ? monthStartUtc(nowMs)
       : startOfDay(calendar[0], timeZone);
   const allowed = new Set(calendar);
@@ -176,11 +181,10 @@ export function aggregateUsage(
   const included = points.filter((point) => {
     const at = new Date(point.at).getTime();
     if (!Number.isFinite(at) || at > nowMs) return false;
-    if (period === '24h') return at >= windowStart;
     return allowed.has(calendarDay(new Date(at), timeZone));
   });
 
-  const daysExpected = period === '24h' ? 1 : calendar.length;
+  const daysExpected = calendar.length;
   if (included.length === 0) {
     return {
       usage: null,
@@ -192,7 +196,15 @@ export function aggregateUsage(
     };
   }
 
-  const byDay = new Map<string, { totalCost: number; tokensIn: number; tokensOut: number; providers: UsageProvider[] }>();
+  const byDay = new Map<
+    string,
+    {
+      totalCost: number;
+      tokensIn: number;
+      tokensOut: number;
+      providers: UsageProvider[];
+    }
+  >();
   for (const point of included) {
     const day = calendarDay(new Date(point.at), timeZone);
     const providers = providerList(point.providers);
@@ -213,18 +225,26 @@ export function aggregateUsage(
   }
 
   const ordered = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  const days = ordered.map(([day, row]) => ({ day, totalCost: round4(row.totalCost) }));
+  const days = ordered.map(([day, row]) => ({
+    day,
+    totalCost: round4(row.totalCost),
+  }));
   const daysCovered = byDay.size;
   return {
     usage: {
       period,
-      totalCost: round4([...byDay.values()].reduce((sum, row) => sum + row.totalCost, 0)),
+      totalCost: round4(
+        [...byDay.values()].reduce((sum, row) => sum + row.totalCost, 0),
+      ),
       tokensIn: [...byDay.values()].reduce((sum, row) => sum + row.tokensIn, 0),
-      tokensOut: [...byDay.values()].reduce((sum, row) => sum + row.tokensOut, 0),
+      tokensOut: [...byDay.values()].reduce(
+        (sum, row) => sum + row.tokensOut,
+        0,
+      ),
       providers: mergeProviders(ordered.map(([, row]) => row.providers)),
     },
     days,
-    note: period === '24h' ? null : partialUsageNote(daysCovered, daysExpected),
+    note: partialUsageNote(daysCovered, daysExpected),
     daysCovered,
     daysExpected,
     windowStart,

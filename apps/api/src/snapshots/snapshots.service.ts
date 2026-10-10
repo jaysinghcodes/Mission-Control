@@ -126,8 +126,11 @@ export class SnapshotsService {
    * including a bare 7d or month total. Days that are not in this payload
    * stay, so a later sync cannot wipe the days already collected.
    */
-  async applyUsage(payload: Record<string, unknown>): Promise<void> {
-    const buckets = usageBucketsFromPayload(payload);
+  async applyUsage(
+    payload: Record<string, unknown>,
+    now: Date = new Date(),
+  ): Promise<void> {
+    const buckets = usageBucketsFromPayload(payload, now);
     for (const bucket of buckets) {
       await this.prisma.usageBucket.upsert({
         where: { day: bucket.day },

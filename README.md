@@ -44,7 +44,9 @@ These are the current screens after `npm run seed:demo`. The sidebar has no Over
 
 | System | Setup |
 | --- | --- |
-| ![System](docs/screenshots/system.png) | ![Setup](docs/screenshots/connect.png) |
+| ![System, example data](docs/screenshots/system.png) | ![Setup](docs/screenshots/connect.png) |
+
+The System screenshot is example data from one seed. The dollar amounts depend on the date you run `npm run seed:demo`.
 
 System panels:
 
@@ -175,7 +177,7 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW
 * Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
 * `memory.snapshot` upserts notes by id and drops bridge sourced rows for the agents in the payload when those ids are missing. An empty `entries` list is a no op. It does not wipe Memory. Demo rows stay.
 * `agents.snapshot` replaces the whole roster. There is no endpoint that registers one agent.
-* `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers? }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` sums those points. 24h is a rolling day. The 7 day and month windows use the America/Chicago calendar. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. `npm run seed:demo` writes 30 days, so a fresh database shows all three windows. `period=30d` is not a window and returns `usage: null`. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced.
+* `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers? }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` sums those points. `period=24h` is Today, the calendar day in America/Chicago, taken from the daily buckets. There is no hourly storage. The 7 day and month windows use that same calendar. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. `npm run seed:demo` writes 30 days, and today's row is stamped at seed time. The dollar amounts depend on the date. `period=30d` is not a window and returns `usage: null`. A point more than 30 days before today, or a point after now, is not stored. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced.
 * `GET /models` is a stored list. The bridge does not read it. The API does not call DeepSeek or Z.ai. The comment that used to say otherwise in `apps/api/src/models/models.controller.ts` was wrong and has been corrected.
 * `run.*` events are activity and a socket broadcast. They do not insert tickets or runs, and they do not move office seats. Seats come from role text and status.
 * The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` and `PATCH /runs/:id`. Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. Those routes require `x-ingest-token` when `INGEST_TOKEN` is set. A missing run name is 400. An unknown run id is 404.
@@ -280,7 +282,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 * Memory notes, from seeded rows. Docs do not use the bridge. The seed writes sample markdown under `data/docs`.
 * Team mission, from `GET /mission`. People come from the seeded roster. Devices come from the seed. There is no device write route.
 * Custom tools, one seeded tool on `/#/system/tools`.
-* Office, Calendar, Approvals, and System spend for 24h, 7 day, and month, summed from 30 seeded days.
+* Office, Calendar, Approvals, and System spend for Today, the last 7 days, and the month, summed from 30 seeded days. The amounts depend on the date.
 
 Sessions and gateway logs stay empty until a real bridge posts them.
 
@@ -291,7 +293,7 @@ What this tree already does:
 * ✅ Tasks, Agents, Approvals, Projects, Office, Pipeline
 * ✅ Calendar, Memory, Docs, Team (mission, people, devices), System
 * ✅ System panels for logs, sessions, settings, connection, and custom tools
-* ✅ `POST /events` intake, including `memory.snapshot` and `usage.snapshot` daily points (24h, 7 day, and month are summed on read)
+* ✅ `POST /events` intake, including `memory.snapshot` and `usage.snapshot` daily points (Today, 7 day, and month are summed on read)
 * ✅ Idempotent `seed:demo` so the UI works with no OpenClaw
 * ✅ Optional `bridge/` sync from the OpenClaw CLI
 

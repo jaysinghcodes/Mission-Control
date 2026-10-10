@@ -12,10 +12,10 @@ import CustomTools from './CustomTools'
 
 /**
  * System. Health, models and spend, and the old observe pages behind a click.
- * Last 24 hours / last 7 days / month to date read GET /usage?period=24h|7d|month.
- * Those windows are sums of daily points. 24h is a rolling day. A short range
- * shows the API note (for example "Showing 3 days of data so far") and only
- * the days that were collected.
+ * Today / last 7 days / month to date read GET /usage?period=24h|7d|month.
+ * Those windows are sums of daily points. Today is the calendar day in
+ * Central Time. A short range shows the API note (for example
+ * "Showing 3 days of data so far") and only the days that were collected.
  */
 
 interface HealthResp { status: string; database: string; uptimeSeconds: number; lastIngestAt?: string | null }
@@ -47,7 +47,7 @@ interface UsageResp {
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
 
 const PERIODS = [
-  { id: '24h', label: 'Last 24 hours' },
+  { id: '24h', label: 'Today' },
   { id: '7d', label: 'Last 7 days' },
   { id: 'month', label: 'Month to date' },
 ] as const
@@ -218,7 +218,7 @@ export default function System() {
       {!any && (day.data || week.data || month.data) && (
         <EmptyState
           title="No model spend yet"
-          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. The last 24 hours, the last 7 days, and the month to date stay empty until a daily point exists. A per model price override is not part of this build."
+          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. Today, the last 7 days, and the month to date stay empty until a daily point exists. A per model price override is not part of this build."
         />
       )}
       {!day.data && !week.data && !month.data && (
@@ -278,7 +278,7 @@ export default function System() {
                     </div>
                     {open && (
                       <p className="mt-3 text-[13px] text-mc-sub">
-                        Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
+                        Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Today is the calendar day in Central Time. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
                       </p>
                     )}
                   </div>
@@ -325,7 +325,7 @@ export default function System() {
                         {open && (
                           <tr className="border-t border-mc-sep bg-mc-bg">
                             <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
-                              Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
+                              Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Today is the calendar day in Central Time. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
                             </td>
                           </tr>
                         )}

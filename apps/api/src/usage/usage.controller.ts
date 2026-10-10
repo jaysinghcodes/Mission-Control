@@ -1,13 +1,17 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { USAGE_DISPLAY_TZ, aggregateUsage, type UsageProvider } from './aggregate-usage';
+import {
+  USAGE_DISPLAY_TZ,
+  aggregateUsage,
+  type UsageProvider,
+} from './aggregate-usage';
 import { usagePeriodLabel } from './period-window';
 
 /**
  * UsageController — spend for System.
  *
- * Rows are daily buckets. `24h`, `7d`, and `month` are summed here.
- * The bridge does not post those totals.
+ * Rows are daily buckets. Today (`24h`), `7d`, and `month` are summed here.
+ * Today is the calendar day in America/Chicago. The bridge does not post those totals.
  */
 @Controller('usage')
 export class UsageController {

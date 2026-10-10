@@ -15,8 +15,9 @@
  *   - a sample mission statement and 3 devices (ticket 7)
  *   - 1 experimental custom tool (ticket 10; a prompt template only — the
  *     seed does not run it, and a test run never calls out of the app)
- *   - 30 America/Chicago days of usage so System 24h, 7 day, and month
- *     views are populated on a fresh database
+ *   - 30 America/Chicago days of usage so System Today, 7 day, and month
+ *     views are populated on a fresh database. Today's row is stamped at
+ *     seed time. The amounts depend on the date.
  *
  * IDEMPOTENT — safe to run any number of times:
  *   - Every row has a FIXED id (prefix `demo-`) or a unique natural key

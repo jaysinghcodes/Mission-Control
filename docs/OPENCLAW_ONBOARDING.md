@@ -99,7 +99,7 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 | Memory | `/#/memory` | Memory notes grouped by day (America/Chicago) | `memory.snapshot` |
 | Docs | `/#/docs` | Markdown files from `DOCS_ROOT` (default `data/docs`), read only in the browser | files on disk |
 | Team | `/#/team` | Mission, people, and devices. Not an org chart | `agents.snapshot`, `/mission`, `/devices` |
-| System | `/#/system` | Health, uptime, usage and cost (24h, 7d, month), sessions, activity. Panels: `/#/system/logs`, `/#/system/sessions`, `/#/system/settings`, `/#/system/tools`, `/#/system/connection`. `/#/health` and `/#/usage` redirect here | `/health`, `/system`, `/usage`, `/sessions` |
+| System | `/#/system` | Health, uptime, usage and cost (Today, 7d, month), sessions, activity. Panels: `/#/system/logs`, `/#/system/sessions`, `/#/system/settings`, `/#/system/tools`, `/#/system/connection`. `/#/health` and `/#/usage` redirect here | `/health`, `/system`, `/usage`, `/sessions` |
 | Connect | `/#/connect` | Setup and remote tunnel guide | |
 
 ## 4. How you report into Mission Control
@@ -199,7 +199,7 @@ Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves sh
 ### 4.7 Models and spend
 
 * `GET /models`, `POST /models` with `{ provider, model, label? }`, `DELETE /models/:id`. This is a list of models to track. **Nothing reads it yet:** the bridge does not call `GET /models`. The API does not call DeepSeek or Z.ai, so those keys do not produce a live balance.
-* Spend shown on System comes only from `usage.snapshot` daily points. `GET /usage?period=24h|7d|month` sums them. 24h is a rolling day. The 7 day and month windows use America/Chicago. A short range returns `note` (for example `Showing 3 days of data so far`) and does not fill the gap with zero. `period=30d` returns `usage: null`. The bridge posts points, not 7 day or month totals. On first connect it backfills up to 30 days when session timestamps exist. Otherwise it records the days it has synced. `npm run seed:demo` writes 30 days, so a fresh System page shows all three windows. If the bridge cannot read sessions, it posts no usage snapshot.
+* Spend shown on System comes only from `usage.snapshot` daily points. `GET /usage?period=24h|7d|month` sums them. `period=24h` is Today, the calendar day in America/Chicago, taken from those buckets. There is no hourly storage. The 7 day and month windows use the same calendar. A short range returns `note` (for example `Showing 3 days of data so far`) and does not fill the gap with zero. `period=30d` returns `usage: null`. The bridge posts points, not 7 day or month totals. On first connect it backfills up to 30 days when session timestamps exist. Otherwise it records the days it has synced. The API keeps a point only when its Chicago day is within the last 30 days through today, and it drops a timestamp after now. `npm run seed:demo` writes 30 days and stamps today at seed time, so a fresh System page shows all three windows. The amounts depend on the date. If the bridge cannot read sessions, it posts no usage snapshot.
 * Per agent cost on profiles comes from `totalCost` in `agents.snapshot`.
 
 ### 4.8 Memory
