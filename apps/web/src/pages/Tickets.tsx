@@ -9,6 +9,8 @@ import { ticketCreateQueue } from '../lib/serialQueue'
 import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
 import { useBoardDrag } from '../lib/boardDrag'
 import { BoardDnd, CardDrag, ColumnDrop } from '../components/boardDnd'
+import { TicketRuns } from '../components/TicketRuns'
+import { runsForTicket, type LinkedRun } from '../lib/ticket-runs'
 
 /**
  * Tickets — full-page kanban, fully functional (review fix #9) + Option B (MC-214).
@@ -30,6 +32,7 @@ import { BoardDnd, CardDrag, ColumnDrop } from '../components/boardDnd'
 
 interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; projectId: string | null; createdAt: string }
 interface TicketsResp { tickets: Ticket[] }
+interface RunsResp { runs: LinkedRun[] }
 
 /** Columns live in board.ts so the board, Pipeline, and Office share one status map. */
 
@@ -85,6 +88,10 @@ export default function Tickets() {
   const [title, setTitle] = useState('')
   const [titleError, setTitleError] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
+  // Linked runs for the open ticket. The list route filters by ticket id so
+  // a run outside the global newest 50 still shows on its ticket.
+  const runsPath = detailId ? `/runs?ticketId=${encodeURIComponent(detailId)}` : '/runs'
+  const runsQ = useApi<RunsResp>(runsPath, { pollMs: 15000 })
   // How many of THIS page's creates are queued or in flight. Display-only
   // (drives the "Saving…" button label) — it NEVER gates a submit. The old
   // `busy` flag did gate submits (`if (!title || busy) return`), and that is
@@ -168,9 +175,11 @@ export default function Tickets() {
   useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
 
   // Instant refresh on any ticket/run activity event.
+  const refetchRuns = runsQ.refetch
   useEffect(() => {
     if (events.some((e) => e.type.startsWith('run.') || e.type.includes('ticket'))) void refetch()
-  }, [events, refetch])
+    if (events.some((e) => e.type.startsWith('run.'))) void refetchRuns()
+  }, [events, refetch, refetchRuns])
 
   /**
    * "+ New ticket" (button or Enter). QA-1 #1 fix — every submit is either
@@ -529,6 +538,7 @@ export default function Tickets() {
             <div className="mb-1 text-[12px] font-semibold text-mc-sub">Project</div>
             {projectControl(detail)}
           </div>
+          <TicketRuns runs={runsForTicket(runsQ.data?.runs ?? [], detail.id)} />
         </SoftCard>
       )}
 
