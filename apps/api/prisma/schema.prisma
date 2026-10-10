@@ -124,15 +124,21 @@ model CronJob {
   updatedAt DateTime @updatedAt
 }
 
-/// Usage & cost snapshots — pushed by the bridge (usage.snapshot), one per period.
-model UsageSnapshot {
+/// One collected usage day. The bridge posts timestamped points
+/// (`usage.snapshot`); 24h, 7 day, and month views sum `at`.
+/// `day` is the America/Chicago calendar day and the upsert key.
+/// Re-posting a day replaces that row. Other days stay.
+model UsageBucket {
   id        String   @id @default(cuid())
-  period    String   @unique // 24h | 7d | 30d | month
+  day       String   @unique
+  at        DateTime
   totalCost Float    @default(0)
   tokensIn  Int      @default(0)
   tokensOut Int      @default(0)
   providers Json?
   updatedAt DateTime @updatedAt
+
+  @@index([at])
 }
 
 /// Every ingested/broadcast event — persisted so pages can load history.

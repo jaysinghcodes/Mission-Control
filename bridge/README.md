@@ -62,7 +62,7 @@ also persisted to `ActivityEvent` and broadcast on the socket.**
 | `agents.snapshot` | `{ agents: [{ name, role?, color?, status?: "working"\|"idle", parent?: <name>, emoji?, personalityTags?, currentTask?, tasksCompleted?, totalCost?, recentActivity?, channel? }] }` | **Replaces** the Agent table; `parent` is resolved by name | `openclaw agents list --json` (default agent = root; `working` if it has a session updated in the last 10 min) |
 | `sessions.snapshot` | `{ sessions: [{ name, agent, model?, ctx?: 0-100, lastActivity?: string, hot?: bool }] }` | **Replaces** the Session table | `openclaw sessions --all-agents --json` |
 | `calendar.snapshot` | `{ jobs: [{ name, schedule?, day?: 0=Mon…6=Sun\|null, time?: "HH:MM"\|null, color?, enabled? }] }` | **Replaces** the CronJob table | `openclaw cron list --all --json` (`day=null` ⇒ daily, `time=null` ⇒ all-day strip) |
-| `usage.snapshot` | `{ period: "24h"\|"7d"\|"30d"\|"month", totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }` | Upserts one row per `period` | 24h rollup of session token/cost counters (fields absent ⇒ 0) |
+| `usage.snapshot` | `{ points: [{ at: ISO timestamp, totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }] }` | Upserts one row per America/Chicago day of `at`, for the last 30 days through today. A future timestamp is dropped. Other days stay. A payload with no timestamp is ignored. | Daily points from session token/cost counters. First connect backfills up to 30 days when sessions have timestamps. Later runs add the increase for that sync day. No separate 7 day or month total. |
 | `approvals.snapshot` | `{ approvals: [{ kind, tag, desc, status?, meta? }] }` | Drops stale **pending** rows, keeps decided history, inserts new | `MC_BRIDGE_APPROVALS_CMD` (opt-in) |
 | `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term"\|"daily"\|"other", source?, ref? }] }` | Upserts by stable `id`. Deletes only rows with `source=bridge` (and legacy `openclaw`) for agents present in the payload. Demo rows are left alone. A payload with no `entries` array is ignored. An empty `entries` array clears bridge rows only | Each agent's workspace: `MEMORY.md` (long-term, `createdAt` is the file mtime) and `memory/YYYY-MM-DD.md` plus `memory/YYYY-MM-DD-<slug>.md` (daily). The daily calendar day is the filename in America/Chicago. The clock is the file mtime when that mtime falls on the same Chicago date; otherwise a standalone `Time: HH:MM CT` line, otherwise 12:00 CT. `id` is a hash of agent id + relative path. `source` is `bridge` |
 | `run.queued` · `run.started` · `run.running` · `run.progress` · `run.completed` · `run.done` · `run.failed` | `{ name, …free-form (agent, job, status, progress, summary, ticketId?) }` | Persisted + broadcast (Live Activity, Office movement, Tickets refetch). When the cron job carries a string `ticketId` (or `meta.ticketId`), the bridge also calls `POST /runs` and `PATCH /runs/:id` with that id. Create success is 201. Update success is 200. 400 and 404 fail the sync and are logged without the token | Cron job state changes between bridge runs |
@@ -73,13 +73,15 @@ Other accepted types (not sent by this bridge): `health.tick`, `hello`,
 
 ### Safety rules the bridge follows
 
-1. **Never wipe on failure.** Snapshots are replace-semantics server-side, so an
-   unavailable source (no `openclaw` on PATH, non-zero exit, unrecognized JSON,
-   a memory workspace path that cannot be read, or a `--memory-dir` that
-   contains no agent workspaces) is **skipped**, not posted empty. With no
-   OpenClaw at all, the bridge posts nothing and exits 0 — demo-seed data
-   stays intact. A real workspace that was readable and has zero notes still
-   posts `[]`, and the API clears bridge rows only.
+1. **Never wipe on failure.** Most snapshots are replace-semantics server-side.
+   `usage.snapshot` is not: it upserts the days in the payload and leaves
+   every other day in place. An unavailable source (no `openclaw` on PATH,
+   non-zero exit, unrecognized JSON, a memory workspace path that cannot be
+   read, or a `--memory-dir` that contains no agent workspaces) is
+   **skipped**, not posted empty. With no OpenClaw at all, the bridge posts
+   nothing and exits 0. Demo seed data stays intact. A real workspace that
+   was readable and has zero notes still posts `[]`, and the API clears
+   bridge rows only.
    Memory files follow [OpenClaw's layout](https://docs.openclaw.ai/concepts/memory):
    `MEMORY.md` at the agent workspace root, daily notes in `memory/YYYY-MM-DD.md`
    (and slugged `memory/YYYY-MM-DD-<name>.md`). `openclaw agents list --json`
