@@ -54,6 +54,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 // typo or a future status rename fails the seed loudly instead of creating
 // cards that vanish from every column.
 import { isTicketStatus, TICKET_STATUSES } from '../src/tickets/ticket-status';
+import { isRunStatus, RUN_STATUSES } from '../src/runs/run-status';
 import {
   DEMO_PROJECTS,
   assertDemoSeedProjects,
@@ -216,6 +217,22 @@ async function main(): Promise<void> {
   if (bad.length > 0) {
     throw new Error(
       `invalid demo ticket status: ${bad.map((t) => `${t.key}=${t.status}`).join(', ')} — expected one of ${TICKET_STATUSES.join(', ')}`,
+    );
+  }
+  // Same allowlist as POST /runs and PATCH /runs. This script writes rows
+  // through Prisma, so it never sees 201, 200, 400, or 404. A status the
+  // API would 400, or a ticketId the API would 404, fails here instead.
+  const badRuns = RUNS.filter((r) => !isRunStatus(r.status));
+  if (badRuns.length > 0) {
+    throw new Error(
+      `invalid demo run status: ${badRuns.map((r) => `${r.id}=${r.status}`).join(', ')}. Expected one of ${RUN_STATUSES.join(', ')}.`,
+    );
+  }
+  const seededTicketIds = new Set(TICKETS.map((t) => t.id));
+  const badLinks = RUNS.filter((r) => r.ticketId !== null && !seededTicketIds.has(r.ticketId));
+  if (badLinks.length > 0) {
+    throw new Error(
+      `demo run ticketId is not a seeded ticket: ${badLinks.map((r) => `${r.id}=${r.ticketId}`).join(', ')}.`,
     );
   }
 

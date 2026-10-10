@@ -14,6 +14,8 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
   openclaw sessions --all-agents --json → sessions.snapshot
   openclaw cron list --all --json     →   calendar.snapshot
                                           + run.* for job-state changes
+                                          + POST /runs and PATCH /runs/:id
+                                            (ticketId when the job has one)
   (derived from sessions token counts) →  usage.snapshot (daily points, up to 30 days)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
   agent workspace MEMORY.md + memory/*.md → memory.snapshot
@@ -52,6 +54,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -344,16 +347,71 @@ def map_cron(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+def ticket_id_of(job: Dict[str, Any]) -> Optional[str]:
+    """Mission Control ticket id when OpenClaw put one on the job. Otherwise None.
+
+    A ticket key is not an id. Only a non blank string counts, so a missing
+    field still produces a run with no link.
     """
-    Diff each job's run state against the previous bridge run and emit:
+    sources: List[Dict[str, Any]] = [job]
+    meta = job.get("meta")
+    if isinstance(meta, dict):
+        sources.append(meta)
+    for source in sources:
+        for key in ("ticketId", "ticket_id"):
+            raw = source.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+    return None
+
+
+def _run_create_body(name: str, agent: Any, ticket_id: Optional[str]) -> Dict[str, Any]:
+    body: Dict[str, Any] = {"name": name}
+    if isinstance(agent, str) and agent.strip():
+        body["agent"] = agent.strip()
+    if ticket_id:
+        body["ticketId"] = ticket_id
+    return body
+
+
+def _with_ticket(body: Dict[str, Any], ticket_id: Optional[str]) -> Dict[str, Any]:
+    if not ticket_id:
+        return body
+    out = dict(body)
+    out["ticketId"] = ticket_id
+    return out
+
+
+def _event_payload(name: str, jid: str, agent: Any, ticket_id: Optional[str], **extra: Any) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"name": name, "job": jid, "agent": agent}
+    if ticket_id:
+        payload["ticketId"] = ticket_id
+    payload.update(extra)
+    return payload
+
+
+def cron_run_plan(
+    rows: List[Dict[str, Any]],
+    state: Dict[str, Any],
+) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Dict[str, Any]]]:
+    """
+    Diff each job's run state against the previous bridge run.
+
+    Events (unchanged contract):
       run.running    — job started running since last time
       run.completed  — a new lastRunAtMs with status ok
       run.failed     — a new lastRunAtMs with status error
     First run for a job only records state (no backfill flood).
-    Mutates `state` in place: {jobId: {"running": bool, "lastRunAtMs": int}}.
+
+    Calls are the REST writes that store Run.ticketId:
+      create — POST /runs, then PATCH to running or a terminal status
+      patch  — PATCH /runs/:id when this job already has a run id
+    ticketId is included only when OpenClaw knows it.
+
+    Mutates `state` in place: {jobId: {running, lastRunAtMs, runId}}.
     """
-    events = []
+    events: List[Tuple[str, Dict[str, Any]]] = []
+    calls: List[Dict[str, Any]] = []
     for j in rows:
         jid = str(first(j, "id", "name") or "")
         if not jid:
@@ -363,17 +421,64 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
         last_at = to_ms(st.get("lastRunAtMs"))
         last_status = str(st.get("lastRunStatus") or st.get("lastStatus") or "")
         name = str(first(j, "name", "id"))
-        prev = state.get(jid)
-        if prev is not None:
-            if running and not prev.get("running"):
-                events.append(("run.running", {"name": name, "job": jid, "agent": j.get("agentId")}))
-            if last_at and last_at != prev.get("lastRunAtMs"):
-                ok = last_status in ("ok", "success", "done", "")
+        agent = j.get("agentId")
+        ticket_id = ticket_id_of(j)
+        prev = state.get(jid) if isinstance(state.get(jid), dict) else None
+        run_id = prev.get("runId") if isinstance(prev, dict) else None
+        if isinstance(prev, dict):
+            started = bool(running) and not prev.get("running")
+            finished = bool(last_at) and last_at != prev.get("lastRunAtMs")
+            ok = last_status in ("ok", "success", "done", "")
+            terminal = "done" if ok else "failed"
+            if started:
+                events.append(("run.running", _event_payload(name, jid, agent, ticket_id)))
+            if finished:
                 events.append((
                     "run.completed" if ok else "run.failed",
-                    {"name": name, "job": jid, "status": last_status or "ok", "agent": j.get("agentId")},
+                    _event_payload(name, jid, agent, ticket_id, status=last_status or "ok"),
                 ))
-        state[jid] = {"running": running, "lastRunAtMs": last_at}
+            if finished and not started and run_id:
+                calls.append({
+                    "jobId": jid,
+                    "op": "patch",
+                    "runId": run_id,
+                    "body": _with_ticket({"status": terminal, "progress": 100}, ticket_id),
+                })
+            elif finished and not started:
+                calls.append({
+                    "jobId": jid,
+                    "op": "create",
+                    "body": _run_create_body(name, agent, ticket_id),
+                    "follow": _with_ticket({"status": terminal, "progress": 100}, ticket_id),
+                })
+            elif started and finished:
+                if run_id:
+                    calls.append({
+                        "jobId": jid,
+                        "op": "patch",
+                        "runId": run_id,
+                        "body": _with_ticket({"status": terminal, "progress": 100}, ticket_id),
+                    })
+                calls.append({
+                    "jobId": jid,
+                    "op": "create",
+                    "body": _run_create_body(name, agent, ticket_id),
+                    "follow": _with_ticket({"status": "running"}, ticket_id),
+                })
+            elif started:
+                calls.append({
+                    "jobId": jid,
+                    "op": "create",
+                    "body": _run_create_body(name, agent, ticket_id),
+                    "follow": _with_ticket({"status": "running"}, ticket_id),
+                })
+        state[jid] = {"running": running, "lastRunAtMs": last_at, "runId": run_id}
+    return events, calls
+
+
+def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """Event half of cron_run_plan. Prefer cron_run_plan when the REST calls matter."""
+    events, _calls = cron_run_plan(rows, state)
     return events
 
 
@@ -811,11 +916,123 @@ def collect_memory(
 
 # ── Transport ───────────────────────────────────────────────────────────────
 
+def _read_json(raw: bytes) -> Any:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
+def _error_message(body: Any) -> str:
+    if not isinstance(body, dict):
+        return ""
+    message = body.get("message")
+    if isinstance(message, str):
+        return message
+    if isinstance(message, list):
+        return " ".join(str(part) for part in message)
+    return ""
+
+
+def write_json(
+    api_url: str,
+    token: str,
+    method: str,
+    path: str,
+    body: Dict[str, Any],
+) -> Tuple[bool, int, Any]:
+    """One JSON write. Sends x-ingest-token. Never logs the token.
+
+    2xx is success unless the body still carries a string `error` key
+    (the old runs shape). 400 and 404 come back as (False, status, body).
+    """
+    url = f"{api_url.rstrip('/')}{path}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json", "x-ingest-token": token},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            parsed = _read_json(r.read())
+            status = r.status
+            if isinstance(parsed, dict) and isinstance(parsed.get("error"), str):
+                log(f"{method} {path}: HTTP {status} returned an error key")
+                return False, status, parsed
+            return True, status, parsed
+    except urllib.error.HTTPError as e:
+        parsed = _read_json(e.read())
+        hint = " (INGEST_TOKEN mismatch with the api?)" if e.code == 401 else ""
+        detail = _error_message(parsed)
+        suffix = f" {detail}" if detail else ""
+        log(f"{method} {path}: HTTP {e.code}{hint}{suffix}")
+        return False, e.code, parsed
+    except urllib.error.URLError as e:
+        log(f"{method} {path}: api unreachable at {api_url} ({e.reason})")
+        return False, 0, None
+
+
+def _accepted(ok: bool, status: int, expected: int) -> bool:
+    return bool(ok) and status == expected
+
+
+def apply_run_calls(
+    api_url: str,
+    token: str,
+    calls: List[Dict[str, Any]],
+    state: Dict[str, Any],
+) -> int:
+    """POST /runs (expect 201) and PATCH /runs/:id (expect 200).
+
+    Returns how many calls failed. A 201 whose body has an error key is a
+    failure. On create, the new id is stored on the job so the next sync
+    can PATCH it. The token is never logged.
+    """
+    failures = 0
+    for call in calls:
+        job_id = str(call.get("jobId") or "")
+        if call.get("op") == "patch":
+            path = "/runs/" + urllib.parse.quote(str(call.get("runId") or ""), safe="")
+            ok, status, body = write_json(api_url, token, "PATCH", path, call.get("body") or {})
+            if _accepted(ok, status, 200):
+                continue
+            log(f"PATCH {path}: expected HTTP 200, got {status} {_error_message(body)}".rstrip())
+            failures += 1
+            continue
+        ok, status, body = write_json(api_url, token, "POST", "/runs", call.get("body") or {})
+        if not _accepted(ok, status, 201) or not isinstance(body, dict):
+            log(f"POST /runs: expected HTTP 201, got {status} {_error_message(body)}".rstrip())
+            failures += 1
+            continue
+        run = body.get("run")
+        run_id = run.get("id") if isinstance(run, dict) else None
+        if not isinstance(run_id, str) or not run_id:
+            log("POST /runs: HTTP 201 had no run id")
+            failures += 1
+            continue
+        slot = state.get(job_id)
+        if isinstance(slot, dict):
+            slot["runId"] = run_id
+        follow = call.get("follow")
+        if not isinstance(follow, dict):
+            continue
+        path = "/runs/" + urllib.parse.quote(run_id, safe="")
+        ok2, status2, body2 = write_json(api_url, token, "PATCH", path, follow)
+        if _accepted(ok2, status2, 200):
+            continue
+        log(f"PATCH {path}: expected HTTP 200, got {status2} {_error_message(body2)}".rstrip())
+        failures += 1
+    return failures
+
+
 def post(api_url: str, token: str, etype: str, payload: Dict[str, Any]) -> bool:
     """POST one event. True on 2xx. Logs the status, never the token.
 
     The API applies the same x-ingest-token check to every write route.
-    This bridge only calls POST /events, and it always sends that header.
+    POST /events, POST /runs, and PATCH /runs/:id all send that header.
     """
     req = urllib.request.Request(
         f"{api_url.rstrip('/')}/events",
@@ -879,6 +1096,7 @@ def main() -> int:
     cron_rows = as_list(src.cron(), "jobs", "cron")
     state_file = Path(os.environ.get("MC_BRIDGE_STATE_FILE", DEFAULT_STATE_FILE))
     state: Dict[str, Any] = {}
+    run_calls: List[Dict[str, Any]] = []
     try:
         loaded = json.loads(state_file.read_text()) if state_file.is_file() else {}
         state = loaded if isinstance(loaded, dict) else {}
@@ -886,7 +1104,8 @@ def main() -> int:
         state = {}
     if cron_rows is not None:
         events.append(("calendar.snapshot", {"jobs": map_cron(cron_rows)}))
-        events.extend(cron_run_events(cron_rows, state))
+        run_events, run_calls = cron_run_plan(cron_rows, state)
+        events.extend(run_events)
 
     if sessions is not None:
         usage_payload, usage_state = usage_points_from_sessions(sessions, now_ms, state.get("_mcUsage"))
@@ -929,6 +1148,11 @@ def main() -> int:
         return 0  # dry-run never writes the state file either
 
     failures = sum(0 if post(api_url, token, t, p) else 1 for t, p in events)
+    # Run rows are separate from the activity events. 201 create, 200 update.
+    # A 400 or 404 counts as a failure so the state file is not saved and the
+    # next sync retries. The token stays in the header only.
+    if run_calls:
+        failures += apply_run_calls(api_url, token, run_calls, state)
     # Persist run-diff and usage state only after a successful pass so a
     # failed post doesn't swallow run.* transitions or double-count a delta.
     if failures == 0 and (cron_rows is not None or sessions is not None):
