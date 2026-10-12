@@ -70,6 +70,8 @@ npm run dev
 
 The api has no `.env` loader, so the `set -a` export is required on this path. Copy the root `.env.example` to the root `.env`. `apps/api/.env` is never loaded.
 
+If setup fails, run `npm run doctor` from the repo root. It prints one line per check and the command that fixes it. OpenClaw is optional in that report. A missing bridge does not fail the command.
+
 On npm 11.17.0, `npm ci` skips the Prisma install scripts. Run `(cd apps/api && npx prisma generate)` before `npm test` or `npm run build`, or those commands fail to find `.prisma/client`.
 
 Useful URLs (the web app uses hash routes, so always include `/#/`):
