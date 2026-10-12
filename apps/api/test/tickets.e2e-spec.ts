@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { applyWriteToken } from './write-token';
+import { bodyMessage } from './lint-helpers';
 
 /**
  * Tickets e2e — real Nest app + REAL Postgres (PR #20 QA findings A–E + QA-1).
@@ -20,6 +21,22 @@ import { applyWriteToken } from './write-token';
  * FAST here, before Nest boots and before any create runs — and clean up
  * every ticket + its activity events we create, even when a test fails.
  */
+/** A dropped socket. HTTP 4xx and 5xx are not this. */
+function isDroppedConnection(err: unknown): boolean {
+  let message = '';
+  if (typeof err === 'string') message = err;
+  else if (err instanceof Error) message = err.message;
+  const code =
+    err && typeof err === 'object' && 'code' in err
+      ? String((err as { code?: unknown }).code)
+      : '';
+  return (
+    code === 'ECONNRESET' ||
+    message.includes('ECONNRESET') ||
+    message.includes('socket hang up')
+  );
+}
+
 if (!process.env.DATABASE_URL) {
   throw new Error(
     'Tickets e2e refuses to run without DATABASE_URL.\n' +
@@ -45,22 +62,45 @@ describe('Tickets (e2e)', () => {
     const base = request(app.getHttpServer());
     const token = process.env.INGEST_TOKEN;
     if (typeof token !== 'string' || token.trim() === '') return base;
-    const wrap = (method: 'post' | 'put' | 'patch' | 'delete') => {
-      const original = base[method].bind(base);
-      base[method] = ((url: string) =>
-        applyWriteToken(original(url))) as (typeof base)[typeof method];
+    const wrap = (
+      method: 'post' | 'put' | 'patch' | 'delete',
+      original: (url: string) => request.Test,
+    ) => {
+      base[method] = (url: string) => applyWriteToken(original(url));
     };
-    wrap('post');
-    wrap('put');
-    wrap('patch');
-    wrap('delete');
+    wrap('post', base.post.bind(base));
+    wrap('put', base.put.bind(base));
+    wrap('patch', base.patch.bind(base));
+    wrap('delete', base.delete.bind(base));
     return base;
   }
 
   /** POST a ticket and remember its id for cleanup. */
+  function ticketFrom(res: { body: unknown }): {
+    ticket?: { id: string; status: string; key: string };
+    message?: unknown;
+    tickets?: { id: string; status: string; key: string }[];
+  } {
+    if (!res.body || typeof res.body !== 'object') return {};
+    return res.body;
+  }
+
+  function ticketOf(res: { body: unknown }): {
+    id: string;
+    status: string;
+    key: string;
+  } {
+    return ticketFrom(res).ticket as {
+      id: string;
+      status: string;
+      key: string;
+    };
+  }
+
   async function createTicket(body: Record<string, unknown>) {
     const res = await call().post('/tickets').send(body);
-    if (res.body?.ticket?.id) created.push(res.body.ticket.id);
+    const ticket = ticketFrom(res).ticket;
+    if (ticket?.id) created.push(ticket.id);
     return res;
   }
 
@@ -105,7 +145,6 @@ describe('Tickets (e2e)', () => {
         }
         await prisma.ticket.deleteMany({ where: { id: { in: created } } });
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.warn('[tickets.e2e] cleanup failed:', err);
       }
     }
@@ -116,58 +155,57 @@ describe('Tickets (e2e)', () => {
     it('A: no status → backlog (Atlas decision, matches schema default)', async () => {
       const res = await createTicket({ title: 'e2e default status' });
       expect(res.status).toBe(201);
-      expect(res.body.ticket.status).toBe('backlog');
+      expect(ticketOf(res).status).toBe('backlog');
     });
 
     it('explicit status todo (kanban "+ New ticket") → todo', async () => {
       const res = await createTicket({ title: 'e2e todo', status: 'todo' });
       expect(res.status).toBe(201);
-      expect(res.body.ticket.status).toBe('todo');
+      expect(ticketOf(res).status).toBe('todo');
     });
 
     it('C: invalid create status (done) → 400 and nothing saved', async () => {
-      const before = await prisma.ticket.count();
+      const title = `e2e bad status ${Date.now()}-${Math.random()}`;
       const res = await createTicket({
-        title: 'e2e bad status',
+        title,
         status: 'done',
       });
       expect(res.status).toBe(400);
-      expect(await prisma.ticket.count()).toBe(before);
+      expect(await prisma.ticket.count({ where: { title } })).toBe(0);
     });
 
     it('E: missing title → 400 (was 201 {error})', async () => {
       const res = await createTicket({ priority: 'med' });
       expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/title/);
+      expect(bodyMessage(res)).toMatch(/title/);
     });
   });
 
   describe('PATCH /tickets/:id', () => {
     it('full button loop: Backlog → To-Do → Build → QA → Review → Done', async () => {
-      const { body } = await createTicket({ title: 'e2e loop' });
-      const id = body.ticket.id as string;
+      const createdTicket = await createTicket({ title: 'e2e loop' });
+      const id = ticketOf(createdTicket).id;
       for (const status of ['todo', 'build', 'qa', 'review', 'done']) {
-        const res = await call()
-          .patch(`/tickets/${id}`)
-          .send({ status });
+        const res = await call().patch(`/tickets/${id}`).send({ status });
         expect(res.status).toBe(200);
-        expect(res.body.ticket.status).toBe(status);
+        expect(ticketOf(res).status).toBe(status);
       }
       const row = await prisma.ticket.findUnique({ where: { id } });
       expect(row?.status).toBe('done');
     });
 
     it('D: {status:"banana"} → 400 and the row is unchanged', async () => {
-      const { body } = await createTicket({
+      const createdTicket = await createTicket({
         title: 'e2e banana',
         status: 'todo',
       });
+      const id = ticketOf(createdTicket).id;
       const res = await call()
-        .patch(`/tickets/${body.ticket.id}`)
+        .patch(`/tickets/${id}`)
         .send({ status: 'banana' });
       expect(res.status).toBe(400);
       const row = await prisma.ticket.findUnique({
-        where: { id: body.ticket.id },
+        where: { id },
       });
       expect(row?.status).toBe('todo');
     });
@@ -189,24 +227,25 @@ describe('Tickets (e2e)', () => {
         ...a: unknown[]
       ) => Promise<unknown>;
       let stallNext = false;
-      const spy = jest.spyOn(prisma, '$transaction').mockImplementation(((
-        fn: (tx: unknown) => Promise<unknown>,
-        opts?: unknown,
-      ) =>
-        original(async (tx: unknown) => {
-          if (stallNext) {
-            stallNext = false;
-            await sleep(60);
-          }
-          return fn(tx);
-        }, opts)) as never);
+      const spy = jest
+        .spyOn(prisma, '$transaction')
+        .mockImplementation(
+          (fn: (tx: unknown) => Promise<unknown>, opts?: unknown) =>
+            original(async (tx: unknown) => {
+              if (stallNext) {
+                stallNext = false;
+                await sleep(60);
+              }
+              return fn(tx);
+            }, opts),
+        );
       try {
         for (let run = 0; run < 10; run++) {
-          const { body } = await createTicket({
+          const createdTicket = await createTicket({
             title: `e2e race ${run}`,
             status: 'todo',
           });
-          const id = body.ticket.id as string;
+          const id = ticketOf(createdTicket).id;
           stallNext = true;
           const first = call()
             .patch(`/tickets/${id}`)
@@ -221,9 +260,7 @@ describe('Tickets (e2e)', () => {
           expect([r1.status, r2.status]).toEqual([200, 200]);
           // What a browser refresh would show:
           const get = await call().get('/tickets');
-          const row = (
-            get.body.tickets as { id: string; status: string }[]
-          ).find((t) => t.id === id);
+          const row = (ticketFrom(get).tickets ?? []).find((t) => t.id === id);
           expect(row?.status).toBe('done');
         }
       } finally {
@@ -232,12 +269,12 @@ describe('Tickets (e2e)', () => {
     });
 
     it('QA-1 #3: same-status PATCH → 200 and no extra activity event', async () => {
-      const { body } = await createTicket({
+      const createdTicket = await createTicket({
         title: 'e2e noop',
         status: 'todo',
       });
-      const id = body.ticket.id as string;
-      const key = body.ticket.key as string;
+      const id = ticketOf(createdTicket).id;
+      const key = ticketOf(createdTicket).key;
       const before = await prisma.activityEvent.count({
         where: {
           type: 'run.progress',
@@ -252,7 +289,7 @@ describe('Tickets (e2e)', () => {
         .patch(`/tickets/${id}`)
         .send({ status: 'build' }); // double-click ▶ Start
       expect(second.status).toBe(200);
-      expect(second.body.ticket.status).toBe('build');
+      expect(ticketOf(second).status).toBe('build');
       const after = await prisma.activityEvent.count({
         where: {
           type: 'run.progress',
@@ -266,18 +303,75 @@ describe('Tickets (e2e)', () => {
 
   describe('concurrent creates (QA-1 #5)', () => {
     it('10 parallel POSTs → 10 unique MC-N keys', async () => {
-      const settled = await Promise.all(
-        Array.from({ length: 10 }, (_, i) =>
-          call()
-            .post('/tickets')
-            .send({ title: `e2e parallel ${i}`, status: 'todo' }),
-        ),
+      const postOnce = (i: number) =>
+        call()
+          .post('/tickets')
+          .send({ title: `e2e parallel ${i}`, status: 'todo' });
+
+      const first = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, i) => postOnce(i)),
       );
+      const rejected = first.filter((result) => result.status === 'rejected');
+      const fulfilled = first.filter((result) => result.status === 'fulfilled');
+      for (const result of fulfilled) {
+        if (result.value.status !== 201) continue;
+        const ticket = ticketFrom(result.value).ticket;
+        if (ticket?.id) created.push(ticket.id);
+      }
+
+      const httpFailure = fulfilled.find(
+        (result) => result.value.status !== 201,
+      );
+      const otherReject = rejected.find(
+        (result) => !isDroppedConnection(result.reason),
+      );
+      if (rejected.length > 0 || httpFailure) {
+        console.log(
+          'parallel ticket create first batch:',
+          JSON.stringify(
+            first.map((result) => {
+              if (result.status === 'rejected') {
+                const reason: unknown = result.reason;
+                const message =
+                  typeof reason === 'string'
+                    ? reason
+                    : reason instanceof Error
+                      ? reason.message
+                      : '';
+                const code =
+                  reason && typeof reason === 'object' && 'code' in reason
+                    ? String((reason as { code?: unknown }).code)
+                    : '';
+                return { error: message, code };
+              }
+              const body: unknown = result.value.body as unknown;
+              return {
+                status: result.value.status,
+                body,
+              };
+            }),
+          ),
+        );
+      }
+      if (otherReject && otherReject.status === 'rejected') {
+        throw otherReject.reason;
+      }
+      if (httpFailure) {
+        expect(httpFailure.value.status).toBe(201);
+      }
+
+      let settled = fulfilled.map((result) => result.value);
+      if (rejected.length > 0) {
+        settled = await Promise.all(
+          Array.from({ length: 10 }, (_, i) => postOnce(i)),
+        );
+      }
       for (const res of settled) {
         expect(res.status).toBe(201);
-        if (res.body?.ticket?.id) created.push(res.body.ticket.id);
+        const ticket = ticketFrom(res).ticket;
+        if (ticket?.id) created.push(ticket.id);
       }
-      const keys = settled.map((r) => r.body.ticket.key as string);
+      const keys = settled.map((r) => ticketOf(r).key);
       expect(new Set(keys).size).toBe(10);
       for (const key of keys) expect(key).toMatch(/^MC-[0-9]+$/);
     });

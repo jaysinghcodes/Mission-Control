@@ -19,7 +19,9 @@ import {
  */
 @Injectable()
 export class DocsService {
-  list(query: { q?: string; type?: DocType } = {}): Promise<{ docs: DocListItem[]; total: number }> {
+  list(
+    query: { q?: string; type?: DocType } = {},
+  ): Promise<{ docs: DocListItem[]; total: number }> {
     return listDocs(openDocsRoot(), query);
   }
 

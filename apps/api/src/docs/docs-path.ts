@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { existsSync, lstatSync, realpathSync } from 'fs';
+import { existsSync, lstatSync, realpathSync, type Stats } from 'fs';
 import path from 'path';
 
 /**
@@ -40,7 +40,9 @@ export function repoRoot(): string {
 export function configuredDocsRoot(): string {
   const raw = process.env.DOCS_ROOT?.trim();
   if (!raw) return path.join(repoRoot(), 'data', 'docs');
-  return path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(repoRoot(), raw);
+  return path.isAbsolute(raw)
+    ? path.normalize(raw)
+    : path.resolve(repoRoot(), raw);
 }
 
 /**
@@ -108,10 +110,14 @@ export function isInsideRoot(rootReal: string, candidate: string): boolean {
  * Resolve a root-relative slug to a real file inside `rootReal`.
  * Does not read the file. Throws DocsPathError (400 or 404) otherwise.
  */
-export function resolveDocFile(rootReal: string, request: string): { absolute: string; relative: string } {
+export function resolveDocFile(
+  rootReal: string,
+  request: string,
+): { absolute: string; relative: string } {
   if (typeof request !== 'string') throw new DocsPathError(400, 'bad path');
   const decoded = fullyDecode(request.trim());
-  if (!decoded || decoded.includes('\0')) throw new DocsPathError(400, 'bad path');
+  if (!decoded || decoded.includes('\0'))
+    throw new DocsPathError(400, 'bad path');
 
   const slash = decoded.replace(/\\/g, '/');
   if (slash.startsWith('/') || /^[a-zA-Z]:\//.test(slash)) {
@@ -143,7 +149,7 @@ export function resolveDocFile(rootReal: string, request: string): { absolute: s
   if (!isInsideRoot(rootReal, real)) {
     throw new DocsPathError(400, 'path escapes docs root');
   }
-  let st;
+  let st: Stats;
   try {
     st = lstatSync(real);
   } catch {

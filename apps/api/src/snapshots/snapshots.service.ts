@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { wireText } from '../wire-text';
 import { PrismaService } from '../prisma/prisma.service';
 import { usageBucketsFromPayload } from '../usage/usage-points';
 
@@ -39,7 +40,7 @@ export class SnapshotsService {
     // Bridge sends parent as a NAME; the FK column needs an id, so resolve names first.
     const ids = new Map<string, string>();
     for (const a of agents) {
-      ids.set(String(a.name ?? 'unknown'), randomUUID());
+      ids.set(wireText(a.name ?? 'unknown'), randomUUID());
     }
     await this.prisma.$transaction([
       this.prisma.agent.deleteMany({}),
@@ -47,31 +48,33 @@ export class SnapshotsService {
       ...agents.map((a) =>
         this.prisma.agent.create({
           data: {
-            id: ids.get(String(a.name ?? 'unknown'))!,
-            name: String(a.name ?? 'unknown'),
-            color: String(a.color ?? '#58A6FF'),
-            role: a.role ? String(a.role) : null,
-            status: String(a.status ?? 'idle'),
+            id: ids.get(wireText(a.name ?? 'unknown'))!,
+            name: wireText(a.name ?? 'unknown'),
+            color: wireText(a.color ?? '#58A6FF'),
+            role: a.role ? wireText(a.role) : null,
+            status: wireText(a.status ?? 'idle'),
             parentId: null,
             // MC-200 profile fields — optional on the wire; defaults/null when absent.
-            emoji: a.emoji ? String(a.emoji) : null,
+            emoji: a.emoji ? wireText(a.emoji) : null,
             personalityTags: toTags(a.personalityTags),
-            currentTask: a.currentTask ? String(a.currentTask) : null,
+            currentTask: a.currentTask ? wireText(a.currentTask) : null,
             tasksCompleted:
               a.tasksCompleted != null ? Number(a.tasksCompleted) : undefined,
             totalCost: a.totalCost != null ? Number(a.totalCost) : undefined,
-            recentActivity: a.recentActivity ? String(a.recentActivity) : null,
-            channel: a.channel ? String(a.channel) : null,
+            recentActivity: a.recentActivity
+              ? wireText(a.recentActivity)
+              : null,
+            channel: a.channel ? wireText(a.channel) : null,
           },
         }),
       ),
       // Phase 2 — wire the tree now that every row exists (name → fresh id).
       ...agents
-        .filter((a) => a.parent && ids.has(String(a.parent)))
+        .filter((a) => a.parent && ids.has(wireText(a.parent)))
         .map((a) =>
           this.prisma.agent.update({
-            where: { name: String(a.name ?? 'unknown') },
-            data: { parentId: ids.get(String(a.parent))! },
+            where: { name: wireText(a.name ?? 'unknown') },
+            data: { parentId: ids.get(wireText(a.parent))! },
           }),
         ),
     ]);
@@ -87,11 +90,11 @@ export class SnapshotsService {
       ...sessions.map((s) =>
         this.prisma.session.create({
           data: {
-            name: String(s.name ?? 'session'),
-            agent: String(s.agent ?? 'main'),
-            model: s.model ? String(s.model) : null,
+            name: wireText(s.name ?? 'session'),
+            agent: wireText(s.agent ?? 'main'),
+            model: s.model ? wireText(s.model) : null,
             ctx: Number(s.ctx ?? 0),
-            lastActivity: s.lastActivity ? String(s.lastActivity) : null,
+            lastActivity: s.lastActivity ? wireText(s.lastActivity) : null,
             hot: Boolean(s.hot ?? false),
           },
         }),
@@ -109,11 +112,11 @@ export class SnapshotsService {
       ...jobs.map((j) =>
         this.prisma.cronJob.create({
           data: {
-            name: String(j.name ?? 'job'),
-            schedule: j.schedule ? String(j.schedule) : null,
+            name: wireText(j.name ?? 'job'),
+            schedule: j.schedule ? wireText(j.schedule) : null,
             day: j.day != null ? Number(j.day) : null,
-            time: j.time ? String(j.time) : null,
-            color: j.color ? String(j.color) : null,
+            time: j.time ? wireText(j.time) : null,
+            color: j.color ? wireText(j.color) : null,
             enabled: j.enabled !== false,
           },
         }),
@@ -166,14 +169,14 @@ export class SnapshotsService {
     const decided = new Set(
       existing.filter((a) => a.status !== 'pending').map((a) => a.tag),
     );
-    const fresh = approvals.filter((a) => !decided.has(String(a.tag ?? '')));
+    const fresh = approvals.filter((a) => !decided.has(wireText(a.tag ?? '')));
     if (fresh.length > 0) {
       await this.prisma.approval.createMany({
         data: fresh.map((a) => ({
-          kind: String(a.kind ?? 'exec'),
-          tag: String(a.tag ?? 'Request'),
-          desc: String(a.desc ?? ''),
-          status: String(a.status ?? 'pending'),
+          kind: wireText(a.kind ?? 'exec'),
+          tag: wireText(a.tag ?? 'Request'),
+          desc: wireText(a.desc ?? ''),
+          status: wireText(a.status ?? 'pending'),
           meta: a.meta ? a.meta : undefined,
         })),
       });
@@ -195,7 +198,9 @@ export class SnapshotsService {
    */
   async applyMemory(payload: Record<string, unknown>): Promise<void> {
     if (!Array.isArray(payload.entries)) return;
-    const rows = dedupeMemory(payload.entries.map(normalizeMemory).filter(isMemoryRow));
+    const rows = dedupeMemory(
+      payload.entries.map(normalizeMemory).filter(isMemoryRow),
+    );
     // No storable rows means there is nobody to replace. Deleting here
     // would be a delete-all of every bridge note.
     if (rows.length === 0) return;
@@ -293,15 +298,20 @@ function normalizeMemory(value: unknown): MemoryWrite | null {
   if (!rawId || rawId.length > 200) return null;
   const id = namespaceBridgeId(rawId);
   if (!id) return null;
-  const title = String(entry.title ?? '').trim().slice(0, 200);
+  const title = wireText(entry.title ?? '')
+    .trim()
+    .slice(0, 200);
   const body = typeof entry.body === 'string' ? entry.body : '';
   if (!title || !body.trim()) return null;
-  const createdAt = new Date(String(entry.createdAt ?? ''));
+  const createdAt = new Date(wireText(entry.createdAt ?? ''));
   if (Number.isNaN(createdAt.getTime())) return null;
-  const kindRaw = String(entry.kind ?? 'other');
+  const kindRaw = wireText(entry.kind ?? 'other');
   const kind = MEMORY_KINDS.has(kindRaw) ? kindRaw : 'other';
-  const agent = String(entry.agent ?? 'agent').trim().slice(0, 120) || 'agent';
-  const ref = entry.ref ? String(entry.ref).slice(0, 300) : null;
+  const agent =
+    wireText(entry.agent ?? 'agent')
+      .trim()
+      .slice(0, 120) || 'agent';
+  const ref = entry.ref ? wireText(entry.ref).slice(0, 300) : null;
   // Every snapshot row is a bridge row. The replace below only deletes
   // source=bridge, so a payload cannot hide a note by labeling it demo.
   return { id, title, body, agent, createdAt, kind, source: 'bridge', ref };

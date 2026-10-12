@@ -141,6 +141,13 @@ test('each required failure names the next command and exits non zero', () => {
     assert.ok(line, item.name)
     assert.match(line, new RegExp(item.includes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false, item.name)
+    if (item.name === 'ports') {
+      assert.equal(
+        result.lines[6],
+        'info health: Skipped because the API port is used by another program.',
+      )
+      assert.doesNotMatch(result.lines[6], /npm run dev/)
+    }
   }
 })
 
@@ -195,6 +202,11 @@ test('a foreign 404 fails with the port message', async () => {
     assert.equal(result.code, 1)
     assert.equal(result.lines[1], otherProgram(port))
     assert.match(result.lines[3], /^pass database:/)
+    assert.equal(
+      result.lines[6],
+      'info health: Skipped because the API port is used by another program.',
+    )
+    assert.doesNotMatch(result.lines[6], /npm run dev/)
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
   } finally {
     await close(server)
@@ -222,6 +234,11 @@ test('a foreign 500 fails with the port message whether the database is up or do
       assert.equal(result.lines[1], otherProgram(port))
       assert.equal(result.code, 1)
       assert.doesNotMatch(result.lines[1], /already running/)
+      assert.equal(
+        result.lines[6],
+        'info health: Skipped because the API port is used by another program.',
+      )
+      assert.doesNotMatch(result.lines.join('\n'), /npm run dev/)
       assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
     }
   } finally {
@@ -241,6 +258,11 @@ test('a raw TCP listener with no HTTP fails with the port message', async () => 
     }))
     assert.equal(result.code, 1)
     assert.equal(result.lines[1], otherProgram(port))
+    assert.equal(
+      result.lines[6],
+      'info health: Skipped because the API port is used by another program.',
+    )
+    assert.doesNotMatch(result.lines[6], /npm run dev/)
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
   } finally {
     await close(server)

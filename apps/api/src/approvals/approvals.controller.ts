@@ -35,7 +35,10 @@ export class ApprovalsController {
   }
 
   @Post(':id/decide')
-  async decide(@Param('id') id: string, @Body() body: { action?: 'approve' | 'reject' }) {
+  async decide(
+    @Param('id') id: string,
+    @Body() body: { action?: 'approve' | 'reject' },
+  ) {
     const action = body?.action;
     if (action !== 'approve' && action !== 'reject') {
       return { error: 'action must be approve or reject' };
@@ -48,11 +51,22 @@ export class ApprovalsController {
     // PR approvals: approving merges on GitHub + deletes the branch.
     let mergeResult: { ok: boolean; message: string } | null = null;
     if (action === 'approve' && existing.kind === 'pr') {
-      const meta = (existing.meta ?? {}) as { repo?: string; number?: number; branch?: string | null };
+      const meta = (existing.meta ?? {}) as {
+        repo?: string;
+        number?: number;
+        branch?: string | null;
+      };
       if (meta.repo && meta.number) {
-        mergeResult = await this.github.mergePr(meta.repo, meta.number, meta.branch);
+        mergeResult = await this.github.mergePr(
+          meta.repo,
+          meta.number,
+          meta.branch,
+        );
       } else {
-        mergeResult = { ok: false, message: 'PR metadata missing — cannot merge on GitHub' };
+        mergeResult = {
+          ok: false,
+          message: 'PR metadata missing — cannot merge on GitHub',
+        };
       }
     }
 

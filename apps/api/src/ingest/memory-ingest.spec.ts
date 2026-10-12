@@ -1,3 +1,4 @@
+import { promiseFn } from '../../test/lint-helpers';
 import { IngestController } from './ingest.controller';
 import type { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -16,12 +17,13 @@ describe('POST /events memory.snapshot', () => {
   });
 
   it('accepts memory.snapshot and applies it through the snapshot service', async () => {
-    const applyMemory = jest.fn(async () => undefined);
+    const applyMemory = jest.fn(promiseFn(() => undefined));
     const snapshots = { applyMemory } as unknown as SnapshotsService;
     const prisma = {
-      activityEvent: { create: jest.fn(async () => ({ id: 'evt' })) },
+      activityEvent: { create: jest.fn(promiseFn(() => ({ id: 'evt' }))) },
     } as unknown as PrismaService;
-    const gateway = { broadcast: jest.fn() } as unknown as LiveActivityGateway;
+    const broadcast = jest.fn();
+    const gateway = { broadcast } as unknown as LiveActivityGateway;
     const controller = new IngestController(gateway, prisma, snapshots);
     const payload = { entries: [{ id: 'mem-1' }] };
 
@@ -30,7 +32,7 @@ describe('POST /events memory.snapshot', () => {
     expect(res.accepted).toBe(true);
     expect(res.type).toBe('memory.snapshot');
     expect(applyMemory).toHaveBeenCalledWith(payload);
-    expect(gateway.broadcast).toHaveBeenCalledWith(
+    expect(broadcast).toHaveBeenCalledWith(
       'memory.snapshot',
       expect.objectContaining({ entries: payload.entries }),
     );

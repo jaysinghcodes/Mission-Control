@@ -8,7 +8,9 @@ export class SessionsController {
 
   @Get()
   async list() {
-    const sessions = await this.prisma.session.findMany({ orderBy: { updatedAt: 'desc' } });
+    const sessions = await this.prisma.session.findMany({
+      orderBy: { updatedAt: 'desc' },
+    });
     return { sessions, ts: Date.now() };
   }
 }

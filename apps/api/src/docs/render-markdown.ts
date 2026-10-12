@@ -13,25 +13,38 @@ import MarkdownIt from 'markdown-it';
 
 const UNSAFE_PROTO = /^(javascript|vbscript|data|file):/i;
 
+/** ASCII controls, DEL, and whitespace. Built without a control-character literal. */
+const STRIP_CONTROLS = new RegExp(
+  `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}\\s]+`,
+  'g',
+);
+
 export function isSafeLink(url: string): boolean {
-  const compact = String(url ?? '').replace(/[\u0000-\u001F\u007F\s]+/g, '');
+  const compact = String(url ?? '').replace(STRIP_CONTROLS, '');
   let decoded = compact;
   try {
     decoded = decodeURIComponent(compact);
   } catch {
     return false;
   }
-  const probe = decoded.replace(/[\u0000-\u001F\u007F\s]+/g, '');
+  const probe = decoded.replace(STRIP_CONTROLS, '');
   if (UNSAFE_PROTO.test(probe) || UNSAFE_PROTO.test(compact)) return false;
   return true;
 }
 
-const md = new MarkdownIt({ html: false, linkify: false, breaks: false, xhtmlOut: false });
+const md = new MarkdownIt({
+  html: false,
+  linkify: false,
+  breaks: false,
+  xhtmlOut: false,
+});
 md.validateLink = (url: string) => isSafeLink(url);
 
 function decodeEntities(value: string): string {
   return value
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => safeCodePoint(parseInt(hex, 16)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+      safeCodePoint(parseInt(hex, 16)),
+    )
     .replace(/&#(\d+);/g, (_, dec: string) => safeCodePoint(Number(dec)))
     .replace(/&colon;/gi, ':')
     .replace(/&amp;/gi, '&')
@@ -64,7 +77,13 @@ function escapeHtml(text: string): string {
 function rewriteUnsafeAttrs(tag: string): string {
   return tag.replace(
     /\s(href|src)\s*=\s*("([^"]*)"|'([^']*)')/gi,
-    (full, attr: string, _quoted: string, doubleQ: string | undefined, singleQ: string | undefined) => {
+    (
+      full,
+      attr: string,
+      _quoted: string,
+      doubleQ: string | undefined,
+      singleQ: string | undefined,
+    ) => {
       const raw = doubleQ ?? singleQ ?? '';
       const quote = doubleQ !== undefined ? '"' : "'";
       if (isSafeLink(decodeEntities(raw)) && isSafeLink(raw)) return full;

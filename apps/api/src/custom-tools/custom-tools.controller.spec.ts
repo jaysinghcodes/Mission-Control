@@ -1,6 +1,11 @@
+import { bodyMessage, promiseFn, responseJson } from '../../test/lint-helpers';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -31,66 +36,99 @@ function makeFake() {
   let raceMisses = 0;
 
   const customTool = {
-    findMany: jest.fn(async () => {
-      return [...tools.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    }),
-    findUnique: jest.fn(async ({ where }: { where: { id?: string; name?: string } }) => {
-      if (where.name !== undefined) {
-        if (raceMisses > 0) {
-          raceMisses -= 1;
-          return null;
+    findMany: jest.fn(
+      promiseFn(() => {
+        return [...tools.values()].sort(
+          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+        );
+      }),
+    ),
+    findUnique: jest.fn(
+      promiseFn(({ where }: { where: { id?: string; name?: string } }) => {
+        if (where.name !== undefined) {
+          if (raceMisses > 0) {
+            raceMisses -= 1;
+            return null;
+          }
+          return (
+            [...tools.values()].find((row) => row.name === where.name) ?? null
+          );
         }
-        return [...tools.values()].find((row) => row.name === where.name) ?? null;
-      }
-      if (!where.id) return null;
-      return tools.get(where.id) ?? null;
-    }),
-    create: jest.fn(async ({ data }: { data: Omit<ToolRow, 'id' | 'createdAt' | 'updatedAt'> }) => {
-      if ([...tools.values()].some((row) => row.name === data.name)) {
-        const err = new Error('unique') as Error & { code: string };
-        err.code = 'P2002';
-        throw err;
-      }
-      const now = new Date(clock);
-      clock += 1_000;
-      const row: ToolRow = {
-        id: `tool-${nextId++}`,
-        name: data.name,
-        description: data.description,
-        promptTemplate: data.promptTemplate,
-        inputs: data.inputs,
-        createdAt: now,
-        updatedAt: now,
-      };
-      tools.set(row.id, row);
-      return { ...row };
-    }),
-    update: jest.fn(async ({ where, data }: { where: { id: string }; data: Partial<ToolRow> }) => {
-      const row = tools.get(where.id);
-      if (!row) {
-        const err = new Error('missing') as Error & { code: string };
-        err.code = 'P2025';
-        throw err;
-      }
-      if (data.name && [...tools.values()].some((other) => other.name === data.name && other.id !== row.id)) {
-        const err = new Error('unique') as Error & { code: string };
-        err.code = 'P2002';
-        throw err;
-      }
-      Object.assign(row, data, { updatedAt: new Date(clock) });
-      clock += 1_000;
-      return { ...row };
-    }),
-    delete: jest.fn(async ({ where }: { where: { id: string } }) => {
-      const row = tools.get(where.id);
-      if (!row) {
-        const err = new Error('missing') as Error & { code: string };
-        err.code = 'P2025';
-        throw err;
-      }
-      tools.delete(where.id);
-      return { ...row };
-    }),
+        if (!where.id) return null;
+        return tools.get(where.id) ?? null;
+      }),
+    ),
+    create: jest.fn(
+      promiseFn(
+        ({
+          data,
+        }: {
+          data: Omit<ToolRow, 'id' | 'createdAt' | 'updatedAt'>;
+        }) => {
+          if ([...tools.values()].some((row) => row.name === data.name)) {
+            const err = new Error('unique') as Error & { code: string };
+            err.code = 'P2002';
+            throw err;
+          }
+          const now = new Date(clock);
+          clock += 1_000;
+          const row: ToolRow = {
+            id: `tool-${nextId++}`,
+            name: data.name,
+            description: data.description,
+            promptTemplate: data.promptTemplate,
+            inputs: data.inputs,
+            createdAt: now,
+            updatedAt: now,
+          };
+          tools.set(row.id, row);
+          return { ...row };
+        },
+      ),
+    ),
+    update: jest.fn(
+      promiseFn(
+        ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: Partial<ToolRow>;
+        }) => {
+          const row = tools.get(where.id);
+          if (!row) {
+            const err = new Error('missing') as Error & { code: string };
+            err.code = 'P2025';
+            throw err;
+          }
+          if (
+            data.name &&
+            [...tools.values()].some(
+              (other) => other.name === data.name && other.id !== row.id,
+            )
+          ) {
+            const err = new Error('unique') as Error & { code: string };
+            err.code = 'P2002';
+            throw err;
+          }
+          Object.assign(row, data, { updatedAt: new Date(clock) });
+          clock += 1_000;
+          return { ...row };
+        },
+      ),
+    ),
+    delete: jest.fn(
+      promiseFn(({ where }: { where: { id: string } }) => {
+        const row = tools.get(where.id);
+        if (!row) {
+          const err = new Error('missing') as Error & { code: string };
+          err.code = 'P2025';
+          throw err;
+        }
+        tools.delete(where.id);
+        return { ...row };
+      }),
+    ),
   };
 
   return {
@@ -104,7 +142,9 @@ function makeFake() {
 
 function makeController() {
   const fake = makeFake();
-  const controller = new CustomToolsController(fake.prisma as unknown as PrismaService);
+  const controller = new CustomToolsController(
+    fake.prisma as unknown as PrismaService,
+  );
   return { controller, ...fake };
 }
 
@@ -118,12 +158,20 @@ const twoInputs = {
   ],
 };
 
-async function expectStatus(run: () => Promise<unknown>, status: number, message: string) {
+async function expectStatus(
+  run: () => Promise<unknown>,
+  status: number,
+  message: string,
+) {
   try {
     await run();
   } catch (err) {
     expect(err).toBeInstanceOf(
-      status === 409 ? ConflictException : status === 404 ? NotFoundException : BadRequestException,
+      status === 409
+        ? ConflictException
+        : status === 404
+          ? NotFoundException
+          : BadRequestException,
     );
     const http = err as BadRequestException;
     expect(http.getStatus()).toBe(status);
@@ -157,30 +205,41 @@ describe('CustomToolsController', () => {
     expect((await controller.list()).tools).toEqual([]);
   });
 
-  it.each([undefined, '', '   ', 4])('rejects missing name %p with 400', async (name) => {
-    const { controller, prisma } = makeController();
-    await expectStatus(
-      () => controller.create({ name, promptTemplate: 'Hello' }),
-      400,
-      'name is required',
-    );
-    expect(prisma.customTool.create).not.toHaveBeenCalled();
-  });
+  it.each([undefined, '', '   ', 4])(
+    'rejects missing name %p with 400',
+    async (name) => {
+      const { controller, prisma } = makeController();
+      await expectStatus(
+        () => controller.create({ name, promptTemplate: 'Hello' }),
+        400,
+        'name is required',
+      );
+      expect(prisma.customTool.create).not.toHaveBeenCalled();
+    },
+  );
 
-  it.each(['', '   ', undefined])('rejects empty template %p with 400', async (promptTemplate) => {
-    const { controller, prisma } = makeController();
-    await expectStatus(
-      () => controller.create({ name: 'Brief', promptTemplate }),
-      400,
-      'prompt template is empty',
-    );
-    expect(prisma.customTool.create).not.toHaveBeenCalled();
-  });
+  it.each(['', '   ', undefined])(
+    'rejects empty template %p with 400',
+    async (promptTemplate) => {
+      const { controller, prisma } = makeController();
+      await expectStatus(
+        () => controller.create({ name: 'Brief', promptTemplate }),
+        400,
+        'prompt template is empty',
+      );
+      expect(prisma.customTool.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects a placeholder with no matching input', async () => {
     const { controller, prisma } = makeController();
     await expectStatus(
-      () => controller.create({ name: 'Brief', promptTemplate: 'Hello {{topic}}', inputs: [] }),
+      () =>
+        controller.create({
+          name: 'Brief',
+          promptTemplate: 'Hello {{topic}}',
+          inputs: [],
+        }),
       400,
       'placeholder {{topic}} has no matching input',
     );
@@ -212,8 +271,14 @@ describe('CustomToolsController', () => {
 
   it('rejects renaming onto an existing name', async () => {
     const { controller } = makeController();
-    const first = await controller.create({ name: 'Brief', promptTemplate: 'Hello' });
-    const second = await controller.create({ name: 'Notes', promptTemplate: 'Hello' });
+    const first = await controller.create({
+      name: 'Brief',
+      promptTemplate: 'Hello',
+    });
+    const second = await controller.create({
+      name: 'Notes',
+      promptTemplate: 'Hello',
+    });
     await expectStatus(
       () => controller.update(second.tool.id, { name: 'Brief' }),
       409,
@@ -223,14 +288,15 @@ describe('CustomToolsController', () => {
     expect((await controller.get(second.tool.id)).tool.name).toBe('Notes');
   });
 
-  it('preview fills a draft and does not write or call out', async () => {
+  it('preview fills a draft and does not write or call out', () => {
     const { controller, prisma, tools } = makeController();
     const fetchMock = jest.fn();
     const previousFetch = global.fetch;
-    global.fetch = fetchMock as unknown as typeof fetch;
+    global.fetch = fetchMock;
     try {
-      const result = await controller.preview({
-        promptTemplate: 'Write about {{topic}} for {{audience}}. See {{topic}}.',
+      const result = controller.preview({
+        promptTemplate:
+          'Write about {{topic}} for {{audience}}. See {{topic}}.',
         inputs: twoInputs.inputs,
         values: {
           topic: '<script>alert(1)</script>',
@@ -256,10 +322,13 @@ describe('CustomToolsController', () => {
     prisma.customTool.create.mockClear();
     const fetchMock = jest.fn();
     const previousFetch = global.fetch;
-    global.fetch = fetchMock as unknown as typeof fetch;
+    global.fetch = fetchMock;
     try {
       const result = await controller.previewSaved(created.tool.id, {
-        values: { topic: 'https://example.invalid/secret', audience: '<img src=x onerror=alert(1)>' },
+        values: {
+          topic: 'https://example.invalid/secret',
+          audience: '<img src=x onerror=alert(1)>',
+        },
       });
       expect(result.prompt).toBe(
         'Write about https://example.invalid/secret for <img src=x onerror=alert(1)>.',
@@ -277,7 +346,9 @@ describe('CustomToolsController', () => {
     const combined = ['custom-tools.controller.ts', 'prompt-template.ts']
       .map((file) => readFileSync(join(dir, file), 'utf8'))
       .join('\n');
-    expect(combined).not.toMatch(/node:http|node:https|axios|node-fetch|from 'http'|from 'https'/);
+    expect(combined).not.toMatch(
+      /node:http|node:https|axios|node-fetch|from 'http'|from 'https'/,
+    );
     expect(combined).not.toMatch(/\bfetch\s*\(/);
   });
 
@@ -291,7 +362,7 @@ describe('CustomToolsController', () => {
     await app.init();
     const fetchMock = jest.fn();
     const previousFetch = global.fetch;
-    global.fetch = fetchMock as unknown as typeof fetch;
+    global.fetch = fetchMock;
     try {
       const filled = await request(app.getHttpServer())
         .post('/custom-tools/preview')
@@ -301,7 +372,9 @@ describe('CustomToolsController', () => {
           values: { topic: '<script>alert(1)</script>' },
         });
       expect(filled.status).toBe(200);
-      expect(filled.body.prompt).toBe('Hi <script>alert(1)</script>');
+      expect(responseJson<{ prompt: string }>(filled).prompt).toBe(
+        'Hi <script>alert(1)</script>',
+      );
       expect(fetchMock).not.toHaveBeenCalled();
       expect(fake.prisma.customTool.create).not.toHaveBeenCalled();
 
@@ -309,19 +382,21 @@ describe('CustomToolsController', () => {
         .post('/custom-tools')
         .send({ promptTemplate: 'Hi' });
       expect(missing.status).toBe(400);
-      expect(missing.body.message).toBe('name is required');
+      expect(bodyMessage(missing)).toBe('name is required');
 
       const empty = await request(app.getHttpServer())
         .post('/custom-tools')
         .send({ name: 'Brief', promptTemplate: '  ' });
       expect(empty.status).toBe(400);
-      expect(empty.body.message).toBe('prompt template is empty');
+      expect(bodyMessage(empty)).toBe('prompt template is empty');
 
       const placeholder = await request(app.getHttpServer())
         .post('/custom-tools')
         .send({ name: 'Brief', promptTemplate: 'Hi {{topic}}', inputs: [] });
       expect(placeholder.status).toBe(400);
-      expect(placeholder.body.message).toBe('placeholder {{topic}} has no matching input');
+      expect(bodyMessage(placeholder)).toBe(
+        'placeholder {{topic}} has no matching input',
+      );
 
       const created = await request(app.getHttpServer())
         .post('/custom-tools')
@@ -332,7 +407,9 @@ describe('CustomToolsController', () => {
         .post('/custom-tools')
         .send({ name: 'Brief', promptTemplate: 'Hi again' });
       expect(duplicate.status).toBe(409);
-      expect(duplicate.body.message).toBe('a tool named "Brief" already exists');
+      expect(bodyMessage(duplicate)).toBe(
+        'a tool named "Brief" already exists',
+      );
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       global.fetch = previousFetch;
@@ -342,8 +419,20 @@ describe('CustomToolsController', () => {
 
   it('returns 404 for an unknown tool', async () => {
     const { controller } = makeController();
-    await expectStatus(() => controller.remove('missing'), 404, 'tool missing not found');
-    await expectStatus(() => controller.update('missing', { name: 'X' }), 404, 'tool missing not found');
-    await expectStatus(() => controller.previewSaved('missing', { values: {} }), 404, 'tool missing not found');
+    await expectStatus(
+      () => controller.remove('missing'),
+      404,
+      'tool missing not found',
+    );
+    await expectStatus(
+      () => controller.update('missing', { name: 'X' }),
+      404,
+      'tool missing not found',
+    );
+    await expectStatus(
+      () => controller.previewSaved('missing', { values: {} }),
+      404,
+      'tool missing not found',
+    );
   });
 });

@@ -1,3 +1,4 @@
+import { responseJson } from './lint-helpers';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -70,7 +71,6 @@ describe('Search (e2e)', () => {
           where: { id: { in: eventIds } },
         });
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.warn('[search.e2e] cleanup failed:', err);
       }
     }
@@ -92,16 +92,18 @@ describe('Search (e2e)', () => {
 
   it('a wildcard-only query no longer returns every row', async () => {
     const res = await search('%%').expect(200);
-    for (const t of res.body.results.tickets as { title: string }[]) {
+    for (const t of responseJson<{ results: { tickets: { title: string }[] } }>(
+      res,
+    ).results.tickets) {
       expect(t.title).toContain('%%');
     }
   });
 
   it('activity search is case-insensitive on payload.name', async () => {
     const res = await search(`deploy ${m}`).expect(200);
-    const ids = (res.body.results.activity as { id: string }[]).map(
-      (e) => e.id,
-    );
+    const ids = responseJson<{ results: { activity: { id: string }[] } }>(
+      res,
+    ).results.activity.map((e) => e.id);
     expect(ids).toContain(eventIds[0]);
   });
 });

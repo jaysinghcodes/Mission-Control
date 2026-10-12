@@ -1,3 +1,4 @@
+import { promiseFn } from '../../test/lint-helpers';
 import { SnapshotsService } from './snapshots.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -15,44 +16,80 @@ type Row = {
 function makePrisma() {
   const rows = new Map<string, Row>();
   const memoryEntry = {
-    deleteMany: jest.fn(async ({ where }: {
-      where?: {
-        source?: { in?: string[] };
-        agent?: { in?: string[] };
-        id?: { notIn?: string[] };
-      };
-    } = {}) => {
-      const sources = where?.source?.in;
-      const agents = where?.agent?.in;
-      const notIn = where?.id?.notIn;
-      for (const [id, row] of [...rows.entries()]) {
-        if (sources && (row.source == null || !sources.includes(row.source))) continue;
-        if (agents && !agents.includes(row.agent)) continue;
-        if (notIn && notIn.includes(id)) continue;
-        rows.delete(id);
-      }
-      return { count: 0 };
-    }),
-    upsert: jest.fn(async ({ where, create, update }: { where: { id: string }; create: Row; update: Omit<Row, 'id'> }) => {
-      const prev = rows.get(where.id);
-      const next = prev ? { ...prev, ...update, id: where.id } : create;
-      rows.set(where.id, next);
-      return next;
-    }),
-    findUnique: jest.fn(async ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null),
+    deleteMany: jest.fn(
+      promiseFn(
+        ({
+          where,
+        }: {
+          where?: {
+            source?: { in?: string[] };
+            agent?: { in?: string[] };
+            id?: { notIn?: string[] };
+          };
+        } = {}) => {
+          const sources = where?.source?.in;
+          const agents = where?.agent?.in;
+          const notIn = where?.id?.notIn;
+          for (const [id, row] of [...rows.entries()]) {
+            if (
+              sources &&
+              (row.source == null || !sources.includes(row.source))
+            )
+              continue;
+            if (agents && !agents.includes(row.agent)) continue;
+            if (notIn && notIn.includes(id)) continue;
+            rows.delete(id);
+          }
+          return { count: 0 };
+        },
+      ),
+    ),
+    upsert: jest.fn(
+      promiseFn(
+        ({
+          where,
+          create,
+          update,
+        }: {
+          where: { id: string };
+          create: Row;
+          update: Omit<Row, 'id'>;
+        }) => {
+          const prev = rows.get(where.id);
+          const next = prev ? { ...prev, ...update, id: where.id } : create;
+          rows.set(where.id, next);
+          return next;
+        },
+      ),
+    ),
+    findUnique: jest.fn(
+      promiseFn(
+        ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null,
+      ),
+    ),
   };
   const prisma = {
     memoryEntry,
-    $transaction: jest.fn(async (fn: (tx: typeof memoryEntry & { memoryEntry: typeof memoryEntry }) => Promise<void>) => {
-      await fn({ memoryEntry } as unknown as typeof memoryEntry & { memoryEntry: typeof memoryEntry });
-    }),
+    $transaction: jest.fn(
+      async (
+        fn: (
+          tx: typeof memoryEntry & { memoryEntry: typeof memoryEntry },
+        ) => Promise<void>,
+      ) => {
+        await fn({ memoryEntry } as unknown as typeof memoryEntry & {
+          memoryEntry: typeof memoryEntry;
+        });
+      },
+    ),
   };
   // The service calls tx.memoryEntry.*, and tx is the transaction client.
   // Pass a client whose memoryEntry is the same store, and whose
   // $transaction invokes the callback with that client.
   const client = {
     memoryEntry,
-    $transaction: async (fn: (tx: { memoryEntry: typeof memoryEntry }) => Promise<void>) => {
+    $transaction: async (
+      fn: (tx: { memoryEntry: typeof memoryEntry }) => Promise<void>,
+    ) => {
       await fn({ memoryEntry });
     },
   };
@@ -87,8 +124,12 @@ describe('SnapshotsService.applyMemory', () => {
   it('upserts stable ids and does not duplicate on a second sync', async () => {
     const { client, rows } = makePrisma();
     const service = new SnapshotsService(client);
-    await service.applyMemory({ entries: [entry('mem-1', 'first'), entry('mem-2', 'second')] });
-    await service.applyMemory({ entries: [entry('mem-1', 'updated'), entry('mem-2', 'second')] });
+    await service.applyMemory({
+      entries: [entry('mem-1', 'first'), entry('mem-2', 'second')],
+    });
+    await service.applyMemory({
+      entries: [entry('mem-1', 'updated'), entry('mem-2', 'second')],
+    });
     expect(rows.size).toBe(2);
     expect(rows.get('mem-1')?.body).toBe('updated');
     expect(rows.get('mem-2')?.body).toBe('second');
@@ -97,7 +138,9 @@ describe('SnapshotsService.applyMemory', () => {
   it('drops ids missing from the snapshot and ignores a payload with no entries array', async () => {
     const { client, rows } = makePrisma();
     const service = new SnapshotsService(client);
-    await service.applyMemory({ entries: [entry('mem-1', 'keep'), entry('mem-2', 'gone')] });
+    await service.applyMemory({
+      entries: [entry('mem-1', 'keep'), entry('mem-2', 'gone')],
+    });
     await service.applyMemory({ entries: [entry('mem-1', 'keep')] });
     expect([...rows.keys()]).toEqual(['mem-1']);
     await service.applyMemory({ note: 'malformed' });
@@ -109,7 +152,10 @@ describe('SnapshotsService.applyMemory', () => {
     rows.set('demo-1', demoRow('demo-1'));
     const service = new SnapshotsService(client);
     await service.applyMemory({
-      entries: [entry('mem-forge', 'keep', 'Forge'), entry('mem-aegis', 'keep', 'Aegis')],
+      entries: [
+        entry('mem-forge', 'keep', 'Forge'),
+        entry('mem-aegis', 'keep', 'Aegis'),
+      ],
     });
     await service.applyMemory({ entries: [] });
     expect(rows.get('mem-forge')?.body).toBe('keep');
@@ -117,7 +163,9 @@ describe('SnapshotsService.applyMemory', () => {
     expect(rows.get('demo-1')?.source).toBe('demo');
     expect(rows.get('demo-1')?.body).toBe('from seed:demo');
     // A payload that stores nothing (no body) is the same no-op.
-    await service.applyMemory({ entries: [{ id: 'mem-forge', title: 'no body' }] });
+    await service.applyMemory({
+      entries: [{ id: 'mem-forge', title: 'no body' }],
+    });
     expect(rows.get('mem-forge')?.body).toBe('keep');
     expect(rows.get('mem-aegis')?.body).toBe('keep');
   });
@@ -148,7 +196,10 @@ describe('SnapshotsService.applyMemory', () => {
     rows.set('demo-forge', demoRow('demo-forge'));
     const service = new SnapshotsService(client);
     await service.applyMemory({
-      entries: [entry('forge-1', 'old', 'Forge'), entry('aegis-1', 'keep', 'Aegis')],
+      entries: [
+        entry('forge-1', 'old', 'Forge'),
+        entry('aegis-1', 'keep', 'Aegis'),
+      ],
     });
     await service.applyMemory({ entries: [entry('forge-2', 'new', 'Forge')] });
     expect(rows.has('bridge-forge-1')).toBe(false);

@@ -13,9 +13,17 @@ export class GitHubService {
   private readonly logger = new Logger(GitHubService.name);
   private readonly token = process.env.GITHUB_TOKEN ?? '';
 
-  private async gh(path: string, method: string, body?: unknown): Promise<{ ok: boolean; status: number; data: any }> {
+  private async gh(
+    path: string,
+    method: string,
+    body?: unknown,
+  ): Promise<{ ok: boolean; status: number; data: unknown }> {
     if (!this.token) {
-      return { ok: false, status: 0, data: { message: 'GITHUB_TOKEN not set' } };
+      return {
+        ok: false,
+        status: 0,
+        data: { message: 'GITHUB_TOKEN not set' },
+      };
     }
     try {
       const res = await fetch(`https://api.github.com${path}`, {
@@ -28,7 +36,7 @@ export class GitHubService {
         },
         body: body ? JSON.stringify(body) : undefined,
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await readJson(res);
       return { ok: res.ok, status: res.status, data };
     } catch (e) {
       return { ok: false, status: 0, data: { message: String(e) } };
@@ -36,18 +44,42 @@ export class GitHubService {
   }
 
   /** Merge a PR and delete its source branch (standing rule #6). */
-  async mergePr(repo: string, number: number, branch?: string | null): Promise<{ ok: boolean; message: string }> {
+  async mergePr(
+    repo: string,
+    number: number,
+    branch?: string | null,
+  ): Promise<{ ok: boolean; message: string }> {
     const merge = await this.gh(`/repos/${repo}/pulls/${number}/merge`, 'PUT', {
       merge_method: 'merge',
       commit_title: `Merge PR #${number} (via Mission Control approval)`,
     });
     if (!merge.ok && merge.status !== 405) {
-      return { ok: false, message: `merge failed: ${JSON.stringify(merge.data).slice(0, 160)}` };
+      return {
+        ok: false,
+        message: `merge failed: ${JSON.stringify(merge.data).slice(0, 160)}`,
+      };
     }
     // Branch delete is part of the standing workflow — best effort, non-fatal.
     if (branch) {
-      await this.gh(`/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, 'DELETE');
+      await this.gh(
+        `/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`,
+        'DELETE',
+      );
     }
-    return { ok: true, message: `merged PR #${number}${branch ? `, deleted branch ${branch}` : ''}` };
+    return {
+      ok: true,
+      message: `merged PR #${number}${branch ? `, deleted branch ${branch}` : ''}`,
+    };
+  }
+}
+
+/** Same fallback as res.json().catch(() => ({})), without the any return type. */
+async function readJson(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return {};
   }
 }

@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { applyWriteToken } from './write-token';
+import { bodyMessage, responseJson } from './lint-helpers';
 
 /**
  * Runs e2e. Real Nest app and Postgres.
@@ -33,16 +34,45 @@ describe('Runs (e2e)', () => {
     const base = request(app.getHttpServer());
     const token = process.env.INGEST_TOKEN;
     if (typeof token !== 'string' || token.trim() === '') return base;
-    const wrap = (method: 'post' | 'put' | 'patch' | 'delete') => {
-      const original = base[method].bind(base);
-      base[method] = ((url: string) =>
-        applyWriteToken(original(url))) as (typeof base)[typeof method];
+    const wrap = (
+      method: 'post' | 'put' | 'patch' | 'delete',
+      original: (url: string) => request.Test,
+    ) => {
+      base[method] = (url: string) => applyWriteToken(original(url));
     };
-    wrap('post');
-    wrap('put');
-    wrap('patch');
-    wrap('delete');
+    wrap('post', base.post.bind(base));
+    wrap('put', base.put.bind(base));
+    wrap('patch', base.patch.bind(base));
+    wrap('delete', base.delete.bind(base));
     return base;
+  }
+
+  function runFrom(res: { body: unknown }): {
+    id: string;
+    name: string;
+    agent: string;
+    status: string;
+    progress: number;
+    ticketId: string | null;
+  } {
+    return responseJson<{
+      run: {
+        id: string;
+        name: string;
+        agent: string;
+        status: string;
+        progress: number;
+        ticketId: string | null;
+      };
+    }>(res).run;
+  }
+
+  function runsFrom(res: { body: unknown }): { id: string }[] {
+    return responseJson<{ runs: { id: string }[] }>(res).runs;
+  }
+
+  function ticketIdFrom(res: { body: unknown }): string {
+    return responseJson<{ ticket: { id: string } }>(res).ticket.id;
   }
 
   function noError(body: { error?: unknown }) {
@@ -85,21 +115,21 @@ describe('Runs (e2e)', () => {
   async function createTicket(title: string) {
     const res = await call().post('/tickets').send({ title, status: 'todo' });
     expect(res.status).toBe(201);
-    tickets.push(res.body.ticket.id);
-    return res.body.ticket.id as string;
+    tickets.push(ticketIdFrom(res));
+    return ticketIdFrom(res);
   }
 
   describe('POST /runs', () => {
     it('missing name is 400 and the message names name', async () => {
       const res = await call().post('/runs').send({});
       expect(res.status).toBe(400);
-      expect(String(res.body.message)).toMatch(/name/);
+      expect(bodyMessage(res)).toMatch(/name/);
     });
 
     it('a non string name is 400 and names name', async () => {
       const res = await call().post('/runs').send({ name: 4 });
       expect(res.status).toBe(400);
-      expect(String(res.body.message)).toMatch(/name/);
+      expect(bodyMessage(res)).toMatch(/name/);
     });
 
     it('an unknown ticketId is 404 and nothing is inserted', async () => {
@@ -108,7 +138,7 @@ describe('Runs (e2e)', () => {
         .post('/runs')
         .send({ name: 'Orphan run', ticketId: 'missing-ticket' });
       expect(res.status).toBe(404);
-      expect(String(res.body.message)).toMatch(/ticketId/);
+      expect(bodyMessage(res)).toMatch(/ticketId/);
       expect(await prisma.run.count()).toBe(before);
     });
 
@@ -117,7 +147,7 @@ describe('Runs (e2e)', () => {
         .post('/runs')
         .send({ name: 'Bad link', ticketId: 9 });
       expect(res.status).toBe(400);
-      expect(String(res.body.message)).toMatch(/ticketId/);
+      expect(bodyMessage(res)).toMatch(/ticketId/);
     });
 
     it('creates 201 with no error key, and without a ticket the link stays empty', async () => {
@@ -126,9 +156,9 @@ describe('Runs (e2e)', () => {
         .send({ name: 'Loose run', agent: 'Quill' });
       expect(res.status).toBe(201);
       noError(res.body);
-      expect(res.body.run.ticketId).toBeNull();
-      expect(res.body.run.status).toBe('queued');
-      runs.push(res.body.run.id);
+      expect(runFrom(res).ticketId).toBeNull();
+      expect(runFrom(res).status).toBe('queued');
+      runs.push(runFrom(res).id);
     });
 
     it('a 20KB name or agent is 400 and the message names the field', async () => {
@@ -136,12 +166,12 @@ describe('Runs (e2e)', () => {
       const before = await prisma.run.count();
       const name = await call().post('/runs').send({ name: huge });
       expect(name.status).toBe(400);
-      expect(String(name.body.message)).toMatch(/name/);
+      expect(bodyMessage(name)).toMatch(/name/);
       const agent = await call()
         .post('/runs')
         .send({ name: 'Short', agent: huge });
       expect(agent.status).toBe(400);
-      expect(String(agent.body.message)).toMatch(/agent/);
+      expect(bodyMessage(agent)).toMatch(/agent/);
       expect(await prisma.run.count()).toBe(before);
     });
 
@@ -150,22 +180,22 @@ describe('Runs (e2e)', () => {
         .post('/runs')
         .send({ name: 'n'.repeat(201), agent: 'a'.repeat(101) });
       expect(over.status).toBe(400);
-      expect(String(over.body.message)).toMatch(/name/);
+      expect(bodyMessage(over)).toMatch(/name/);
 
       const res = await call()
         .post('/runs')
         .send({ name: 'n'.repeat(200), agent: 'a'.repeat(100) });
       expect(res.status).toBe(201);
       noError(res.body);
-      expect([...(res.body.run.name as string)].length).toBe(200);
-      expect([...(res.body.run.agent as string)].length).toBe(100);
-      runs.push(res.body.run.id);
+      expect([...runFrom(res).name].length).toBe(200);
+      expect([...runFrom(res).agent].length).toBe(100);
+      runs.push(runFrom(res).id);
 
       const agent = await call()
-        .patch(`/runs/${res.body.run.id}`)
+        .patch(`/runs/${runFrom(res).id}`)
         .send({ agent: 'a'.repeat(101) });
       expect(agent.status).toBe(400);
-      expect(String(agent.body.message)).toMatch(/agent/);
+      expect(bodyMessage(agent)).toMatch(/agent/);
     });
 
     it('counts emoji as characters: 200 and 100 pass, 201 and 101 fail', async () => {
@@ -174,25 +204,25 @@ describe('Runs (e2e)', () => {
         .post('/runs')
         .send({ name: emoji.repeat(201) });
       expect(overName.status).toBe(400);
-      expect(String(overName.body.message)).toMatch(/name/);
+      expect(bodyMessage(overName)).toMatch(/name/);
       const overAgent = await call()
         .post('/runs')
         .send({ name: 'Emoji agent', agent: emoji.repeat(101) });
       expect(overAgent.status).toBe(400);
-      expect(String(overAgent.body.message)).toMatch(/agent/);
+      expect(bodyMessage(overAgent)).toMatch(/agent/);
 
       const res = await call()
         .post('/runs')
         .send({ name: emoji.repeat(200), agent: emoji.repeat(100) });
       expect(res.status).toBe(201);
       noError(res.body);
-      const name = res.body.run.name as string;
-      const agent = res.body.run.agent as string;
+      const name = runFrom(res).name;
+      const agent = runFrom(res).agent;
       expect([...name].length).toBe(200);
       expect([...agent].length).toBe(100);
       expect(name).toHaveLength(400);
       expect(agent).toHaveLength(200);
-      runs.push(res.body.run.id);
+      runs.push(runFrom(res).id);
     });
 
     it('an unknown field, including status, is 400 and nothing is inserted', async () => {
@@ -201,12 +231,12 @@ describe('Runs (e2e)', () => {
         .post('/runs')
         .send({ name: 'No status here', status: 'running' });
       expect(status.status).toBe(400);
-      expect(String(status.body.message)).toMatch(/status/);
+      expect(bodyMessage(status)).toMatch(/status/);
       const extra = await call()
         .post('/runs')
         .send({ name: 'No extra', extra: true });
       expect(extra.status).toBe(400);
-      expect(String(extra.body.message)).toMatch(/extra/);
+      expect(bodyMessage(extra)).toMatch(/extra/);
       expect(await prisma.run.count()).toBe(before);
     });
 
@@ -217,11 +247,11 @@ describe('Runs (e2e)', () => {
         .send({ name: 'Linked run', agent: 'Forge', ticketId });
       expect(res.status).toBe(201);
       noError(res.body);
-      expect(res.body.run.ticketId).toBe(ticketId);
-      runs.push(res.body.run.id);
+      expect(runFrom(res).ticketId).toBe(ticketId);
+      runs.push(runFrom(res).id);
 
       const row = await prisma.run.findUnique({
-        where: { id: res.body.run.id },
+        where: { id: runFrom(res).id },
       });
       expect(row?.ticketId).toBe(ticketId);
 
@@ -230,8 +260,8 @@ describe('Runs (e2e)', () => {
         .query({ ticketId });
       expect(listed.status).toBe(200);
       noError(listed.body);
-      expect(listed.body.runs.map((row: { id: string }) => row.id)).toContain(
-        res.body.run.id,
+      expect(runsFrom(listed).map((row: { id: string }) => row.id)).toContain(
+        runFrom(res).id,
       );
     });
   });
@@ -242,44 +272,44 @@ describe('Runs (e2e)', () => {
         .patch('/runs/missing-run')
         .send({ status: 'done' });
       expect(res.status).toBe(404);
-      expect(String(res.body.message)).toMatch(/run/);
+      expect(bodyMessage(res)).toMatch(/run/);
     });
 
     it('a bad status is 400 and names status', async () => {
       const created = await call().post('/runs').send({ name: 'Patch me' });
       expect(created.status).toBe(201);
-      runs.push(created.body.run.id);
+      runs.push(runFrom(created).id);
       const res = await call()
-        .patch(`/runs/${created.body.run.id}`)
+        .patch(`/runs/${runFrom(created).id}`)
         .send({ status: 'shipped' });
       expect(res.status).toBe(400);
-      expect(String(res.body.message)).toMatch(/status/);
+      expect(bodyMessage(res)).toMatch(/status/);
       const row = await prisma.run.findUnique({
-        where: { id: created.body.run.id },
+        where: { id: runFrom(created).id },
       });
       expect(row?.status).toBe('queued');
     });
 
     it('a bad progress is 400 and names progress', async () => {
       const created = await call().post('/runs').send({ name: 'Progress me' });
-      runs.push(created.body.run.id);
+      runs.push(runFrom(created).id);
       const res = await call()
-        .patch(`/runs/${created.body.run.id}`)
+        .patch(`/runs/${runFrom(created).id}`)
         .send({ progress: 'fast' });
       expect(res.status).toBe(400);
-      expect(String(res.body.message)).toMatch(/progress/);
+      expect(bodyMessage(res)).toMatch(/progress/);
     });
 
     it('an unknown ticketId is 404 and the row stays unchanged', async () => {
       const created = await call().post('/runs').send({ name: 'Stay queued' });
-      runs.push(created.body.run.id);
+      runs.push(runFrom(created).id);
       const res = await call()
-        .patch(`/runs/${created.body.run.id}`)
+        .patch(`/runs/${runFrom(created).id}`)
         .send({ ticketId: 'missing-ticket', status: 'done' });
       expect(res.status).toBe(404);
-      expect(String(res.body.message)).toMatch(/ticketId/);
+      expect(bodyMessage(res)).toMatch(/ticketId/);
       const row = await prisma.run.findUnique({
-        where: { id: created.body.run.id },
+        where: { id: runFrom(created).id },
       });
       expect(row?.status).toBe('queued');
       expect(row?.ticketId).toBeNull();
@@ -290,17 +320,17 @@ describe('Runs (e2e)', () => {
         .post('/runs')
         .send({ name: 'Stay put', agent: 'Quill' });
       expect(created.status).toBe(201);
-      runs.push(created.body.run.id);
+      runs.push(runFrom(created).id);
       const before = await prisma.run.findUnique({
-        where: { id: created.body.run.id },
+        where: { id: runFrom(created).id },
       });
       const res = await call()
-        .patch(`/runs/${created.body.run.id}`)
+        .patch(`/runs/${runFrom(created).id}`)
         .send({ status: 'done', bogus: 1 });
       expect(res.status).toBe(400);
-      expect(String(res.body.message)).toMatch(/bogus/);
+      expect(bodyMessage(res)).toMatch(/bogus/);
       const after = await prisma.run.findUnique({
-        where: { id: created.body.run.id },
+        where: { id: runFrom(created).id },
       });
       expect(after?.status).toBe(before?.status);
       expect(after?.agent).toBe('Quill');
@@ -311,8 +341,8 @@ describe('Runs (e2e)', () => {
         .post('/runs')
         .send({ name: 'Already queued', agent: 'Quill' });
       expect(created.status).toBe(201);
-      runs.push(created.body.run.id);
-      const id = created.body.run.id as string;
+      runs.push(runFrom(created).id);
+      const id = runFrom(created).id;
       const beforeRow = await prisma.run.findUnique({ where: { id } });
       const beforeEvents = await prisma.activityEvent.count({
         where: { payload: { path: ['id'], equals: id } },
@@ -322,10 +352,10 @@ describe('Runs (e2e)', () => {
       const empty = await call().patch(`/runs/${id}`).send({});
       expect(empty.status).toBe(200);
       noError(empty.body);
-      expect(empty.body.run.status).toBe('queued');
-      expect(empty.body.run.agent).toBe('Quill');
-      expect(empty.body.run.progress).toBe(0);
-      expect(empty.body.run.ticketId).toBeNull();
+      expect(runFrom(empty).status).toBe('queued');
+      expect(runFrom(empty).agent).toBe('Quill');
+      expect(runFrom(empty).progress).toBe(0);
+      expect(runFrom(empty).ticketId).toBeNull();
 
       const repeated = await call().patch(`/runs/${id}`).send({
         status: 'queued',
@@ -335,7 +365,7 @@ describe('Runs (e2e)', () => {
       });
       expect(repeated.status).toBe(200);
       noError(repeated.body);
-      expect(repeated.body.run.status).toBe('queued');
+      expect(runFrom(repeated).status).toBe('queued');
 
       const afterRow = await prisma.run.findUnique({ where: { id } });
       expect(afterRow?.status).toBe(beforeRow?.status);
@@ -353,7 +383,7 @@ describe('Runs (e2e)', () => {
         .patch(`/runs/${id}`)
         .send({ status: 'running' });
       expect(moved.status).toBe(200);
-      expect(moved.body.run.status).toBe('running');
+      expect(runFrom(moved).status).toBe('running');
       const afterMove = await prisma.activityEvent.count({
         where: { payload: { path: ['id'], equals: id } },
       });
@@ -364,24 +394,24 @@ describe('Runs (e2e)', () => {
       const ticketId = await createTicket('e2e patch parent');
       const created = await call().post('/runs').send({ name: 'Move me' });
       expect(created.status).toBe(201);
-      runs.push(created.body.run.id);
+      runs.push(runFrom(created).id);
 
       const linked = await call()
-        .patch(`/runs/${created.body.run.id}`)
+        .patch(`/runs/${runFrom(created).id}`)
         .send({ status: 'running', progress: 40, ticketId });
       expect(linked.status).toBe(200);
       noError(linked.body);
-      expect(linked.body.run.status).toBe('running');
-      expect(linked.body.run.progress).toBe(40);
-      expect(linked.body.run.ticketId).toBe(ticketId);
+      expect(runFrom(linked).status).toBe('running');
+      expect(runFrom(linked).progress).toBe(40);
+      expect(runFrom(linked).ticketId).toBe(ticketId);
 
       const cleared = await call()
-        .patch(`/runs/${created.body.run.id}`)
+        .patch(`/runs/${runFrom(created).id}`)
         .send({ ticketId: null, status: 'done', progress: 100 });
       expect(cleared.status).toBe(200);
       noError(cleared.body);
-      expect(cleared.body.run.ticketId).toBeNull();
-      expect(cleared.body.run.status).toBe('done');
+      expect(runFrom(cleared).ticketId).toBeNull();
+      expect(runFrom(cleared).status).toBe('done');
     });
   });
 });

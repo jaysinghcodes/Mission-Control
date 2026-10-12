@@ -1,3 +1,4 @@
+import { wireText } from '../wire-text';
 import {
   USAGE_DISPLAY_TZ,
   calendarDay,
@@ -28,9 +29,7 @@ function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
-function readPoint(
-  value: unknown,
-): {
+function readPoint(value: unknown): {
   at: Date;
   totalCost: number;
   tokensIn: number;
@@ -39,7 +38,7 @@ function readPoint(
 } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
-  const at = new Date(String(raw.at ?? ''));
+  const at = new Date(wireText(raw.at ?? ''));
   if (Number.isNaN(at.getTime())) return null;
   return {
     at,

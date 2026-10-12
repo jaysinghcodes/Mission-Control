@@ -499,7 +499,12 @@ export class TicketsController {
   ): Promise<void> {
     try {
       await this.prisma.activityEvent.create({
-        data: { type, payload: payload as object, source: 'api' },
+        data: {
+          type,
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- Prisma Json rejects Record<string, unknown> and accepts object
+          payload: payload as object,
+          source: 'api',
+        },
       });
     } catch {
       // best-effort — never fail the transition over persistence

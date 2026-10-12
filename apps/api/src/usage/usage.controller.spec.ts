@@ -1,3 +1,4 @@
+import { promiseFn } from '../../test/lint-helpers';
 import { UsageController } from './usage.controller';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -13,7 +14,9 @@ describe('UsageController', () => {
       providers: unknown;
     }[],
   ) {
-    const prisma = { usageBucket: { findMany: jest.fn(async () => rows) } };
+    const prisma = {
+      usageBucket: { findMany: jest.fn(promiseFn(() => rows)) },
+    };
     return new UsageController(prisma as unknown as PrismaService);
   }
 

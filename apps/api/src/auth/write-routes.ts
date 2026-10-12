@@ -40,20 +40,15 @@ export function listRegisteredWriteRoutes(
       const ctor = wrapper.metatype;
       if (!ctor) continue;
       const controllerPath = Reflect.getMetadata(PATH_METADATA, ctor) as
-        | string
-        | string[]
-        | undefined;
+        string | string[] | undefined;
       const proto = ctor.prototype as Record<string, unknown>;
       for (const key of Object.getOwnPropertyNames(proto)) {
         const handler = proto[key];
         if (typeof handler !== 'function') continue;
         const methodMeta = Reflect.getMetadata(METHOD_METADATA, handler) as
-          | number
-          | undefined;
+          number | undefined;
         const pathMeta = Reflect.getMetadata(PATH_METADATA, handler) as
-          | string
-          | string[]
-          | undefined;
+          string | string[] | undefined;
         if (methodMeta === undefined || pathMeta === undefined) continue;
         if (!WRITE_METHODS.has(methodMeta)) continue;
         const paths = Array.isArray(pathMeta) ? pathMeta : [pathMeta];

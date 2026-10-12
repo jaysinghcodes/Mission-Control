@@ -70,7 +70,9 @@ export function assertDemoSeedProjects(
   const seen = new Set<string>();
   for (const [ticketId, link] of Object.entries(DEMO_TICKET_PROJECT)) {
     if (seen.has(ticketId)) {
-      throw new Error(`demo ticket ${ticketId} is linked to more than one project`);
+      throw new Error(
+        `demo ticket ${ticketId} is linked to more than one project`,
+      );
     }
     seen.add(ticketId);
     if (!known.has(link.projectId)) {
@@ -100,7 +102,9 @@ export function assertDemoSeedProjects(
   });
 
   // These three numbers are the walkthrough: partial, in-flight, empty.
-  const onboarding = summary.find((s) => s.projectId === 'demo-project-onboarding');
+  const onboarding = summary.find(
+    (s) => s.projectId === 'demo-project-onboarding',
+  );
   const pipeline = summary.find((s) => s.projectId === 'demo-project-pipeline');
   const ideas = summary.find((s) => s.projectId === 'demo-project-ideas');
   if (!onboarding || onboarding.done !== 1 || onboarding.total !== 2) {

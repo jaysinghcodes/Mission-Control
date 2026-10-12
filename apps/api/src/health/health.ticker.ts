@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 
 /**
@@ -22,7 +27,9 @@ export class HealthTickerService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     const ms = Number(process.env.HEALTH_TICK_MS ?? 30000);
     if (!Number.isFinite(ms) || ms <= 0) {
-      this.logger.warn('HEALTH_TICK_MS disabled (0 or invalid) — no health.tick broadcasts');
+      this.logger.warn(
+        'HEALTH_TICK_MS disabled (0 or invalid) — no health.tick broadcasts',
+      );
       return;
     }
     this.timer = setInterval(() => this.tick(), ms);

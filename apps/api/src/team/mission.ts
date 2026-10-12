@@ -17,7 +17,8 @@ export const MISSION_MAX = 2000;
 export const SETTING_ID = 'default';
 
 /** Shown on the Team page when the saved mission is empty. */
-export const MISSION_PLACEHOLDER = 'No mission yet. Edit to add one the team can see.';
+export const MISSION_PLACEHOLDER =
+  'No mission yet. Edit to add one the team can see.';
 
 export interface MissionBody {
   mission: string;
@@ -43,7 +44,9 @@ export function readMission(body: unknown): string {
   }
   const text = mission.trim();
   if (text.length > MISSION_MAX) {
-    throw new BadRequestException(`mission must be at most ${MISSION_MAX} characters`);
+    throw new BadRequestException(
+      `mission must be at most ${MISSION_MAX} characters`,
+    );
   }
   return text;
 }

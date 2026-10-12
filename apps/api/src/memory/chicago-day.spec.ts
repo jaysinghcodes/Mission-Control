@@ -30,15 +30,31 @@ describe('chicagoDay', () => {
 describe('chicagoDayBounds', () => {
   it('includes 23:58 and excludes 00:02, in CST and CDT', () => {
     const winter = chicagoDayBounds('2026-01-15');
-    expect(new Date('2026-01-16T05:58:00.000Z').getTime()).toBeGreaterThanOrEqual(winter.start.getTime());
-    expect(new Date('2026-01-16T05:58:00.000Z').getTime()).toBeLessThan(winter.end.getTime());
-    expect(new Date('2026-01-16T06:00:00.000Z').getTime()).toBe(winter.end.getTime());
-    expect(new Date('2026-01-16T06:02:00.000Z').getTime()).toBeGreaterThanOrEqual(winter.end.getTime());
+    expect(
+      new Date('2026-01-16T05:58:00.000Z').getTime(),
+    ).toBeGreaterThanOrEqual(winter.start.getTime());
+    expect(new Date('2026-01-16T05:58:00.000Z').getTime()).toBeLessThan(
+      winter.end.getTime(),
+    );
+    expect(new Date('2026-01-16T06:00:00.000Z').getTime()).toBe(
+      winter.end.getTime(),
+    );
+    expect(
+      new Date('2026-01-16T06:02:00.000Z').getTime(),
+    ).toBeGreaterThanOrEqual(winter.end.getTime());
 
     const summer = chicagoDayBounds('2026-07-15');
-    expect(new Date('2026-07-16T04:58:00.000Z').getTime()).toBeGreaterThanOrEqual(summer.start.getTime());
-    expect(new Date('2026-07-16T04:58:00.000Z').getTime()).toBeLessThan(summer.end.getTime());
-    expect(new Date('2026-07-16T05:00:00.000Z').getTime()).toBe(summer.end.getTime());
-    expect(new Date('2026-07-16T05:02:00.000Z').getTime()).toBeGreaterThanOrEqual(summer.end.getTime());
+    expect(
+      new Date('2026-07-16T04:58:00.000Z').getTime(),
+    ).toBeGreaterThanOrEqual(summer.start.getTime());
+    expect(new Date('2026-07-16T04:58:00.000Z').getTime()).toBeLessThan(
+      summer.end.getTime(),
+    );
+    expect(new Date('2026-07-16T05:00:00.000Z').getTime()).toBe(
+      summer.end.getTime(),
+    );
+    expect(
+      new Date('2026-07-16T05:02:00.000Z').getTime(),
+    ).toBeGreaterThanOrEqual(summer.end.getTime());
   });
 });

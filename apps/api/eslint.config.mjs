@@ -26,9 +26,13 @@ export default tseslint.config(
   },
   {
     rules: {
+      // External payloads and test doubles use explicit any, and tsconfig noImplicitAny is already off.
       '@typescript-eslint/no-explicit-any': 'off',
+      // bootstrap() starts the process and is not awaited. Warn, so the call stays visible and lint still exits 0.
       '@typescript-eslint/no-floating-promises': 'warn',
+      // supertest request() is typed as any. Warn, so those calls stay visible and lint still exits 0.
       '@typescript-eslint/no-unsafe-argument': 'warn',
+      // Prettier stays an error. endOfLine auto matches the line endings already in the tree.
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },

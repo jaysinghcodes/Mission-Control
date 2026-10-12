@@ -13,7 +13,10 @@ export class ActivityController {
   @Get()
   async list(@Query('limit') limit = '50') {
     const n = Math.min(Number(limit) || 50, 200);
-    const events = await this.prisma.activityEvent.findMany({ orderBy: { ts: 'desc' }, take: n });
+    const events = await this.prisma.activityEvent.findMany({
+      orderBy: { ts: 'desc' },
+      take: n,
+    });
     return { events, ts: Date.now() };
   }
 }

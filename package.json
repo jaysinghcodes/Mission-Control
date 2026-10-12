@@ -13,6 +13,7 @@
     "test": "turbo run test && node --test scripts/doctor.test.mjs scripts/fresh-clone.test.mjs",
     "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
     "seed:demo": "npm run seed:demo --workspace api",
     "doctor": "node scripts/doctor.mjs"
   },

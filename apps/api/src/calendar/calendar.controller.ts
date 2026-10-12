@@ -8,7 +8,9 @@ export class CalendarController {
 
   @Get()
   async list() {
-    const jobs = await this.prisma.cronJob.findMany({ orderBy: { day: 'asc' } });
+    const jobs = await this.prisma.cronJob.findMany({
+      orderBy: { day: 'asc' },
+    });
     return { jobs, ts: Date.now() };
   }
 }

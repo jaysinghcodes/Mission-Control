@@ -1,3 +1,4 @@
+import { promiseFn } from '../../test/lint-helpers';
 import { SnapshotsService } from './snapshots.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import { aggregateUsage } from '../usage/aggregate-usage';
@@ -15,22 +16,24 @@ function makePrisma() {
   const rows = new Map<string, Bucket>();
   const usageBucket = {
     upsert: jest.fn(
-      async ({
-        where,
-        create,
-        update,
-      }: {
-        where: { day: string };
-        create: Bucket;
-        update: Omit<Bucket, 'day'>;
-      }) => {
-        const prev = rows.get(where.day);
-        const next = prev ? { ...prev, ...update, day: where.day } : create;
-        rows.set(where.day, next);
-        return next;
-      },
+      promiseFn(
+        ({
+          where,
+          create,
+          update,
+        }: {
+          where: { day: string };
+          create: Bucket;
+          update: Omit<Bucket, 'day'>;
+        }) => {
+          const prev = rows.get(where.day);
+          const next = prev ? { ...prev, ...update, day: where.day } : create;
+          rows.set(where.day, next);
+          return next;
+        },
+      ),
     ),
-    findMany: jest.fn(async () => [...rows.values()]),
+    findMany: jest.fn(promiseFn(() => [...rows.values()])),
   };
   return { prisma: { usageBucket } as unknown as PrismaService, rows };
 }

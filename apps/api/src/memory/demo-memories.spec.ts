@@ -2,8 +2,18 @@ import { chicagoDay, chicagoDayBounds, shiftChicagoDay } from './chicago-day';
 import { buildDemoMemories } from './demo-memories';
 
 const ROSTER = new Set([
-  'Speedy', 'Atlas', 'Forge', 'Sentinel', 'Echo', 'Pixel',
-  'Bolt', 'Ledger', 'Quill', 'Aegis', 'Patch', 'Scout',
+  'Speedy',
+  'Atlas',
+  'Forge',
+  'Sentinel',
+  'Echo',
+  'Pixel',
+  'Bolt',
+  'Ledger',
+  'Quill',
+  'Aegis',
+  'Patch',
+  'Scout',
 ]);
 
 function chicagoClock(iso: string): string {
@@ -24,13 +34,19 @@ describe('demo memories', () => {
     const ids = rows.map((row) => row.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((id) => id.startsWith('demo-memory-'))).toBe(true);
-    expect(buildDemoMemories(new Date('2026-01-16T06:02:00.000Z')).map((row) => row.id)).toEqual(ids);
+    expect(
+      buildDemoMemories(new Date('2026-01-16T06:02:00.000Z')).map(
+        (row) => row.id,
+      ),
+    ).toEqual(ids);
 
     const days = new Map<string, number>();
     for (const row of rows) {
       expect(ROSTER.has(row.agent)).toBe(true);
       expect(['long-term', 'daily', 'other']).toContain(row.kind);
-      expect(new Date(row.createdAt).getTime()).toBeLessThanOrEqual(now.getTime());
+      expect(new Date(row.createdAt).getTime()).toBeLessThanOrEqual(
+        now.getTime(),
+      );
       const day = chicagoDay(row.createdAt);
       days.set(day, (days.get(day) ?? 0) + 1);
     }
@@ -47,8 +63,16 @@ describe('demo memories', () => {
     expect(chicagoClock(midnight!.createdAt)).toBe('23:58');
     const day = chicagoDay(midnight!.createdAt);
     const nextMidnight = chicagoDayBounds(shiftChicagoDay(day, 1)).start;
-    expect(nextMidnight.getTime() - new Date(midnight!.createdAt).getTime()).toBe(2 * 60_000);
-    expect(chicagoDay(new Date(new Date(midnight!.createdAt).getTime() + 4 * 60_000).toISOString())).not.toBe(day);
+    expect(
+      nextMidnight.getTime() - new Date(midnight!.createdAt).getTime(),
+    ).toBe(2 * 60_000);
+    expect(
+      chicagoDay(
+        new Date(
+          new Date(midnight!.createdAt).getTime() + 4 * 60_000,
+        ).toISOString(),
+      ),
+    ).not.toBe(day);
     expect(rows.some((row) => row.agent === 'Aegis')).toBe(true);
   });
 });

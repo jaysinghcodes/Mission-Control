@@ -240,11 +240,11 @@ npm test
 npm run build
 ```
 
-`npm run doctor` checks the Node version, ports, `.env`, the database, migrations, the write token, API health, and the optional OpenClaw bridge. Run it from the repo root when setup fails.
+`npm run doctor` checks the Node version, the API port (`PORT`, default 3000), `.env`, the database, migrations, the write token, API health, and the optional OpenClaw bridge. It does not check the web port 5173. Run it from the repo root when setup fails.
 
 On this clone, after that generate, `npm test` passed (API Jest: 29 suites, 208 tests; web: 51 tests) and `npm run build` passed. This pass used Node 22.14.0. Six of the nine tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres stopped, that file is the only API failure: 6 failed, 202 passed, 208 total. The unknown event type check and the production missing token checks (`POST /events` and `POST /tickets` with no token) return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
 
-`npm run lint` is `oxlint` for the web app (warnings, exit 0) and `eslint --fix` for the API. The API lint exits 1 on the current sources (mostly `prettier/prettier`, plus typescript-eslint `no-unsafe-*` and `require-await`). That failure is in the existing API tree. Do not treat `eslint --fix` as safe to commit: it rewrites a lot of files. `npm run test:e2e` needs Postgres and was not part of this pass.
+`npm run lint` checks the web app with oxlint and the API with eslint. It only reads files. `npm run lint:fix` runs the same checks and applies their automatic fixes. Commit the result only after you review the diff. `npm run test:e2e` needs Postgres.
 
 ---
 
@@ -268,7 +268,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 **`npm ci` warns that install scripts are not covered by allowScripts.** Seen for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. Until `(cd apps/api && npx prisma generate)`, `npm test` and `npm run build` fail with `Cannot find module '.prisma/client/default'`. Generate succeeded after the warning. If generate cannot find query engines, allow those scripts (`npm approve-scripts` in the npm 11 docs) and generate again.
 
-**`npm run lint` exits 1.** The web oxlint step finishes. The API eslint step reports existing `prettier/prettier` and typescript-eslint errors and exits 1. That is the current tree, not a missing env var.
+**`npm run lint` exits 1.** oxlint or eslint found an error. The command does not rewrite files. Run `npm run lint:fix` for the automatic fixes, then fix anything it still reports.
 
 **`python3 bridge/mc-bridge-sync.py` says `openclaw` is not on PATH and posts nothing.** Expected on a machine without the OpenClaw CLI. Exit code was 0. Demo data stays. Install the CLI, or POST `/events` yourself using the onboarding file.
 
