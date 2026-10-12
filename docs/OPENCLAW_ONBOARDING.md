@@ -193,8 +193,8 @@ Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves sh
 | Call | Body | Notes |
 | --- | --- | --- |
 | `GET /runs?status=&ticketId=` | | Newest 50. `ticketId` keeps only runs linked to that ticket |
-| `POST /runs` | `{ name, agent?, ticketId? }` | 201 `{ run, ts }` for a queued run. No `error` key. Missing or blank name is 400 `name is required`. A non string name is 400 `name must be a string`. `ticketId`, when set, must be an existing ticket id or the call is 404 `ticketId not found` and nothing is inserted. Null or blank stores no link |
-| `PATCH /runs/:id` | `{ status?, progress?, agent?, ticketId? }` | 200 `{ run, ts }` with no `error` key. Unknown run id is 404 `run not found`. Unknown `ticketId` is 404 `ticketId not found` and the row is left unchanged. A bad `status`, `progress`, or `agent` is 400 and the message names that field. Status `queued`, `running`, `done`, `failed`, `needs_approval`. Emits `run.started`, `run.completed`, `run.failed` or `run.queued`. `ticketId: null` clears the link |
+| `POST /runs` | `{ name, agent?, ticketId? }` | 201 `{ run, ts }` for a queued run. No `error` key. Missing or blank name is 400 `name is required`. A non string name is 400 `name must be a string`. Name is at most 200 characters and agent at most 100. Longer is 400 and the message names the field. Unknown fields are 400 (`unknown field <name>`), including `status`, which create does not accept. Nothing extra is stored. `ticketId`, when set, must be an existing ticket id or the call is 404 `ticketId not found` and nothing is inserted. Null or blank stores no link |
+| `PATCH /runs/:id` | `{ status?, progress?, agent?, ticketId? }` | 200 `{ run, ts }` with no `error` key. Unknown run id is 404 `run not found`. Unknown `ticketId` is 404 `ticketId not found` and the row is left unchanged. Unknown fields are 400. A bad `status`, `progress`, or `agent` is 400 and the message names that field. Agent is at most 100 characters. Status `queued`, `running`, `done`, `failed`, `needs_approval`. A body that changes no stored field returns 200 with the unchanged run and writes no activity event. A real change emits `run.started`, `run.completed`, `run.failed` or `run.queued`. `ticketId: null` clears the link |
 
 ### 4.7 Models and spend
 
@@ -226,7 +226,7 @@ These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/se
 * No write route for agents, sessions, cron jobs, usage or memory except `POST /events` snapshots. There is no per agent register call: registering yourself means appearing in `agents.snapshot`, which replaces the whole roster.
 * `/models` is stored but not used by the bridge. Nothing in this repo fetches a live provider balance.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
-* A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
+* A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
 * Devices have no write route; only `seed:demo` fills them.
 * Do not publish port 3000 on a non loopback address without `INGEST_TOKEN`. The API refuses that start. With the token set, a write that omits `x-ingest-token` is 401.
 
