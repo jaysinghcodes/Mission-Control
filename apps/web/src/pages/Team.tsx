@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { useRosterLive } from '../lib/useRosterLive'
-import type { Agent, AgentsResp } from '../types'
-import { PageHeader, SoftCard, Btn, Face, AgentName, Kicker, EmptyState, FieldError } from '../components/shell'
+import type { AgentsResp } from '../types'
+import { PageHeader, SoftCard, Btn, AgentName, Kicker, EmptyState, FieldError } from '../components/shell'
+import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { OPERATOR_NAME } from '../config'
 import { ROSTER, agentCaption } from '../data/roster'
 import { formatChicagoSaved } from '../lib/chicago-day'
+import { OFFLINE_LABEL, isRegisteredOffline, orderedPeople, showSampleTag } from '../lib/sample-roster'
+import { useRosterView } from '../lib/useSampleRoster'
 
 /**
  * Team — ticket 13 layout (mission, people, devices), filled from the API.
@@ -33,23 +36,6 @@ interface DevicesResp {
   devices: DeviceRow[]
 }
 
-/** Roster order, at most the 12 cool-name robots. Unmatched agents fill in only when none of the roster is present. */
-function peopleRow(agents: Agent[]): Agent[] {
-  const used = new Set<string>()
-  const picked: Agent[] = []
-  for (const entry of ROSTER) {
-    const match = agents.find((agent) => {
-      if (used.has(agent.id)) return false
-      return agentCaption(agent.name, agent.role).name === entry.name
-    })
-    if (!match) continue
-    used.add(match.id)
-    picked.push(match)
-  }
-  if (picked.length > 0) return picked.slice(0, 12)
-  return agents.slice(0, 12)
-}
-
 function deviceStatus(device: DeviceRow): { on: boolean; status: string } {
   if (device.online) return { on: true, status: 'Online' }
   const when = device.lastSeenAt ? formatChicagoSaved(device.lastSeenAt) : ''
@@ -64,8 +50,9 @@ export default function Team() {
   const { events } = useLiveActivity()
   useRosterLive(events, agentsQ.refetch)
   const agents = agentsQ.data?.agents ?? []
-  const people = peopleRow(agents)
-  const working = agents.filter((a) => a.status === 'working').length
+  const { visible: roster, now } = useRosterView(agents)
+  const people = orderedPeople(roster, ROSTER.map((entry) => entry.name), (agent) => agentCaption(agent.name, agent.role).name)
+  const working = roster.filter((a) => a.status === 'working' && !isRegisteredOffline(a, now)).length
   const devices = devicesQ.data?.devices ?? []
   const mission = missionQ.data?.mission ?? ''
   const placeholder = missionQ.data?.placeholder ?? ''
@@ -102,7 +89,7 @@ export default function Team() {
     <div>
       <PageHeader
         title="Team"
-        summary={`${owner} + ${agents.length} agents · ${online} online`}
+        summary={`${owner} + ${roster.length} agents · ${online} online`}
         tools={<Btn kind="primary" onClick={() => setInvite(true)}>Invite</Btn>}
       />
 
@@ -161,11 +148,18 @@ export default function Team() {
             <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-3">
               {people.map((agent) => {
                 const cap = agentCaption(agent.name, agent.role)
+                const offline = isRegisteredOffline(agent, now)
                 return (
-                  <li key={agent.id}>
-                    <Link to="/agents" className="flex shrink-0 items-center gap-2" aria-label={`${cap.name} · ${cap.role}`}>
-                      <Face agent={agent} agents={agents} px={36} />
-                      <AgentName name={agent.name} role={agent.role} size="md" />
+                  <li key={agent.id} data-agent-id={agent.id} data-offline={offline ? 'true' : 'false'}>
+                    <Link to="/agents" className="flex shrink-0 items-center gap-2" aria-label={`${cap.name} · ${cap.role}${offline ? `, ${OFFLINE_LABEL}` : ''}`}>
+                      <RosterRobot agent={agent} agents={agents} px={36} now={now} />
+                      <span className="min-w-0">
+                        <span className="flex flex-wrap items-center gap-1">
+                          <AgentName name={agent.name} role={agent.role} size="md" />
+                          {showSampleTag(agent) && <SampleTag />}
+                        </span>
+                        {offline && <span className="block text-[11px] text-mc-sub">{OFFLINE_LABEL}</span>}
+                      </span>
                     </Link>
                   </li>
                 )
@@ -180,19 +174,22 @@ export default function Team() {
         <SoftCard className="px-6 py-5">
           <div className="flex items-center justify-between">
             <span className="text-[15px] font-semibold">Agents</span>
-            <span className="text-[12.5px] text-mc-sub">{agents.length} · {working} working</span>
+            <span className="text-[12.5px] text-mc-sub">{roster.length} · {working} working</span>
           </div>
           {!agentsQ.data && agentsQ.loading ? (
             <p className="mt-4 text-[13px] text-mc-sub">Loading agents…</p>
-          ) : agents.length === 0 ? (
+          ) : roster.length === 0 ? (
             <p className="mt-4 text-[13px] text-mc-sub">No agents yet. Seed or connect the bridge.</p>
           ) : (
             <div className="mt-3 flex flex-wrap gap-2">
               {people.map((agent) => {
                 const cap = agentCaption(agent.name, agent.role)
+                const offline = isRegisteredOffline(agent, now)
                 return (
-                  <Link key={agent.id} to="/agents" aria-label={`${cap.name} · ${cap.role}`} className="rounded-lg">
-                    <Face agent={agent} agents={agents} px={46} />
+                  <Link key={agent.id} to="/agents" data-agent-id={agent.id} aria-label={`${cap.name} · ${cap.role}${offline ? `, ${OFFLINE_LABEL}` : ''}`} className="flex flex-col items-center rounded-lg">
+                    <RosterRobot agent={agent} agents={agents} px={46} now={now} />
+                    {showSampleTag(agent) && <SampleTag />}
+                    {offline && <span className="text-[11px] text-mc-sub">{OFFLINE_LABEL}</span>}
                   </Link>
                 )
               })}

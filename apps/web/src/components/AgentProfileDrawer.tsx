@@ -4,6 +4,9 @@ import type { Agent } from '../types'
 import { SectionLabel } from './ui'
 import { AgentAvatar } from './AgentAvatar'
 import { channelHref, rosterDisplayName, rosterIdentity } from '../data/roster'
+import { SampleTag } from './rosterMarks'
+import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
+import { useNow } from '../lib/useSampleRoster'
 
 const statusColor = (status: string) => (status === 'working' ? 'var(--mc-green)' : 'var(--mc-faint)')
 
@@ -45,7 +48,9 @@ export function AgentProfileDrawer({
   const identity = rosterIdentity(agent.name, agent.role)
   const name = rosterDisplayName(agent.name, agent.role)
   const roleTitle = identity?.role ?? agent.role ?? 'agent'
-  const working = agent.status === 'working'
+  const now = useNow()
+  const offline = isRegisteredOffline(agent, now)
+  const working = !offline && agent.status === 'working'
   const chief = !agent.parentId
 
   const href = channelHref(agent.channel, name)
@@ -97,15 +102,18 @@ export function AgentProfileDrawer({
       >
         {/* Header: avatar + identity + status, close button */}
         <div className="flex items-start gap-3 border-b border-mc-border px-5 pb-4 pt-5">
-          <AgentAvatar agent={agent} agents={agents} size={1.8} />
+          <AgentAvatar agent={offline ? { ...agent, status: 'idle' } : agent} agents={agents} size={1.8} dim={offline} />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[16px] font-semibold leading-tight text-mc-text">{name}</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="truncate text-[16px] font-semibold leading-tight text-mc-text">{name}</div>
+              {showSampleTag(agent) && <SampleTag />}
+            </div>
             <div className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${chief ? 'text-mc-accent-text' : 'text-mc-sub'}`}>
               {roleTitle}
             </div>
             <div className="mt-1.5 flex items-center gap-1.5">
-              <span className="inline-block h-[6px] w-[6px] rounded-full" style={{ backgroundColor: statusColor(agent.status) }} />
-              <span className="text-[11px] text-mc-sub">{working ? 'working' : 'idle'}</span>
+              <span className="inline-block h-[6px] w-[6px] rounded-full" style={{ backgroundColor: offline ? 'var(--mc-gray)' : statusColor(agent.status) }} />
+              <span className="text-[11px] text-mc-sub">{offline ? OFFLINE_LABEL : working ? 'working' : 'idle'}</span>
             </div>
           </div>
           <button
