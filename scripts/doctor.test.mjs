@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import http from 'node:http'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
@@ -11,6 +12,7 @@ import {
   FIX_NODE,
   FIX_TOKEN,
   hasDashPunctuation,
+  interpretHealthResponse,
   nodeSupported,
   portFix,
   report,
@@ -144,6 +146,80 @@ test('each required failure names the next command and exits non zero', () => {
     assert.ok(line, item.name)
     assert.match(line, new RegExp(item.includes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false, item.name)
+  }
+})
+
+test('API up and database down keeps the API port and names the database', async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(500, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ statusCode: 500, message: 'Internal server error' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  try {
+    const probe = interpretHealthResponse({
+      ok: false,
+      status: 500,
+      text: JSON.stringify({ statusCode: 500, message: 'Internal server error' }),
+    })
+    assert.equal(probe.kind, 'database-down')
+    assert.equal(interpretHealthResponse({ ok: false, status: 0, text: '' }).kind, 'down')
+    assert.equal(interpretHealthResponse({ ok: true, status: 200, text: 'not the api' }).kind, 'stranger')
+    assert.equal(
+      interpretHealthResponse({
+        ok: true,
+        status: 200,
+        text: JSON.stringify({
+          status: 'degraded',
+          database: 'unavailable',
+          uptimeSeconds: 3,
+        }),
+      }).kind,
+      'database-down',
+    )
+    const result = report(facts({
+      ports: {
+        badPort: false,
+        api: port,
+        web: 5173,
+        apiState: 'ours',
+        webState: 'free',
+        health: {
+          reachable: false,
+          databaseDown: true,
+          url: `http://127.0.0.1:${port}/health`,
+        },
+      },
+      database: {
+        state: 'unreachable',
+        migrations: 'unknown',
+        pending: [],
+        detail: '127.0.0.1:5493',
+      },
+    }))
+    assert.equal(result.code, 1)
+    assert.match(result.lines[1], /^pass ports:/)
+    assert.match(result.lines[1], /serving the Mission Control API/)
+    assert.doesNotMatch(result.lines[1], /in use/)
+    assert.match(result.lines[3], new RegExp(FIX_DATABASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(
+      result.lines[6],
+      new RegExp(
+        `^fail health: The API is running at http://127\\.0\\.0\\.1:${port}/health but the database is down\\. Start Postgres with: ${FIX_DATABASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+      ),
+    )
+    assert.doesNotMatch(result.lines[6], /npm run dev/)
+    assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+    const live = await fetch(`http://127.0.0.1:${port}/health`)
+    assert.equal(live.status, 500)
+    const liveKind = interpretHealthResponse({
+      ok: live.ok,
+      status: live.status,
+      text: await live.text(),
+    })
+    assert.equal(liveKind.kind, 'database-down')
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
   }
 })
 

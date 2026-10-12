@@ -173,6 +173,28 @@ function isMissionControlHealth(text) {
   }
 }
 
+/**
+ * A refused connection means the API is not running.
+ * A response that is not Mission Control means a stranger holds the port.
+ * Any /health response with a Mission Control body, including a 4xx or 5xx
+ * body, is this API. An error body means the process is up and the database
+ * is down.
+ */
+export function interpretHealthResponse(res) {
+  if (!res || res.status === 0) return { kind: 'down' }
+  if (isMissionControlHealth(res.text)) {
+    try {
+      const body = JSON.parse(res.text)
+      if (body.database !== 'connected') return { kind: 'database-down' }
+    } catch {
+      return { kind: 'stranger' }
+    }
+    return { kind: 'up' }
+  }
+  if (res.status >= 400 && String(res.text ?? '').trim() !== '') return { kind: 'database-down' }
+  return { kind: 'stranger' }
+}
+
 function isMissionControlWeb(text) {
   return text.includes('Mission Control') && text.includes('id="root"')
 }
@@ -342,14 +364,20 @@ async function portFacts(env) {
   let health = null
   if (!apiFree) {
     const res = await httpGet(healthUrl)
-    if (res.ok && isMissionControlHealth(res.text)) {
+    const kind = interpretHealthResponse(res)
+    if (kind.kind === 'up' || kind.kind === 'database-down') {
       apiState = 'ours'
-      health = { reachable: true, url: healthUrl, body: res.text }
+      health = {
+        reachable: kind.kind === 'up',
+        databaseDown: kind.kind === 'database-down',
+        url: healthUrl,
+        body: res.text,
+      }
     } else {
-      health = { reachable: false, url: healthUrl, body: '' }
+      health = { reachable: false, databaseDown: false, url: healthUrl, body: '' }
     }
   } else {
-    health = { reachable: false, url: healthUrl, body: '' }
+    health = { reachable: false, databaseDown: false, url: healthUrl, body: '' }
   }
   if (!webFree) {
     const res = await httpGet(`http://127.0.0.1:${WEB_PORT}/`)
@@ -450,6 +478,9 @@ function tokenLine(env) {
 
 function healthLine(ports) {
   const url = ports.health?.url ?? 'http://127.0.0.1:3000/health'
+  if (ports.health?.databaseDown) {
+    return `fail health: The API is running at ${url} but the database is down. Start Postgres with: ${FIX_DATABASE}`
+  }
   if (ports.health?.reachable) return `pass health: The API health endpoint is reachable at ${url}.`
   return `fail health: The API health endpoint is not reachable at ${url}. Start the API and the web app with: ${FIX_HEALTH}`
 }
