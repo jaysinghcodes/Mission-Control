@@ -173,14 +173,28 @@ function isMissionControlHealth(text) {
   }
 }
 
+/** Nest's unhandled error body, for example {"statusCode":500,"message":"Internal server error"}. */
+function isNestServerError(res) {
+  if (!res || res.status < 500 || res.status > 599) return false
+  let body
+  try {
+    body = JSON.parse(res.text)
+  } catch {
+    return false
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  const code = body.statusCode
+  if (typeof code !== 'number' || code < 500 || code > 599) return false
+  return typeof body.message === 'string' && body.message.length > 0
+}
+
 /**
  * A refused connection means the API is not running.
- * A response that is not Mission Control means a stranger holds the port.
- * Any /health response with a Mission Control body, including a 4xx or 5xx
- * body, is this API. An error body means the process is up and the database
- * is down.
+ * The Mission Control health JSON is this API.
+ * A Nest 5xx JSON body is this API only when the database check also failed.
+ * Every other response is a stranger on the port.
  */
-export function interpretHealthResponse(res) {
+export function interpretHealthResponse(res, databaseFailed = false) {
   if (!res || res.status === 0) return { kind: 'down' }
   if (isMissionControlHealth(res.text)) {
     try {
@@ -191,8 +205,37 @@ export function interpretHealthResponse(res) {
     }
     return { kind: 'up' }
   }
-  if (res.status >= 400 && String(res.text ?? '').trim() !== '') return { kind: 'database-down' }
+  if (databaseFailed && isNestServerError(res)) return { kind: 'database-down' }
   return { kind: 'stranger' }
+}
+
+/** Fold the database check into the port probe. A stranger stays busy. */
+export function applyDatabaseToPorts(ports, database) {
+  if (ports.badPort || !ports.probe) return ports
+  const databaseFailed = database?.state !== 'ok'
+  const kind = interpretHealthResponse(ports.probe, databaseFailed)
+  if (kind.kind === 'up' || kind.kind === 'database-down') {
+    return {
+      ...ports,
+      apiState: 'ours',
+      health: {
+        reachable: kind.kind === 'up',
+        databaseDown: kind.kind === 'database-down',
+        url: ports.healthUrl,
+        body: ports.probe.text,
+      },
+    }
+  }
+  return {
+    ...ports,
+    apiState: 'busy',
+    health: {
+      reachable: false,
+      databaseDown: false,
+      url: ports.healthUrl,
+      body: '',
+    },
+  }
 }
 
 function isMissionControlWeb(text) {
@@ -361,36 +404,21 @@ async function portFacts(env) {
   let apiState = apiFree ? 'free' : 'busy'
   let webState = webFree ? 'free' : 'busy'
   const healthUrl = `http://${host}:${port}/health`
-  let health = null
-  if (!apiFree) {
-    const res = await httpGet(healthUrl)
-    const kind = interpretHealthResponse(res)
-    if (kind.kind === 'up' || kind.kind === 'database-down') {
-      apiState = 'ours'
-      health = {
-        reachable: kind.kind === 'up',
-        databaseDown: kind.kind === 'database-down',
-        url: healthUrl,
-        body: res.text,
-      }
-    } else {
-      health = { reachable: false, databaseDown: false, url: healthUrl, body: '' }
-    }
-  } else {
-    health = { reachable: false, databaseDown: false, url: healthUrl, body: '' }
-  }
+  let probe = null
+  const health = { reachable: false, databaseDown: false, url: healthUrl, body: '' }
+  if (!apiFree) probe = await httpGet(healthUrl)
   if (!webFree) {
     const res = await httpGet(`http://127.0.0.1:${WEB_PORT}/`)
     if (res.ok && isMissionControlWeb(res.text)) webState = 'ours'
   }
-  return { badPort: false, api: port, web: WEB_PORT, apiState, webState, health }
+  return { badPort: false, api: port, web: WEB_PORT, apiState, webState, health, probe, healthUrl }
 }
 
 export async function gather(root, processEnv = process.env) {
   const envFile = path.join(root, '.env')
   const envExists = existsSync(envFile)
   const env = effectiveEnv(loadEnvFile(envFile), processEnv)
-  const [ports, database, openclaw] = await Promise.all([
+  const [rawPorts, database, openclaw] = await Promise.all([
     portFacts(env),
     databaseFacts(root, env),
     openclawDetail(),
@@ -399,7 +427,7 @@ export async function gather(root, processEnv = process.env) {
     nodeVersion: process.version,
     envExists,
     env,
-    ports,
+    ports: applyDatabaseToPorts(rawPorts, database),
     database,
     openclaw,
   }
