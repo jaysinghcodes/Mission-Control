@@ -240,6 +240,8 @@ npm test
 npm run build
 ```
 
+`npm run doctor` checks the Node version, ports, `.env`, the database, migrations, the write token, API health, and the optional OpenClaw bridge. Run it from the repo root when setup fails.
+
 On this clone, after that generate, `npm test` passed (API Jest: 29 suites, 208 tests; web: 51 tests) and `npm run build` passed. This pass used Node 22.14.0. Six of the nine tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres stopped, that file is the only API failure: 6 failed, 202 passed, 208 total. The unknown event type check and the production missing token checks (`POST /events` and `POST /tickets` with no token) return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
 
 `npm run lint` is `oxlint` for the web app (warnings, exit 0) and `eslint --fix` for the API. The API lint exits 1 on the current sources (mostly `prettier/prettier`, plus typescript-eslint `no-unsafe-*` and `require-await`). That failure is in the existing API tree. Do not treat `eslint --fix` as safe to commit: it rewrites a lot of files. `npm run test:e2e` needs Postgres and was not part of this pass.
@@ -249,6 +251,8 @@ On this clone, after that generate, `npm test` passed (API Jest: 29 suites, 208 
 ## Troubleshooting
 
 These are the failures hit while bringing up a fresh clone. Commands were run from the repo root unless noted.
+
+**Start with `npm run doctor`.** It prints one line per check. A failing line includes the command to run next. OpenClaw is optional in that report and does not fail the command. The command exits 0 when every required check passes, and exits non zero when one does not.
 
 **The dev server listens on `127.0.0.1:5173`.** Vite `server.host` is `127.0.0.1`. The tunnel `ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000` forwards to that address. Open `http://127.0.0.1:5173/#/tasks` on the machine that opened the tunnel. The API, with `HOST=127.0.0.1`, listens on `127.0.0.1:3000`. `http://localhost:3000` also reaches it when localhost resolves to IPv4.
 

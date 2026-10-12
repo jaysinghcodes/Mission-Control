@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-clone:
+    name: Fresh clone
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - '20'
+          - '22'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mission_control
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mission_control"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Node prefers IPv6 localhost. The published Postgres port is IPv4.
+      # .env.example stays unchanged.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      # npm ci should not download a browser. The smoke step installs one
+      # only when this runner has no Chrome.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - name: Check out a clean tree
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Use npm 11.17.0
+        run: npm install -g npm@11.17.0
+
+      - name: Run the README install and prove the app
+        run: node scripts/fresh-clone.mjs
