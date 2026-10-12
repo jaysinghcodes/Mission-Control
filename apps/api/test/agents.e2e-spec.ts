@@ -95,6 +95,9 @@ describe('Agents register (e2e)', () => {
             'e2e_live',
             '11111111-2222-4333-8444-555555555555',
             'e2e_backfill_default',
+            'scout_clone',
+            'other_thing',
+            'qa_bot',
           ],
         },
       },
@@ -507,6 +510,173 @@ describe('Agents register (e2e)', () => {
       ) AS slug
     `;
     expect(slug[0].slug).toBe('demo_lead');
+  });
+
+  it('matches an explicit id only and leaves the same display name alone', async () => {
+    created.push('scout_clone', 'other_thing', 'qa_bot');
+    await prisma.agent.upsert({
+      where: { id: 'speedy' },
+      update: {},
+      create: {
+        id: 'speedy',
+        name: 'Speedy',
+        source: 'default',
+        position: 0,
+      },
+    });
+    await prisma.agent.upsert({
+      where: { id: 'forge' },
+      update: {},
+      create: {
+        id: 'forge',
+        name: 'Forge',
+        source: 'default',
+        parentId: 'speedy',
+        position: 2,
+      },
+    });
+    await prisma.agent.upsert({
+      where: { id: 'scout' },
+      update: { source: 'default', parentId: 'speedy', status: 'working' },
+      create: {
+        id: 'scout',
+        name: 'Scout',
+        source: 'default',
+        parentId: 'speedy',
+        status: 'working',
+        position: 11,
+      },
+    });
+    await prisma.agent.upsert({
+      where: { id: 'qa_bot' },
+      update: {},
+      create: {
+        id: 'qa_bot',
+        name: 'QA Bot',
+        source: 'registered',
+        status: 'idle',
+        parentId: 'speedy',
+        position: 20,
+      },
+    });
+
+    const cloned = await call()
+      .post('/events')
+      .send({
+        type: 'agents.snapshot',
+        payload: {
+          agents: [
+            {
+              id: 'scout_clone',
+              name: 'Scout',
+              status: 'hijacked',
+              parent: 'Forge',
+            },
+          ],
+        },
+      });
+    expect(cloned.status).toBe(202);
+    const scout = await prisma.agent.findUnique({ where: { id: 'scout' } });
+    const scoutClone = await prisma.agent.findUnique({
+      where: { id: 'scout_clone' },
+    });
+    expect(scout).toMatchObject({
+      source: 'default',
+      status: 'working',
+      parentId: 'speedy',
+    });
+    expect(scoutClone).toMatchObject({
+      name: 'Scout',
+      source: 'snapshot',
+      status: 'hijacked',
+      parentId: 'forge',
+    });
+
+    const stolen = await call()
+      .post('/events')
+      .send({
+        type: 'agents.snapshot',
+        payload: {
+          agents: [{ id: 'other_thing', name: 'QA Bot', status: 'stolen' }],
+        },
+      });
+    expect(stolen.status).toBe(202);
+    const qa = await prisma.agent.findUnique({ where: { id: 'qa_bot' } });
+    const other = await prisma.agent.findUnique({
+      where: { id: 'other_thing' },
+    });
+    expect(qa).toMatchObject({
+      source: 'registered',
+      status: 'idle',
+      parentId: 'speedy',
+    });
+    expect(other).toMatchObject({
+      name: 'QA Bot',
+      source: 'snapshot',
+      status: 'stolen',
+    });
+  });
+
+  it('a nameless snapshot does not move Sentinel, and seed keeps Pixel under Speedy', async () => {
+    await prisma.agent.upsert({
+      where: { id: 'speedy' },
+      update: {},
+      create: { id: 'speedy', name: 'Speedy', source: 'default', position: 0 },
+    });
+    await prisma.agent.upsert({
+      where: { id: 'forge' },
+      update: {},
+      create: {
+        id: 'forge',
+        name: 'Forge',
+        source: 'default',
+        parentId: 'speedy',
+        position: 2,
+      },
+    });
+    await prisma.agent.upsert({
+      where: { id: 'sentinel' },
+      update: { source: 'default', parentId: 'speedy' },
+      create: {
+        id: 'sentinel',
+        name: 'Sentinel',
+        source: 'default',
+        parentId: 'speedy',
+        status: 'working',
+        position: 3,
+      },
+    });
+    await prisma.agent.upsert({
+      where: { id: 'pixel' },
+      update: {},
+      create: {
+        id: 'pixel',
+        name: 'Pixel',
+        source: 'default',
+        parentId: 'speedy',
+        position: 5,
+      },
+    });
+
+    const moved = await call()
+      .post('/events')
+      .send({
+        type: 'agents.snapshot',
+        payload: {
+          agents: [{ name: 'Sentinel', parent: 'Forge' }],
+        },
+      });
+    expect(moved.status).toBe(202);
+    const sentinel = await prisma.agent.findUnique({
+      where: { id: 'sentinel' },
+    });
+    expect(sentinel).toMatchObject({
+      source: 'default',
+      parentId: 'speedy',
+    });
+
+    const pixel = await prisma.agent.findUnique({ where: { id: 'pixel' } });
+    expect(pixel).toMatchObject({ source: 'default', parentId: 'speedy' });
   });
 });
 

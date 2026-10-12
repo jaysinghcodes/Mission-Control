@@ -335,7 +335,6 @@ export function planSnapshot(
   incoming: readonly NormalizedSnapshotAgent[],
 ): SnapshotPlan {
   const byId = new Map(existing.map((row) => [row.id, row]));
-  const byName = new Map(existing.map((row) => [row.name, row]));
   const matched = new Set<string>();
   let nextPosition =
     existing.reduce((max, row) => Math.max(max, row.position), -1) + 1;
@@ -345,23 +344,20 @@ export function planSnapshot(
   const parentNames: { id: string; parentName: string | null }[] = [];
 
   for (const item of incoming) {
-    const row = byId.get(item.id) ?? byName.get(item.name) ?? null;
+    // Identity is the id only. An entry with no id already carries the
+    // slug of its name. A different id never claims a row by display name.
+    const row = byId.get(item.id) ?? null;
     if (row) {
       matched.add(row.id);
       if (row.source === 'snapshot') {
         snapshotWrites.push(snapshotOwned(row, item));
         parentNames.push({ id: row.id, parentName: item.parentName });
       } else {
+        // Default and registered rows take status fields only.
+        // Parent stays where seed:demo or register put it.
         const data = statusPatch(item);
         if (Object.keys(data).length > 0) {
           statusWrites.push({ id: row.id, data });
-        }
-        // A seeded default shares the slug of its name. A snapshot that
-        // omits id still addresses that row. Keep source and profile, and
-        // place it when the payload names a parent. An omitted parent does
-        // not clear the link. A registered row changes status fields only.
-        if (row.source === 'default' && item.parentName) {
-          parentNames.push({ id: row.id, parentName: item.parentName });
         }
       }
       continue;

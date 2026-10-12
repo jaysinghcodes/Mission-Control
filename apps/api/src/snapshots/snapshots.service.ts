@@ -28,15 +28,15 @@ export class SnapshotsService {
    * Merge an agents.snapshot into the roster.
    *
    * Snapshot rows may be created, updated, or removed. Default and
-   * registered rows are never deleted and never change source. When the
-   * payload includes one of those ids (or the same name), only status
-   * fields change. Parent links are applied after the rows exist so a
-   * child listed before its parent does not trip the foreign key.
+   * registered rows are never deleted and never change source. Match is
+   * by id. An entry with no id uses the slug of its name. When that id
+   * is default or registered, only status fields change. Parent links
+   * are applied to snapshot rows after they exist, so a child listed
+   * before its parent does not trip the foreign key.
    *
    * Profile fields stay optional. A snapshot owned row mirrors the payload.
-   * A protected row keeps name, role, color, emoji, position, and avatar.
-   * A default row whose entry names a parent is placed in that tree.
-   * A registered row does not change parent.
+   * A protected row keeps name, role, color, emoji, position, avatar,
+   * and parent.
    */
   async applyAgents(payload: Record<string, unknown>): Promise<void> {
     const existing = (await this.prisma.agent.findMany()).map(asRosterAgent);

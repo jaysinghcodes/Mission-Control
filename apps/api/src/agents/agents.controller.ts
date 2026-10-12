@@ -60,18 +60,16 @@ export class AgentsController {
   }
 
   /**
-   * GET /agents/:id. :id accepts the stable id or the unique name.
+   * GET /agents/:id. :id is the agent id. When no row has that id, a name
+   * match is used so older links keep working.
    */
   @Get(':id')
   async one(@Param('id') id: string) {
     const now = new Date();
-    const withChildren = (where: { id: string } | { name: string }) =>
-      this.prisma.agent.findUnique({
-        where,
-        include: { children: { orderBy: { name: 'asc' } } },
-      });
+    const include = { children: { orderBy: { name: 'asc' as const } } };
     const agent =
-      (await withChildren({ id })) ?? (await withChildren({ name: id }));
+      (await this.prisma.agent.findUnique({ where: { id }, include })) ??
+      (await this.prisma.agent.findFirst({ where: { name: id }, include }));
     if (!agent) {
       throw new NotFoundException(`agent "${id}" not found`);
     }

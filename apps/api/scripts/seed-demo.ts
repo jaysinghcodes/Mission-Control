@@ -251,11 +251,11 @@ async function main(): Promise<void> {
   // Rename a previous demo roster in place when the cool name is free.
   // If both rows already exist, leave both — the seed never deletes.
   for (const [from, to] of Object.entries(LEGACY_AGENT_NAMES)) {
-    const old = await prisma.agent.findUnique({ where: { name: from }, select: { id: true } });
+    const old = await prisma.agent.findFirst({ where: { name: from }, select: { id: true } });
     if (!old) continue;
-    const taken = await prisma.agent.findUnique({ where: { name: to }, select: { id: true } });
+    const taken = await prisma.agent.findFirst({ where: { name: to }, select: { id: true } });
     if (taken) continue;
-    await prisma.agent.update({ where: { name: from }, data: { name: to } });
+    await prisma.agent.update({ where: { id: old.id }, data: { name: to } });
   }
   for (const [from, to] of Object.entries(LEGACY_AGENT_NAMES)) {
     await prisma.ticket.updateMany({
@@ -277,17 +277,18 @@ async function main(): Promise<void> {
     if (!before) counts.projects++;
   }
 
-  // Agents — phase 1: upsert by unique name (no parent yet → FK-safe in any order).
-  // New rows use a slug id, source default, and the roster index as position.
-  // update is empty so a bridge or register that already owns the name is left alone.
+  // Agents — phase 1: upsert by slug id (no parent yet → FK-safe in any order).
+  // A snapshot row may share the display name. update is empty so a bridge
+  // or register that already owns this id is left alone.
   for (let index = 0; index < AGENTS.length; index++) {
     const a = AGENTS[index];
-    const before = await prisma.agent.findUnique({ where: { name: a.name }, select: { id: true } });
+    const id = slugFromName(a.name) ?? `agent_${index}`;
+    const before = await prisma.agent.findUnique({ where: { id }, select: { id: true } });
     await prisma.agent.upsert({
-      where: { name: a.name },
+      where: { id },
       update: {}, // never clobber an existing (possibly bridge-pushed) agent
       create: {
-        id: slugFromName(a.name) ?? `agent_${index}`,
+        id,
         name: a.name,
         role: a.role,
         color: a.color,
@@ -308,11 +309,16 @@ async function main(): Promise<void> {
     });
     if (!before) counts.agents++;
   }
-  // Agents — phase 2: wire the tree only where no parent is set yet.
+  // Agents — phase 2: the seed owns the parent of each default id.
+  // Pixel stays under Speedy. A snapshot cannot move that link, and a
+  // re-seed puts it back if an older build did.
   for (const a of AGENTS.filter((x) => x.parent)) {
-    const parent = await prisma.agent.findUnique({ where: { name: a.parent! }, select: { id: true } });
+    const id = slugFromName(a.name);
+    const parentId = slugFromName(a.parent!);
+    if (!id || !parentId) continue;
+    const parent = await prisma.agent.findUnique({ where: { id: parentId }, select: { id: true } });
     if (parent) {
-      await prisma.agent.updateMany({ where: { name: a.name, parentId: null }, data: { parentId: parent.id } });
+      await prisma.agent.updateMany({ where: { id, source: 'default' }, data: { parentId: parent.id } });
     }
   }
   // Office floor lines. Exact previous demo copy only — a custom currentTask

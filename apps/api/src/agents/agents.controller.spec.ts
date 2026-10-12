@@ -223,10 +223,15 @@ describe('AgentsController register, heartbeat, delete', () => {
       'agents.snapshot',
       expect.objectContaining({ id: 'forge_helper', action: 'heartbeat' }),
     );
-    const heartbeats = prisma.activityEvent.create.mock.calls.filter(
-      (call: [{ data: { payload?: { action?: string } } }]) =>
-        call[0].data.payload?.action === 'heartbeat',
-    );
+    const heartbeats = prisma.activityEvent.create.mock.calls.filter((call) => {
+      const payload = call[0].data.payload;
+      return (
+        !!payload &&
+        typeof payload === 'object' &&
+        'action' in payload &&
+        payload.action === 'heartbeat'
+      );
+    });
     expect(heartbeats).toHaveLength(0);
 
     rows.get('forge_helper')!.lastSeenAt = new Date(

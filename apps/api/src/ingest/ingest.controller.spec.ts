@@ -273,7 +273,7 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
         status: 'working',
         parent: 'Demo Lead',
       },
-      { name: 'Pixel', role: 'design', status: 'idle', parent: 'Demo Lead' },
+      { name: 'Ribbon', role: 'design', status: 'idle', parent: 'Demo Lead' },
     ]);
     expect(res.status).toBe(202);
 
@@ -286,7 +286,7 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
     const childNames = oneAgent(byName)
       .children.map((c: { name: string }) => c.name)
       .sort();
-    expect(childNames).toEqual(['Nova', 'Pixel']);
+    expect(childNames).toEqual(['Nova', 'Ribbon']);
 
     // Lookup by raw id works too, and a leaf agent has no children.
     const list = await request(app.getHttpServer()).get('/agents');
@@ -310,7 +310,7 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
     // parents first (GET /agents returns children first — re-ingesting that
     // order used to violate Agent_parentId_fkey).
     const res = await seedSnapshot([
-      { name: 'Pixel', role: 'design', status: 'idle', parent: 'Demo Lead' },
+      { name: 'Ribbon', role: 'design', status: 'idle', parent: 'Demo Lead' },
       {
         name: 'Nova',
         role: 'development',
@@ -328,6 +328,6 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
     const childNames = oneAgent(byName)
       .children.map((c: { name: string }) => c.name)
       .sort();
-    expect(childNames).toEqual(['Nova', 'Pixel']);
+    expect(childNames).toEqual(['Nova', 'Ribbon']);
   });
 });

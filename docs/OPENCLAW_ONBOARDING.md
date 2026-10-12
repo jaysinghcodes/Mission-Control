@@ -226,7 +226,7 @@ All three are writes. When `INGEST_TOKEN` is set, send `x-ingest-token`. With no
 
 Register, heartbeat, and delete each broadcast `agents.snapshot`. An open Agents, Office, or Team page refetches the roster when that event arrives, so the list updates within 2 seconds without a reload.
 
-`agents.snapshot` creates, updates, or removes only rows whose `source` is `snapshot`. Default and registered rows stay when the payload omits them. When the payload includes a registered id, only status fields change: `status`, `currentTask`, `recentActivity`, `tasksCompleted`, and `totalCost`. A default row included by id or by the slug of its name keeps its source and profile. If that entry names a parent, the parent link is updated. An omitted parent does not clear it. A registered row does not change parent.
+`agents.snapshot` creates, updates, or removes only rows whose `source` is `snapshot`. Match is by `id`. An entry with no `id` uses the slug of its name as the id. Default and registered rows stay when the payload omits that id. When the payload includes a default or registered id, only status fields change: `status`, `currentTask`, `recentActivity`, `tasksCompleted`, and `totalCost`. Parent is not one of those fields. A snapshot row may still name `parent`, and that link is resolved by name. `npm run seed:demo` sets Pixel's parent.
 
 OpenClaw stays optional. The bridge still posts `agents.snapshot`. Set `MC_BRIDGE_REGISTER=1` when it should also call `POST /agents/register` for each agent it maps. Leave that unset and the bridge does not register anyone.
 

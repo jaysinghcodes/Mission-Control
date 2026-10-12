@@ -161,76 +161,92 @@ describe('agent merge', () => {
     expect(omitted.statusWrites).toEqual([]);
   });
 
-  it('places a seeded default when a nameless snapshot names its parent', () => {
-    const pixel = row({
-      id: 'pixel',
-      name: 'Pixel',
+  it('matches by id only and does not move a default parent', () => {
+    const scout = row({
+      id: 'scout',
+      name: 'Scout',
       source: 'default',
       parentId: 'speedy',
-      position: 5,
-      role: 'designer',
+      status: 'working',
+      position: 11,
     });
-    const speedy = row({
-      id: 'speedy',
-      name: 'Speedy',
+    const sentinel = row({
+      id: 'sentinel',
+      name: 'Sentinel',
       source: 'default',
-      position: 0,
+      parentId: 'speedy',
+      status: 'working',
+      position: 3,
     });
-    const registered = row({
-      id: 'forge_helper',
-      name: 'Forge Helper',
+    const qa = row({
+      id: 'qa_bot',
+      name: 'QA Bot',
       source: 'registered',
       parentId: 'speedy',
+      status: 'idle',
       position: 12,
     });
-    const incoming = normalizeSnapshotAgents({
+    const forge = row({
+      id: 'forge',
+      name: 'Forge',
+      source: 'default',
+      parentId: 'speedy',
+      position: 2,
+    });
+
+    const named = normalizeSnapshotAgents({
+      agents: [{ name: 'Sentinel', parent: 'Forge' }],
+    });
+    expect(named[0].id).toBe('sentinel');
+    const namedPlan = planSnapshot([sentinel, forge], named);
+    expect(namedPlan.creates).toEqual([]);
+    expect(namedPlan.parentLinks).toEqual([]);
+    expect(namedPlan.statusWrites).toEqual([]);
+
+    const clone = normalizeSnapshotAgents({
       agents: [
-        { name: 'Pixel', role: 'design', status: 'idle', parent: 'Demo Lead' },
         {
-          name: 'Nova',
-          role: 'development',
-          status: 'working',
-          parent: 'Demo Lead',
-        },
-        { name: 'Demo Lead', role: 'chief-of-staff', status: 'working' },
-        {
-          id: 'forge_helper',
-          name: 'Forge Helper',
-          status: 'working',
-          parent: 'Demo Lead',
+          id: 'scout_clone',
+          name: 'Scout',
+          status: 'hijacked',
+          parent: 'Forge',
         },
       ],
     });
-    const plan = planSnapshot([pixel, speedy, registered], incoming);
-    const lead = plan.creates.find((agent) => agent.name === 'Demo Lead');
-    expect(lead?.id).toBe('demo_lead');
-    expect(plan.creates.map((agent) => agent.name).sort()).toEqual([
-      'Demo Lead',
-      'Nova',
+    const clonePlan = planSnapshot([scout, forge], clone);
+    expect(clonePlan.creates.map((agent) => agent.id)).toEqual(['scout_clone']);
+    expect(clonePlan.creates[0]).toMatchObject({
+      name: 'Scout',
+      source: 'snapshot',
+      status: 'hijacked',
+    });
+    expect(clonePlan.parentLinks).toEqual([
+      { id: 'scout_clone', parentId: 'forge' },
     ]);
-    expect(plan.deleteIds).toEqual([]);
-    expect(plan.parentLinks).toEqual(
-      expect.arrayContaining([
-        { id: 'pixel', parentId: 'demo_lead' },
-        { id: 'nova', parentId: 'demo_lead' },
-      ]),
-    );
-    expect(plan.parentLinks.map((link) => link.id)).not.toContain(
-      'forge_helper',
-    );
-    expect(plan.parentLinks.map((link) => link.id)).not.toContain('speedy');
-    expect(
-      plan.statusWrites.find((write) => write.id === 'pixel')?.data,
-    ).toEqual({
-      status: 'idle',
-    });
+    expect(clonePlan.statusWrites).toEqual([]);
+    expect(clonePlan.parentLinks.map((link) => link.id)).not.toContain('scout');
 
-    const noParent = normalizeSnapshotAgents({
-      agents: [{ name: 'Pixel', status: 'working' }],
+    const other = normalizeSnapshotAgents({
+      agents: [{ id: 'other_thing', name: 'QA Bot', status: 'stolen' }],
     });
-    const left = planSnapshot([pixel], noParent);
-    expect(left.parentLinks).toEqual([]);
-    expect(left.creates).toEqual([]);
+    const otherPlan = planSnapshot([qa], other);
+    expect(otherPlan.creates.map((agent) => agent.id)).toEqual(['other_thing']);
+    expect(otherPlan.statusWrites).toEqual([]);
+    expect(otherPlan.parentLinks.map((link) => link.id)).not.toContain(
+      'qa_bot',
+    );
+  });
+
+  it('seed:demo puts Pixel under Speedy', () => {
+    const text = readFileSync(
+      join(__dirname, '../../scripts/seed-demo.ts'),
+      'utf8',
+    );
+    expect(text).toContain("const LEAD = 'Speedy'");
+    const pixel = text.slice(text.indexOf("name: 'Pixel'"));
+    expect(pixel.slice(0, 220)).toContain('parent: LEAD');
+    expect(text).toContain("source: 'default'");
+    expect(text).toContain('parentId: parent.id');
   });
 
   it('criterion 4: heartbeat stamps lastSeenAt and 10 minutes reads offline', () => {
