@@ -110,7 +110,7 @@ API base URL: `http://127.0.0.1:3000` unless your operator moved it. All bodies 
 
 ### 4.1 Auth
 
-Every mutating route (`POST`, `PUT`, `PATCH`, `DELETE`) uses one check. When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>`. That includes `POST /events` and the REST writes (tickets, projects, runs, models, mission, approvals, custom tools). `GET` and the other reads do not require the header.
+Every mutating route (`POST`, `PUT`, `PATCH`, `DELETE`) uses one check. When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>`. That includes `POST /events` and the REST writes (tickets, projects, runs, models, mission, approvals, custom tools, and `POST /agents/register`, `POST /agents/:id/heartbeat`, `DELETE /agents/:id`). `GET` and the other reads do not require the header.
 
 A missing or wrong token is HTTP 401 and this JSON body:
 
@@ -140,11 +140,11 @@ Accepted types (exactly these):
 
 Non snapshot types are just stored and broadcast. `run.*` payloads are free form; use `{ "name": "...", "agent": "...", "status": "...", "progress": 0, "summary": "..." }`.
 
-Snapshot types write tables. **Warning:** several replace a whole table, so never post a partial roster.
+Snapshot types write tables. **Warning:** sessions and calendar replace a whole table. `agents.snapshot` does not. It leaves default and registered bots in place, and it removes only snapshot rows that the payload omits.
 
 | Type | Payload | Effect |
 | --- | --- | --- |
-| `agents.snapshot` | `{ agents: [{ name, role?, color?, status?: "working" or "idle", parent?: name, emoji?, personalityTags?, currentTask?, tasksCompleted?, totalCost?, recentActivity?, channel? }] }` | Replaces every Agent row |
+| `agents.snapshot` | `{ agents: [{ id?, name, role?, color?, status?: "working" or "idle", parent?: name, emoji?, personalityTags?, currentTask?, tasksCompleted?, totalCost?, recentActivity?, channel? }] }` | Creates, updates, or removes `snapshot` rows only. Default and registered rows stay. A registered id in the payload changes status fields only. `id`, when sent, is a lowercase slug. Otherwise the slug comes from the name |
 | `sessions.snapshot` | `{ sessions: [{ name, agent, model?, ctx?: 0 to 100, lastActivity?, hot? }] }` | Replaces every Session row |
 | `calendar.snapshot` | `{ jobs: [{ name, schedule?, day?: 0 Mon to 6 Sun or null, time?: "HH:MM" or null, color?, enabled? }] }` | Replaces every CronJob row |
 | `usage.snapshot` | `{ points: [{ at: ISO timestamp, totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }] }` | Upserts one America/Chicago day per point. Days not in the payload stay. A period total with no `at` is ignored |
@@ -214,6 +214,56 @@ Read only routes: `GET /memory?day=YYYY-MM-DD&kind=&q=&limit=&offset=` and `GET 
 
 These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/sessions`, `/calendar`, `/logs`, `/search?q=a`, `/approvals?status=pending`, `/mission`, `/devices`, `/docs`, `/projects`, `/tickets`, `/runs`, `/models`, `/memory`, `/custom-tools`.
 
+### 4.10 Register, heartbeat, and delete
+
+A bot adds or updates itself with `POST /agents/register`. The body is `{ "id", "name", "role?", "model?", "avatar?" }`. `id` is a lowercase slug of 1 to 64 characters using a to z, 0 to 9, and underscores. `name` is required and at most 200 characters. `role`, `model`, and `avatar` are optional and at most 200 characters. Unknown fields are 400 (`unknown field <name>`). A new id returns 201 `{ agent, ts }`. The same id again returns 200 and does not insert a second row. Registering a default or snapshot id keeps that row, sets `source` to `registered`, and keeps `position`, `color`, and `emoji`.
+
+`POST /agents/:id/heartbeat` returns 204 and sets `lastSeenAt`. It returns 404 when that id is not a registered bot (`agent not found` or `agent is not registered`). A registered bot with no register or heartbeat for 10 minutes reads `online: false` on `GET /agents` and `GET /agents/:id`. The row stays.
+
+`DELETE /agents/:id` removes a registered bot and returns 204. A default row returns 409 `default agents cannot be deleted`. A snapshot row returns 409 `snapshot agents cannot be deleted`. A missing id returns 404 `agent not found`.
+
+All three are writes. When `INGEST_TOKEN` is set, send `x-ingest-token`. With no token, outside production, on loopback, they stay open. With `NODE_ENV=production` and no token, they return 401 `unauthorized`.
+
+Register, heartbeat, and delete each broadcast `agents.snapshot`. An open Agents, Office, or Team page refetches the roster when that event arrives, so the list updates within 2 seconds without a reload.
+
+`agents.snapshot` creates, updates, or removes only rows whose `source` is `snapshot`. Match is by `id`. An entry with no `id` uses the slug of its name as the id. Default and registered rows stay when the payload omits that id. When the payload includes a default or registered id, only status fields change: `status`, `currentTask`, `recentActivity`, `tasksCompleted`, and `totalCost`. Parent is not one of those fields. A snapshot row may still name `parent`, and that link is resolved by name. `npm run seed:demo` sets Pixel's parent.
+
+OpenClaw stays optional. The bridge still posts `agents.snapshot`. Set `MC_BRIDGE_REGISTER=1` when it should also call `POST /agents/register` for each agent it maps. Leave that unset and the bridge does not register anyone.
+
+`$MC_TOKEN` is the ingest token from checklist step 2. When `INGEST_TOKEN` is unset on loopback outside production, omit the `x-ingest-token` line.
+
+```bash
+curl -sS -D - -o /tmp/mc-register.json -X POST "http://127.0.0.1:3000/agents/register" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"id":"forge_helper","name":"Forge Helper","role":"engineer"}'
+```
+
+A new id returns HTTP 201 and `"source":"registered"`. Run the same call again with a model:
+
+```bash
+curl -sS -D - -o /tmp/mc-register.json -X POST "http://127.0.0.1:3000/agents/register" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"id":"forge_helper","name":"Forge Helper","role":"engineer","model":"local"}'
+```
+
+That returns HTTP 200. `GET /agents` lists one `forge_helper`.
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/forge_helper/heartbeat" \
+  -H "x-ingest-token: $MC_TOKEN"
+```
+
+That prints `204`.
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper" \
+  -H "x-ingest-token: $MC_TOKEN"
+```
+
+That prints `204`.
+
 ## 5. Adapting your workflow
 
 * **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Those names match `apps/web/src/lib/board.ts`. To-Do and Backlog are not pipeline stages.
@@ -221,11 +271,11 @@ These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/se
 * **Make runs visible.** For a longer job, `POST /runs` then `PATCH` with `running`, progress, and `done` or `failed`, or post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time.
 * **Ask, do not act, on gated work.** Put anything that needs your operator in an approval (via `approvals.snapshot`) and wait for the decision.
 * **Write daily memory** to `memory/YYYY-MM-DD.md` so Memory shows your day.
-* **Keep the bridge scheduled** so roster, cron, sessions, usage and memory stay current. `agents.snapshot` replaces the whole roster. There is no endpoint that registers one agent.
+* **Keep the bridge scheduled** so roster, cron, sessions, usage and memory stay current. `agents.snapshot` updates snapshot rows only. One bot can also call `POST /agents/register` (section 4.10).
 
 ## 6. Not implemented yet (do not rely on these)
 
-* No write route for agents, sessions, cron jobs, usage or memory except `POST /events` snapshots. There is no per agent register call: registering yourself means appearing in `agents.snapshot`, which replaces the whole roster.
+* Sessions, cron jobs, usage, and memory still have no REST write except `POST /events`. Agents do: `POST /agents/register`, `POST /agents/:id/heartbeat`, and `DELETE /agents/:id` (section 4.10). A snapshot cannot delete a registered or default bot.
 * `/models` is stored but not used by the bridge. Nothing in this repo fetches a live provider balance.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
@@ -248,7 +298,7 @@ Run these in order and report the results to your operator. The file stops at st
    python3 bridge/mc-bridge-sync.py
    curl -s http://127.0.0.1:3000/agents
    ```
-   Your name should be in the list. Do not post a hand made `agents.snapshot` with only yourself; it would wipe every other agent. With no `openclaw` binary, `--dry-run` exits 0 and posts nothing, and the seeded roster stays (12 agents after `seed:demo`).
+   Your name should be in the list. A hand made `agents.snapshot` that names only you removes other snapshot rows and leaves default and registered bots. To add only yourself, use `POST /agents/register` in section 4.10. With no `openclaw` binary, `--dry-run` exits 0 and posts nothing, and the seeded roster stays (12 agents after `seed:demo`).
 4. **Post a test event.**
    ```bash
    curl -s -X POST http://127.0.0.1:3000/events \

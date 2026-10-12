@@ -176,7 +176,7 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW
 * Success is `202` with `{ "accepted": true, "type", "ts" }`.
 * Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
 * `memory.snapshot` upserts notes by id and drops bridge sourced rows for the agents in the payload when those ids are missing. An empty `entries` list is a no op. It does not wipe Memory. Demo rows stay.
-* `agents.snapshot` replaces the whole roster. There is no endpoint that registers one agent.
+* `agents.snapshot` creates, updates, or removes snapshot rows only. Default and registered bots stay. `POST /agents/register` upserts one bot (201 when new, 200 when the id exists). `POST /agents/:id/heartbeat` returns 204. `DELETE /agents/:id` returns 204 for a registered bot and 409 for a default. Details and curl examples: [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md) section 4.10.
 * `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers? }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` sums those points. `period=24h` is Today, the calendar day in America/Chicago, taken from the daily buckets. There is no hourly storage. The 7 day and month windows use that same calendar. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. `npm run seed:demo` writes 30 days, and today's row is stamped at seed time. The dollar amounts depend on the date. `period=30d` is not a window and returns `usage: null`. A point more than 30 days before today, or a point after now, is not stored. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced.
 * `GET /models` is a stored list. The bridge does not read it. The API does not call DeepSeek or Z.ai. The comment that used to say otherwise in `apps/api/src/models/models.controller.ts` was wrong and has been corrected.
 * `run.*` events are activity and a socket broadcast. They do not insert tickets or runs, and they do not move office seats. Seats come from role text and status.
@@ -193,7 +193,7 @@ curl -sS -X POST "http://127.0.0.1:3000/events" \
   -d '{"type":"health.tick","payload":{"uptimeSeconds":1,"connectedClients":0}}'
 ```
 
-Roster example, the object the ingest tests persist (send the whole roster, not one agent, or you wipe the table):
+Roster example, the object the ingest tests persist (a partial snapshot removes other snapshot rows and leaves default and registered bots):
 
 ```json
 {
@@ -311,13 +311,13 @@ Still open:
 
 Read this before you open a port.
 
-* When `INGEST_TOKEN` is set, every write requires header `x-ingest-token`. That is `POST`, `PUT`, `PATCH`, and `DELETE`: `POST /events`, `POST /tickets`, `PATCH /tickets/:id`, `POST /projects`, `PATCH /projects/:id`, `POST /runs`, `PATCH /runs/:id`, `PUT /mission`, `POST /approvals/:id/decide`, `POST /models`, `DELETE /models/:id`, and the custom tool writes. A missing or wrong token is 401 JSON `{"statusCode":401,"message":"unauthorized"}`. Reads do not check the token.
+* When `INGEST_TOKEN` is set, every write requires header `x-ingest-token`. That is `POST`, `PUT`, `PATCH`, and `DELETE`: `POST /events`, `POST /tickets`, `PATCH /tickets/:id`, `POST /projects`, `PATCH /projects/:id`, `POST /runs`, `PATCH /runs/:id`, `PUT /mission`, `POST /approvals/:id/decide`, `POST /models`, `DELETE /models/:id`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `DELETE /agents/:id`, and the custom tool writes. A missing or wrong token is 401 JSON `{"statusCode":401,"message":"unauthorized"}`. Reads do not check the token.
 * With no `INGEST_TOKEN` and `HOST` on loopback (`127.0.0.1` by default for `npm run dev`), writes stay open and the API logs one warning, for any `NODE_ENV` other than `production`. The web UI still works.
 * With `NODE_ENV=production` and no `INGEST_TOKEN`, the API still starts on loopback and logs one line that shows how to set `INGEST_TOKEN`. Every write returns 401, including `POST /events`.
 * With no `INGEST_TOKEN` and `HOST` on any other address, the API refuses to start. Set `INGEST_TOKEN` to a long random string (`openssl rand -hex 24`) and start again. Compose sets `HOST=0.0.0.0` inside the api container, so it always has a token: your `.env` value, or `dev-ingest-token` when that value is blank.
 * The browser never receives the token. Dev Vite and compose nginx add `x-ingest-token` on same origin `/api` writes. Do not put `INGEST_TOKEN` in a `VITE_` variable or in local storage. `npm run seed:demo` writes through Prisma and does not send the header. The bridge still posts `POST /events` with the header.
 * Do not publish port 3000 beyond loopback without a token. `npm run dev` binds `127.0.0.1` (`HOST` in the root `.env`). Compose publishes the API on `127.0.0.1` as well.
-* There is no agent self registration endpoint. `agents.snapshot` replaces the whole roster. Posting a snapshot that contains only one agent deletes every other agent.
+* `POST /agents/register` adds one bot without replacing the roster. `agents.snapshot` removes only snapshot rows that the payload omits. Default and registered bots stay. A registered bot with no heartbeat for 10 minutes reads `online: false` and is not deleted.
 
 ## Layout
 

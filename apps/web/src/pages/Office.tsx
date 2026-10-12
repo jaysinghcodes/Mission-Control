@@ -7,6 +7,7 @@ import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { activityNeedsYou, agentNeedsYou, isWorking, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
+import { useRosterLive } from '../lib/useRosterLive'
 import {
   activityAge,
   commonsByline,
@@ -79,6 +80,7 @@ export default function Office() {
   const roomParam = params.get('room')
   const focus: Room | null = roomParam && ROOM_IDS.has(roomParam) ? (roomParam as Room) : null
 
+  useRosterLive(liveEvents, agentsQ.refetch)
   useEffect(() => {
     if (liveEvents.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
   }, [liveEvents, refetchApprovals])

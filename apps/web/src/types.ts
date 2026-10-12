@@ -25,6 +25,15 @@ export interface Agent {
   totalCost: number
   recentActivity: string | null
   channel: string | null
+  /** Who owns the row. Absent on older payloads. */
+  source?: 'default' | 'snapshot' | 'registered'
+  model?: string | null
+  avatar?: string | null
+  /** Roster order. Registering an existing id does not change it. */
+  position?: number
+  lastSeenAt?: string | null
+  /** False when a registered bot has not been seen for 10 minutes. */
+  online?: boolean
 }
 
 export interface AgentsResp {

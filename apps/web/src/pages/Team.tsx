@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
+import { useLiveActivity } from '../hooks/useLiveActivity'
+import { useRosterLive } from '../lib/useRosterLive'
 import type { Agent, AgentsResp } from '../types'
 import { PageHeader, SoftCard, Btn, Face, AgentName, Kicker, EmptyState, FieldError } from '../components/shell'
 import { OPERATOR_NAME } from '../config'
@@ -59,6 +61,8 @@ export default function Team() {
   const agentsQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const missionQ = useApi<MissionResp>('/mission')
   const devicesQ = useApi<DevicesResp>('/devices', { pollMs: 30000 })
+  const { events } = useLiveActivity()
+  useRosterLive(events, agentsQ.refetch)
   const agents = agentsQ.data?.agents ?? []
   const people = peopleRow(agents)
   const working = agents.filter((a) => a.status === 'working').length

@@ -6,6 +6,7 @@ import { PageHeader, Segmented, StatusChip, Face, Kicker, EmptyState, SearchInpu
 import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
 import { agentNeedsYou, isWorking, type ApprovalLike } from '../lib/board'
+import { useRosterLive } from '../lib/useRosterLive'
 
 /**
  * Agents — who is doing what right now. The old Team roster, as cards.
@@ -24,7 +25,7 @@ function tone(
 }
 
 export default function Agents() {
-  const { data, loading, errorMessage } = useApi<AgentsResp>('/agents', { pollMs: 15000 })
+  const { data, loading, errorMessage, refetch } = useApi<AgentsResp>('/agents', { pollMs: 15000 })
   const approvalsQ = useApi<{ approvals: ApprovalLike[] }>('/approvals', { pollMs: 15000 })
   const ticketsQ = useApi<{ tickets: { id: string; key: string | null; title: string; assignee: string | null }[] }>('/tickets', { pollMs: 15000 })
   const { events } = useLiveActivity()
@@ -33,6 +34,7 @@ export default function Agents() {
   const pending = approvalsQ.data?.approvals ?? []
   const tickets = ticketsQ.data?.tickets ?? []
 
+  useRosterLive(events, refetch)
   useEffect(() => {
     if (events.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
   }, [events, refetchApprovals])
