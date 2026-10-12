@@ -10,12 +10,15 @@ import { SearchController } from '../search/search.controller';
 // Only the three calls openclaw-log.ts makes are mocked; everything else in
 // `fs` stays real (jest/ts-jest need it). fs exports are non-configurable, so
 // they must be replaced in the module factory rather than via jest.spyOn.
-jest.mock('fs', () => ({
-  ...jest.requireActual('fs'),
-  readdirSync: jest.fn(),
-  statSync: jest.fn(),
-  readFileSync: jest.fn(),
-}));
+jest.mock('fs', () => {
+  const actual = jest.requireActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    readdirSync: jest.fn(),
+    statSync: jest.fn(),
+    readFileSync: jest.fn(),
+  };
+});
 const readdirSync = fs.readdirSync as unknown as jest.Mock;
 const statSync = fs.statSync as unknown as jest.Mock;
 const readFileSync = fs.readFileSync as unknown as jest.Mock;

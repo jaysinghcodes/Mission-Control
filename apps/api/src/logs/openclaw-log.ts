@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { wireText } from '../wire-text';
 
 /**
  * openclaw-log — shared, crash-proof access to the OpenClaw gateway log.
@@ -86,10 +87,23 @@ export function tailNewestOpenclawLog(maxLines: number): LogTail {
   }
 
   try {
-    const lines = readFileSync(newest, 'utf8').split('\n').filter(Boolean).slice(-maxLines);
-    return { available: true, file: newest, lines, reason: lines.length ? null : 'Log file is empty.' };
+    const lines = readFileSync(newest, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .slice(-maxLines);
+    return {
+      available: true,
+      file: newest,
+      lines,
+      reason: lines.length ? null : 'Log file is empty.',
+    };
   } catch {
-    return { available: false, file: null, lines: [], reason: `Could not read ${newest}.` };
+    return {
+      available: false,
+      file: null,
+      lines: [],
+      reason: `Could not read ${newest}.`,
+    };
   }
 }
 
@@ -100,12 +114,22 @@ export function tailNewestOpenclawLog(maxLines: number): LogTail {
  */
 export function parseLogLine(line: string, maxLen = Infinity): LogLine {
   try {
-    const j = JSON.parse(line);
-    const time = typeof j.time === 'string' ? j.time : '';
+    const parsed: unknown = JSON.parse(line);
+    if (!parsed || typeof parsed !== 'object') {
+      return { tm: '', lvl: 'INFO', msg: line.slice(0, maxLen) };
+    }
+    const record = parsed as Record<string, unknown>;
+    const time = typeof record.time === 'string' ? record.time : '';
+    const meta = record._meta;
+    let level: unknown = 'INFO';
+    if (meta && typeof meta === 'object') {
+      level = (meta as Record<string, unknown>).logLevelName ?? 'INFO';
+    }
+    const message = record.message ?? line;
     return {
       tm: time ? time.slice(11, 19) : '',
-      lvl: String(j._meta?.logLevelName ?? 'INFO'),
-      msg: String(j.message ?? line).slice(0, maxLen),
+      lvl: wireText(level),
+      msg: wireText(message).slice(0, maxLen),
     };
   } catch {
     return { tm: '', lvl: 'INFO', msg: line.slice(0, maxLen) };

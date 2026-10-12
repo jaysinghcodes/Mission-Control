@@ -130,16 +130,25 @@ export class CustomToolsController {
       body?.promptTemplate === undefined &&
       body?.inputs === undefined
     ) {
-      throw new BadRequestException('nothing to update — send name, description, promptTemplate, and/or inputs');
+      throw new BadRequestException(
+        'nothing to update — send name, description, promptTemplate, and/or inputs',
+      );
     }
     const current = this.toJson(existing);
     const draft = this.parseDraft({
       name: body?.name === undefined ? current.name : body.name,
-      description: body?.description === undefined ? current.description : body.description,
-      promptTemplate: body?.promptTemplate === undefined ? current.promptTemplate : body.promptTemplate,
+      description:
+        body?.description === undefined
+          ? current.description
+          : body.description,
+      promptTemplate:
+        body?.promptTemplate === undefined
+          ? current.promptTemplate
+          : body.promptTemplate,
       inputs: body?.inputs === undefined ? current.inputs : body.inputs,
     });
-    if (draft.name !== existing.name) await this.assertNameAvailable(draft.name);
+    if (draft.name !== existing.name)
+      await this.assertNameAvailable(draft.name);
     try {
       const row = await this.prisma.customTool.update({
         where: { id },
@@ -161,7 +170,8 @@ export class CustomToolsController {
     try {
       await this.prisma.customTool.delete({ where: { id } });
     } catch (err) {
-      if (this.isNotFound(err)) throw new NotFoundException(`tool ${id} not found`);
+      if (this.isNotFound(err))
+        throw new NotFoundException(`tool ${id} not found`);
       throw err;
     }
     return { deleted: id };
@@ -174,10 +184,15 @@ export class CustomToolsController {
   @Post('preview')
   @HttpCode(200)
   preview(@Body() body: PreviewBody) {
-    const promptTemplate = this.guard(() => normalizeTemplate(body?.promptTemplate));
+    const promptTemplate = this.guard(() =>
+      normalizeTemplate(body?.promptTemplate),
+    );
     const inputs = this.guard(() => normalizeInputs(body?.inputs));
     this.guard(() => assertPlaceholdersMatch(promptTemplate, inputs));
-    const prompt = fillPrompt(promptTemplate, this.guard(() => valuesFor(inputs, body?.values)));
+    const prompt = fillPrompt(
+      promptTemplate,
+      this.guard(() => valuesFor(inputs, body?.values)),
+    );
     return { prompt, ts: Date.now() };
   }
 
@@ -188,7 +203,10 @@ export class CustomToolsController {
     const row = await this.prisma.customTool.findUnique({ where: { id } });
     if (!row) throw new NotFoundException(`tool ${id} not found`);
     const tool = this.toJson(row);
-    const prompt = fillPrompt(tool.promptTemplate, this.guard(() => valuesFor(tool.inputs, body?.values)));
+    const prompt = fillPrompt(
+      tool.promptTemplate,
+      this.guard(() => valuesFor(tool.inputs, body?.values)),
+    );
     return { prompt, ts: Date.now() };
   }
 
@@ -212,27 +230,40 @@ export class CustomToolsController {
     try {
       return fn();
     } catch (err) {
-      if (err instanceof ToolValidationError) throw new BadRequestException(err.message);
+      if (err instanceof ToolValidationError)
+        throw new BadRequestException(err.message);
       throw err;
     }
   }
 
   private async assertNameAvailable(name: string): Promise<void> {
     const clash = await this.prisma.customTool.findUnique({ where: { name } });
-    if (clash) throw new ConflictException(`a tool named "${clash.name}" already exists`);
+    if (clash)
+      throw new ConflictException(
+        `a tool named "${clash.name}" already exists`,
+      );
   }
 
   private nameConflictOrRethrow(err: unknown, name: string): Error {
-    if (this.isUnique(err)) return new ConflictException(`a tool named "${name}" already exists`);
+    if (this.isUnique(err))
+      return new ConflictException(`a tool named "${name}" already exists`);
     return err instanceof Error ? err : new Error(String(err));
   }
 
   private isUnique(err: unknown): boolean {
-    return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002';
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      (err as { code?: unknown }).code === 'P2002'
+    );
   }
 
   private isNotFound(err: unknown): boolean {
-    return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2025';
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      (err as { code?: unknown }).code === 'P2025'
+    );
   }
 
   private toJson(row: ToolRow): ToolJson {

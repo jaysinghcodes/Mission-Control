@@ -23,9 +23,7 @@ export class LogsController {
     const n = Math.min(Math.max(Number(lines) || 200, 1), 500);
     const tail = tailNewestOpenclawLog(n);
 
-    const logs = tail.lines
-      .map((line) => parseLogLine(line, 300))
-      .reverse(); // newest first
+    const logs = tail.lines.map((line) => parseLogLine(line, 300)).reverse(); // newest first
 
     return {
       logs,

@@ -218,10 +218,12 @@ export async function writeDemoDocs(root: string): Promise<DemoDocWriteResult> {
   let skipped = 0;
   for (const doc of DEMO_DOCS) {
     const dest = destFor(root, doc.relative);
-    const current = await readFile(dest, 'utf8').catch((err: NodeJS.ErrnoException) => {
-      if (err.code === 'ENOENT') return null;
-      throw err;
-    });
+    const current = await readFile(dest, 'utf8').catch(
+      (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return null;
+        throw err;
+      },
+    );
     if (current != null) {
       skipped += 1;
       continue;
@@ -235,7 +237,10 @@ export async function writeDemoDocs(root: string): Promise<DemoDocWriteResult> {
 
 function destFor(root: string, relative: string): string {
   const parts = relative.split('/');
-  if (parts.length === 0 || parts.some((part) => !part || part === '.' || part === '..')) {
+  if (
+    parts.length === 0 ||
+    parts.some((part) => !part || part === '.' || part === '..')
+  ) {
     throw new Error(`demo doc path escapes the docs root: ${relative}`);
   }
   return path.join(root, ...parts);

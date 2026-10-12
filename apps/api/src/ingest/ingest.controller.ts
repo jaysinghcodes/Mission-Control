@@ -1,5 +1,15 @@
-import { Body, Controller, HttpCode, HttpException, HttpStatus, Post } from '@nestjs/common';
-import { LiveActivityGateway, ActivityEventType } from '../live-activity/live-activity.gateway';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpException,
+  HttpStatus,
+  Post,
+} from '@nestjs/common';
+import {
+  LiveActivityGateway,
+  ActivityEventType,
+} from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { SnapshotsService } from '../snapshots/snapshots.service';
 
@@ -41,13 +51,25 @@ export class IngestController {
       );
     }
     const payload = body.payload ?? {};
-    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-      throw new HttpException('payload must be a JSON object', HttpStatus.BAD_REQUEST);
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      throw new HttpException(
+        'payload must be a JSON object',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     // Persist for history (Activity page loads recent events on mount).
     await this.prisma.activityEvent.create({
-      data: { type, payload: payload as object, source: 'openclaw' },
+      data: {
+        type,
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- Prisma Json rejects Record<string, unknown> and accepts object
+        payload: payload as object,
+        source: 'openclaw',
+      },
     });
 
     // Snapshot events sync tables instead of just broadcasting.
@@ -58,7 +80,10 @@ export class IngestController {
   }
 
   /** Route snapshot events to their table sync handlers. */
-  private async applySnapshot(type: ActivityEventType, payload: Record<string, unknown>): Promise<void> {
+  private async applySnapshot(
+    type: ActivityEventType,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     switch (type) {
       case 'agents.snapshot':
         await this.snapshots.applyAgents(payload);

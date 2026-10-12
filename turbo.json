@@ -52,6 +52,9 @@
       "cache": false,
       "passThroughEnv": ["DATABASE_URL"]
     },
-    "lint": {}
+    "lint": {},
+    "lint:fix": {
+      "cache": false
+    }
   }
 }

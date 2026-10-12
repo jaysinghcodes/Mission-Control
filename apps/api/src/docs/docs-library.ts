@@ -1,3 +1,4 @@
+import type { Dirent, Stats } from 'fs';
 import { readdir, readFile, realpath, stat } from 'fs/promises';
 import path from 'path';
 import {
@@ -70,7 +71,10 @@ export async function listDocs(
   };
 }
 
-export async function readDocById(root: string | null, id: string): Promise<DocDetail> {
+export async function readDocById(
+  root: string | null,
+  id: string,
+): Promise<DocDetail> {
   const safe = assertDocId(id);
   if (!root) throw new DocsPathError(404, 'doc not found');
   const hit = (await scan(root)).find((doc) => doc.id === safe);
@@ -78,7 +82,10 @@ export async function readDocById(root: string | null, id: string): Promise<DocD
   return withHtml(hit);
 }
 
-export async function readDocBySlug(root: string | null, slug: string): Promise<DocDetail> {
+export async function readDocBySlug(
+  root: string | null,
+  slug: string,
+): Promise<DocDetail> {
   if (!root) throw new DocsPathError(404, 'doc not found');
   const located = resolveDocFile(root, slug);
   if (!MD.test(located.relative)) throw new DocsPathError(404, 'doc not found');
@@ -129,8 +136,13 @@ async function scan(root: string): Promise<Scanned[]> {
   return docs;
 }
 
-async function walk(dir: string, root: string, seen: Set<string>, out: FoundFile[]): Promise<void> {
-  let entries;
+async function walk(
+  dir: string,
+  root: string,
+  seen: Set<string>,
+  out: FoundFile[],
+): Promise<void> {
+  let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
@@ -146,7 +158,7 @@ async function walk(dir: string, root: string, seen: Set<string>, out: FoundFile
       continue;
     }
     if (!isInsideRoot(root, real)) continue;
-    let st;
+    let st: Stats;
     try {
       st = await stat(real);
     } catch {
@@ -160,7 +172,8 @@ async function walk(dir: string, root: string, seen: Set<string>, out: FoundFile
     }
     if (!st.isFile() || !MD.test(ent.name) || st.size > MAX_BYTES) continue;
     const relative = path.relative(root, logical).split(path.sep).join('/');
-    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative))
+      continue;
     out.push({ absolute: real, relative, mtime: st.mtime });
   }
 }
@@ -171,7 +184,11 @@ async function recordFromFile(root: string, file: FoundFile): Promise<Scanned> {
   }
   const raw = await readFile(file.absolute, 'utf8');
   const { meta, body } = splitFrontmatter(raw);
-  const title = (meta.title || headingTitle(body) || fileTitle(file.relative)).slice(0, 200);
+  const title = (
+    meta.title ||
+    headingTitle(body) ||
+    fileTitle(file.relative)
+  ).slice(0, 200);
   const updated = parseUpdated(meta.updated) ?? file.mtime;
   const state = (meta.state ?? '').trim().slice(0, 40);
   const author = (meta.author ?? '').trim().slice(0, 120) || 'Unknown';
@@ -188,7 +205,10 @@ async function recordFromFile(root: string, file: FoundFile): Promise<Scanned> {
   };
 }
 
-export function splitFrontmatter(raw: string): { meta: Frontmatter; body: string } {
+export function splitFrontmatter(raw: string): {
+  meta: Frontmatter;
+  body: string;
+} {
   const text = raw.replace(/^\uFEFF/, '');
   if (!text.startsWith('---')) return { meta: {}, body: text };
   const end = text.indexOf('\n---', 3);
@@ -202,12 +222,19 @@ export function splitFrontmatter(raw: string): { meta: Frontmatter; body: string
     let value = match[2].trim();
     if (
       value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
     ) {
       value = value.slice(1, -1);
     }
     const key = match[1].toLowerCase();
-    if (key === 'title' || key === 'type' || key === 'author' || key === 'state' || key === 'updated') {
+    if (
+      key === 'title' ||
+      key === 'type' ||
+      key === 'author' ||
+      key === 'state' ||
+      key === 'updated'
+    ) {
       meta[key] = value;
     }
   }
@@ -250,7 +277,9 @@ function typeFrom(raw: string | undefined): DocType | null {
 }
 
 export function previewText(body: string): string {
-  const noFence = body.replace(/```[\s\S]*?```/g, ' ').replace(/```[\s\S]*$/g, ' ');
+  const noFence = body
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/```[\s\S]*$/g, ' ');
   const text = noFence
     .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]*)]\([^)]*\)/g, '$1')

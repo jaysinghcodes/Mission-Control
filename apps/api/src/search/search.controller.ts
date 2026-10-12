@@ -1,6 +1,10 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { LogLine, parseLogLine, tailNewestOpenclawLog } from '../logs/openclaw-log';
+import {
+  LogLine,
+  parseLogLine,
+  tailNewestOpenclawLog,
+} from '../logs/openclaw-log';
 import { escapeLike } from './escape-like';
 
 /**
@@ -35,7 +39,15 @@ export class SearchController {
   @Get()
   async search(@Query('q') q?: string) {
     const query = (q ?? '').trim();
-    const empty = { tasks: [], tickets: [], agents: [], sessions: [], approvals: [], activity: [], logs: [] };
+    const empty = {
+      tasks: [],
+      tickets: [],
+      agents: [],
+      sessions: [],
+      approvals: [],
+      activity: [],
+      logs: [],
+    };
     // `logsAvailable` is additive (old clients ignore it). For short queries we
     // skip all work, so we don't claim anything about the log source either.
     if (query.length < 2) {
@@ -45,19 +57,45 @@ export class SearchController {
     const pattern = escapeLike(query);
     const like = { contains: pattern, mode: 'insensitive' as const };
 
-    const [tasks, tickets, agents, sessions, approvals, activity, logs] = await Promise.all([
-      this.prisma.run.findMany({ where: { OR: [{ name: like }, { agent: like }] }, orderBy: { createdAt: 'desc' }, take: 6 }),
-      this.prisma.ticket.findMany({ where: { OR: [{ title: like }, { key: like }] }, orderBy: { createdAt: 'desc' }, take: 6 }),
-      this.prisma.agent.findMany({ where: { OR: [{ name: like }, { role: like }] }, take: 6 }),
-      this.prisma.session.findMany({ where: { OR: [{ name: like }, { agent: like }, { model: like }] }, take: 6 }),
-      this.prisma.approval.findMany({ where: { OR: [{ tag: like }, { desc: like }] }, take: 6 }),
-      this.searchActivity(pattern),
-      Promise.resolve(this.grepLogs(query)),
-    ]);
+    const [tasks, tickets, agents, sessions, approvals, activity, logs] =
+      await Promise.all([
+        this.prisma.run.findMany({
+          where: { OR: [{ name: like }, { agent: like }] },
+          orderBy: { createdAt: 'desc' },
+          take: 6,
+        }),
+        this.prisma.ticket.findMany({
+          where: { OR: [{ title: like }, { key: like }] },
+          orderBy: { createdAt: 'desc' },
+          take: 6,
+        }),
+        this.prisma.agent.findMany({
+          where: { OR: [{ name: like }, { role: like }] },
+          take: 6,
+        }),
+        this.prisma.session.findMany({
+          where: { OR: [{ name: like }, { agent: like }, { model: like }] },
+          take: 6,
+        }),
+        this.prisma.approval.findMany({
+          where: { OR: [{ tag: like }, { desc: like }] },
+          take: 6,
+        }),
+        this.searchActivity(pattern),
+        Promise.resolve(this.grepLogs(query)),
+      ]);
 
     return {
       query,
-      results: { tasks, tickets, agents, sessions, approvals, activity, logs: logs.hits },
+      results: {
+        tasks,
+        tickets,
+        agents,
+        sessions,
+        approvals,
+        activity,
+        logs: logs.hits,
+      },
       logsAvailable: logs.available,
       // Human-readable reason when the log group is empty because there is no
       // log SOURCE (not because nothing matched). null when logs are available.
@@ -99,7 +137,11 @@ export class SearchController {
    * Tail the newest gateway log (last 2000 lines) and keep lines containing
    * the query. Never throws: a missing /tmp/openclaw → `{ available: false, reason, hits: [] }`.
    */
-  private grepLogs(query: string): { available: boolean; reason: string | null; hits: LogLine[] } {
+  private grepLogs(query: string): {
+    available: boolean;
+    reason: string | null;
+    hits: LogLine[];
+  } {
     const tail = tailNewestOpenclawLog(2000);
     const needle = query.toLowerCase();
     const hits = tail.lines

@@ -64,7 +64,9 @@ export type ActivityEventType =
     credentials: false,
   },
 })
-export class LiveActivityGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class LiveActivityGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   /** Socket.IO server instance — used to broadcast to all connected clients. */
   @WebSocketServer()
   server!: Server;
@@ -80,10 +82,15 @@ export class LiveActivityGateway implements OnGatewayConnection, OnGatewayDiscon
   handleConnection(client: Socket): void {
     // Production guard: require SOCKET_TOKEN in the handshake auth payload.
     if (process.env.NODE_ENV === 'production') {
-      const token = client.handshake.auth?.token;
-      if (!token || token !== process.env.SOCKET_TOKEN) {
-        // eslint-disable-next-line no-console
-        console.warn('[socket] rejected unauthenticated connection in production');
+      const token = readHandshakeToken(client.handshake.auth);
+      if (
+        typeof token !== 'string' ||
+        !token ||
+        token !== process.env.SOCKET_TOKEN
+      ) {
+        console.warn(
+          '[socket] rejected unauthenticated connection in production',
+        );
         client.disconnect(true);
         return;
       }
@@ -91,7 +98,10 @@ export class LiveActivityGateway implements OnGatewayConnection, OnGatewayDiscon
 
     this.connectedClients.add(client.id);
     // Tell the new client we're alive; heartbeat pattern for the UI's status dot.
-    client.emit('hello', { ts: Date.now(), message: 'mission-control api connected' });
+    client.emit('hello', {
+      ts: Date.now(),
+      message: 'mission-control api connected',
+    });
   }
 
   /**
@@ -115,4 +125,10 @@ export class LiveActivityGateway implements OnGatewayConnection, OnGatewayDiscon
   get clientCount(): number {
     return this.connectedClients.size;
   }
+}
+
+/** Handshake auth is an open record. Only an exact string token is accepted. */
+function readHandshakeToken(auth: object | null | undefined): unknown {
+  if (!auth || !('token' in auth)) return undefined;
+  return (auth as { token?: unknown }).token;
 }

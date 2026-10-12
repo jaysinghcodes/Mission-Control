@@ -1,3 +1,4 @@
+import { promiseFn } from '../../test/lint-helpers';
 import {
   BadRequestException,
   ConflictException,
@@ -23,7 +24,12 @@ type ProjectRow = {
   updatedAt: Date;
 };
 
-type TicketRow = { id: string; projectId: string | null; status: string; title: string };
+type TicketRow = {
+  id: string;
+  projectId: string | null;
+  status: string;
+  title: string;
+};
 
 function makeFake() {
   const projects = new Map<string, ProjectRow>();
@@ -39,132 +45,153 @@ function makeFake() {
 
   const project = {
     findMany: jest.fn(
-      async ({
-        where,
-      }: {
-        where?: { archivedAt?: null | { not: null } };
-      }) => {
-        let list = [...projects.values()];
-        if (where && Object.prototype.hasOwnProperty.call(where, 'archivedAt')) {
-          const archivedAt = where.archivedAt;
-          if (archivedAt === null) list = list.filter((p) => p.archivedAt === null);
-          else if (archivedAt && 'not' in archivedAt) {
-            list = list.filter((p) => p.archivedAt !== null);
+      promiseFn(
+        ({ where }: { where?: { archivedAt?: null | { not: null } } }) => {
+          let list = [...projects.values()];
+          if (
+            where &&
+            Object.prototype.hasOwnProperty.call(where, 'archivedAt')
+          ) {
+            const archivedAt = where.archivedAt;
+            if (archivedAt === null)
+              list = list.filter((p) => p.archivedAt === null);
+            else if (archivedAt && 'not' in archivedAt) {
+              list = list.filter((p) => p.archivedAt !== null);
+            }
           }
-        }
-        list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-        return list.map((p) => ({
-          ...publicProject(p),
-          _count: {
-            tickets: tickets.filter((t) => t.projectId === p.id).length,
-          },
-        }));
-      },
+          list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+          return list.map((p) => ({
+            ...publicProject(p),
+            _count: {
+              tickets: tickets.filter((t) => t.projectId === p.id).length,
+            },
+          }));
+        },
+      ),
     ),
     findUnique: jest.fn(
-      async ({
-        where,
-        include,
-      }: {
-        where: { id?: string; nameKey?: string };
-        include?: { tickets?: unknown };
-      }) => {
-        if (where.nameKey !== undefined) {
-          if (raceMisses > 0) {
-            raceMisses -= 1;
-            return null;
+      promiseFn(
+        ({
+          where,
+          include,
+        }: {
+          where: { id?: string; nameKey?: string };
+          include?: { tickets?: unknown };
+        }) => {
+          if (where.nameKey !== undefined) {
+            if (raceMisses > 0) {
+              raceMisses -= 1;
+              return null;
+            }
+            return (
+              [...projects.values()].find((p) => p.nameKey === where.nameKey) ??
+              null
+            );
           }
-          return (
-            [...projects.values()].find((p) => p.nameKey === where.nameKey) ??
-            null
-          );
-        }
-        const row = where.id ? projects.get(where.id) : undefined;
-        if (!row) return null;
-        if (!include?.tickets) return { ...row };
-        const own = tickets.filter((t) => t.projectId === row.id);
-        return { ...row, tickets: own };
-      },
+          const row = where.id ? projects.get(where.id) : undefined;
+          if (!row) return null;
+          if (!include?.tickets) return { ...row };
+          const own = tickets.filter((t) => t.projectId === row.id);
+          return { ...row, tickets: own };
+        },
+      ),
     ),
-    create: jest.fn(async ({ data }: { data: { name: string; nameKey: string } }) => {
-      if ([...projects.values()].some((p) => p.nameKey === data.nameKey)) {
-        const err = new Error('unique') as Error & { code: string };
-        err.code = 'P2002';
-        throw err;
-      }
-      const now = new Date();
-      const row: ProjectRow = {
-        id: `proj-${nextId++}`,
-        name: data.name,
-        nameKey: data.nameKey,
-        archivedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-      projects.set(row.id, row);
-      return { ...row };
-    }),
-    update: jest.fn(
-      async ({
-        where,
-        data,
-      }: {
-        where: { id: string };
-        data: Partial<Pick<ProjectRow, 'name' | 'nameKey' | 'archivedAt'>>;
-      }) => {
-        const row = projects.get(where.id);
-        if (!row) throw new Error('missing');
-        if (
-          data.nameKey &&
-          [...projects.values()].some(
-            (p) => p.nameKey === data.nameKey && p.id !== row.id,
-          )
-        ) {
+    create: jest.fn(
+      promiseFn(({ data }: { data: { name: string; nameKey: string } }) => {
+        if ([...projects.values()].some((p) => p.nameKey === data.nameKey)) {
           const err = new Error('unique') as Error & { code: string };
           err.code = 'P2002';
           throw err;
         }
-        Object.assign(row, data, { updatedAt: new Date() });
+        const now = new Date();
+        const row: ProjectRow = {
+          id: `proj-${nextId++}`,
+          name: data.name,
+          nameKey: data.nameKey,
+          archivedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        projects.set(row.id, row);
         return { ...row };
-      },
+      }),
+    ),
+    update: jest.fn(
+      promiseFn(
+        ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: Partial<Pick<ProjectRow, 'name' | 'nameKey' | 'archivedAt'>>;
+        }) => {
+          const row = projects.get(where.id);
+          if (!row) throw new Error('missing');
+          if (
+            data.nameKey &&
+            [...projects.values()].some(
+              (p) => p.nameKey === data.nameKey && p.id !== row.id,
+            )
+          ) {
+            const err = new Error('unique') as Error & { code: string };
+            err.code = 'P2002';
+            throw err;
+          }
+          Object.assign(row, data, { updatedAt: new Date() });
+          return { ...row };
+        },
+      ),
     ),
   };
 
   const ticket = {
-    count: jest.fn(async ({ where }: { where: { projectId: string; status?: string } }) => {
-      return tickets.filter(
-        (t) =>
-          t.projectId === where.projectId &&
-          (where.status === undefined || t.status === where.status),
-      ).length;
-    }),
+    count: jest.fn(
+      promiseFn(
+        ({ where }: { where: { projectId: string; status?: string } }) => {
+          return tickets.filter(
+            (t) =>
+              t.projectId === where.projectId &&
+              (where.status === undefined || t.status === where.status),
+          ).length;
+        },
+      ),
+    ),
     groupBy: jest.fn(
-      async ({
-        where,
-      }: {
-        where: { status: string; projectId: { in: string[] } };
-      }) => {
-        const counts = new Map<string, number>();
-        for (const t of tickets) {
-          if (t.status !== where.status || !t.projectId) continue;
-          if (!where.projectId.in.includes(t.projectId)) continue;
-          counts.set(t.projectId, (counts.get(t.projectId) ?? 0) + 1);
-        }
-        return [...counts.entries()].map(([projectId, n]) => ({
-          projectId,
-          _count: { _all: n },
-        }));
-      },
+      promiseFn(
+        ({
+          where,
+        }: {
+          where: { status: string; projectId: { in: string[] } };
+        }) => {
+          const counts = new Map<string, number>();
+          for (const t of tickets) {
+            if (t.status !== where.status || !t.projectId) continue;
+            if (!where.projectId.in.includes(t.projectId)) continue;
+            counts.set(t.projectId, (counts.get(t.projectId) ?? 0) + 1);
+          }
+          return [...counts.entries()].map(([projectId, n]) => ({
+            projectId,
+            _count: { _all: n },
+          }));
+        },
+      ),
     ),
   };
 
   const prisma = { project, ticket };
-  return { prisma, projects, tickets, setRaceMisses: (n: number) => (raceMisses = n) };
+  return {
+    prisma,
+    projects,
+    tickets,
+    setRaceMisses: (n: number) => (raceMisses = n),
+  };
 }
 
 function makeController() {
   const fake = makeFake();
-  const controller = new ProjectsController(fake.prisma as unknown as PrismaService);
+  const controller = new ProjectsController(
+    fake.prisma as unknown as PrismaService,
+  );
   return { controller, ...fake };
 }
 
@@ -207,9 +234,9 @@ describe('ProjectsController', () => {
     await expect(controller.create({ name: 'roadmap' })).rejects.toBeInstanceOf(
       ConflictException,
     );
-    await expect(controller.create({ name: '  Roadmap  ' })).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      controller.create({ name: '  Roadmap  ' }),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.project.create).not.toHaveBeenCalled();
   });
 
@@ -228,7 +255,9 @@ describe('ProjectsController', () => {
   it('renames a project', async () => {
     const { controller } = makeController();
     const { project } = await controller.create({ name: 'Roadmap' });
-    const renamed = await controller.update(project.id, { name: 'Launch plan' });
+    const renamed = await controller.update(project.id, {
+      name: 'Launch plan',
+    });
     expect(renamed.project.name).toBe('Launch plan');
     const { projects } = await controller.list();
     expect(projects.map((p) => p.name)).toEqual(['Launch plan']);
@@ -255,14 +284,16 @@ describe('ProjectsController', () => {
   it('blank rename is 400', async () => {
     const { controller } = makeController();
     const { project } = await controller.create({ name: 'Roadmap' });
-    await expect(controller.update(project.id, { name: '  ' })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      controller.update(project.id, { name: '  ' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('unknown id is 404', async () => {
     const { controller } = makeController();
-    await expect(controller.get('nope')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller.get('nope')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
     await expect(
       controller.update('nope', { name: 'X' }),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -297,7 +328,10 @@ describe('ProjectsController', () => {
 
     // Direct link still returns the tickets — archive is not delete.
     const detail = await controller.get(project.id);
-    expect(detail.tickets.map((t) => t.title).sort()).toEqual(['Open', 'Shipped']);
+    expect(detail.tickets.map((t) => t.title).sort()).toEqual([
+      'Open',
+      'Shipped',
+    ]);
     expect(detail.project.doneCount).toBe(1);
     expect(detail.project.ticketCount).toBe(2);
     expect(tickets).toHaveLength(2);
@@ -319,15 +353,20 @@ describe('ProjectsController', () => {
     await controller.update(project.id, { archived: true });
     await controller.create({ name: 'Launch' });
     const all = await controller.list('all');
-    expect(all.projects.map((p) => p.name).sort()).toEqual(['Launch', 'Roadmap']);
-    await expect(controller.list('maybe')).rejects.toBeInstanceOf(BadRequestException);
+    expect(all.projects.map((p) => p.name).sort()).toEqual([
+      'Launch',
+      'Roadmap',
+    ]);
+    await expect(controller.list('maybe')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('non-boolean archived is 400', async () => {
     const { controller } = makeController();
     const { project } = await controller.create({ name: 'Roadmap' });
     await expect(
-      controller.update(project.id, { archived: 'yes' as unknown as boolean }),
+      controller.update(project.id, { archived: 'yes' }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 

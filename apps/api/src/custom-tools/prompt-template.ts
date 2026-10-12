@@ -35,40 +35,52 @@ const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BRACE = /\{\{([^{}]*)\}\}/g;
 
 export function normalizeName(raw: unknown): string {
-  if (typeof raw !== 'string') throw new ToolValidationError('name is required');
+  if (typeof raw !== 'string')
+    throw new ToolValidationError('name is required');
   const name = raw.trim();
   if (!name) throw new ToolValidationError('name is required');
   if (name.length > NAME_MAX) {
-    throw new ToolValidationError(`name must be ${NAME_MAX} characters or fewer`);
+    throw new ToolValidationError(
+      `name must be ${NAME_MAX} characters or fewer`,
+    );
   }
   return name;
 }
 
 export function normalizeDescription(raw: unknown): string {
   if (raw === undefined || raw === null) return '';
-  if (typeof raw !== 'string') throw new ToolValidationError('description must be text');
+  if (typeof raw !== 'string')
+    throw new ToolValidationError('description must be text');
   const description = raw.trim();
   if (description.length > DESCRIPTION_MAX) {
-    throw new ToolValidationError(`description must be ${DESCRIPTION_MAX} characters or fewer`);
+    throw new ToolValidationError(
+      `description must be ${DESCRIPTION_MAX} characters or fewer`,
+    );
   }
   return description;
 }
 
 export function normalizeTemplate(raw: unknown): string {
-  if (typeof raw !== 'string') throw new ToolValidationError('prompt template is empty');
+  if (typeof raw !== 'string')
+    throw new ToolValidationError('prompt template is empty');
   const template = raw.trim();
   if (!template) throw new ToolValidationError('prompt template is empty');
   if (template.length > TEMPLATE_MAX) {
-    throw new ToolValidationError(`prompt template must be ${TEMPLATE_MAX} characters or fewer`);
+    throw new ToolValidationError(
+      `prompt template must be ${TEMPLATE_MAX} characters or fewer`,
+    );
   }
   return template;
 }
 
 export function normalizeInputs(raw: unknown): ToolInput[] {
   if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) throw new ToolValidationError('inputs must be an array');
+  if (!Array.isArray(raw))
+    throw new ToolValidationError('inputs must be an array');
   if (raw.length > MAX_INPUTS) {
-    throw new ToolValidationError(`a tool can have at most ${MAX_INPUTS} inputs`);
+    throw new ToolValidationError(
+      `a tool can have at most ${MAX_INPUTS} inputs`,
+    );
   }
   const inputs: ToolInput[] = [];
   const seen = new Set<string>();
@@ -77,7 +89,8 @@ export function normalizeInputs(raw: unknown): ToolInput[] {
       throw new ToolValidationError('each input needs a name');
     }
     const rec = item as { name?: unknown; label?: unknown };
-    if (typeof rec.name !== 'string') throw new ToolValidationError('each input needs a name');
+    if (typeof rec.name !== 'string')
+      throw new ToolValidationError('each input needs a name');
     const name = rec.name.trim();
     if (!name) throw new ToolValidationError('each input needs a name');
     if (!IDENT.test(name) || name.length > INPUT_NAME_MAX) {
@@ -85,14 +98,18 @@ export function normalizeInputs(raw: unknown): ToolInput[] {
         `input name "${name}" must use letters, digits, and underscores, and start with a letter or underscore`,
       );
     }
-    if (seen.has(name)) throw new ToolValidationError(`duplicate input name "${name}"`);
+    if (seen.has(name))
+      throw new ToolValidationError(`duplicate input name "${name}"`);
     seen.add(name);
     const input: ToolInput = { name };
     if (rec.label !== undefined && rec.label !== null && rec.label !== '') {
-      if (typeof rec.label !== 'string') throw new ToolValidationError('input label must be text');
+      if (typeof rec.label !== 'string')
+        throw new ToolValidationError('input label must be text');
       const label = rec.label.trim();
       if (label.length > LABEL_MAX) {
-        throw new ToolValidationError(`input label must be ${LABEL_MAX} characters or fewer`);
+        throw new ToolValidationError(
+          `input label must be ${LABEL_MAX} characters or fewer`,
+        );
       }
       if (label) input.label = label;
     }
@@ -106,7 +123,10 @@ export function normalizeInputs(raw: unknown): ToolInput[] {
  * A brace pair that is not an identifier is also refused, so `{{topic}}`
  * with a space or a hyphen cannot silently skip substitution.
  */
-export function assertPlaceholdersMatch(template: string, inputs: ToolInput[]): void {
+export function assertPlaceholdersMatch(
+  template: string,
+  inputs: ToolInput[],
+): void {
   const defined = new Set(inputs.map((input) => input.name));
   const missing: string[] = [];
   const seen = new Set<string>();
@@ -124,10 +144,14 @@ export function assertPlaceholdersMatch(template: string, inputs: ToolInput[]): 
   }
   const stripped = template.replace(BRACE, '');
   if (stripped.includes('{{')) {
-    throw new ToolValidationError('prompt template has an unclosed {{ placeholder');
+    throw new ToolValidationError(
+      'prompt template has an unclosed {{ placeholder',
+    );
   }
   if (missing.length === 1) {
-    throw new ToolValidationError(`placeholder {{${missing[0]}}} has no matching input`);
+    throw new ToolValidationError(
+      `placeholder {{${missing[0]}}} has no matching input`,
+    );
   }
   if (missing.length > 1) {
     throw new ToolValidationError(
@@ -141,14 +165,25 @@ export function assertPlaceholdersMatch(template: string, inputs: ToolInput[]): 
  * become an empty string. The replacement is not scanned for further
  * placeholders, and `$` in a value is not treated as a replacement pattern.
  */
-export function fillPrompt(template: string, values: Record<string, string>): string {
-  return template.replace(/\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g, (_match, name: string) => {
-    return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : '';
-  });
+export function fillPrompt(
+  template: string,
+  values: Record<string, string>,
+): string {
+  return template.replace(
+    /\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g,
+    (_match, name: string) => {
+      return Object.prototype.hasOwnProperty.call(values, name)
+        ? values[name]
+        : '';
+    },
+  );
 }
 
 /** Values for a dry run. Only the tool's own inputs are read. Non-strings are 400. */
-export function valuesFor(inputs: ToolInput[], raw: unknown): Record<string, string> {
+export function valuesFor(
+  inputs: ToolInput[],
+  raw: unknown,
+): Record<string, string> {
   if (raw === undefined || raw === null) {
     return Object.fromEntries(inputs.map((input) => [input.name, '']));
   }
@@ -158,7 +193,10 @@ export function valuesFor(inputs: ToolInput[], raw: unknown): Record<string, str
   const rec = raw as Record<string, unknown>;
   const map: Record<string, string> = {};
   for (const input of inputs) {
-    if (!Object.prototype.hasOwnProperty.call(rec, input.name) || rec[input.name] === undefined) {
+    if (
+      !Object.prototype.hasOwnProperty.call(rec, input.name) ||
+      rec[input.name] === undefined
+    ) {
       map[input.name] = '';
       continue;
     }

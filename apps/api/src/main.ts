@@ -16,16 +16,13 @@ async function bootstrap() {
   const host = bindHost();
   const decision = evaluateWriteBind();
   if (decision.action === 'refuse') {
-    // eslint-disable-next-line no-console
     console.error(decision.message);
     process.exit(1);
   }
   if (decision.action === 'warn') {
-    // eslint-disable-next-line no-console
     console.warn(decision.message);
   }
   if (decision.action === 'log') {
-    // eslint-disable-next-line no-console
     console.log(decision.message);
   }
 
@@ -47,7 +44,9 @@ async function bootstrap() {
   });
 
   await app.listen(process.env.PORT ?? 3000, host);
-  // eslint-disable-next-line no-console
-  console.log(`mission-control api listening on ${host}:${process.env.PORT ?? 3000}`);
+
+  console.log(
+    `mission-control api listening on ${host}:${process.env.PORT ?? 3000}`,
+  );
 }
 bootstrap();

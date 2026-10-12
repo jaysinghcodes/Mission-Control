@@ -423,6 +423,9 @@ function tokenLine(env) {
 
 function healthLine(ports) {
   const url = ports.health?.url ?? 'http://127.0.0.1:3000/health'
+  if (!ports.badPort && ports.apiState === 'busy') {
+    return 'info health: Skipped because the API port is used by another program.'
+  }
   if (ports.health?.reachable && ports.health.db === 'up') {
     return 'pass health: The health check says the database is up.'
   }

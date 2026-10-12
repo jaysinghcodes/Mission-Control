@@ -1,3 +1,4 @@
+import { promiseFn } from '../../test/lint-helpers';
 import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RunsController } from './runs.controller';
@@ -30,23 +31,26 @@ function make() {
   const prisma = {
     run: {
       findMany: jest.fn(
-        async ({
-          where,
-        }: { where?: { status?: string; ticketId?: string } } = {}) => {
-          return [...runs.values()].filter((row) => {
-            if (where?.status && row.status !== where.status) return false;
-            if (where?.ticketId && row.ticketId !== where.ticketId)
-              return false;
-            return true;
-          });
-        },
+        promiseFn(
+          ({
+            where,
+          }: { where?: { status?: string; ticketId?: string } } = {}) => {
+            return [...runs.values()].filter((row) => {
+              if (where?.status && row.status !== where.status) return false;
+              if (where?.ticketId && row.ticketId !== where.ticketId)
+                return false;
+              return true;
+            });
+          },
+        ),
       ),
       findUnique: jest.fn(
-        async ({ where }: { where: { id: string } }) =>
-          runs.get(where.id) ?? null,
+        promiseFn(
+          ({ where }: { where: { id: string } }) => runs.get(where.id) ?? null,
+        ),
       ),
       create: jest.fn(
-        async ({ data }: { data: Partial<RunRow> & { name: string } }) => {
+        promiseFn(({ data }: { data: Partial<RunRow> & { name: string } }) => {
           const row: RunRow = {
             id: `run-${next++}`,
             name: data.name,
@@ -59,31 +63,35 @@ function make() {
           };
           runs.set(row.id, row);
           return row;
-        },
+        }),
       ),
       update: jest.fn(
-        async ({
-          where,
-          data,
-        }: {
-          where: { id: string };
-          data: Partial<RunRow>;
-        }) => {
-          const prev = runs.get(where.id);
-          if (!prev) throw new Error('missing');
-          const row = { ...prev, ...data };
-          runs.set(row.id, row);
-          return row;
-        },
+        promiseFn(
+          ({
+            where,
+            data,
+          }: {
+            where: { id: string };
+            data: Partial<RunRow>;
+          }) => {
+            const prev = runs.get(where.id);
+            if (!prev) throw new Error('missing');
+            const row = { ...prev, ...data };
+            runs.set(row.id, row);
+            return row;
+          },
+        ),
       ),
     },
     ticket: {
-      findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
-        tickets.has(where.id) ? { id: where.id } : null,
+      findUnique: jest.fn(
+        promiseFn(({ where }: { where: { id: string } }) =>
+          tickets.has(where.id) ? { id: where.id } : null,
+        ),
       ),
     },
     activityEvent: {
-      create: jest.fn(async () => ({})),
+      create: jest.fn(promiseFn(() => ({}))),
     },
   };
 
@@ -97,12 +105,14 @@ function make() {
 
 describe('RunsController', () => {
   it('declares 201 for create and 200 for update', () => {
-    expect(
-      Reflect.getMetadata(HTTP_CODE_METADATA, RunsController.prototype.create),
-    ).toBe(201);
-    expect(
-      Reflect.getMetadata(HTTP_CODE_METADATA, RunsController.prototype.update),
-    ).toBe(200);
+    // Nest stores the status code on the method function. Binding it would
+    // look up a different function and miss the metadata.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
+    const create = RunsController.prototype.create;
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
+    const update = RunsController.prototype.update;
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, create)).toBe(201);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, update)).toBe(200);
   });
 
   it('rejects a missing or blank name with 400 that names name', async () => {
@@ -131,12 +141,9 @@ describe('RunsController', () => {
       message: 'agent must be a string',
       status: 400,
     });
-    await expect(
-      controller.update(created.run.id, { status: 'shipped' }),
-    ).rejects.toMatchObject({
-      message: expect.stringMatching(/status/),
-      status: 400,
-    });
+    const badStatus = controller.update(created.run.id, { status: 'shipped' });
+    await expect(badStatus).rejects.toMatchObject({ status: 400 });
+    await expect(badStatus).rejects.toThrow(/status/);
     await expect(
       controller.update(created.run.id, { progress: 40.5 }),
     ).rejects.toMatchObject({

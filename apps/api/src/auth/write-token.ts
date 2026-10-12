@@ -46,7 +46,10 @@ export function bindHost(env: NodeJS.ProcessEnv = process.env): string {
 
 /** 127.0.0.0/8, localhost, and ::1. 0.0.0.0 and :: are not loopback. */
 export function isLoopbackHost(host: string): boolean {
-  const bare = host.trim().replace(/^\[|\]$/g, '').toLowerCase();
+  const bare = host
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase();
   if (bare === 'localhost' || bare === '::1') return true;
   const parts = bare.split('.');
   if (parts.length !== 4) return false;

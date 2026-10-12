@@ -22,7 +22,25 @@ export interface DemoDevice {
 }
 
 export const DEMO_DEVICES: DemoDevice[] = [
-  { id: 'demo-device-studio', name: 'Studio display', type: 'browser', online: true, lastSeenMinAgo: null },
-  { id: 'demo-device-api', name: 'API host', type: 'server', online: true, lastSeenMinAgo: null },
-  { id: 'demo-device-field', name: 'Field laptop', type: 'laptop', online: false, lastSeenMinAgo: 180 },
+  {
+    id: 'demo-device-studio',
+    name: 'Studio display',
+    type: 'browser',
+    online: true,
+    lastSeenMinAgo: null,
+  },
+  {
+    id: 'demo-device-api',
+    name: 'API host',
+    type: 'server',
+    online: true,
+    lastSeenMinAgo: null,
+  },
+  {
+    id: 'demo-device-field',
+    name: 'Field laptop',
+    type: 'laptop',
+    online: false,
+    lastSeenMinAgo: 180,
+  },
 ];

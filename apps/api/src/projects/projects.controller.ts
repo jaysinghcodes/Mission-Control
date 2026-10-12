@@ -172,7 +172,9 @@ export class ProjectsController {
       }
       // Re-archiving keeps the original timestamp so a double-click does
       // not look like a new archive. Unarchive clears it.
-      data.archivedAt = body.archived ? (existing.archivedAt ?? new Date()) : null;
+      data.archivedAt = body.archived
+        ? (existing.archivedAt ?? new Date())
+        : null;
     }
 
     if (Object.keys(data).length === 0) {
@@ -187,7 +189,10 @@ export class ProjectsController {
         this.prisma.ticket.count({ where: { projectId: id } }),
         this.prisma.ticket.count({ where: { projectId: id, status: 'done' } }),
       ]);
-      return { project: this.toJson(project, ticketCount, doneCount), ts: Date.now() };
+      return {
+        project: this.toJson(project, ticketCount, doneCount),
+        ts: Date.now(),
+      };
     } catch (err) {
       throw this.nameConflictOrRethrow(err, data.name ?? existing.name);
     }
@@ -230,7 +235,9 @@ export class ProjectsController {
     const name = raw.trim();
     if (!name) throw new BadRequestException('name is required');
     if (name.length > NAME_MAX) {
-      throw new BadRequestException(`name must be ${NAME_MAX} characters or fewer`);
+      throw new BadRequestException(
+        `name must be ${NAME_MAX} characters or fewer`,
+      );
     }
     return name;
   }

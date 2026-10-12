@@ -18,7 +18,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
  * human-reviewed, never auto-applied by the app.
  */
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
   /** True once $connect() succeeded. Read by HealthController for honest status. */
   private dbReadyFlag = false;
 
@@ -30,7 +33,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       throw new Error('DATABASE_URL is required in production');
     }
     const adapter = new PrismaPg({
-      connectionString: url ?? 'postgresql://postgres:postgres@localhost:5432/mission_control',
+      connectionString:
+        url ?? 'postgresql://postgres:postgres@localhost:5432/mission_control',
     });
     super({ adapter });
   }
@@ -48,8 +52,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       this.dbReadyFlag = true;
     } catch {
       this.dbReadyFlag = false;
-      // eslint-disable-next-line no-console
-      console.warn('[prisma] database unavailable — health will report degraded');
+
+      console.warn(
+        '[prisma] database unavailable — health will report degraded',
+      );
     }
   }
 

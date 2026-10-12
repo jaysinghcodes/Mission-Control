@@ -1,4 +1,10 @@
-import { Module, Global, MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
+import {
+  Module,
+  Global,
+  MiddlewareConsumer,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { WriteAuthMiddleware } from './auth/write-auth.middleware';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';

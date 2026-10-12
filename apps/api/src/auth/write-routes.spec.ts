@@ -57,10 +57,7 @@ describe('write route coverage', () => {
 
   function hit(route: RegisteredWriteRoute, token?: string) {
     const method = route.method.toLowerCase() as
-      | 'post'
-      | 'put'
-      | 'patch'
-      | 'delete';
+      'post' | 'put' | 'patch' | 'delete';
     const path = probePath(route.path);
     const req = request(app.getHttpServer())[method](path);
     if (token) req.set('x-ingest-token', token);
@@ -87,14 +84,10 @@ describe('write route coverage', () => {
     expect(routes.length).toBeGreaterThanOrEqual(REQUIRED.length);
     for (const route of routes) {
       const denied = await hit(route);
-      expect({
-        route: `${route.method} ${route.path}`,
-        status: denied.status,
-        body: denied.body,
-      }).toEqual({
-        route: `${route.method} ${route.path}`,
-        status: 401,
-        body: { statusCode: 401, message: 'unauthorized' },
+      expect(denied.status).toBe(401);
+      expect(denied.body).toEqual({
+        statusCode: 401,
+        message: 'unauthorized',
       });
 
       const allowed = await hit(route, TOKEN);

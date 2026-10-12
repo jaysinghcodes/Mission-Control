@@ -20,7 +20,9 @@ describe('renderMarkdown', () => {
     expect(html).toMatch(/<pre><code[^>]*>/);
     expect(html).toContain('const lanes');
     expect(html).toContain('href="#/connect"');
-    expect(html).toContain('href="https://github.com/jaysinghcodes/mission-control"');
+    expect(html).toContain(
+      'href="https://github.com/jaysinghcodes/mission-control"',
+    );
   });
 
   it('does not execute raw HTML or javascript links', () => {
@@ -103,5 +105,7 @@ describe('renderMarkdown', () => {
 });
 
 function hrefs(html: string): string[] {
-  return [...html.matchAll(/\shref\s*=\s*"([^"]*)"/gi)].map((match) => match[1]);
+  return [...html.matchAll(/\shref\s*=\s*"([^"]*)"/gi)].map(
+    (match) => match[1],
+  );
 }

@@ -13,7 +13,9 @@ describe('seed team catalog', () => {
     expect(ids.size).toBe(3);
 
     const online = DEMO_DEVICES.filter((device) => device.online);
-    const seen = DEMO_DEVICES.filter((device) => !device.online && device.lastSeenMinAgo != null);
+    const seen = DEMO_DEVICES.filter(
+      (device) => !device.online && device.lastSeenMinAgo != null,
+    );
     expect(online.length).toBeGreaterThan(0);
     expect(seen.length).toBeGreaterThan(0);
 
@@ -26,7 +28,10 @@ describe('seed team catalog', () => {
   });
 
   it('does not ship personal ids or Demo Builder names', () => {
-    const blob = JSON.stringify({ mission: DEMO_MISSION, devices: DEMO_DEVICES });
+    const blob = JSON.stringify({
+      mission: DEMO_MISSION,
+      devices: DEMO_DEVICES,
+    });
     expect(blob).not.toMatch(/Demo Builder/);
     expect(blob).not.toMatch(/discord/i);
     expect(blob).not.toMatch(SNOWFLAKE);

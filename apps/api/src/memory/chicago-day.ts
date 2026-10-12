@@ -45,7 +45,8 @@ function chicagoOffsetMs(instant: Date): number {
     second: '2-digit',
   });
   const parts = fmt.formatToParts(instant);
-  const pick = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const pick = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value);
   let year = pick('year');
   let month = pick('month');
   let day = pick('day');
@@ -59,12 +60,23 @@ function chicagoOffsetMs(instant: Date): number {
     month = bumped.getUTCMonth() + 1;
     day = bumped.getUTCDate();
   }
-  const asUtc = Date.UTC(year, month - 1, day, hour, pick('minute'), pick('second'));
+  const asUtc = Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour,
+    pick('minute'),
+    pick('second'),
+  );
   return asUtc - instant.getTime();
 }
 
 /** UTC instant of a clock time on a YYYY-MM-DD America/Chicago day. */
-export function chicagoWallTime(day: string, hour: number, minute: number): Date {
+export function chicagoWallTime(
+  day: string,
+  hour: number,
+  minute: number,
+): Date {
   const [y, m, d] = day.split('-').map(Number);
   let utc = Date.UTC(y, m - 1, d, hour + 6, minute, 0);
   for (let i = 0; i < 4; i++) {

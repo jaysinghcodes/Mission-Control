@@ -17,7 +17,9 @@ export class MissionController {
 
   @Get()
   async get() {
-    const row = await this.prisma.setting.findUnique({ where: { id: SETTING_ID } });
+    const row = await this.prisma.setting.findUnique({
+      where: { id: SETTING_ID },
+    });
     return missionResponse(row?.mission ?? '');
   }
 

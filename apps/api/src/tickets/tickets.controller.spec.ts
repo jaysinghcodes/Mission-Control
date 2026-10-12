@@ -1,3 +1,4 @@
+import { promiseFn } from '../../test/lint-helpers';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TicketsController } from './tickets.controller';
 import { DEFAULT_CREATE_STATUS, TICKET_STATUSES } from './ticket-status';
@@ -39,7 +40,7 @@ function makeFakePrisma() {
   let nextId = 1;
 
   const ticket = {
-    count: jest.fn(async () => rows.size),
+    count: jest.fn(promiseFn(() => rows.size)),
     create: jest.fn(async ({ data }: { data: Omit<Row, 'id'> }) => {
       // A tiny await widens the read-max → insert window, so the QA-1 #5
       // race (parallel creates reading the same max) reproduces reliably
@@ -52,7 +53,7 @@ function makeFakePrisma() {
         ...data,
         id: `id-${nextId++}`,
         projectId: data.projectId ?? null,
-      } as Row;
+      };
       rows.set(row.id, row);
       return row;
     }),
@@ -72,19 +73,25 @@ function makeFakePrisma() {
       },
     ),
     findMany: jest.fn(
-      async (args?: {
-        where?: { status?: string; projectId?: string | null };
-      }) => {
-        let list = [...rows.values()];
-        const where = args?.where;
-        if (where?.status) list = list.filter((r) => r.status === where.status);
-        // `none` filter is `projectId: null` — hasOwnProperty so we don't
-        // treat a missing key (unfiltered list) as "unassigned only".
-        if (where && Object.prototype.hasOwnProperty.call(where, 'projectId')) {
-          list = list.filter((r) => (r.projectId ?? null) === where.projectId);
-        }
-        return list;
-      },
+      promiseFn(
+        (args?: { where?: { status?: string; projectId?: string | null } }) => {
+          let list = [...rows.values()];
+          const where = args?.where;
+          if (where?.status)
+            list = list.filter((r) => r.status === where.status);
+          // `none` filter is `projectId: null` — hasOwnProperty so we don't
+          // treat a missing key (unfiltered list) as "unassigned only".
+          if (
+            where &&
+            Object.prototype.hasOwnProperty.call(where, 'projectId')
+          ) {
+            list = list.filter(
+              (r) => (r.projectId ?? null) === where.projectId,
+            );
+          }
+          return list;
+        },
+      ),
     ),
   };
 
@@ -95,7 +102,7 @@ function makeFakePrisma() {
   //   - POST key lock:   SELECT pg_advisory_xact_lock(…)       ($executeRaw)
   const tx = {
     $queryRaw: jest.fn(
-      async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      promiseFn((strings: TemplateStringsArray, ...values: unknown[]) => {
         const sql = strings.join('?');
         if (sql.includes('MAX(')) {
           // Mirror the SQL: highest numeric MC-<n> key, NULL if none.
@@ -127,9 +134,14 @@ function makeFakePrisma() {
               },
             ]
           : [];
-      },
+      }),
     ),
-    $executeRaw: jest.fn(async (_strings: TemplateStringsArray) => 1),
+    $executeRaw: jest.fn(
+      promiseFn((strings: TemplateStringsArray, ...values: unknown[]) => {
+        void values;
+        return strings ? 1 : 1;
+      }),
+    ),
     ticket,
   };
 
@@ -140,32 +152,30 @@ function makeFakePrisma() {
   let lockTail: Promise<void> = Promise.resolve();
   const prisma = {
     ticket,
-    activityEvent: { create: jest.fn(async () => ({})) },
-    $transaction: jest.fn(
-      async (fn: (t: typeof tx) => Promise<unknown>, _opts?: unknown) => {
-        let release: () => void = () => undefined;
-        const client = {
-          ...tx,
-          $executeRaw: async (
-            strings: TemplateStringsArray,
-            ...values: unknown[]
-          ) => {
-            await tx.$executeRaw(strings, ...values);
-            if (strings.join('?').includes('pg_advisory_xact_lock')) {
-              const previous = lockTail;
-              lockTail = new Promise<void>((r) => (release = r));
-              await previous;
-            }
-            return 1;
-          },
-        };
-        try {
-          return await fn(client as typeof tx);
-        } finally {
-          release(); // "COMMIT/ROLLBACK" releases the xact lock
-        }
-      },
-    ),
+    activityEvent: { create: jest.fn(promiseFn(() => ({}))) },
+    $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => {
+      let release: () => void = () => undefined;
+      const client = {
+        ...tx,
+        $executeRaw: async (
+          strings: TemplateStringsArray,
+          ...values: unknown[]
+        ) => {
+          await tx.$executeRaw(strings, ...values);
+          if (strings.join('?').includes('pg_advisory_xact_lock')) {
+            const previous = lockTail;
+            lockTail = new Promise<void>((r) => (release = r));
+            await previous;
+          }
+          return 1;
+        },
+      };
+      try {
+        return await fn(client as typeof tx);
+      } finally {
+        release(); // "COMMIT/ROLLBACK" releases the xact lock
+      }
+    }),
   };
   return { prisma, rows, projects, updateDelays, tx };
 }
@@ -215,7 +225,10 @@ describe('TicketsController', () => {
       it('an explicit assignee still wins over the default', async () => {
         process.env.OPERATOR_NAME = 'Ada';
         const { controller } = makeController();
-        const { ticket } = await controller.create({ title: 't', assignee: 'Demo Builder' });
+        const { ticket } = await controller.create({
+          title: 't',
+          assignee: 'Demo Builder',
+        });
         expect(ticket.assignee).toBe('Demo Builder');
       });
     });
@@ -364,9 +377,7 @@ describe('TicketsController', () => {
       const { ticket } = await controller.create({ title: 't' });
       tx.$queryRaw.mockClear(); // ignore create()'s MAX(key) query (QA-1 #5)
       await controller.update(ticket.id, { status: 'todo' });
-      const sql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join(
-        '?',
-      );
+      const sql = tx.$queryRaw.mock.calls[0][0].join('?');
       expect(sql).toMatch(/FOR UPDATE/);
     });
 
@@ -441,7 +452,10 @@ describe('TicketsController', () => {
 
   describe('project membership (ticket 4)', () => {
     function seedProjects(
-      projects: Map<string, { id: string; name: string; archivedAt: Date | null }>,
+      projects: Map<
+        string,
+        { id: string; name: string; archivedAt: Date | null }
+      >,
     ) {
       projects.set('p-active', {
         id: 'p-active',

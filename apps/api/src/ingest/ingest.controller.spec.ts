@@ -1,3 +1,36 @@
+import { responseJson } from '../../test/lint-helpers';
+
+interface AgentSnap {
+  id: string;
+  name: string;
+  color: string;
+  role: string | null;
+  status: string;
+  parentId: string | null;
+  emoji?: string | null;
+  personalityTags?: string[] | null;
+  currentTask?: string | null;
+  tasksCompleted?: number;
+  totalCost?: number;
+  recentActivity?: string | null;
+  channel?: string | null;
+  children?: { name: string }[];
+}
+
+function agentList(res: { body: unknown }): AgentSnap[] {
+  if (!res.body || typeof res.body !== 'object') return [];
+  const agents = (res.body as { agents?: unknown }).agents;
+  return Array.isArray(agents) ? (agents as AgentSnap[]) : [];
+}
+
+function oneAgent(res: {
+  body: unknown;
+}): AgentSnap & { children: { name: string }[] } {
+  return responseJson<{ agent: AgentSnap & { children: { name: string }[] } }>(
+    res,
+  ).agent;
+}
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -46,7 +79,7 @@ describe('IngestController (POST /events)', () => {
       .post('/events')
       .send({ type: 'run.started', payload: { name: 'Morning Brief' } });
     expect(res.status).toBe(202);
-    expect(res.body.accepted).toBe(true);
+    expect(responseJson<{ accepted: boolean }>(res).accepted).toBe(true);
   });
 
   it('fails closed in production without a token', async () => {
@@ -132,10 +165,8 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
     }[] = [];
     for (let attempt = 0; attempt < 5 && current.length === 0; attempt++) {
       const res = await request(app.getHttpServer()).get('/agents');
-      current =
-        res.status === 200 && Array.isArray(res.body?.agents)
-          ? res.body.agents
-          : [];
+      const agents = agentList(res);
+      current = res.status === 200 ? agents : [];
       if (current.length === 0) await new Promise((r) => setTimeout(r, 250));
     }
     const idToName = new Map<string, string>(
@@ -183,7 +214,7 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
 
     const list = await request(app.getHttpServer()).get('/agents');
     expect(list.status).toBe(200);
-    const nova = list.body.agents.find(
+    const nova = agentList(list).find(
       (a: { name: string }) => a.name === 'Nova',
     );
     expect(nova).toBeTruthy();
@@ -205,7 +236,7 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
     expect(res.status).toBe(202);
 
     const list = await request(app.getHttpServer()).get('/agents');
-    const legacy = list.body.agents.find(
+    const legacy = agentList(list).find(
       (a: { name: string }) => a.name === 'LegacyBot',
     );
     expect(legacy).toBeTruthy();
@@ -251,21 +282,21 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
       '/agents/Demo%20Lead',
     );
     expect(byName.status).toBe(200);
-    expect(byName.body.agent.name).toBe('Demo Lead');
-    const childNames = byName.body.agent.children
-      .map((c: { name: string }) => c.name)
+    expect(oneAgent(byName).name).toBe('Demo Lead');
+    const childNames = oneAgent(byName)
+      .children.map((c: { name: string }) => c.name)
       .sort();
     expect(childNames).toEqual(['Nova', 'Pixel']);
 
     // Lookup by raw id works too, and a leaf agent has no children.
     const list = await request(app.getHttpServer()).get('/agents');
-    const nova = list.body.agents.find(
+    const nova = agentList(list).find(
       (a: { name: string }) => a.name === 'Nova',
-    );
+    )!;
     const byId = await request(app.getHttpServer()).get(`/agents/${nova.id}`);
     expect(byId.status).toBe(200);
-    expect(byId.body.agent.name).toBe('Nova');
-    expect(byId.body.agent.children).toEqual([]);
+    expect(oneAgent(byId).name).toBe('Nova');
+    expect(oneAgent(byId).children).toEqual([]);
 
     // Unknown agent → 404.
     const missing = await request(app.getHttpServer()).get(
@@ -294,8 +325,8 @@ describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', 
       '/agents/Demo%20Lead',
     );
     expect(byName.status).toBe(200);
-    const childNames = byName.body.agent.children
-      .map((c: { name: string }) => c.name)
+    const childNames = oneAgent(byName)
+      .children.map((c: { name: string }) => c.name)
       .sort();
     expect(childNames).toEqual(['Nova', 'Pixel']);
   });

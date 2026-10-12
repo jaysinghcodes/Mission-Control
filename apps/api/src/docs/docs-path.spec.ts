@@ -7,7 +7,11 @@ async function tempRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'mc-docs-path-'));
   await mkdir(path.join(root, 'notes'), { recursive: true });
   await writeFile(path.join(root, 'notes', 'ok.md'), '# Ok\n', 'utf8');
-  await writeFile(path.join(root, 'notes', 'Café checklist.md'), '# Café\n', 'utf8');
+  await writeFile(
+    path.join(root, 'notes', 'Café checklist.md'),
+    '# Café\n',
+    'utf8',
+  );
   return root;
 }
 
@@ -56,7 +60,10 @@ describe('docs path sandbox', () => {
     const outside = await mkdtemp(path.join(tmpdir(), 'mc-docs-outside-'));
     const secret = 'SECRET_SENTINEL_passwd';
     await writeFile(path.join(outside, 'secret.md'), secret, 'utf8');
-    await symlink(path.join(outside, 'secret.md'), path.join(root, 'notes', 'leak.md'));
+    await symlink(
+      path.join(outside, 'secret.md'),
+      path.join(root, 'notes', 'leak.md'),
+    );
     try {
       resolveDocFile(root, 'notes/leak.md');
       throw new Error('expected symlink escape to fail');
@@ -66,12 +73,19 @@ describe('docs path sandbox', () => {
       expect((err as Error).message).not.toContain(secret);
     }
 
-    await symlink(path.join(root, 'notes', 'ok.md'), path.join(root, 'notes', 'alias.md'));
-    expect(resolveDocFile(root, 'notes/alias.md').relative).toBe('notes/alias.md');
+    await symlink(
+      path.join(root, 'notes', 'ok.md'),
+      path.join(root, 'notes', 'alias.md'),
+    );
+    expect(resolveDocFile(root, 'notes/alias.md').relative).toBe(
+      'notes/alias.md',
+    );
   });
 
   it('treats a missing root as closed', async () => {
-    expect(openDocsRoot(path.join(tmpdir(), 'mc-docs-no-such-root'))).toBeNull();
+    expect(
+      openDocsRoot(path.join(tmpdir(), 'mc-docs-no-such-root')),
+    ).toBeNull();
     const empty = await mkdtemp(path.join(tmpdir(), 'mc-docs-empty-'));
     expect(openDocsRoot(empty)).toBeTruthy();
   });

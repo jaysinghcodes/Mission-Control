@@ -87,8 +87,8 @@ describe('write token', () => {
       expect(decision.message).toContain('openssl rand -hex 24');
       expect(decision.message).not.toMatch(/[—–]/);
     }
-    expect(evaluateWriteBind({ HOST: '0.0.0.0', INGEST_TOKEN: '   ' }).action).toBe(
-      'refuse',
-    );
+    expect(
+      evaluateWriteBind({ HOST: '0.0.0.0', INGEST_TOKEN: '   ' }).action,
+    ).toBe('refuse');
   });
 });
