@@ -4,7 +4,7 @@ import { useLiveActivity } from '../hooks/useLiveActivity'
 import { useApi } from '../hooks/useApi'
 import { OPERATOR_NAME } from '../config'
 import { API_URL } from '../lib/apiBase'
-import { reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
+import { isMissionControlHealth, reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
 
 /**
  * Shared Apple window: vibrancy sidebar, traffic lights, account chip.
@@ -182,7 +182,14 @@ export default function AppLayout() {
       try {
         const res = await fetch(`${API_URL}/health`, { signal: ctrl.signal, cache: 'no-store' })
         if (cancelled) return
-        if (res.ok) {
+        let body: unknown = null
+        try {
+          body = await res.json()
+        } catch {
+          body = null
+        }
+        // 503 with the mission-control body means the API is up and the database is down.
+        if (res.ok || isMissionControlHealth(body)) {
           reportLatency(performance.now() - t0)
           ok = true
         } else {

@@ -59,9 +59,14 @@ async function probeApi(): Promise<{ ok: boolean; detail: string }> {
   for (const base of [...new Set(bases)]) {
     try {
       const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })
-      if (res.ok) {
-        const h = (await res.json()) as { status?: string; database?: string }
-        return { ok: true, detail: `API ${h.status ?? 'ok'} · database ${h.database ?? 'connected'}` }
+      let h: { service?: string; status?: string; database?: string } | null = null
+      try {
+        h = (await res.json()) as { service?: string; status?: string; database?: string }
+      } catch {
+        h = null
+      }
+      if (res.ok || h?.service === 'mission-control') {
+        return { ok: true, detail: `API ${h?.status ?? 'ok'} · database ${h?.database ?? 'connected'}` }
       }
       detail = `API responded with ${res.status} — the connection is up but the API is unhappy.`
     } catch {

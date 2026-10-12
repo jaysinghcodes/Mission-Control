@@ -1,6 +1,17 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+
+export interface HealthBody {
+  service: 'mission-control';
+  db: 'up' | 'down';
+  status: 'ok' | 'degraded';
+  uptimeSeconds: number;
+  connectedClients: number;
+  database: 'connected' | 'unavailable';
+  lastIngestAt: string | null;
+  ts: number;
+}
 
 /**
  * HealthController — liveness/readiness probe for the API.
@@ -18,27 +29,42 @@ export class HealthController {
   ) {}
 
   /**
-   * GET /health — liveness + readiness.
-   * Returns status (ok | degraded), uptime seconds, connected dashboard
-   * clients, and whether the database is reachable.
+   * GET /health. Always JSON with service mission-control.
+   * db up is HTTP 200. db down is HTTP 503. A database error never becomes
+   * an unhandled 500.
    */
   @Get()
-  async getHealth() {
-    const db = this.prisma.dbReady;
-    let lastIngestAt: string | null = null;
-    if (db) {
+  async getHealth(): Promise<HealthBody> {
+    try {
+      if (!this.prisma.dbReady) {
+        throw new HttpException(
+          this.payload(false, null),
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
+      }
       const row = await this.prisma.activityEvent.findFirst({
         where: { source: 'openclaw' },
         orderBy: { ts: 'desc' },
         select: { ts: true },
       });
-      lastIngestAt = row?.ts ? row.ts.toISOString() : null;
+      return this.payload(true, row?.ts ? row.ts.toISOString() : null);
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      throw new HttpException(
+        this.payload(false, null),
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
+  }
+
+  private payload(dbUp: boolean, lastIngestAt: string | null): HealthBody {
     return {
-      status: db ? 'ok' : 'degraded',
+      service: 'mission-control',
+      db: dbUp ? 'up' : 'down',
+      status: dbUp ? 'ok' : 'degraded',
       uptimeSeconds: Math.round(process.uptime()),
       connectedClients: this.gateway.clientCount,
-      database: db ? 'connected' : 'unavailable',
+      database: dbUp ? 'connected' : 'unavailable',
       lastIngestAt,
       ts: Date.now(),
     };

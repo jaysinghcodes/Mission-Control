@@ -23,6 +23,24 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
+  it('GET /health names this service and says the database is up', () => {
+    return request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect((res) => {
+        const body = res.body as {
+          service: string;
+          db: string;
+          status: string;
+          database: string;
+        };
+        expect(body.service).toBe('mission-control');
+        expect(body.db).toBe('up');
+        expect(body.status).toBe('ok');
+        expect(body.database).toBe('connected');
+      });
+  });
+
   afterEach(async () => {
     await app.close();
   });
