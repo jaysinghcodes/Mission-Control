@@ -34,6 +34,9 @@ const REQUIRED: RegisteredWriteRoute[] = [
   { method: 'DELETE', path: '/custom-tools/:id' },
   { method: 'POST', path: '/custom-tools/preview' },
   { method: 'POST', path: '/custom-tools/:id/preview' },
+  { method: 'POST', path: '/agents/register' },
+  { method: 'POST', path: '/agents/:id/heartbeat' },
+  { method: 'DELETE', path: '/agents/:id' },
 ];
 
 describe('write route coverage', () => {

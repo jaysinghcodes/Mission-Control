@@ -1,0 +1,384 @@
+import {
+  ConflictException,
+  NotFoundException,
+  RequestMethod,
+} from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import type { Request, Response } from 'express';
+import { WriteAuthMiddleware } from '../auth/write-auth.middleware';
+
+import { AgentsController } from './agents.controller';
+import { OFFLINE_AFTER_MS } from './agent-merge';
+import type { LiveActivityGateway } from '../live-activity/live-activity.gateway';
+import type { PrismaService } from '../prisma/prisma.service';
+
+interface Stored {
+  id: string;
+  name: string;
+  source: string;
+  color: string;
+  role: string | null;
+  status: string;
+  parentId: string | null;
+  emoji: string | null;
+  personalityTags: unknown;
+  currentTask: string | null;
+  tasksCompleted: number;
+  totalCost: number;
+  recentActivity: string | null;
+  channel: string | null;
+  model: string | null;
+  avatar: string | null;
+  position: number;
+  lastSeenAt: Date | null;
+  updatedAt: Date;
+}
+
+class StatusResponse {
+  statusCode = 0;
+  status(this: StatusResponse, code: number): StatusResponse {
+    this.statusCode = code;
+    return this;
+  }
+}
+
+class CapturedResponse {
+  statusCode = 0;
+  body: unknown = null;
+  status(this: CapturedResponse, code: number): CapturedResponse {
+    this.statusCode = code;
+    return this;
+  }
+  json(this: CapturedResponse, body: unknown): CapturedResponse {
+    this.body = body;
+    return this;
+  }
+}
+
+function harness() {
+  const rows = new Map<string, Stored>();
+  const events: { type: string; payload: unknown }[] = [];
+  const broadcast = jest.fn();
+  const prisma = {
+    agent: {
+      findMany: jest.fn(() => Promise.resolve([...rows.values()])),
+      findUnique: jest.fn(
+        ({
+          where,
+          include,
+        }: {
+          where: { id?: string; name?: string };
+          include?: unknown;
+        }) => {
+          const row = where.id
+            ? rows.get(where.id)
+            : [...rows.values()].find((agent) => agent.name === where.name);
+          if (!row) return Promise.resolve(null);
+          if (include) return Promise.resolve({ ...row, children: [] });
+          return Promise.resolve(row);
+        },
+      ),
+      create: jest.fn(({ data }: { data: Stored }) => {
+        const row: Stored = {
+          ...data,
+          personalityTags:
+            data.personalityTags &&
+            typeof data.personalityTags === 'object' &&
+            !Array.isArray(data.personalityTags)
+              ? null
+              : data.personalityTags,
+          updatedAt: new Date(),
+        };
+        rows.set(row.id, row);
+        return Promise.resolve(row);
+      }),
+      update: jest.fn(
+        ({ where, data }: { where: { id: string }; data: Partial<Stored> }) => {
+          const prev = rows.get(where.id);
+          if (!prev) return Promise.reject(new Error('missing'));
+          const next = { ...prev, ...data, updatedAt: new Date() };
+          rows.set(where.id, next);
+          return Promise.resolve(next);
+        },
+      ),
+      delete: jest.fn(({ where }: { where: { id: string } }) => {
+        const prev = rows.get(where.id);
+        rows.delete(where.id);
+        return Promise.resolve(prev);
+      }),
+    },
+    activityEvent: {
+      create: jest.fn(
+        ({ data }: { data: { type: string; payload: unknown } }) => {
+          events.push(data);
+          return Promise.resolve(data);
+        },
+      ),
+    },
+  };
+  const gateway = { broadcast, clientCount: 0 };
+  const controller = new AgentsController(
+    prisma as unknown as PrismaService,
+    gateway as unknown as LiveActivityGateway,
+  );
+  const res = new StatusResponse();
+  return {
+    rows,
+    events,
+    broadcast,
+    prisma,
+    controller,
+    res: res as unknown as Response & { statusCode: number },
+  };
+}
+
+function seedDefault(rows: Map<string, Stored>): void {
+  rows.set('forge', {
+    id: 'forge',
+    name: 'Forge',
+    source: 'default',
+    color: '#9bd434',
+    role: 'engineer',
+    status: 'working',
+    parentId: 'speedy',
+    emoji: '🛠️',
+    personalityTags: ['builder'],
+    currentTask: 'Ticket 4',
+    tasksCompleted: 31,
+    totalCost: 2.41,
+    recentActivity: 'Working',
+    channel: null,
+    model: null,
+    avatar: 'robot-forge',
+    position: 2,
+    lastSeenAt: null,
+    updatedAt: new Date('2026-10-01T00:00:00.000Z'),
+  });
+}
+
+describe('AgentsController register, heartbeat, delete', () => {
+  it('criterion 1: 201 creates a registered row and 200 updates it with no duplicate', async () => {
+    const { rows, controller, res, broadcast } = harness();
+    const created = await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper', role: 'engineer' },
+      res,
+    );
+    expect(res.statusCode).toBe(201);
+    expect(created.agent.source).toBe('registered');
+    expect(created.agent.online).toBe(true);
+    expect('error' in created).toBe(false);
+
+    const updated = await controller.register(
+      {
+        id: 'forge_helper',
+        name: 'Forge Helper',
+        role: 'engineer',
+        model: 'local',
+      },
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(updated.agent.model).toBe('local');
+    expect(rows.size).toBe(1);
+    expect(broadcast).toHaveBeenCalledWith(
+      'agents.snapshot',
+      expect.objectContaining({ id: 'forge_helper', action: 'register' }),
+    );
+  });
+
+  it('criterion 2: registering a default id keeps position and visual', async () => {
+    const { rows, controller, res } = harness();
+    seedDefault(rows);
+    const updated = await controller.register(
+      { id: 'forge', name: 'Forge', model: 'local' },
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(updated.agent).toMatchObject({
+      id: 'forge',
+      source: 'registered',
+      position: 2,
+      color: '#9bd434',
+      emoji: '🛠️',
+      avatar: 'robot-forge',
+      role: 'engineer',
+      parentId: 'speedy',
+      model: 'local',
+    });
+    expect(rows.size).toBe(1);
+  });
+
+  it('criterion 4: heartbeat updates lastSeenAt and 10 minutes reports online false', async () => {
+    const { rows, controller, res, broadcast, prisma } = harness();
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    const before = rows.get('forge_helper')!.lastSeenAt!.getTime();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await controller.heartbeat('forge_helper');
+    const after = rows.get('forge_helper')!.lastSeenAt!.getTime();
+    expect(after).toBeGreaterThanOrEqual(before);
+    expect(broadcast).toHaveBeenCalledWith(
+      'agents.snapshot',
+      expect.objectContaining({ id: 'forge_helper', action: 'heartbeat' }),
+    );
+    const heartbeats = prisma.activityEvent.create.mock.calls.filter(
+      (call: [{ data: { payload?: { action?: string } } }]) =>
+        call[0].data.payload?.action === 'heartbeat',
+    );
+    expect(heartbeats).toHaveLength(0);
+
+    rows.get('forge_helper')!.lastSeenAt = new Date(
+      Date.now() - OFFLINE_AFTER_MS,
+    );
+    const listed = await controller.list();
+    expect(listed.agents[0].online).toBe(false);
+    expect(listed.agents).toHaveLength(1);
+
+    rows.get('forge_helper')!.lastSeenAt = new Date(
+      Date.now() - OFFLINE_AFTER_MS + 1000,
+    );
+    const fresh = await controller.list();
+    expect(fresh.agents[0].online).toBe(true);
+
+    await expect(controller.heartbeat('missing_bot')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    seedDefault(rows);
+    await expect(controller.heartbeat('forge')).rejects.toMatchObject({
+      message: 'agent is not registered',
+    });
+  });
+
+  it('criterion 5: delete removes a registered row and returns 409 for a default', async () => {
+    const { rows, controller, res, broadcast } = harness();
+    seedDefault(rows);
+    await expect(controller.remove('forge')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    await expect(controller.remove('forge')).rejects.toMatchObject({
+      message: 'default agents cannot be deleted',
+    });
+    expect(rows.has('forge')).toBe(true);
+
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    await controller.remove('forge_helper');
+    expect(rows.has('forge_helper')).toBe(false);
+    expect(broadcast).toHaveBeenCalledWith(
+      'agents.snapshot',
+      expect.objectContaining({ id: 'forge_helper', action: 'delete' }),
+    );
+    await expect(controller.remove('forge_helper')).rejects.toMatchObject({
+      message: 'agent not found',
+    });
+  });
+
+  it('criterion 7: register and delete broadcast agents.snapshot', async () => {
+    const { controller, res, broadcast } = harness();
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    await controller.remove('forge_helper');
+    const types = broadcast.mock.calls.map((call: [string]) => call[0]);
+    expect(types).toEqual(['agents.snapshot', 'agents.snapshot']);
+  });
+
+  it('rejects an unknown field, a bad id, and a name over 200 characters', async () => {
+    const { controller, res } = harness();
+    await expect(
+      controller.register(
+        { id: 'forge_helper', name: 'Forge Helper', status: 'working' },
+        res,
+      ),
+    ).rejects.toMatchObject({ message: 'unknown field status' });
+    await expect(
+      controller.register({ id: 'Forge', name: 'Forge' }, res),
+    ).rejects.toMatchObject({
+      message: 'id must be a lowercase slug of 1 to 64 characters',
+    });
+    await expect(
+      controller.register({ id: 'forge_helper', name: 'n'.repeat(201) }, res),
+    ).rejects.toMatchObject({
+      message: 'name must be 200 characters or fewer',
+    });
+    const created = await controller.register(
+      { id: 'forge_helper', name: '😀'.repeat(200) },
+      res,
+    );
+    expect([...created.agent.name].length).toBe(200);
+  });
+
+  it('criterion 6: the three routes are writes and follow the token middleware', () => {
+    // Nest stores route metadata on the method function. Binding it would
+    // look up a different function and miss the metadata.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
+    const register = AgentsController.prototype.register;
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
+    const heartbeat = AgentsController.prototype.heartbeat;
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
+    const remove = AgentsController.prototype.remove;
+    expect(Reflect.getMetadata(METHOD_METADATA, register)).toBe(
+      RequestMethod.POST,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, register)).toBe('register');
+    expect(Reflect.getMetadata(METHOD_METADATA, heartbeat)).toBe(
+      RequestMethod.POST,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, heartbeat)).toBe(':id/heartbeat');
+    expect(Reflect.getMetadata(METHOD_METADATA, remove)).toBe(
+      RequestMethod.DELETE,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, remove)).toBe(':id');
+
+    const saved = { ...process.env };
+    const middleware = new WriteAuthMiddleware();
+    const hit = (method: string, token?: string) => {
+      const headers: Record<string, string> = {};
+      if (token !== undefined) headers['x-ingest-token'] = token;
+      let called = false;
+      const response = new CapturedResponse();
+      middleware.use(
+        { method, headers } as Request,
+        response as unknown as Response,
+        () => {
+          called = true;
+        },
+      );
+      return { called, response };
+    };
+
+    process.env.INGEST_TOKEN = 'secret';
+    process.env.NODE_ENV = 'test';
+    for (const method of ['POST', 'DELETE']) {
+      const denied = hit(method);
+      expect(denied.called).toBe(false);
+      expect(denied.response.statusCode).toBe(401);
+      expect(denied.response.body).toEqual({
+        statusCode: 401,
+        message: 'unauthorized',
+      });
+      const wrong = hit(method, 'nope');
+      expect(wrong.response.statusCode).toBe(401);
+      const allowed = hit(method, 'secret');
+      expect(allowed.called).toBe(true);
+    }
+
+    delete process.env.INGEST_TOKEN;
+    process.env.NODE_ENV = 'test';
+    expect(hit('POST').called).toBe(true);
+    expect(hit('DELETE').called).toBe(true);
+
+    process.env.NODE_ENV = 'production';
+    const closed = hit('POST');
+    expect(closed.called).toBe(false);
+    expect(closed.response.statusCode).toBe(401);
+    expect(hit('DELETE').response.statusCode).toBe(401);
+
+    process.env = { ...saved };
+  });
+});

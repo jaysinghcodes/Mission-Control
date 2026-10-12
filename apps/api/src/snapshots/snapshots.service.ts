@@ -1,6 +1,12 @@
-import { randomUUID } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  asRosterAgent,
+  normalizeSnapshotAgents,
+  planSnapshot,
+  tagsValue,
+  type RosterAgent,
+} from '../agents/agent-merge';
 import { wireText } from '../wire-text';
 import { PrismaService } from '../prisma/prisma.service';
 import { usageBucketsFromPayload } from '../usage/usage-points';
@@ -10,74 +16,55 @@ import { usageBucketsFromPayload } from '../usage/usage-points';
  *
  * The bridge (an OpenClaw cron job) collects REAL state from the instance —
  * agent roster, sessions, cron jobs, usage, pending approvals — and POSTs it
- * as `*.snapshot` events. Each handler replaces the relevant table rows so
- * the dashboard always mirrors the live instance, never stale wireframes.
+ * as `*.snapshot` events. Session, calendar, and approval handlers replace
+ * their rows. agents.snapshot merges by id and only removes snapshot rows,
+ * so a default or registered bot survives a partial roster.
  */
 @Injectable()
 export class SnapshotsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Replace the agent roster (family tree: main on top, sub-agents below).
+   * Merge an agents.snapshot into the roster.
    *
-   * MC-200: accepts the new profile fields (emoji, personalityTags, currentTask,
-   * tasksCompleted, totalCost, recentActivity, channel). Every one of them is
-   * optional on the wire: absent fields fall back to schema defaults / null, so
-   * legacy snapshots that predate MC-200 keep working unchanged (backward
-   * compatible). personalityTags arrives as a JSON array of short strings and is
-   * coerced defensively (never trusted raw) before being stored in the Json column.
+   * Snapshot rows may be created, updated, or removed. Default and
+   * registered rows are never deleted and never change source. When the
+   * payload includes one of those ids (or the same name), only status
+   * fields change. Parent links are applied after the rows exist so a
+   * child listed before its parent does not trip the foreign key.
    *
-   * Order-independent tree wiring: rows are created WITHOUT parentId first, then
-   * the parent links are set by name — a snapshot that lists children before
-   * their parent used to violate Agent_parentId_fkey (inserts run sequentially);
-   * two-phase wiring can't. The bridge already sends parents first, but relying
-   * on producer ordering is fragile (GET /agents itself returns children first).
+   * Profile fields stay optional. A snapshot owned row mirrors the payload.
+   * A protected row keeps name, role, color, emoji, position, and avatar.
    */
   async applyAgents(payload: Record<string, unknown>): Promise<void> {
-    const agents = Array.isArray(payload.agents)
-      ? (payload.agents as Record<string, unknown>[])
-      : [];
-    // Bridge sends parent as a NAME; the FK column needs an id, so resolve names first.
-    const ids = new Map<string, string>();
-    for (const a of agents) {
-      ids.set(wireText(a.name ?? 'unknown'), randomUUID());
-    }
-    await this.prisma.$transaction([
-      this.prisma.agent.deleteMany({}),
-      // Phase 1 — create every row without a parent edge (FK-safe in any order).
-      ...agents.map((a) =>
-        this.prisma.agent.create({
-          data: {
-            id: ids.get(wireText(a.name ?? 'unknown'))!,
-            name: wireText(a.name ?? 'unknown'),
-            color: wireText(a.color ?? '#58A6FF'),
-            role: a.role ? wireText(a.role) : null,
-            status: wireText(a.status ?? 'idle'),
-            parentId: null,
-            // MC-200 profile fields — optional on the wire; defaults/null when absent.
-            emoji: a.emoji ? wireText(a.emoji) : null,
-            personalityTags: toTags(a.personalityTags),
-            currentTask: a.currentTask ? wireText(a.currentTask) : null,
-            tasksCompleted:
-              a.tasksCompleted != null ? Number(a.tasksCompleted) : undefined,
-            totalCost: a.totalCost != null ? Number(a.totalCost) : undefined,
-            recentActivity: a.recentActivity
-              ? wireText(a.recentActivity)
-              : null,
-            channel: a.channel ? wireText(a.channel) : null,
-          },
-        }),
-      ),
-      // Phase 2 — wire the tree now that every row exists (name → fresh id).
-      ...agents
-        .filter((a) => a.parent && ids.has(wireText(a.parent)))
-        .map((a) =>
-          this.prisma.agent.update({
-            where: { name: wireText(a.name ?? 'unknown') },
-            data: { parentId: ids.get(wireText(a.parent))! },
-          }),
-        ),
-    ]);
+    const existing = (await this.prisma.agent.findMany()).map(asRosterAgent);
+    const plan = planSnapshot(existing, normalizeSnapshotAgents(payload));
+    await this.prisma.$transaction(async (tx) => {
+      if (plan.deleteIds.length > 0) {
+        await tx.agent.deleteMany({ where: { id: { in: plan.deleteIds } } });
+      }
+      for (const row of plan.creates) {
+        await tx.agent.create({ data: snapshotCreate(row) });
+      }
+      for (const row of plan.snapshotWrites) {
+        await tx.agent.update({
+          where: { id: row.id },
+          data: snapshotUpdate(row),
+        });
+      }
+      for (const write of plan.statusWrites) {
+        await tx.agent.update({
+          where: { id: write.id },
+          data: write.data,
+        });
+      }
+      for (const link of plan.parentLinks) {
+        await tx.agent.update({
+          where: { id: link.id },
+          data: { parentId: link.parentId },
+        });
+      }
+    });
   }
 
   /** Replace the active sessions table. */
@@ -317,17 +304,41 @@ function normalizeMemory(value: unknown): MemoryWrite | null {
   return { id, title, body, agent, createdAt, kind, source: 'bridge', ref };
 }
 
-/**
- * Coerce a snapshot's personalityTags into a stored Json value.
- *
- * Accepts an array of short strings (e.g. ["strategist","daily"]); anything
- * else (absent, null, non-array, garbage) becomes undefined so the field is
- * omitted from the insert (column → NULL) and the ingest never rejects a
- * snapshot over an unexpected tags shape. Items are stringified and trimmed;
- * empty strings are dropped.
- */
-function toTags(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const tags = value.map((t) => String(t).trim()).filter((t) => t.length > 0);
-  return tags.length > 0 ? tags : undefined;
+function snapshotCreate(row: RosterAgent): Prisma.AgentCreateInput {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    role: row.role,
+    status: row.status,
+    emoji: row.emoji,
+    personalityTags: tagsValue(row.personalityTags),
+    currentTask: row.currentTask,
+    tasksCompleted: row.tasksCompleted,
+    totalCost: row.totalCost,
+    recentActivity: row.recentActivity,
+    channel: row.channel,
+    source: 'snapshot',
+    model: row.model,
+    avatar: row.avatar,
+    position: row.position,
+    lastSeenAt: row.lastSeenAt,
+  };
+}
+
+function snapshotUpdate(row: RosterAgent): Prisma.AgentUpdateInput {
+  return {
+    name: row.name,
+    color: row.color,
+    role: row.role,
+    status: row.status,
+    emoji: row.emoji,
+    personalityTags: tagsValue(row.personalityTags),
+    currentTask: row.currentTask,
+    tasksCompleted: row.tasksCompleted,
+    totalCost: row.totalCost,
+    recentActivity: row.recentActivity,
+    channel: row.channel,
+    source: 'snapshot',
+  };
 }

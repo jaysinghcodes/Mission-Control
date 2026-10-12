@@ -38,6 +38,9 @@ Design rules (why the code looks the way it does):
   * Secrets: INGEST_TOKEN comes from the environment or the repo-root .env.
     It is sent only as the x-ingest-token header and is NEVER printed, even
     with --dry-run.
+  * MC_BRIDGE_REGISTER=1 also POSTs /agents/register for each mapped agent.
+    Leave it unset and this script only posts agents.snapshot. OpenClaw
+    stays optional either way.
 
 Usage:
   python3 bridge/mc-bridge-sync.py              # collect + post
@@ -267,11 +270,60 @@ def map_sessions(rows: List[Dict[str, Any]], now_ms: int) -> List[Dict[str, Any]
     return out
 
 
+def agent_slug(raw: str) -> str:
+    """Lowercase slug, 1 to 64 characters: a to z, 0 to 9, underscores."""
+    text = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower())
+    text = re.sub(r"_+", "_", text).strip("_")[:64].strip("_")
+    return text or "agent"
+
+
+def unique_agent_slug(base: str, used: Set[str]) -> str:
+    slug = agent_slug(base)
+    if slug not in used:
+        used.add(slug)
+        return slug
+    n = 2
+    while n < 1000:
+        suffix = f"_{n}"
+        cut = slug[: 64 - len(suffix)].rstrip("_")
+        candidate = f"{cut}{suffix}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        n += 1
+    used.add(slug)
+    return slug
+
+
+def wants_self_register() -> bool:
+    """Optional. Unset means the bridge only posts agents.snapshot."""
+    return os.environ.get("MC_BRIDGE_REGISTER", "").strip().lower() in {"1", "true", "yes"}
+
+
+def register_payloads(agents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Bodies for POST /agents/register. Name is clipped to 200 code points."""
+    out = []
+    for agent in agents:
+        body: Dict[str, Any] = {
+            "id": str(agent.get("id") or agent_slug(str(agent.get("name") or "agent"))),
+            "name": _clip_chars(str(agent.get("name") or "agent"), RUN_NAME_MAX),
+        }
+        role = agent.get("role")
+        if isinstance(role, str) and role.strip():
+            body["role"] = _clip_chars(role, RUN_NAME_MAX)
+        emoji = agent.get("emoji")
+        if isinstance(emoji, str) and emoji.strip():
+            body["avatar"] = _clip_chars(emoji, RUN_NAME_MAX)
+        out.append(body)
+    return out
+
+
 def map_agents(rows: List[Dict[str, Any]], sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Agent tree: the default agent (isDefault / id 'main') is the root; every
     other agent hangs under it unless OpenClaw names an explicit parent.
     `status` is derived: 'working' if the agent has a hot session.
+    `id` is a stable lowercase slug so a later snapshot updates the same row.
     """
     hot_agents = {s["agent"] for s in sessions if s["hot"]}
     root = next((a for a in rows if a.get("isDefault")), None) or next(
@@ -281,16 +333,18 @@ def map_agents(rows: List[Dict[str, Any]], sessions: List[Dict[str, Any]]) -> Li
         return str(first(a, "identityName", "name", "id") or "agent")
 
     root_name = display(root) if root else None
+    used: Set[str] = set()
     out = []
     for i, a in enumerate(rows):
         aid = str(first(a, "id", "name") or "")
         name = display(a)
         out.append({
+            "id": unique_agent_slug(aid or name, used),
             "name": name,
             "role": first(a, "role") or aid or None,
             "color": first(a, "color") or AGENT_COLORS[i % len(AGENT_COLORS)],
             "status": "working" if aid in hot_agents else "idle",
-            # Parent is sent as a NAME — SnapshotsService resolves it to an id.
+            # Parent is sent as a NAME. SnapshotsService resolves it to an id.
             "parent": first(a, "parent") or (root_name if root_name and name != root_name else None),
             "emoji": first(a, "identityEmoji", "emoji"),
             "channel": first(a, "channel"),
@@ -1129,6 +1183,25 @@ def persist_run_state(state_file: Path, state: Dict[str, Any], event_failures: i
     state_file.write_text(json.dumps(state))
 
 
+def post_register(api_url: str, token: str, body: Dict[str, Any]) -> bool:
+    """POST /agents/register. True on 200 or 201. Logs the status, never the token."""
+    req = urllib.request.Request(
+        f"{api_url.rstrip('/')}/agents/register",
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json", "x-ingest-token": token},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        hint = " (INGEST_TOKEN mismatch with the api?)" if e.code == 401 else ""
+        log(f"POST /agents/register: HTTP {e.code}{hint}")
+    except urllib.error.URLError as e:
+        log(f"POST /agents/register: api unreachable at {api_url} ({e.reason})")
+    return False
+
+
 def post(api_url: str, token: str, etype: str, payload: Dict[str, Any]) -> bool:
     """POST one event. True on 2xx. Logs the status, never the token.
 
@@ -1189,8 +1262,12 @@ def main() -> int:
     sessions = map_sessions(sessions_rows, now_ms) if sessions_rows is not None else None
 
     agents_rows = as_list(src.agents(), "agents")
+    register_bodies: List[Dict[str, Any]] = []
     if agents_rows is not None:
-        events.append(("agents.snapshot", {"agents": map_agents(agents_rows, sessions or [])}))
+        mapped_agents = map_agents(agents_rows, sessions or [])
+        events.append(("agents.snapshot", {"agents": mapped_agents}))
+        if wants_self_register():
+            register_bodies = register_payloads(mapped_agents)
     if sessions is not None:
         events.append(("sessions.snapshot", {"sessions": strip_private(sessions)}))
 
@@ -1248,9 +1325,14 @@ def main() -> int:
     if args.dry_run:
         for etype, payload in events:
             print(json.dumps({"type": etype, "payload": payload}))
+        for body in register_bodies:
+            print(json.dumps({"call": "POST /agents/register", "body": body}))
         return 0  # dry-run never writes the state file either
 
     event_failures = sum(0 if post(api_url, token, t, p) else 1 for t, p in events)
+    # Optional. Off unless MC_BRIDGE_REGISTER is 1, true, or yes. A failed
+    # register does not undo the snapshot that already landed.
+    register_failures = sum(0 if post_register(api_url, token, body) else 1 for body in register_bodies)
     # Run rows are separate from the activity events. 201 create, 200 update.
     # A 404 for an unknown ticketId is retried once without ticketId inside
     # apply_run_calls, so that case is not a failure. Any other failed run
@@ -1263,13 +1345,15 @@ def main() -> int:
         failed_jobs: Set[str] = set()
         run_failures = apply_run_calls(api_url, token, run_calls, state, failed_jobs)
         keep_successful_run_state(prior_state, state, failed_jobs)
-    failures = event_failures + run_failures
+    failures = event_failures + run_failures + register_failures
     # Usage deltas share this file. A failed activity post skips the write so
     # a delta is not counted twice. A failed run does not: that job was rolled
     # back, and the runs that succeeded stay saved.
     if event_failures == 0 and (cron_rows is not None or sessions is not None):
         persist_run_state(state_file, state, 0)
-    log(f"posted {len(events) - failures}/{len(events)} events to {api_url}/events")
+    posted = len(events) + len(register_bodies) - failures
+    total = len(events) + len(register_bodies)
+    log(f"posted {posted}/{total} events to {api_url}/events")
     return 1 if failures else 0
 
 

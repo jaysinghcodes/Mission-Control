@@ -33,11 +33,10 @@
  * boot). Demo activity is tagged `source: 'demo'` (existing column, default
  * 'openclaw') so it is distinguishable from real bridge traffic.
  *
- * Interaction with the bridge: once a real OpenClaw bridge posts
- * agents/calendar snapshots, those REPLACE the Agent / CronJob tables (that's
- * the snapshot contract) — i.e. real data supersedes demo agents/jobs
- * automatically. Demo tickets/activity remain until you delete them
- * (`DELETE … WHERE id LIKE 'demo-%'`).
+ * Interaction with the bridge: calendar snapshots still replace cron jobs.
+ * agents.snapshot creates, updates, or removes snapshot rows only. Seeded
+ * default rows and self registered rows stay. Demo tickets and activity
+ * remain until you delete them (`DELETE … WHERE id LIKE 'demo-%'`).
  *
  * Runs on the HOST against the compose Postgres (127.0.0.1:5432) using
  * DATABASE_URL from the env or the repo-root .env, same as the api.
@@ -67,6 +66,7 @@ import { configuredDocsRoot } from '../src/docs/docs-path';
 import { DEMO_DEVICES, DEMO_MISSION } from '../src/team/demo-team';
 import { SETTING_ID } from '../src/team/mission';
 import { demoUsageBuckets } from '../src/usage/demo-usage';
+import { slugFromName } from '../src/agents/agent-merge';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -278,12 +278,16 @@ async function main(): Promise<void> {
   }
 
   // Agents — phase 1: upsert by unique name (no parent yet → FK-safe in any order).
-  for (const a of AGENTS) {
+  // New rows use a slug id, source default, and the roster index as position.
+  // update is empty so a bridge or register that already owns the name is left alone.
+  for (let index = 0; index < AGENTS.length; index++) {
+    const a = AGENTS[index];
     const before = await prisma.agent.findUnique({ where: { name: a.name }, select: { id: true } });
     await prisma.agent.upsert({
       where: { name: a.name },
       update: {}, // never clobber an existing (possibly bridge-pushed) agent
       create: {
+        id: slugFromName(a.name) ?? `agent_${index}`,
         name: a.name,
         role: a.role,
         color: a.color,
@@ -298,6 +302,8 @@ async function main(): Promise<void> {
             ? `Working on ${a.currentTask}`
             : a.currentTask
           : 'Idle in the Break Room',
+        source: 'default',
+        position: index,
       },
     });
     if (!before) counts.agents++;

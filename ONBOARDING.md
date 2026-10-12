@@ -128,7 +128,7 @@ Without OpenClaw:
 With the bridge:
 
 3. Calendar jobs become the real cron list. `calendar.snapshot` replaces the table.
-4. Agents and the office floor follow `agents.snapshot`. `run.*` events show up as activity. A ticket move also writes activity, so a local move is not proof the bridge ran.
+4. Agents and the office floor follow `agents.snapshot`, and also `POST /agents/register` and `DELETE /agents/:id`, which broadcast that same event. `run.*` events show up as activity. A ticket move also writes activity, so a local move is not proof the bridge ran.
 5. `/#/system` shows a recent OpenClaw bridge time after any accepted `POST /events`. Sessions stay empty until `sessions.snapshot`. Logs stay empty until `/tmp/openclaw` has a gateway log.
 
 Tell the operator where `.env` lives, that it must not be committed, and that OpenClaw is optional for looking around.
