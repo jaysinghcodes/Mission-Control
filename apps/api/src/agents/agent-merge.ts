@@ -356,6 +356,13 @@ export function planSnapshot(
         if (Object.keys(data).length > 0) {
           statusWrites.push({ id: row.id, data });
         }
+        // A seeded default shares the slug of its name. A snapshot that
+        // omits id still addresses that row. Keep source and profile, and
+        // place it when the payload names a parent. An omitted parent does
+        // not clear the link. A registered row changes status fields only.
+        if (row.source === 'default' && item.parentName) {
+          parentNames.push({ id: row.id, parentName: item.parentName });
+        }
       }
       continue;
     }

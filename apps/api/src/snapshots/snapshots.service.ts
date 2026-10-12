@@ -35,6 +35,8 @@ export class SnapshotsService {
    *
    * Profile fields stay optional. A snapshot owned row mirrors the payload.
    * A protected row keeps name, role, color, emoji, position, and avatar.
+   * A default row whose entry names a parent is placed in that tree.
+   * A registered row does not change parent.
    */
   async applyAgents(payload: Record<string, unknown>): Promise<void> {
     const existing = (await this.prisma.agent.findMany()).map(asRosterAgent);

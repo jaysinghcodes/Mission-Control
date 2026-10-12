@@ -161,6 +161,78 @@ describe('agent merge', () => {
     expect(omitted.statusWrites).toEqual([]);
   });
 
+  it('places a seeded default when a nameless snapshot names its parent', () => {
+    const pixel = row({
+      id: 'pixel',
+      name: 'Pixel',
+      source: 'default',
+      parentId: 'speedy',
+      position: 5,
+      role: 'designer',
+    });
+    const speedy = row({
+      id: 'speedy',
+      name: 'Speedy',
+      source: 'default',
+      position: 0,
+    });
+    const registered = row({
+      id: 'forge_helper',
+      name: 'Forge Helper',
+      source: 'registered',
+      parentId: 'speedy',
+      position: 12,
+    });
+    const incoming = normalizeSnapshotAgents({
+      agents: [
+        { name: 'Pixel', role: 'design', status: 'idle', parent: 'Demo Lead' },
+        {
+          name: 'Nova',
+          role: 'development',
+          status: 'working',
+          parent: 'Demo Lead',
+        },
+        { name: 'Demo Lead', role: 'chief-of-staff', status: 'working' },
+        {
+          id: 'forge_helper',
+          name: 'Forge Helper',
+          status: 'working',
+          parent: 'Demo Lead',
+        },
+      ],
+    });
+    const plan = planSnapshot([pixel, speedy, registered], incoming);
+    const lead = plan.creates.find((agent) => agent.name === 'Demo Lead');
+    expect(lead?.id).toBe('demo_lead');
+    expect(plan.creates.map((agent) => agent.name).sort()).toEqual([
+      'Demo Lead',
+      'Nova',
+    ]);
+    expect(plan.deleteIds).toEqual([]);
+    expect(plan.parentLinks).toEqual(
+      expect.arrayContaining([
+        { id: 'pixel', parentId: 'demo_lead' },
+        { id: 'nova', parentId: 'demo_lead' },
+      ]),
+    );
+    expect(plan.parentLinks.map((link) => link.id)).not.toContain(
+      'forge_helper',
+    );
+    expect(plan.parentLinks.map((link) => link.id)).not.toContain('speedy');
+    expect(
+      plan.statusWrites.find((write) => write.id === 'pixel')?.data,
+    ).toEqual({
+      status: 'idle',
+    });
+
+    const noParent = normalizeSnapshotAgents({
+      agents: [{ name: 'Pixel', status: 'working' }],
+    });
+    const left = planSnapshot([pixel], noParent);
+    expect(left.parentLinks).toEqual([]);
+    expect(left.creates).toEqual([]);
+  });
+
   it('criterion 4: heartbeat stamps lastSeenAt and 10 minutes reads offline', () => {
     const bot = row({
       id: 'forge_helper',
