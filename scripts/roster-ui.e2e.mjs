@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { io } from 'socket.io-client'
 
 const web = (process.env.MC_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '')
 const api = (process.env.MC_API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '')
@@ -65,15 +66,70 @@ async function pumpUntil(page, ready) {
   throw new Error('criterion 5: the roster did not render under the mocked clock')
 }
 
-function run(command, args) {
+function run(command, args, cwd = root) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: root, env: process.env, stdio: 'inherit' })
+    const child = spawn(command, args, { cwd, env: process.env, stdio: 'inherit' })
     child.on('error', reject)
     child.on('close', (code) => {
       if (code === 0) resolve()
       else reject(new Error(`${command} ${args.join(' ')} exited ${code}`))
     })
   })
+}
+
+function bootTime(body) {
+  if (!body || typeof body.ts !== 'number' || typeof body.uptimeSeconds !== 'number') return null
+  return body.ts - body.uptimeSeconds * 1000
+}
+
+async function readHealth() {
+  try {
+    const res = await fetch(`${api}/health`, { cache: 'no-store' })
+    const json = await res.json()
+    if (json?.status !== 'ok' || json?.database !== 'connected') return null
+    return json
+  } catch {
+    return null
+  }
+}
+
+function socketConnected(timeoutMs) {
+  return new Promise((resolve) => {
+    const socket = io(api, { transports: ['websocket'], timeout: timeoutMs, reconnection: false })
+    const finish = (ok) => {
+      clearTimeout(timer)
+      socket.removeAllListeners()
+      socket.close()
+      resolve(ok)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    socket.on('connect', () => finish(true))
+    socket.on('connect_error', () => finish(false))
+  })
+}
+
+/**
+ * The sidebar says Connected only after /health succeeds and the page's
+ * socket connects. The first failed health check sends the operator to
+ * /connect and does not try again, so the browser must open against an API
+ * that is already staying up.
+ */
+async function waitForLiveFeed() {
+  const deadline = Date.now() + 30000
+  while (Date.now() < deadline) {
+    const before = await readHealth()
+    const booted = bootTime(before)
+    if (booted === null) {
+      await sleep(100)
+      continue
+    }
+    const up = await socketConnected(2000)
+    const after = await readHealth()
+    const bootedAfter = bootTime(after)
+    if (up && bootedAfter !== null && Math.abs(bootedAfter - booted) < 1500) return
+    await sleep(100)
+  }
+  throw new Error('the API did not keep a live socket after reseed')
 }
 
 async function resetRoster() {
@@ -90,7 +146,10 @@ async function resetRoster() {
   }
   const snap = await apiSend('POST', '/events', { type: 'agents.snapshot', payload: { agents: [] } })
   if (snap.status !== 202) throw new Error(`empty snapshot returned ${snap.status} ${snap.text}`)
-  await run('npm', ['run', 'seed:demo'])
+  // npm run seed:demo also runs prisma generate. That rewrites
+  // node_modules/.prisma/client, and nest start --watch compiles twice and
+  // restarts the API. Skip generate here. The client is already built.
+  await run('npx', ['ts-node', '--transpile-only', 'scripts/seed-demo.ts'], path.join(root, 'apps', 'api'))
 }
 
 async function shot(page, dir, name) {
@@ -130,15 +189,27 @@ async function waitSampleCount(page, min) {
 }
 
 async function waitConnected(page) {
-  await page.getByText(/^Connected/).first().waitFor({ timeout: 20000 })
+  const chip = page.getByText(/^Connected/).first()
+  try {
+    await chip.waitFor({ timeout: 20000 })
+  } catch (err) {
+    const sidebar = await page.locator('aside').innerText().catch(() => '')
+    throw new Error(`live feed was not connected at ${page.url()}\n${sidebar.slice(0, 400)}\n${err instanceof Error ? err.message : err}`)
+  }
 }
 
 function agent(page, id) {
   return page.locator(`[data-agent-id="${id}"]`).first()
 }
 
+async function assertDimmed(page, label) {
+  const opacity = await agent(page, 'ribbon').locator('[data-dim="true"]').first().evaluate((el) => getComputedStyle(el).opacity)
+  if (Number(opacity) >= 0.6) throw new Error(`${label} opacity was ${opacity}`)
+}
+
 async function main() {
   await resetRoster()
+  await waitForLiveFeed()
   const browser = await chromium.launch(launchOptions())
   const page = await openPage(browser)
   try {
@@ -336,16 +407,16 @@ async function showOffline(browser) {
     }
     if (!offline) throw new Error('criterion 5: Ribbon did not show Offline after 10 minutes')
     await page.getByText('Offline', { exact: true }).first().waitFor()
-    const opacity = await agent(page, 'ribbon').locator('[data-dim="true"]').first().evaluate((el) => getComputedStyle(el).opacity)
-    if (Number(opacity) >= 0.6) throw new Error(`criterion 5: robot opacity was ${opacity}`)
+    await assertDimmed(page, 'criterion 5: Agents robot')
     await shot(page, artifactDir, 'agents_offline.png')
     await shot(page, readmeDir, 'agents-offline.png')
     await page.goto(`${web}/#/office`, { waitUntil: 'domcontentloaded' })
     await page.getByRole('heading', { level: 1, name: 'Office' }).waitFor()
     await pumpUntil(page, async () => (await agent(page, 'ribbon').count()) > 0)
     if (await agent(page, 'ribbon').getAttribute('data-offline') !== 'true') {
-      throw new Error('criterion 5: Office did not dim Ribbon')
+      throw new Error('criterion 5: Office did not mark Ribbon Offline')
     }
+    await assertDimmed(page, 'criterion 5: Office robot')
     await shot(page, artifactDir, 'office_offline.png')
     await shot(page, readmeDir, 'office-offline.png')
     await page.goto(`${web}/#/team`, { waitUntil: 'domcontentloaded' })
