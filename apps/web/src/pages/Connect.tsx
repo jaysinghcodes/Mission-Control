@@ -125,7 +125,8 @@ export default function Connect() {
     setOs(clientOS())
     const t = setTimeout(() => void runProbe(), 150)
     return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Probe once on mount. runProbe changes whenever checking changes, so depending on it would probe again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- probe once on mount
   }, [])
 
   const step = STEP_DATA[index]

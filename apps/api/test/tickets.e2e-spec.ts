@@ -21,6 +21,22 @@ import { bodyMessage } from './lint-helpers';
  * FAST here, before Nest boots and before any create runs — and clean up
  * every ticket + its activity events we create, even when a test fails.
  */
+/** A dropped socket. HTTP 4xx and 5xx are not this. */
+function isDroppedConnection(err: unknown): boolean {
+  let message = '';
+  if (typeof err === 'string') message = err;
+  else if (err instanceof Error) message = err.message;
+  const code =
+    err && typeof err === 'object' && 'code' in err
+      ? String((err as { code?: unknown }).code)
+      : '';
+  return (
+    code === 'ECONNRESET' ||
+    message.includes('ECONNRESET') ||
+    message.includes('socket hang up')
+  );
+}
+
 if (!process.env.DATABASE_URL) {
   throw new Error(
     'Tickets e2e refuses to run without DATABASE_URL.\n' +
@@ -149,13 +165,13 @@ describe('Tickets (e2e)', () => {
     });
 
     it('C: invalid create status (done) → 400 and nothing saved', async () => {
-      const before = await prisma.ticket.count();
+      const title = `e2e bad status ${Date.now()}-${Math.random()}`;
       const res = await createTicket({
-        title: 'e2e bad status',
+        title,
         status: 'done',
       });
       expect(res.status).toBe(400);
-      expect(await prisma.ticket.count()).toBe(before);
+      expect(await prisma.ticket.count({ where: { title } })).toBe(0);
     });
 
     it('E: missing title → 400 (was 201 {error})', async () => {
@@ -287,33 +303,69 @@ describe('Tickets (e2e)', () => {
 
   describe('concurrent creates (QA-1 #5)', () => {
     it('10 parallel POSTs → 10 unique MC-N keys', async () => {
-      const postBatch = () =>
-        Promise.all(
-          Array.from({ length: 10 }, (_, i) =>
-            call()
-              .post('/tickets')
-              .send({ title: `e2e parallel ${i}`, status: 'todo' }),
+      const postOnce = (i: number) =>
+        call()
+          .post('/tickets')
+          .send({ title: `e2e parallel ${i}`, status: 'todo' });
+
+      const first = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, i) => postOnce(i)),
+      );
+      const rejected = first.filter((result) => result.status === 'rejected');
+      const fulfilled = first.filter((result) => result.status === 'fulfilled');
+      for (const result of fulfilled) {
+        if (result.value.status !== 201) continue;
+        const ticket = ticketFrom(result.value).ticket;
+        if (ticket?.id) created.push(ticket.id);
+      }
+
+      const httpFailure = fulfilled.find(
+        (result) => result.value.status !== 201,
+      );
+      const otherReject = rejected.find(
+        (result) => !isDroppedConnection(result.reason),
+      );
+      if (rejected.length > 0 || httpFailure) {
+        console.log(
+          'parallel ticket create first batch:',
+          JSON.stringify(
+            first.map((result) => {
+              if (result.status === 'rejected') {
+                const reason: unknown = result.reason;
+                const message =
+                  typeof reason === 'string'
+                    ? reason
+                    : reason instanceof Error
+                      ? reason.message
+                      : '';
+                const code =
+                  reason && typeof reason === 'object' && 'code' in reason
+                    ? String((reason as { code?: unknown }).code)
+                    : '';
+                return { error: message, code };
+              }
+              const body: unknown = result.value.body as unknown;
+              return {
+                status: result.value.status,
+                body,
+              };
+            }),
           ),
         );
-      // Fresh clone keeps the dev server connected to the same Postgres.
-      // A full parallel batch can hit a transient Prisma transaction error
-      // (P2028) and reset the socket. Remember any rows that did commit,
-      // then require one complete batch of 10 unique keys.
-      let settled: Awaited<ReturnType<typeof postBatch>> | undefined;
-      try {
-        settled = await postBatch();
-      } catch {
-        settled = undefined;
       }
-      const complete =
-        settled !== undefined && settled.every((res) => res.status === 201);
-      if (settled) {
-        for (const res of settled) {
-          const ticket = ticketFrom(res).ticket;
-          if (ticket?.id) created.push(ticket.id);
-        }
+      if (otherReject && otherReject.status === 'rejected') {
+        throw otherReject.reason;
       }
-      if (!complete) settled = await postBatch();
+      if (httpFailure) {
+        expect(httpFailure.value.status).toBe(201);
+      }
+
+      let settled = fulfilled.map((result) => result.value);
+      if (rejected.length > 0) {
+        settled = await Promise.all(
+          Array.from({ length: 10 }, (_, i) => postOnce(i)),
+        );
+      }
       for (const res of settled) {
         expect(res.status).toBe(201);
         const ticket = ticketFrom(res).ticket;
