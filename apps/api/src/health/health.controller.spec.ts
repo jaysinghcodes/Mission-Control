@@ -1,3 +1,7 @@
+import { HttpException, INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import { App } from 'supertest/types';
 import { HealthController } from './health.controller';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,7 +23,11 @@ describe('HealthController', () => {
     prisma = {
       dbReady: true,
       activityEvent: {
-        findFirst: jest.fn(async () => ({ ts: new Date('2026-10-05T12:00:00.000Z') })),
+        findFirst: jest.fn(() =>
+          Promise.resolve({
+            ts: new Date('2026-10-05T12:00:00.000Z'),
+          }),
+        ),
       },
     };
     controller = new HealthController(
@@ -31,6 +39,8 @@ describe('HealthController', () => {
   it('reports ok when the database is reachable', async () => {
     const res = await controller.getHealth();
 
+    expect(res.service).toBe('mission-control');
+    expect(res.db).toBe('up');
     expect(res.status).toBe('ok');
     expect(res.database).toBe('connected');
     expect(res.connectedClients).toBe(3);
@@ -44,14 +54,58 @@ describe('HealthController', () => {
     });
   });
 
-  it('reports degraded when the database is down (no fake 100%)', async () => {
+  it('returns 503 JSON when the database is down', async () => {
     prisma.dbReady = false;
-    const res = await controller.getHealth();
-
-    expect(res.status).toBe('degraded');
-    expect(res.database).toBe('unavailable');
-    expect(res.lastIngestAt).toBeNull();
+    await expect(controller.getHealth()).rejects.toBeInstanceOf(HttpException);
+    try {
+      await controller.getHealth();
+    } catch (err) {
+      const http = err as HttpException;
+      expect(http.getStatus()).toBe(503);
+      expect(http.getResponse()).toMatchObject({
+        service: 'mission-control',
+        db: 'down',
+        status: 'degraded',
+        database: 'unavailable',
+        lastIngestAt: null,
+      });
+    }
     expect(prisma.activityEvent.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 JSON when the database query throws', async () => {
+    prisma.activityEvent.findFirst.mockRejectedValue(
+      new Error('database unreachable'),
+    );
+    const moduleRef = await Test.createTestingModule({
+      controllers: [HealthController],
+      providers: [
+        { provide: PrismaService, useValue: prisma },
+        { provide: LiveActivityGateway, useValue: gateway },
+      ],
+    }).compile();
+    const nest: INestApplication<App> = moduleRef.createNestApplication();
+    await nest.init();
+    try {
+      const res = await request(nest.getHttpServer()).get('/health');
+      const body = res.body as {
+        service: string;
+        db: string;
+        status: string;
+        database: string;
+        statusCode?: number;
+      };
+      expect(res.status).toBe(503);
+      expect(body).toMatchObject({
+        service: 'mission-control',
+        db: 'down',
+        status: 'degraded',
+        database: 'unavailable',
+      });
+      expect(body.statusCode).toBeUndefined();
+    } finally {
+      await nest.close();
+    }
   });
 
   it('reports no ingest when the bridge has never posted', async () => {

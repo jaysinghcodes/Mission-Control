@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import net from 'node:net'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
@@ -11,11 +12,10 @@ import {
   FIX_MIGRATIONS,
   FIX_NODE,
   FIX_TOKEN,
-  applyDatabaseToPorts,
   hasDashPunctuation,
-  interpretHealthResponse,
+  inspectApiPort,
   nodeSupported,
-  portFix,
+  readHealthIdentity,
   report,
   tokenState,
 } from './doctor.mjs'
@@ -30,10 +30,8 @@ function facts(overrides = {}) {
     ports: {
       badPort: false,
       api: 3000,
-      web: 5173,
-      apiState: 'free',
-      webState: 'free',
-      health: { reachable: true, url: 'http://127.0.0.1:3000/health' },
+      apiState: 'ours',
+      health: { reachable: true, db: 'up', url: 'http://127.0.0.1:3000/health' },
     },
     database: { state: 'ok', migrations: 'current', pending: [], detail: '127.0.0.1:5432' },
     openclaw: 'OpenClaw is optional. The openclaw command is not on PATH, so the bridge was not reached. Sample data does not need it.',
@@ -66,12 +64,12 @@ test('a healthy report exits 0 and keeps OpenClaw informational', () => {
   assert.equal(result.lines.length, 8)
   assert.ok(result.lines.every((line) => !hasDashPunctuation(line)))
   assert.match(result.lines[0], /^pass node:/)
-  assert.match(result.lines[1], /^pass ports: Required ports are free/)
+  assert.match(result.lines[1], /^pass ports: Port 3000 is already running\.$/)
+  assert.match(result.lines[6], /^pass health: The health check says the database is up\.$/)
   assert.match(result.lines[2], /^pass env:/)
   assert.match(result.lines[3], /^pass database:/)
   assert.match(result.lines[4], /^pass migrations:/)
   assert.match(result.lines[5], /^pass token:/)
-  assert.match(result.lines[6], /^pass health:/)
   assert.match(result.lines[7], /^info openclaw: OpenClaw is optional/)
 })
 
@@ -88,13 +86,11 @@ test('each required failure names the next command and exits non zero', () => {
         ports: {
           badPort: false,
           api: 3000,
-          web: 5173,
           apiState: 'busy',
-          webState: 'free',
-          health: { reachable: false, url: 'http://127.0.0.1:3000/health' },
+          health: { reachable: false, db: null, url: 'http://127.0.0.1:3000/health' },
         },
       }),
-      includes: portFix(3000),
+      includes: 'Port 3000 is used by another program. Stop it or set PORT in .env.',
     },
     {
       name: 'env',
@@ -131,10 +127,8 @@ test('each required failure names the next command and exits non zero', () => {
         ports: {
           badPort: false,
           api: 3000,
-          web: 5173,
           apiState: 'free',
-          webState: 'free',
-          health: { reachable: false, url: 'http://127.0.0.1:3000/health' },
+          health: { reachable: false, db: null, url: 'http://127.0.0.1:3000/health' },
         },
       }),
       includes: FIX_HEALTH,
@@ -150,7 +144,6 @@ test('each required failure names the next command and exits non zero', () => {
   }
 })
 
-const NEST_500 = JSON.stringify({ statusCode: 500, message: 'Internal server error' })
 const HTML_404 = `<!DOCTYPE HTML>
 <html lang="en">
 <head>
@@ -172,126 +165,136 @@ function dbDown() {
   return { state: 'unreachable', migrations: 'unknown', pending: [], detail: '127.0.0.1:59999' }
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+function otherProgram(port) {
+  return `fail ports: Port ${port} is used by another program. Stop it or set PORT in .env.`
 }
 
-function rawPorts(port, probe) {
-  const url = `http://127.0.0.1:${port}/health`
-  return {
-    badPort: false,
-    api: port,
-    web: 5173,
-    apiState: 'busy',
-    webState: 'free',
-    healthUrl: url,
-    probe,
-    health: { reachable: false, databaseDown: false, url, body: '' },
-  }
-}
-
-function reported(port, probe, database) {
-  const ports = applyDatabaseToPorts(rawPorts(port, probe), database)
-  return { ports, result: report(facts({ ports, database })) }
-}
-
-function assertStranger(result, port) {
-  assert.equal(result.code, 1)
-  assert.match(result.lines[1], new RegExp(`^fail ports: Port ${port} is in use\\.`))
-  assert.match(result.lines[1], new RegExp(escapeRegExp(portFix(port))))
-  assert.match(result.lines[3], /^pass database:/)
-  assert.doesNotMatch(result.lines.join('\n'), /database is down/)
-  assert.doesNotMatch(result.lines.join('\n'), /serving the Mission Control API/)
-  assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
-}
-
-async function serve(status, body, type) {
-  const server = http.createServer((req, res) => {
-    res.writeHead(status, { 'content-type': type })
-    res.end(body)
+function listen(server) {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port))
   })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const { port } = server.address()
-  const live = await fetch(`http://127.0.0.1:${port}/health`)
-  const probe = { ok: live.ok, status: live.status, text: await live.text() }
-  await new Promise((resolve) => server.close(resolve))
-  return { port, probe }
 }
 
-test('a stranger 404 HTML page fails the port check', async () => {
-  const { port, probe } = await serve(404, HTML_404, 'text/html')
-  assert.equal(probe.status, 404)
-  assert.equal(interpretHealthResponse(probe, false).kind, 'stranger')
-  assert.equal(interpretHealthResponse(probe, true).kind, 'stranger')
-  const { result } = reported(port, probe, dbOk())
-  assertStranger(result, port)
+function close(server) {
+  return new Promise((resolve) => server.close(resolve))
+}
+
+test('a foreign 404 fails with the port message', async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/html' })
+    res.end(HTML_404)
+  })
+  const port = await listen(server)
+  try {
+    const seen = await inspectApiPort(port)
+    assert.equal(seen.state, 'other')
+    const result = report(facts({
+      ports: { badPort: false, api: port, apiState: 'busy', health: { reachable: false, db: null, url: seen.url } },
+      database: dbOk(),
+    }))
+    assert.equal(result.code, 1)
+    assert.equal(result.lines[1], otherProgram(port))
+    assert.match(result.lines[3], /^pass database:/)
+    assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+  } finally {
+    await close(server)
+  }
 })
 
-test('a stranger 500 text body fails the port check', async () => {
-  const { port, probe } = await serve(500, 'oops', 'text/plain')
-  assert.equal(probe.status, 500)
-  assert.equal(probe.text, 'oops')
-  assert.equal(interpretHealthResponse(probe, false).kind, 'stranger')
-  assert.equal(interpretHealthResponse(probe, true).kind, 'stranger')
-  const { result } = reported(port, probe, dbOk())
-  assertStranger(result, port)
+test('a foreign 500 fails with the port message whether the database is up or down', async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(500, { 'content-type': 'text/plain' })
+    res.end('oops')
+  })
+  const port = await listen(server)
+  try {
+    const seen = await inspectApiPort(port)
+    assert.equal(seen.state, 'other')
+    assert.equal(
+      readHealthIdentity({ status: 500, text: JSON.stringify({ statusCode: 500, message: 'Internal server error' }) }).ours,
+      false,
+    )
+    for (const database of [dbOk(), dbDown()]) {
+      const result = report(facts({
+        ports: { badPort: false, api: port, apiState: 'busy', health: { reachable: false, db: null, url: seen.url } },
+        database,
+      }))
+      assert.equal(result.lines[1], otherProgram(port))
+      assert.equal(result.code, 1)
+      assert.doesNotMatch(result.lines[1], /already running/)
+      assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+    }
+  } finally {
+    await close(server)
+  }
 })
 
-test('a Nest 500 with the database up is a stranger', async () => {
-  const { port, probe } = await serve(500, NEST_500, 'application/json')
-  assert.equal(interpretHealthResponse(probe, false).kind, 'stranger')
-  const { ports, result } = reported(port, probe, dbOk())
-  assert.equal(ports.health.databaseDown, false)
-  assert.equal(ports.apiState, 'busy')
-  assertStranger(result, port)
+test('a raw TCP listener with no HTTP fails with the port message', async () => {
+  const server = net.createServer((socket) => socket.destroy())
+  const port = await listen(server)
+  try {
+    const seen = await inspectApiPort(port)
+    assert.equal(seen.state, 'other')
+    const result = report(facts({
+      ports: { badPort: false, api: port, apiState: 'busy', health: { reachable: false, db: null, url: seen.url } },
+      database: dbOk(),
+    }))
+    assert.equal(result.code, 1)
+    assert.equal(result.lines[1], otherProgram(port))
+    assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+  } finally {
+    await close(server)
+  }
 })
 
-test('API up and database down keeps the API port and names the database', async () => {
-  const { port, probe } = await serve(500, NEST_500, 'application/json')
-  assert.equal(interpretHealthResponse(probe, true).kind, 'database-down')
-  assert.equal(
-    interpretHealthResponse({
-      ok: true,
-      status: 200,
-      text: JSON.stringify({ status: 'ok', database: 'connected', uptimeSeconds: 1 }),
-    }, false).kind,
-    'up',
-  )
-  assert.equal(interpretHealthResponse({ ok: false, status: 0, text: '' }, true).kind, 'down')
-  assert.equal(interpretHealthResponse({ ok: true, status: 200, text: 'not the api' }, true).kind, 'stranger')
-  const { ports, result } = reported(port, probe, dbDown())
-  assert.equal(ports.apiState, 'ours')
-  assert.equal(ports.health.databaseDown, true)
-  assert.equal(result.code, 1)
-  assert.match(result.lines[1], /^pass ports:/)
-  assert.match(result.lines[1], /serving the Mission Control API/)
-  assert.doesNotMatch(result.lines[1], /in use/)
-  assert.match(result.lines[3], new RegExp(escapeRegExp(FIX_DATABASE)))
-  assert.match(
-    result.lines[6],
-    new RegExp(
-      `^fail health: The API is running at http://127\\.0\\.0\\.1:${port}/health but the database is down\\. Start Postgres with: ${escapeRegExp(FIX_DATABASE)}$`,
-    ),
-  )
-  assert.doesNotMatch(result.lines[6], /npm run dev/)
-  assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+test('API up and database down passes the port and fails the database', async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', db: 'down' }))
+  })
+  const port = await listen(server)
+  try {
+    const seen = await inspectApiPort(port)
+    assert.equal(seen.state, 'ours')
+    assert.equal(seen.db, 'down')
+    const result = report(facts({
+      ports: { badPort: false, api: port, apiState: 'ours', health: { reachable: true, db: 'down', url: seen.url } },
+      database: dbDown(),
+    }))
+    assert.equal(result.code, 1)
+    assert.equal(result.lines[1], `pass ports: Port ${port} is already running.`)
+    assert.match(result.lines[3], /^fail database:/)
+    assert.match(result.lines[3], /docker compose up -d db/)
+    assert.equal(result.lines[6], 'fail health: The health check says the database is down.')
+    assert.doesNotMatch(result.lines.join('\n'), /another program/)
+    assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+  } finally {
+    await close(server)
+  }
 })
 
-test('ports held by Mission Control are not a conflict', () => {
-  const result = report(facts({
-    ports: {
-      badPort: false,
-      api: 3000,
-      web: 5173,
-      apiState: 'ours',
-      webState: 'ours',
-      health: { reachable: true, url: 'http://127.0.0.1:3000/health' },
-    },
-  }))
-  assert.equal(result.code, 0)
-  assert.match(result.lines[1], /serving the Mission Control API/)
-  assert.match(result.lines[1], /serving the Mission Control web app/)
-  assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+test('a healthy API passes every required check', async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', db: 'up' }))
+  })
+  const port = await listen(server)
+  try {
+    const seen = await inspectApiPort(port)
+    assert.equal(seen.state, 'ours')
+    assert.equal(seen.db, 'up')
+    const result = report(facts({
+      ports: { badPort: false, api: port, apiState: 'ours', health: { reachable: true, db: 'up', url: seen.url } },
+      database: dbOk(),
+    }))
+    assert.equal(result.code, 0)
+    assert.equal(result.lines[1], `pass ports: Port ${port} is already running.`)
+    assert.match(result.lines[3], /^pass database:/)
+    assert.equal(result.lines[6], 'pass health: The health check says the database is up.')
+    assert.ok(result.lines.every((line) => !hasDashPunctuation(line)))
+  } finally {
+    await close(server)
+  }
 })
 
 test('OpenClaw staying unreachable does not fail the command', () => {

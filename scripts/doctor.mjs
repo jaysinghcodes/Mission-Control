@@ -14,8 +14,6 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const WEB_PORT = 5173
-
 export const FIX_ENV = 'cp .env.example .env'
 export const FIX_DATABASE = 'docker compose up -d db'
 export const FIX_MIGRATIONS = '(cd apps/api && npx prisma migrate deploy)'
@@ -159,87 +157,17 @@ async function httpGet(url, ms = 2500) {
   }
 }
 
-function isMissionControlHealth(text) {
+/** Mission Control is the JSON service name, at any HTTP status. */
+export function readHealthIdentity(res) {
+  if (!res || res.status === 0) return { ours: false, db: null }
   try {
-    const body = JSON.parse(text)
-    return Boolean(
-      body &&
-        typeof body.status === 'string' &&
-        typeof body.database === 'string' &&
-        typeof body.uptimeSeconds === 'number',
-    )
+    const body = JSON.parse(res.text)
+    if (!body || body.service !== 'mission-control') return { ours: false, db: null }
+    const db = body.db === 'up' || body.db === 'down' ? body.db : null
+    return { ours: true, db }
   } catch {
-    return false
+    return { ours: false, db: null }
   }
-}
-
-/** Nest's unhandled error body, for example {"statusCode":500,"message":"Internal server error"}. */
-function isNestServerError(res) {
-  if (!res || res.status < 500 || res.status > 599) return false
-  let body
-  try {
-    body = JSON.parse(res.text)
-  } catch {
-    return false
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
-  const code = body.statusCode
-  if (typeof code !== 'number' || code < 500 || code > 599) return false
-  return typeof body.message === 'string' && body.message.length > 0
-}
-
-/**
- * A refused connection means the API is not running.
- * The Mission Control health JSON is this API.
- * A Nest 5xx JSON body is this API only when the database check also failed.
- * Every other response is a stranger on the port.
- */
-export function interpretHealthResponse(res, databaseFailed = false) {
-  if (!res || res.status === 0) return { kind: 'down' }
-  if (isMissionControlHealth(res.text)) {
-    try {
-      const body = JSON.parse(res.text)
-      if (body.database !== 'connected') return { kind: 'database-down' }
-    } catch {
-      return { kind: 'stranger' }
-    }
-    return { kind: 'up' }
-  }
-  if (databaseFailed && isNestServerError(res)) return { kind: 'database-down' }
-  return { kind: 'stranger' }
-}
-
-/** Fold the database check into the port probe. A stranger stays busy. */
-export function applyDatabaseToPorts(ports, database) {
-  if (ports.badPort || !ports.probe) return ports
-  const databaseFailed = database?.state !== 'ok'
-  const kind = interpretHealthResponse(ports.probe, databaseFailed)
-  if (kind.kind === 'up' || kind.kind === 'database-down') {
-    return {
-      ...ports,
-      apiState: 'ours',
-      health: {
-        reachable: kind.kind === 'up',
-        databaseDown: kind.kind === 'database-down',
-        url: ports.healthUrl,
-        body: ports.probe.text,
-      },
-    }
-  }
-  return {
-    ...ports,
-    apiState: 'busy',
-    health: {
-      reachable: false,
-      databaseDown: false,
-      url: ports.healthUrl,
-      body: '',
-    },
-  }
-}
-
-function isMissionControlWeb(text) {
-  return text.includes('Mission Control') && text.includes('id="root"')
 }
 
 function loadPg(root) {
@@ -393,32 +321,40 @@ async function databaseFacts(root, env) {
   }
 }
 
+export async function inspectApiPort(port, host = '127.0.0.1') {
+  const url = `http://${host}:${port}/health`
+  const free = await listenFree(port, host)
+  if (free) return { state: 'free', url, db: null }
+  const identity = readHealthIdentity(await httpGet(url))
+  if (identity.ours) return { state: 'ours', url, db: identity.db }
+  return { state: 'other', url, db: null }
+}
+
 async function portFacts(env) {
   const port = apiPort(env)
   const host = probeHost(bindHost(env))
+  const bind = host === 'localhost' ? '127.0.0.1' : host
   if (port == null) {
-    return { badPort: true, api: null, web: null, apiState: 'busy', webState: 'busy', health: null }
+    return { badPort: true, api: null, apiState: 'busy', health: null }
   }
-  const apiFree = await listenFree(port, host === 'localhost' ? '127.0.0.1' : host)
-  const webFree = await listenFree(WEB_PORT, '127.0.0.1')
-  let apiState = apiFree ? 'free' : 'busy'
-  let webState = webFree ? 'free' : 'busy'
-  const healthUrl = `http://${host}:${port}/health`
-  let probe = null
-  const health = { reachable: false, databaseDown: false, url: healthUrl, body: '' }
-  if (!apiFree) probe = await httpGet(healthUrl)
-  if (!webFree) {
-    const res = await httpGet(`http://127.0.0.1:${WEB_PORT}/`)
-    if (res.ok && isMissionControlWeb(res.text)) webState = 'ours'
+  const seen = await inspectApiPort(port, bind)
+  return {
+    badPort: false,
+    api: port,
+    apiState: seen.state === 'free' ? 'free' : seen.state === 'ours' ? 'ours' : 'busy',
+    health: {
+      reachable: seen.state === 'ours',
+      db: seen.db,
+      url: seen.url,
+    },
   }
-  return { badPort: false, api: port, web: WEB_PORT, apiState, webState, health, probe, healthUrl }
 }
 
 export async function gather(root, processEnv = process.env) {
   const envFile = path.join(root, '.env')
   const envExists = existsSync(envFile)
   const env = effectiveEnv(loadEnvFile(envFile), processEnv)
-  const [rawPorts, database, openclaw] = await Promise.all([
+  const [ports, database, openclaw] = await Promise.all([
     portFacts(env),
     databaseFacts(root, env),
     openclawDetail(),
@@ -427,7 +363,7 @@ export async function gather(root, processEnv = process.env) {
     nodeVersion: process.version,
     envExists,
     env,
-    ports: applyDatabaseToPorts(rawPorts, database),
+    ports,
     database,
     openclaw,
   }
@@ -437,28 +373,9 @@ function portLine(ports) {
   if (ports.badPort) {
     return 'fail ports: PORT is not a valid port number. Set PORT in .env to a free port, then run npm run doctor again.'
   }
-  const busy = []
-  if (ports.apiState === 'busy') busy.push(ports.api)
-  if (ports.webState === 'busy') busy.push(ports.web)
-  if (busy.length === 1) {
-    return `fail ports: Port ${busy[0]} is in use. Free it, then start again. Find the listener with: ${portFix(busy[0])}`
-  }
-  if (busy.length > 1) {
-    const commands = busy.map((port) => portFix(port)).join(' ; ')
-    return `fail ports: Ports ${busy.join(' and ')} are in use. Free them, then start again. Find the listeners with: ${commands}`
-  }
-  const apiText =
-    ports.apiState === 'free'
-      ? `Port ${ports.api} is free`
-      : `Port ${ports.api} is serving the Mission Control API`
-  const webText =
-    ports.webState === 'free'
-      ? `port ${ports.web} is free`
-      : `port ${ports.web} is serving the Mission Control web app`
-  if (ports.apiState === 'free' && ports.webState === 'free') {
-    return `pass ports: Required ports are free (${ports.api} and ${ports.web}).`
-  }
-  return `pass ports: Required ports are ready. ${apiText} and ${webText}.`
+  if (ports.apiState === 'free') return `pass ports: Port ${ports.api} is free.`
+  if (ports.apiState === 'ours') return `pass ports: Port ${ports.api} is already running.`
+  return `fail ports: Port ${ports.api} is used by another program. Stop it or set PORT in .env.`
 }
 
 function databaseLine(database) {
@@ -506,10 +423,15 @@ function tokenLine(env) {
 
 function healthLine(ports) {
   const url = ports.health?.url ?? 'http://127.0.0.1:3000/health'
-  if (ports.health?.databaseDown) {
-    return `fail health: The API is running at ${url} but the database is down. Start Postgres with: ${FIX_DATABASE}`
+  if (ports.health?.reachable && ports.health.db === 'up') {
+    return 'pass health: The health check says the database is up.'
   }
-  if (ports.health?.reachable) return `pass health: The API health endpoint is reachable at ${url}.`
+  if (ports.health?.reachable && ports.health.db === 'down') {
+    return 'fail health: The health check says the database is down.'
+  }
+  if (ports.health?.reachable) {
+    return `fail health: The health check at ${url} did not say whether the database is up.`
+  }
   return `fail health: The API health endpoint is not reachable at ${url}. Start the API and the web app with: ${FIX_HEALTH}`
 }
 

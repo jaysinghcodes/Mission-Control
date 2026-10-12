@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_URL, writeUrl } from '../lib/apiBase'
-import { reportOutcome } from '../lib/apiStatus'
+import { isMissionControlHealth, reportOutcome, reportReachable } from '../lib/apiStatus'
 
 /**
  * useApi — tiny fetch hook for the Mission Control API.
@@ -70,9 +70,6 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
     const current = () => mounted.current && mine === generation.current
     try {
       const res = await fetch(`${API}${pathRef.current}`, { signal: ctrl.signal })
-      // Item 7: the API (or a proxy in front of it) answered — tell the shared
-      // status store. 502/503/504 count as "API down", anything else as up.
-      reportOutcome(res.status, `HTTP ${res.status}`)
       // Parse defensively: proxies/502 pages are often not JSON at all.
       let json: unknown = null
       try {
@@ -80,6 +77,18 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
       } catch {
         json = null
       }
+      // A 503 from /health still is this API when the database is down.
+      // Keep the degraded payload so the pages render the same way.
+      if (isMissionControlHealth(json)) {
+        reportReachable()
+        if (!current()) return
+        setData(json as T)
+        setLoadError(null)
+        return
+      }
+      // Item 7: the API (or a proxy in front of it) answered. 502/503/504
+      // count as "API down", anything else as up.
+      reportOutcome(res.status, `HTTP ${res.status}`)
       if (!res.ok) throw new Error(errorMessage(json, res.status))
       // Rule 1: a 2xx that is not a JSON object, or that carries the legacy
       // `{ error }` shape, is a FAILURE — never something to render as data.

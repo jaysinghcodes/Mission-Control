@@ -55,6 +55,11 @@ export function isGatewayDown(httpStatus: number): boolean {
   return httpStatus === 502 || httpStatus === 503 || httpStatus === 504
 }
 
+/** /health names this API even when it answers 503 because the database is down. */
+export function isMissionControlHealth(body: unknown): boolean {
+  return Boolean(body && typeof body === 'object' && (body as { service?: unknown }).service === 'mission-control')
+}
+
 /** Any request got a genuine answer from the API. */
 export function reportReachable(): void {
   // Avoid a notify storm: only touch the store when something changes, or
