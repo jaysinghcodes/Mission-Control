@@ -95,11 +95,14 @@ export function AgentAvatar({
   agent,
   agents,
   size = 1,
+  dim = false,
 }: {
   agent: AvatarAgentShape
   /** Full roster this agent belongs to. Needed for "past 12 → parent's robot". */
   agents?: readonly AvatarAgentShape[]
   size?: number
+  /** Lower the opacity of the existing idle or working drawing. */
+  dim?: boolean
 }) {
   const dark = useDarkUi()
   const list = (agents && agents.length > 0 ? agents : [agent]).map(toRef)
@@ -125,7 +128,11 @@ export function AgentAvatar({
   const badge = Math.max(14, Math.round(px * 0.4))
 
   return (
-    <span className="relative inline-flex shrink-0" style={{ width: px, height: px }}>
+    <span
+      className="relative inline-flex shrink-0"
+      data-dim={dim ? 'true' : 'false'}
+      style={{ width: px, height: px, opacity: dim ? 0.45 : 1 }}
+    >
       {/* halo defaults on inside RobotAvatar; we pass it explicitly so light
           mode can turn the sticker off. tile stays off — the dark UI uses the
           halo, not the tinted card (tile is the ≤32px list-row option). */}

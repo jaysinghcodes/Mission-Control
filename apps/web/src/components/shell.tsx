@@ -189,13 +189,16 @@ export function Face({
   agent,
   agents,
   px = 32,
+  dim = false,
 }: {
   agent: AvatarAgentShape
   agents?: readonly AvatarAgentShape[]
   px?: number
+  /** Dim the existing drawing. The artwork file is unchanged. */
+  dim?: boolean
 }) {
   const size = px >= 72 ? 1.9 : px >= 56 ? 1.5 : px >= 44 ? 1.15 : px >= 36 ? 0.95 : 0.75
-  return <AgentAvatar agent={agent} agents={agents} size={size} />
+  return <AgentAvatar agent={agent} agents={agents} size={size} dim={dim} />
 }
 
 export function EmptyState({ title, body, children }: { title: string; body: string; children?: ReactNode }) {

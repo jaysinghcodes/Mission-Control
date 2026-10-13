@@ -302,6 +302,7 @@ export async function freshClone({
     const smokeEnv = await ensureBrowser(plan.cloneDir, env)
     await runInherit('node', ['scripts/ui-smoke.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
     await runInherit('npm', ['run', 'test:e2e'], { cwd: plan.cloneDir, env })
+    await runInherit('node', ['scripts/roster-ui.e2e.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
     console.log('Fresh clone passed.')
   } finally {
     killGroup(dev)

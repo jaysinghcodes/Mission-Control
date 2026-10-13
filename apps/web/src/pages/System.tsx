@@ -5,6 +5,8 @@ import { useApiStatus } from '../lib/apiStatus'
 import { PageHeader, Segmented, SoftCard, StatusChip, Face, Kicker, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
+import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
+import { useShowSampleBots } from '../lib/useSampleRoster'
 import Logs from './Logs'
 import Sessions from './Sessions'
 import Settings from './Settings'
@@ -128,6 +130,7 @@ export default function System() {
   const sessions = useApi<{ sessions: { agent: string; model: string | null }[] }>('/sessions', { pollMs: 30000 })
   const activity = useApi<{ events: EventApi[] }>('/activity?limit=30', { pollMs: 20000 })
   const api = useApiStatus()
+  const [showSampleBots, setShowSampleBots] = useShowSampleBots()
   const [period, setPeriod] = useState(2)
   const [modelOpen, setModelOpen] = useState<string | null>(null)
 
@@ -200,6 +203,19 @@ export default function System() {
           <Fact label="OpenClaw bridge" value={bridge.value} ok={bridge.ok} />
           <Fact label={`Host · ${host}`} value={cpu} />
         </div>
+      </SoftCard>
+
+      <SoftCard className="mt-4 px-6 py-4">
+        <label className="flex items-center justify-between gap-4 text-[14px] font-semibold">
+          {SHOW_SAMPLE_BOTS_LABEL}
+          <input
+            type="checkbox"
+            role="switch"
+            className="mc-switch"
+            checked={showSampleBots}
+            onChange={(event) => setShowSampleBots(event.target.checked)}
+          />
+        </label>
       </SoftCard>
 
       <div className="mb-3 mt-8 flex flex-wrap items-end justify-between gap-3">

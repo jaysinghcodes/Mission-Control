@@ -3,11 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, Face, AgentName, SearchInput, EmptyState } from '../components/shell'
+import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { activityNeedsYou, agentNeedsYou, isWorking, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
 import { useRosterLive } from '../lib/useRosterLive'
+import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
+import { useRosterView } from '../lib/useSampleRoster'
 import {
   activityAge,
   commonsByline,
@@ -74,6 +77,7 @@ export default function Office() {
   const { events: liveEvents } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
   const agents = agentsQ.data?.agents ?? []
+  const { visible: roster, now } = useRosterView(agents)
   const pending = approvalsQ.data?.approvals ?? []
   const ticketRows = ticketsQ.data?.tickets ?? []
   const [params, setParams] = useSearchParams()
@@ -95,27 +99,27 @@ export default function Office() {
 
   const floor = useMemo(() => {
     const blocked = new Set<string>()
-    for (const agent of agents) {
-      if (agentNeedsYou(agent, pending, ticketRows)) blocked.add(agent.id)
+    for (const agent of roster) {
+      if (!isRegisteredOffline(agent, now) && agentNeedsYou(agent, pending, ticketRows)) blocked.add(agent.id)
     }
     const q = query.trim().toLowerCase()
     const visible = q
-      ? agents.filter((agent) => {
+      ? roster.filter((agent) => {
           const cap = agentCaption(agent.name, agent.role)
           return `${cap.name} ${cap.role} ${agent.currentTask ?? ''}`.toLowerCase().includes(q)
         })
-      : agents
+      : roster
     return { blocked, placed: placeFloor(visible, mode, blocked) }
-  }, [agents, mode, query, pending, ticketRows])
+  }, [roster, mode, query, pending, ticketRows, now])
   const placed = floor.placed
   const blockedIds = floor.blocked
 
-  const working = agents.filter((a) => isWorking(a) && !needs(a)).length
-  const needsCount = agents.filter((a) => needs(a)).length
+  const working = roster.filter((a) => isWorking(a) && !needs(a) && !isRegisteredOffline(a, now)).length
+  const needsCount = roster.filter((a) => needs(a) && !isRegisteredOffline(a, now)).length
   const summary = agentsQ.data
-    ? agents.length === 0
+    ? roster.length === 0
       ? 'The floor is empty'
-      : `${agents.length} agents · ${working} working${needsCount === 0 ? '' : needsCount === 1 ? ' · 1 needs you' : ` · ${needsCount} need you`}`
+      : `${roster.length} agents · ${working} working${needsCount === 0 ? '' : needsCount === 1 ? ' · 1 needs you' : ` · ${needsCount} need you`}`
     : 'Loading the floor…'
 
   const pipe = stageCounts(ticketRows)
@@ -136,10 +140,6 @@ export default function Office() {
     setParams(next, { replace: true })
   }
 
-  function faceOf(agent: Agent): Agent {
-    return needs(agent) ? { ...agent, status: 'blocked' } : agent
-  }
-
   const focusMeta = ROOMS.find((room) => room.id === focus) ?? null
   const focusTickets = focusMeta
     ? ticketRows.filter((ticket) => stageIndexForStatus(ticket.status) === ROOMS.findIndex((room) => room.id === focusMeta.id))
@@ -158,7 +158,7 @@ export default function Office() {
         }
       />
 
-      {agentsQ.data && agents.length === 0 && (
+      {agentsQ.data && roster.length === 0 && (
         <EmptyState title="Nobody is in the office" body="Run npm run seed:demo for the sample roster, or connect the OpenClaw bridge. The floor stays empty until agents exist." />
       )}
 
@@ -188,24 +188,36 @@ export default function Office() {
                   {crew.length === 0 && <p className="mt-8 text-center text-[12px] text-mc-sub">Empty</p>}
                   {crew.map((agent) => {
                     const cap = agentCaption(agent.name, agent.role)
-                    const line = taskLine(agent, blockedIds.has(agent.id))
+                    const offline = isRegisteredOffline(agent, now)
+                    const line = offline ? OFFLINE_LABEL : taskLine(agent, blockedIds.has(agent.id))
                     return (
                       <button
                         key={agent.id}
                         type="button"
+                        data-agent-id={agent.id}
+                        data-offline={offline ? 'true' : 'false'}
                         onClick={() => setOpen(agent)}
                         aria-label={`${cap.name}, ${cap.role}, ${line}`}
                         className="relative mt-4 block w-full text-center"
                       >
                         <div className="flex justify-center">
-                          <Face agent={faceOf(agent)} agents={agents} px={84} />
+                          <RosterRobot
+                            agent={agent}
+                            agents={agents}
+                            px={84}
+                            now={now}
+                            status={blockedIds.has(agent.id) ? 'blocked' : agent.status}
+                          />
                         </div>
                         <Desk />
                         <div className="relative z-10 mt-2">
-                          <div className="text-[13px] font-semibold leading-tight">
-                            {cap.name} <span className="whitespace-nowrap text-[11px] font-normal text-mc-sub">· {cap.role}</span>
+                          <div className="flex flex-wrap items-center justify-center gap-1">
+                            <div className="text-[13px] font-semibold leading-tight">
+                              {cap.name} <span className="whitespace-nowrap text-[11px] font-normal text-mc-sub">· {cap.role}</span>
+                            </div>
+                            {showSampleTag(agent) && <SampleTag />}
                           </div>
-                          <div className={`text-[12px] leading-snug ${blockedIds.has(agent.id) ? 'text-mc-redtext' : 'text-mc-sub'}`}>{line}</div>
+                          <div className={`text-[12px] leading-snug ${!offline && blockedIds.has(agent.id) ? 'text-mc-redtext' : 'text-mc-sub'}`}>{line}</div>
                         </div>
                       </button>
                     )
@@ -279,20 +291,33 @@ export default function Office() {
                   <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-4">
                     {placed.commons.map((agent) => {
                       const cap = agentCaption(agent.name, agent.role)
-                      const line = taskLine(agent, blockedIds.has(agent.id))
+                      const offline = isRegisteredOffline(agent, now)
+                      const line = offline ? OFFLINE_LABEL : taskLine(agent, blockedIds.has(agent.id))
                       return (
                         <button
                           key={agent.id}
                           type="button"
+                          data-agent-id={agent.id}
+                          data-offline={offline ? 'true' : 'false'}
                           onClick={() => setOpen(agent)}
                           aria-label={`${cap.name}, ${cap.role}, ${line}`}
                           className="w-[96px] text-center"
                         >
                           <div className="flex justify-center">
-                            <Face agent={faceOf(agent)} agents={agents} px={72} />
+                            <RosterRobot
+                              agent={agent}
+                              agents={agents}
+                              px={72}
+                              now={now}
+                              status={blockedIds.has(agent.id) ? 'blocked' : agent.status}
+                            />
                           </div>
-                          <div className="mt-1 text-[12px] font-semibold leading-tight">{cap.name}</div>
+                          <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[12px] font-semibold leading-tight">
+                            {cap.name}
+                            {showSampleTag(agent) && <SampleTag />}
+                          </div>
                           <div className="text-[11px] leading-tight text-mc-sub">{cap.role}</div>
+                          {offline && <div className="text-[11px] leading-tight text-mc-sub">{OFFLINE_LABEL}</div>}
                         </button>
                       )
                     })}
@@ -318,7 +343,7 @@ export default function Office() {
             {events.length === 0 && <p className="px-4 py-6 text-[12.5px] text-mc-sub">No activity yet. Seed or the bridge fills this list.</p>}
             {events.slice(0, 6).map((e, i) => {
               const name = e.payload?.agent || 'system'
-              const hit = agents.find((a) => a.name.toLowerCase() === name.toLowerCase())
+              const hit = roster.find((a) => a.name.toLowerCase() === name.toLowerCase())
               const who = hit ?? { id: name, name, role: null, status: 'idle' }
               const text = e.payload?.name || e.payload?.summary || e.type
               const waiting = activityNeedsYou(e.payload, pending)
