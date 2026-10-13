@@ -119,6 +119,41 @@ function httpGet(url, ms = 3000) {
     .finally(() => clearTimeout(timer))
 }
 
+function bootTime(text) {
+  try {
+    const body = JSON.parse(text)
+    if (body.status !== 'ok' || body.database !== 'connected') return null
+    if (typeof body.ts !== 'number' || typeof body.uptimeSeconds !== 'number') return null
+    return body.ts - body.uptimeSeconds * 1000
+  } catch {
+    return null
+  }
+}
+
+/**
+ * prisma generate restarts `nest start --watch`, sometimes a second time
+ * after the first health check is already green. Wait until one process
+ * stays up long enough for the browser checks.
+ */
+async function waitUntilApiSettles(timeoutMs = 120000) {
+  const start = Date.now()
+  let boot = null
+  let stableSince = null
+  while (Date.now() - start < timeoutMs) {
+    const res = await httpGet('http://127.0.0.1:3000/health')
+    const next = res.ok ? bootTime(res.text) : null
+    const same = next !== null && boot !== null && Math.abs(next - boot) < 1500
+    if (!same) {
+      boot = next
+      stableSince = next === null ? null : Date.now()
+    } else if (stableSince && Date.now() - stableSince >= 8000) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  throw new Error('The API did not stay up after seed:demo.')
+}
+
 async function waitFor(url, ready, timeoutMs) {
   const start = Date.now()
   let last = null
@@ -303,19 +338,7 @@ export async function freshClone({
     // A fresh database has no sample rows. Prove the empty states, then seed.
     await runInherit('node', ['scripts/empty-state.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
     await runInherit('npm', ['run', 'seed:demo'], { cwd: plan.cloneDir, env })
-    await waitFor(
-      'http://127.0.0.1:3000/health',
-      (res) => {
-        if (!res.ok) return false
-        try {
-          const body = JSON.parse(res.text)
-          return body.status === 'ok' && body.database === 'connected'
-        } catch {
-          return false
-        }
-      },
-      120000,
-    )
+    await waitUntilApiSettles()
     await runInherit('node', ['scripts/ui-smoke.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
     await runInherit('npm', ['run', 'test:e2e'], { cwd: plan.cloneDir, env })
     await runInherit('node', ['scripts/roster-ui.e2e.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
