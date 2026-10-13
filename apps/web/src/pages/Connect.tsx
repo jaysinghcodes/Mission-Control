@@ -147,7 +147,7 @@ export default function Connect() {
   }
 
   return (
-    <div className="flex min-h-full justify-center bg-mc-bg px-4 py-8">
+    <div className="flex h-full min-h-0 justify-center overflow-y-auto bg-mc-bg px-4 py-8">
       <div className="mc-card flex w-full max-w-[760px] flex-col px-5 py-8 sm:px-10">
         <img src="/logo.svg" alt="" className="mx-auto h-14 w-14" />
         <p className="mt-3 text-center text-[13px] font-semibold text-mc-sub">Set up Mission Control</p>

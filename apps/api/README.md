@@ -15,7 +15,8 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run start:prod` | `node dist/main` |
 | `npm test` | Jest. Most suites mock Prisma and need no database. Six of the nine tests in `src/ingest/ingest.controller.spec.ts` write through the real app and need a migrated Postgres at `DATABASE_URL` (a known event, a valid production token, and the four agent snapshot cases). The unknown type check and the production missing token checks (`POST /events` and `POST /tickets`) do not. Export the root `.env` (`set -a; . ./.env; set +a`), generate the client, and run `npx prisma migrate deploy` in this directory before `npm test` when that database is not already up. |
 | `npm run test:e2e` | Separate Jest config under `test/`. Also needs a migrated Postgres at `DATABASE_URL`. |
-| `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
+| `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Not part of a fresh setup. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
+| `npm run seed:clear` | Deletes only the rows `seed:demo` created. Registered, snapshot, and API created rows stay. Idempotent. Same production guard. |
 | `npm run lint` | ESLint |
 
 Schema: `npx prisma migrate deploy` from this directory. Schema changes are human reviewed. `npm run dev` does not migrate. The Docker image does, on container boot.
@@ -47,4 +48,5 @@ src/live-activity/     Socket.IO gateway
 src/health/            GET /health and the ticker
 prisma/                schema and migrations
 scripts/seed-demo.ts   npm run seed:demo
+scripts/seed-clear.ts  npm run seed:clear
 ```

@@ -30,7 +30,7 @@ Confirm each of these:
 * npm 11.17.0 (`npm -v`). If the shell npm is older, `corepack npm -v` should report 11.17.0 after `corepack prepare npm@11.17.0 --activate`.
 * git (`git --version`).
 * Postgres 16 on `127.0.0.1:5432`, database `mission_control`, user `postgres`. The template password is `postgres`. That is a local default. Ask before you reuse it anywhere but loopback.
-* Optional: a running OpenClaw CLI (`openclaw`). Without it, stop after the seed and the dashboard. Do not pretend the bridge synced.
+* Optional: a running OpenClaw CLI (`openclaw`). Without it, the dashboard still runs. Sample data is a separate command. Do not pretend the bridge synced.
 
 ### Step 2. Clone and install
 
@@ -63,19 +63,18 @@ Walk each variable. Ask the operator for real values. Do not invent one.
 
 ### Step 4. Start the stack
 
-Export the file, generate the client, migrate, seed, and start both apps:
+Export the file, generate the client, migrate, and start both apps. Those commands do not load sample data.
 
 ```sh
 set -a; . ./.env; set +a
 (cd apps/api && npx prisma generate)
 (cd apps/api && npx prisma migrate deploy)
-npm run seed:demo
 npm run dev
 ```
 
-`npm run dev` runs the API on port 3000 and Vite on port 5173. Leave that process running.
+`npm run dev` runs the API on port 3000 and Vite on port 5173. Leave that process running. The board starts empty.
 
-`npm run seed:demo` is idempotent. It refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`.
+`npm run seed:demo` fills sample agents, tickets, and the rest of the sample set. `npm run seed:clear` removes only that sample data. Registered bots, snapshot rows, and tickets created through the API stay. Both commands are safe to run again. Both refuse `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`.
 
 The API log line is `mission-control api listening on 127.0.0.1:3000` when `HOST=127.0.0.1`. That lowercase string is the log text, not the product name.
 

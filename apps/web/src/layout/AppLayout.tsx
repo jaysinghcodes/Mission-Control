@@ -7,7 +7,7 @@ import { API_URL } from '../lib/apiBase'
 import { isMissionControlHealth, reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
 
 /**
- * Shared Apple window: vibrancy sidebar, traffic lights, account chip.
+ * Full bleed shell. The sidebar and the page fill the viewport.
  * Connection text is one nowrap line in the sidebar (it used to wrap in the
  * top bar at ~768px). Theme follows the system until a manual choice is saved.
  */
@@ -234,8 +234,7 @@ export default function AppLayout() {
   const onTasks = pathname === '/tasks' || pathname === '/tickets' || pathname === '/backlog'
 
   return (
-    <div className="h-full bg-[var(--mc-desk)] p-3 sm:p-4">
-      <div className="mc-window relative flex h-full min-h-0 overflow-hidden">
+      <div className="mc-window relative flex h-dvh w-screen overflow-hidden">
         {narrow && sidebarOpen && (
           <button
             type="button"
@@ -260,12 +259,7 @@ export default function AppLayout() {
               : 'flex h-full min-h-0 w-[230px] shrink-0 flex-col overflow-hidden border-r border-mc-sideborder bg-mc-sidebar'
           }
         >
-          <div className="flex items-center gap-2 px-4 pt-4">
-            {['#ff5f57', '#febc2e', '#28c840'].map((c) => (
-              <span key={c} className="h-3 w-3 rounded-full" style={{ background: c }} aria-hidden />
-            ))}
-          </div>
-          <nav ref={navEl} className="mc-scroll mt-4 min-h-0 flex-1 overflow-y-auto px-2.5 pb-3" aria-label="Primary">
+          <nav ref={navEl} className="mc-scroll mt-4 min-h-0 flex-1 overflow-y-auto px-2.5 pb-3 pt-4" aria-label="Primary">
             {NAV.map((group) => (
               <div key={group.label} className="mb-2">
                 <div className="px-2.5 pb-1.5 pt-3 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-mc-sub">
@@ -397,6 +391,5 @@ export default function AppLayout() {
           </main>
         </div>
       </div>
-    </div>
   )
 }

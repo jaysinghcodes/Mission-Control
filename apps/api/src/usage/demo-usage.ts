@@ -11,6 +11,37 @@ export interface DemoProvider {
   tokensIn: number;
   tokensOut: number;
   agents: string[];
+  /**
+   * Marker on an untouched sample day. A usage.snapshot overwrite replaces
+   * providers and drops this flag, so seed:clear leaves that day alone.
+   */
+  demo: true;
+}
+
+/** Stable id for one seeded usage day. The unique key in the table is still `day`. */
+export function demoUsageId(day: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    throw new Error(`demo usage day is not YYYY-MM-DD: ${day}`);
+  }
+  return `demo-usage-${day}`;
+}
+
+/**
+ * True only for a usage row seed:demo created and nothing has overwritten.
+ * The id prefix is not enough: the bridge updates that same row in place.
+ */
+export function isUntouchedDemoUsage(row: {
+  id: string;
+  providers: unknown;
+}): boolean {
+  if (!row.id.startsWith('demo-usage-')) return false;
+  if (!Array.isArray(row.providers) || row.providers.length === 0) return false;
+  return row.providers.every(
+    (provider) =>
+      !!provider &&
+      typeof provider === 'object' &&
+      (provider as { demo?: unknown }).demo === true,
+  );
 }
 
 export interface DemoUsageBucket {
@@ -100,6 +131,7 @@ export function demoUsageBuckets(now: Date): DemoUsageBucket[] {
         tokensIn: model.tokensIn + wobble * 100,
         tokensOut: model.tokensOut + wobble * 40,
         agents: [...model.agents],
+        demo: true,
       };
     });
     out.push({

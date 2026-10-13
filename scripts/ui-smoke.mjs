@@ -5,11 +5,45 @@
  * send x-ingest-token. The dev proxy attaches it from the example env.
  */
 
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import path from 'node:path'
 import { chromium } from 'playwright'
+import { assertFullBleed } from './full-bleed.mjs'
 
 const web = (process.env.MC_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '')
 const api = (process.env.MC_API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '')
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+
+function run(command, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, env: process.env, stdio: 'inherit' })
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`${command} ${args.join(' ')} exited ${code}`))
+    })
+  })
+}
+
+async function seedDemo() {
+  // prisma generate rewrites the client and restarts `nest start --watch`.
+  // The client is already built. This writes the sample rows only.
+  await run('npx', ['ts-node', '--transpile-only', 'scripts/seed-demo.ts'], path.join(root, 'apps', 'api'))
+}
+
+const WINDOW_DOTS = new Set(['rgb(255, 95, 87)', 'rgb(254, 188, 46)', 'rgb(40, 200, 64)'])
+
+async function assertNoWindowDots(page) {
+  const hits = await page.locator('#app-sidebar span').evaluateAll((els, banned) => {
+    return els.filter((el) => {
+      const style = getComputedStyle(el)
+      const width = Number.parseFloat(style.width)
+      return width >= 10 && banned.includes(style.backgroundColor)
+    }).length
+  }, [...WINDOW_DOTS])
+  if (hits > 0) throw new Error('The sidebar still shows window dots.')
+}
 
 function launchOptions() {
   const options = {
@@ -36,6 +70,7 @@ async function settle() {
 }
 
 async function main() {
+  await seedDemo()
   const browser = await chromium.launch(launchOptions())
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
   page.on('console', (msg) => {
@@ -47,11 +82,17 @@ async function main() {
     await page.goto(`${web}/${hash}`, { waitUntil: 'domcontentloaded' })
     await page.getByRole('heading', { level: 1, name: heading }).waitFor({ timeout: 30000 })
     await settle()
+    await assertFullBleed(page)
   }
 
   try {
     await visit('#/office', 'Office')
+    await assertNoWindowDots(page)
     await page.getByRole('button', { name: /Forge/ }).first().waitFor({ timeout: 20000 })
+
+    await visit('#/agents', 'Agents')
+    await assertNoWindowDots(page)
+    await page.getByRole('button', { name: /Speedy/ }).first().waitFor({ timeout: 20000 })
 
     await visit('#/tickets', 'Tasks')
     if (!page.url().includes('#/tasks')) {
