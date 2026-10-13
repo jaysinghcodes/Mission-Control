@@ -53,7 +53,10 @@ async function main() {
     for (const [hash, heading, empty] of pages) {
       await page.goto(`${web}/${hash}`, { waitUntil: 'domcontentloaded' })
       await page.getByRole('heading', { level: 1, name: heading }).waitFor({ timeout: 30000 })
-      await page.getByText(empty).waitFor({ timeout: 20000 })
+      // The empty card title is its own line. A page summary can repeat the
+      // same words, so match that title exactly.
+      const exact = new RegExp(`^${empty.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+      await page.locator('div').filter({ hasText: exact }).waitFor({ timeout: 20000 })
       await assertNoWindowDots(page)
     }
     if (errors.length) throw new Error(`Console errors:\n${errors.join('\n')}`)
