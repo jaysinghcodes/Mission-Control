@@ -208,6 +208,9 @@ async function assertDimmed(page, label) {
 }
 
 async function main() {
+  // seed:demo and seed:clear regenerate the Prisma client. nest --watch
+  // restarts, sometimes twice. Wait until that process stays up, then reseed.
+  await waitForLiveFeed()
   await resetRoster()
   await waitForLiveFeed()
   const browser = await chromium.launch(launchOptions())
