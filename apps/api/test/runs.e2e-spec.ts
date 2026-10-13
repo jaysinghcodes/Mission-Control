@@ -225,19 +225,85 @@ describe('Runs (e2e)', () => {
       runs.push(runFrom(res).id);
     });
 
-    it('an unknown field, including status, is 400 and nothing is inserted', async () => {
-      const before = await prisma.run.count();
-      const status = await call()
+    it('an optional status defaults to queued, and a bad status or unknown field inserts nothing', async () => {
+      const queued = await call()
         .post('/runs')
-        .send({ name: 'No status here', status: 'running' });
-      expect(status.status).toBe(400);
-      expect(bodyMessage(status)).toMatch(/status/);
+        .send({ name: 'Default queued' });
+      expect(queued.status).toBe(201);
+      noError(queued.body);
+      expect(runFrom(queued).status).toBe('queued');
+      runs.push(runFrom(queued).id);
+      const queuedRow = await prisma.run.findUnique({
+        where: { id: runFrom(queued).id },
+      });
+      expect(queuedRow?.startedAt).toBeNull();
+      expect(queuedRow?.finishedAt).toBeNull();
+      const queuedEvents = await prisma.activityEvent.findMany({
+        where: {
+          payload: { path: ['id'], equals: runFrom(queued).id },
+        },
+      });
+      expect(queuedEvents.map((event) => event.type)).toEqual(['run.queued']);
+
+      const explicit = await call()
+        .post('/runs')
+        .send({ name: 'Explicit queued', status: 'queued' });
+      expect(explicit.status).toBe(201);
+      expect(runFrom(explicit).status).toBe('queued');
+      runs.push(runFrom(explicit).id);
+
+      const running = await call()
+        .post('/runs')
+        .send({ name: 'Start running', status: 'running' });
+      expect(running.status).toBe(201);
+      noError(running.body);
+      expect(runFrom(running).status).toBe('running');
+      runs.push(runFrom(running).id);
+      const runningRow = await prisma.run.findUnique({
+        where: { id: runFrom(running).id },
+      });
+      expect(runningRow?.startedAt).toBeInstanceOf(Date);
+      expect(runningRow?.finishedAt).toBeNull();
+      const runningEvents = await prisma.activityEvent.findMany({
+        where: {
+          payload: { path: ['id'], equals: runFrom(running).id },
+        },
+      });
+      expect(runningEvents.map((event) => event.type)).toEqual(['run.started']);
+
+      const done = await call()
+        .post('/runs')
+        .send({ name: 'Already done', status: 'done' });
+      expect(done.status).toBe(201);
+      expect(runFrom(done).status).toBe('done');
+      runs.push(runFrom(done).id);
+      const doneRow = await prisma.run.findUnique({
+        where: { id: runFrom(done).id },
+      });
+      expect(doneRow?.finishedAt).toBeInstanceOf(Date);
+      const doneEvents = await prisma.activityEvent.findMany({
+        where: { payload: { path: ['id'], equals: runFrom(done).id } },
+      });
+      expect(doneEvents.map((event) => event.type)).toEqual(['run.completed']);
+
+      const bad = await call()
+        .post('/runs')
+        .send({ name: 'No status here', status: 'shipped' });
+      expect(bad.status).toBe(400);
+      expect(bodyMessage(bad)).toBe(
+        'status must be one of queued, running, done, failed, needs_approval',
+      );
       const extra = await call()
         .post('/runs')
         .send({ name: 'No extra', extra: true });
       expect(extra.status).toBe(400);
       expect(bodyMessage(extra)).toMatch(/extra/);
-      expect(await prisma.run.count()).toBe(before);
+      expect(
+        await prisma.run.findFirst({ where: { name: 'No status here' } }),
+      ).toBeNull();
+      expect(
+        await prisma.run.findFirst({ where: { name: 'No extra' } }),
+      ).toBeNull();
     });
 
     it('creates 201 and persists a real ticketId', async () => {

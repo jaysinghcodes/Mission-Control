@@ -320,14 +320,90 @@ describe('RunsController', () => {
     expect(prisma.run.update).not.toHaveBeenCalled();
   });
 
-  it('rejects unknown fields, including status on create, with 400 that names the field', async () => {
-    const { controller, prisma } = make();
+  it('accepts an optional initial status, defaults to queued, and rejects a bad status', async () => {
+    const { controller, prisma, gateway } = make();
+    const queued = await controller.create({ name: 'Ship' });
+    expect(queued).not.toHaveProperty('error');
+    expect(queued.run.status).toBe('queued');
+    expect(queued.run.startedAt).toBeNull();
+    expect(queued.run.finishedAt).toBeNull();
+    expect(gateway.broadcast).toHaveBeenLastCalledWith('run.queued', {
+      id: queued.run.id,
+      name: 'Ship',
+    });
+
+    const explicit = await controller.create({
+      name: 'Stay queued',
+      status: 'queued',
+    });
+    expect(explicit.run.status).toBe('queued');
+    expect(explicit.run.startedAt).toBeNull();
+
+    const running = await controller.create({
+      name: 'Go',
+      status: 'running',
+    });
+    expect(running.run.status).toBe('running');
+    expect(running.run.startedAt).toBeInstanceOf(Date);
+    expect(running.run.finishedAt).toBeNull();
+    expect(gateway.broadcast).toHaveBeenCalledWith(
+      'run.started',
+      expect.objectContaining({ id: running.run.id, status: 'running' }),
+    );
+
+    const done = await controller.create({ name: 'Finished', status: 'done' });
+    expect(done.run.status).toBe('done');
+    expect(done.run.startedAt).toBeNull();
+    expect(done.run.finishedAt).toBeInstanceOf(Date);
+    expect(gateway.broadcast).toHaveBeenCalledWith(
+      'run.completed',
+      expect.objectContaining({ id: done.run.id, status: 'done' }),
+    );
+
+    const failed = await controller.create({
+      name: 'Broke',
+      status: 'failed',
+    });
+    expect(failed.run.finishedAt).toBeInstanceOf(Date);
+    expect(gateway.broadcast).toHaveBeenCalledWith(
+      'run.failed',
+      expect.objectContaining({ id: failed.run.id, status: 'failed' }),
+    );
+
+    const approval = await controller.create({
+      name: 'Gate',
+      status: 'needs_approval',
+    });
+    expect(approval.run.status).toBe('needs_approval');
+    expect(approval.run.startedAt).toBeNull();
+    expect(approval.run.finishedAt).toBeNull();
+    expect(gateway.broadcast).toHaveBeenCalledWith(
+      'run.queued',
+      expect.objectContaining({
+        id: approval.run.id,
+        status: 'needs_approval',
+      }),
+    );
+
+    const before = prisma.run.create.mock.calls.length;
     await expect(
-      controller.create({ name: 'Ship', status: 'running' }),
+      controller.create({ name: 'Ship', status: 'shipped' }),
     ).rejects.toMatchObject({
-      message: 'unknown field status',
+      message:
+        'status must be one of queued, running, done, failed, needs_approval',
       status: 400,
     });
+    await expect(
+      controller.create({ name: 'Ship', status: 4 }),
+    ).rejects.toMatchObject({
+      message: 'status must be a string',
+      status: 400,
+    });
+    expect(prisma.run.create).toHaveBeenCalledTimes(before);
+  });
+
+  it('rejects unknown fields on create and update with 400 that names the field', async () => {
+    const { controller, prisma } = make();
     await expect(
       controller.create({ name: 'Ship', progress: 10 }),
     ).rejects.toMatchObject({

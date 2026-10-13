@@ -90,6 +90,10 @@ describe('Agents register (e2e)', () => {
             'e2e_nova',
             'e2e_default_kept',
             'e2e_heartbeat',
+            'e2e_hb_both',
+            'e2e_hb_empty',
+            'e2e_hb_unknown',
+            'e2e_hb_status',
             'e2e_delete_me',
             'e2e_delete_default',
             'e2e_live',
@@ -313,6 +317,135 @@ describe('Agents register (e2e)', () => {
     const missing = await call().post('/agents/e2e_missing/heartbeat').send({});
     expect(missing.status).toBe(404);
     expect(bodyMessage(missing)).toBe('agent not found');
+  });
+
+  it('a heartbeat with currentTask and status updates the roster and broadcasts', async () => {
+    const id = 'e2e_hb_both';
+    created.push(id);
+    const socket: Socket = io(baseUrl, {
+      transports: ['websocket'],
+      autoConnect: true,
+    });
+    const events: { id?: string; action?: string }[] = [];
+    socket.on(
+      'agents.snapshot',
+      (payload: { id?: string; action?: string }) => {
+        events.push(payload);
+      },
+    );
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('socket did not connect')),
+        2000,
+      );
+      socket.on('connect', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.on('connect_error', (err: Error) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+    try {
+      const registered = await call()
+        .post('/agents/register')
+        .send({ id, name: 'E2E Heartbeat Body' });
+      expect(registered.status).toBe(201);
+      const started = Date.now();
+      const beat = await call()
+        .post(`/agents/${id}/heartbeat`)
+        .send({ currentTask: 'Shipping the notes', status: 'working' });
+      expect(beat.status).toBe(204);
+      expect(beat.text).toBe('');
+      await waitFor(() =>
+        events.some((event) => event.action === 'heartbeat' && event.id === id),
+      );
+      expect(Date.now() - started).toBeLessThan(2000);
+      const listed = await request(app.getHttpServer()).get(`/agents/${id}`);
+      expect(listed.status).toBe(200);
+      expect(agentFrom(listed)).toMatchObject({
+        id,
+        status: 'working',
+        currentTask: 'Shipping the notes',
+        online: true,
+      });
+    } finally {
+      socket.close();
+    }
+  });
+
+  it('an empty heartbeat body still returns 204 and leaves status and currentTask', async () => {
+    const id = 'e2e_hb_empty';
+    created.push(id);
+    const registered = await call()
+      .post('/agents/register')
+      .send({ id, name: 'E2E Heartbeat Empty' });
+    expect(registered.status).toBe(201);
+    await prisma.agent.update({
+      where: { id },
+      data: { status: 'idle', currentTask: 'Keep me' },
+    });
+    const before = await prisma.agent.findUnique({ where: { id } });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const empty = await call().post(`/agents/${id}/heartbeat`).send({});
+    expect(empty.status).toBe(204);
+    expect(empty.text).toBe('');
+    const noBody = await call().post(`/agents/${id}/heartbeat`);
+    expect(noBody.status).toBe(204);
+    expect(noBody.text).toBe('');
+    const after = await prisma.agent.findUnique({ where: { id } });
+    expect(after?.status).toBe('idle');
+    expect(after?.currentTask).toBe('Keep me');
+    expect(after?.lastSeenAt && before?.lastSeenAt).toBeTruthy();
+    expect(after!.lastSeenAt!.getTime()).toBeGreaterThanOrEqual(
+      before!.lastSeenAt!.getTime(),
+    );
+  });
+
+  it('an unknown heartbeat field is 400 and does not write', async () => {
+    const id = 'e2e_hb_unknown';
+    created.push(id);
+    await call()
+      .post('/agents/register')
+      .send({ id, name: 'E2E Heartbeat Unknown' });
+    const before = await prisma.agent.findUnique({ where: { id } });
+    const res = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ currentTask: 'Nope', extra: true });
+    expect(res.status).toBe(400);
+    expect(bodyMessage(res)).toBe('unknown field extra');
+    const missing = await call()
+      .post('/agents/e2e_hb_missing/heartbeat')
+      .send({ nope: 1 });
+    expect(missing.status).toBe(400);
+    expect(bodyMessage(missing)).toBe('unknown field nope');
+    const after = await prisma.agent.findUnique({ where: { id } });
+    expect(after?.lastSeenAt).toEqual(before?.lastSeenAt);
+    expect(after?.currentTask).toBeNull();
+    expect(after?.status).toBe(before?.status);
+  });
+
+  it('an invalid heartbeat status is 400 and does not write', async () => {
+    const id = 'e2e_hb_status';
+    created.push(id);
+    await call()
+      .post('/agents/register')
+      .send({ id, name: 'E2E Heartbeat Status' });
+    const before = await prisma.agent.findUnique({ where: { id } });
+    const res = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ status: 'running' });
+    expect(res.status).toBe(400);
+    expect(bodyMessage(res)).toBe('status must be one of working, idle');
+    const typed = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ status: 1 });
+    expect(typed.status).toBe(400);
+    expect(bodyMessage(typed)).toBe('status must be a string');
+    const after = await prisma.agent.findUnique({ where: { id } });
+    expect(after?.status).toBe(before?.status);
+    expect(after?.lastSeenAt).toEqual(before?.lastSeenAt);
   });
 
   it('criterion 5: delete removes a registered row and returns 409 for a default', async () => {

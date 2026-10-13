@@ -266,6 +266,23 @@ describe('agent merge', () => {
     const almost = new Date(now.getTime() + OFFLINE_AFTER_MS - 1);
     expect(isOnline('registered', now, almost)).toBe(true);
     expect(isOnline('default', null, later)).toBe(true);
+    const patched = planHeartbeat(bot, now, {
+      status: 'working',
+      currentTask: 'Shipping the notes',
+    });
+    expect(patched.ok).toBe(true);
+    if (patched.ok) {
+      expect(patched.row.status).toBe('working');
+      expect(patched.row.currentTask).toBe('Shipping the notes');
+      expect(patched.row.lastSeenAt).toEqual(now);
+      expect(patched.row.name).toBe(bot.name);
+    }
+    const untouched = planHeartbeat(bot, now, {});
+    expect(untouched.ok).toBe(true);
+    if (untouched.ok) {
+      expect(untouched.row.status).toBe(bot.status);
+      expect(untouched.row.currentTask).toBe(bot.currentTask);
+    }
     expect(planHeartbeat(null, now)).toEqual({
       ok: false,
       status: 404,

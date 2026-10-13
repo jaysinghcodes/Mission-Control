@@ -11,7 +11,10 @@ import {
   Query,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
+import {
+  LiveActivityGateway,
+  type ActivityEventType,
+} from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { operatorName } from '../config/operator';
 import { isRunStatus, RUN_STATUSES } from './run-status';
@@ -27,8 +30,8 @@ function codePointLength(value: string): number {
   return [...value].length;
 }
 
-/** POST /runs fields. `status` is not one of them: create always queues. */
-const CREATE_FIELDS = new Set(['name', 'agent', 'ticketId']);
+/** POST /runs fields. `status` is optional and defaults to queued. */
+const CREATE_FIELDS = new Set(['name', 'agent', 'ticketId', 'status']);
 
 /** PATCH /runs/:id fields. Anything else, including `name`, is 400. */
 const UPDATE_FIELDS = new Set(['status', 'progress', 'agent', 'ticketId']);
@@ -37,6 +40,7 @@ const UPDATE_FIELDS = new Set(['status', 'progress', 'agent', 'ticketId']);
  * RunsController — task rows the board and the bridge share.
  *  - GET /runs              → list (optional ?status= and ?ticketId=)
  *  - POST /runs             → 201 { run, ts }. Missing name is 400. Unknown ticketId is 404.
+ *                             Optional status defaults to queued.
  *  - PATCH /runs/:id        → 200 { run, ts }. Unknown run or ticketId is 404.
  * Success bodies have no `error` key. Failures throw, so they are not HTTP 200.
  * A real change broadcasts a run.* event so open dashboards update live.
@@ -76,25 +80,48 @@ export class RunsController {
     const name = this.requireName(payload.name);
     const agent =
       'agent' in payload ? this.requireAgent(payload.agent) : operatorName();
+    // Shape checks before the ticket lookup, so a bad status is 400
+    // even when ticketId is also unknown.
+    const status =
+      this.parseStatus(payload.status, 'status' in payload) ?? 'queued';
     const ticketId =
       'ticketId' in payload ? await this.resolveTicket(payload.ticketId) : null;
+    const now = new Date();
     const run = await this.prisma.run.create({
       // Default agent = the configured operator (OPERATOR_NAME env, neutral
       // "Operator" fallback). No personal name baked into a fresh clone.
+      // Omitted status stays queued, with no startedAt, same as before.
+      // running, done, and failed use the same timestamps PATCH would set.
       data: {
         name,
         agent,
-        status: 'queued',
+        status,
         ...(ticketId ? { ticketId } : {}),
+        ...(status === 'running' ? { startedAt: now } : {}),
+        ...(status === 'done' || status === 'failed'
+          ? { finishedAt: now }
+          : {}),
       },
     });
-    const event = {
-      id: run.id,
-      name: run.name,
-      ...(run.ticketId ? { ticketId: run.ticketId } : {}),
-    };
-    await this.persist('run.queued', event);
-    this.gateway.broadcast('run.queued', event);
+    // A queued create keeps the previous event shape (id, name, ticketId).
+    // Any other initial status carries status and progress, matching PATCH.
+    const event =
+      status === 'queued'
+        ? {
+            id: run.id,
+            name: run.name,
+            ...(run.ticketId ? { ticketId: run.ticketId } : {}),
+          }
+        : {
+            id: run.id,
+            name: run.name,
+            status,
+            progress: run.progress,
+            ...(run.ticketId ? { ticketId: run.ticketId } : {}),
+          };
+    const eventType = this.eventType(status);
+    await this.persist(eventType, event);
+    this.gateway.broadcast(eventType, event);
     return { run, ts: Date.now() };
   }
 
@@ -147,14 +174,7 @@ export class RunsController {
       },
     });
     // Broadcast the transition so every open dashboard updates instantly.
-    const eventType =
-      nextStatus === 'running'
-        ? 'run.started'
-        : nextStatus === 'done'
-          ? 'run.completed'
-          : nextStatus === 'failed'
-            ? 'run.failed'
-            : 'run.queued';
+    const eventType = this.eventType(nextStatus);
     const event = {
       id: run.id,
       name: run.name,
@@ -172,6 +192,14 @@ export class RunsController {
   private payload(body: unknown): Record<string, unknown> {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
     return body as Record<string, unknown>;
+  }
+
+  /** Same mapping PATCH uses, so a create does not invent a second vocabulary. */
+  private eventType(status: string): ActivityEventType {
+    if (status === 'running') return 'run.started';
+    if (status === 'done') return 'run.completed';
+    if (status === 'failed') return 'run.failed';
+    return 'run.queued';
   }
 
   /** A key this route does not accept is 400. The message names the field. */

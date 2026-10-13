@@ -1,7 +1,7 @@
 /**
- * Statuses PATCH /runs accepts.
- * POST /runs does not take `status`. Sending it is 400 (unknown field).
- * Anything else on PATCH is 400 and the message names `status`.
+ * Statuses POST /runs and PATCH /runs accept.
+ * POST /runs defaults to queued when status is omitted.
+ * Anything else is 400 and the message names `status`.
  * The demo seed uses the same list so it cannot insert a status the API would reject.
  */
 export const RUN_STATUSES = [

@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { AGENT_STATUSES, isAgentStatus } from './agent-status';
 import {
   NAME_MAX,
   REGISTER_FIELDS,
@@ -28,11 +29,13 @@ import {
   planHeartbeat,
   planRegister,
   tagsValue,
+  type HeartbeatPatch,
   type RegisterInput,
   type RosterAgent,
 } from './agent-merge';
 
 const REGISTER_FIELD_SET = new Set<string>(REGISTER_FIELDS);
+const HEARTBEAT_FIELD_SET = new Set<string>(['currentTask', 'status']);
 
 /**
  * AgentsController. The roster is the seeded defaults, OpenClaw snapshot
@@ -108,18 +111,30 @@ export class AgentsController {
 
   /**
    * POST /agents/:id/heartbeat. 204 for a registered bot, 404 otherwise.
-   * Sets lastSeenAt. Does not create a row.
+   * Sets lastSeenAt. An optional body may set currentTask and status.
+   * No body leaves those fields as they are. Does not create a row.
+   * A bad body is 400 before the id is checked.
    */
   @Post(':id/heartbeat')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async heartbeat(@Param('id') id: string): Promise<void> {
+  async heartbeat(
+    @Param('id') id: string,
+    @Body() body: unknown = {},
+  ): Promise<void> {
+    const patch = this.heartbeatInput(body);
     const now = new Date();
     const found = await this.prisma.agent.findUnique({ where: { id } });
-    const plan = planHeartbeat(found ? asRosterAgent(found) : null, now);
+    const plan = planHeartbeat(found ? asRosterAgent(found) : null, now, patch);
     if (!plan.ok) throw new NotFoundException(plan.message);
     await this.prisma.agent.update({
       where: { id },
-      data: { lastSeenAt: plan.row.lastSeenAt },
+      data: {
+        lastSeenAt: plan.row.lastSeenAt,
+        ...(patch.status !== undefined ? { status: plan.row.status } : {}),
+        ...(patch.currentTask !== undefined
+          ? { currentTask: plan.row.currentTask }
+          : {}),
+      },
     });
     await this.emit('heartbeat', id, 'registered', false);
   }
@@ -169,10 +184,24 @@ export class AgentsController {
     return body as Record<string, unknown>;
   }
 
-  private rejectUnknown(body: Record<string, unknown>): void {
-    const unknown = Object.keys(body).filter(
-      (key) => !REGISTER_FIELD_SET.has(key),
-    );
+  private heartbeatInput(body: unknown): HeartbeatPatch {
+    const payload = this.payload(body);
+    this.rejectUnknown(payload, HEARTBEAT_FIELD_SET);
+    const patch: HeartbeatPatch = {};
+    if ('currentTask' in payload) {
+      patch.currentTask = this.requireTask(payload.currentTask);
+    }
+    if ('status' in payload) {
+      patch.status = this.requireAgentStatus(payload.status);
+    }
+    return patch;
+  }
+
+  private rejectUnknown(
+    body: Record<string, unknown>,
+    allowed: ReadonlySet<string> = REGISTER_FIELD_SET,
+  ): void {
+    const unknown = Object.keys(body).filter((key) => !allowed.has(key));
     if (unknown.length === 0) return;
     const label = unknown.length === 1 ? 'unknown field' : 'unknown fields';
     throw new BadRequestException(`${label} ${unknown.join(', ')}`);
@@ -210,6 +239,35 @@ export class AgentsController {
       );
     }
     return name;
+  }
+
+  private requireAgentStatus(raw: unknown): string {
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('status must be a string');
+    }
+    const status = raw.trim();
+    if (!isAgentStatus(status)) {
+      throw new BadRequestException(
+        `status must be one of ${AGENT_STATUSES.join(', ')}`,
+      );
+    }
+    return status;
+  }
+
+  private requireTask(raw: unknown): string {
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('currentTask must be a string');
+    }
+    const text = raw.trim();
+    if (!text) {
+      throw new BadRequestException('currentTask must be a non blank string');
+    }
+    if (codePointLength(text) > TEXT_MAX) {
+      throw new BadRequestException(
+        `currentTask must be ${TEXT_MAX} characters or fewer`,
+      );
+    }
+    return text;
   }
 
   private optionalText(
