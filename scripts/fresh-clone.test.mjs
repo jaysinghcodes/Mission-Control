@@ -16,7 +16,6 @@ const README_COMMANDS = [
   'set -a; . ./.env; set +a',
   '(cd apps/api && npx prisma generate)',
   '(cd apps/api && npx prisma migrate deploy)',
-  'npm run seed:demo',
   'npm run dev',
 ]
 
@@ -48,6 +47,19 @@ test('a broken README command fails', async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('a fresh install does not seed, and the clone job seeds later', () => {
+  const markdown = readFileSync(path.join(root, 'README.md'), 'utf8')
+  const commands = readInstallCommands(markdown)
+  assert.equal(commands.includes('npm run seed:demo'), false)
+  assert.match(markdown, /npm run seed:clear/)
+  assert.match(markdown, /does not load sample data/)
+  const clone = readFileSync(path.join(root, 'scripts/fresh-clone.mjs'), 'utf8')
+  assert.match(clone, /empty-state\.mjs/)
+  assert.match(clone, /run', 'seed:demo'/)
+  const smoke = readFileSync(path.join(root, 'scripts/ui-smoke.mjs'), 'utf8')
+  assert.match(smoke, /seed-demo\.ts/)
 })
 
 test('a README without npm run dev is rejected', () => {

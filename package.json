@@ -15,6 +15,7 @@
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
     "seed:demo": "npm run seed:demo --workspace api",
+    "seed:clear": "npm run seed:clear --workspace api",
     "doctor": "node scripts/doctor.mjs"
   },
   "devDependencies": {

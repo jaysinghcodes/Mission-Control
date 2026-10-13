@@ -36,7 +36,7 @@
  * Interaction with the bridge: calendar snapshots still replace cron jobs.
  * agents.snapshot creates, updates, or removes snapshot rows only. Seeded
  * default rows and self registered rows stay. Demo tickets and activity
- * remain until you delete them (`DELETE … WHERE id LIKE 'demo-%'`).
+ * remain until `npm run seed:clear` removes the seeded ids.
  *
  * Runs on the HOST against the compose Postgres (127.0.0.1:5432) using
  * DATABASE_URL from the env or the repo-root .env, same as the api.
@@ -65,7 +65,7 @@ import { writeDemoDocs } from '../src/docs/demo-docs';
 import { configuredDocsRoot } from '../src/docs/docs-path';
 import { DEMO_DEVICES, DEMO_MISSION } from '../src/team/demo-team';
 import { SETTING_ID } from '../src/team/mission';
-import { demoUsageBuckets } from '../src/usage/demo-usage';
+import { demoUsageBuckets, demoUsageId } from '../src/usage/demo-usage';
 import { slugFromName } from '../src/agents/agent-merge';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
@@ -397,6 +397,7 @@ async function main(): Promise<void> {
       where: { day: u.day },
       update: {},
       create: {
+        id: demoUsageId(u.day),
         day: u.day,
         at: u.at,
         totalCost: u.totalCost,

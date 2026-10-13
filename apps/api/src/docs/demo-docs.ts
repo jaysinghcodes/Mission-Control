@@ -1,4 +1,12 @@
-import { mkdir, readFile, stat, writeFile } from 'fs/promises';
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rmdir,
+  stat,
+  unlink,
+  writeFile,
+} from 'fs/promises';
 import path from 'path';
 
 /**
@@ -233,6 +241,60 @@ export async function writeDemoDocs(root: string): Promise<DemoDocWriteResult> {
     written += 1;
   }
   return { written, skipped };
+}
+
+export interface DemoDocClearResult {
+  removed: number;
+  kept: number;
+}
+
+/**
+ * Delete sample files that still match the seeded bytes.
+ * A file you edited is left in place. Missing files are skipped.
+ * Empty directories that held only sample files are removed.
+ * The docs root itself stays, even when it ends up empty.
+ */
+export async function clearDemoDocs(root: string): Promise<DemoDocClearResult> {
+  const existing = await stat(root).catch(() => null);
+  if (!existing) return { removed: 0, kept: 0 };
+  if (!existing.isDirectory()) {
+    throw new Error(`DOCS_ROOT is not a directory: ${root}`);
+  }
+
+  let removed = 0;
+  let kept = 0;
+  for (const doc of DEMO_DOCS) {
+    const dest = destFor(root, doc.relative);
+    const current = await readFile(dest, 'utf8').catch(
+      (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return null;
+        throw err;
+      },
+    );
+    if (current == null) continue;
+    if (current !== doc.contents) {
+      kept += 1;
+      continue;
+    }
+    await unlink(dest);
+    removed += 1;
+    await pruneEmptyParents(root, dest);
+  }
+  return { removed, kept };
+}
+
+async function pruneEmptyParents(
+  root: string,
+  filePath: string,
+): Promise<void> {
+  const rootResolved = path.resolve(root);
+  let dir = path.dirname(path.resolve(filePath));
+  while (dir.startsWith(rootResolved + path.sep)) {
+    const entries = await readdir(dir).catch(() => null);
+    if (!entries || entries.length > 0) return;
+    await rmdir(dir).catch(() => undefined);
+    dir = path.dirname(dir);
+  }
 }
 
 function destFor(root: string, relative: string): string {

@@ -1,7 +1,12 @@
-import { mkdtemp, readFile, writeFile } from 'fs/promises';
+import { access, mkdtemp, readFile, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { DEMO_DOC_AUTHORS, DEMO_DOCS, writeDemoDocs } from './demo-docs';
+import {
+  DEMO_DOC_AUTHORS,
+  DEMO_DOCS,
+  clearDemoDocs,
+  writeDemoDocs,
+} from './demo-docs';
 import { isSafeLink, renderMarkdown } from './render-markdown';
 
 describe('writeDemoDocs', () => {
@@ -72,5 +77,32 @@ describe('writeDemoDocs', () => {
     const again = await writeDemoDocs(root);
     expect(again.written).toBe(0);
     expect(await readFile(target, 'utf8')).toBe('edited by a person\n');
+  });
+
+  it('removes untouched sample files and keeps an edited one', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'mc-docs-clear-'));
+    await writeDemoDocs(root);
+    const edited = path.join(root, 'specs', 'app-redesign.md');
+    const sample = path.join(root, 'briefs', 'morning-brief.md');
+    await writeFile(edited, 'edited by a person\n', 'utf8');
+
+    const first = await clearDemoDocs(root);
+    expect(first.removed).toBe(DEMO_DOCS.length - 1);
+    expect(first.kept).toBe(1);
+    expect(await readFile(edited, 'utf8')).toBe('edited by a person\n');
+    await expect(access(sample)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const second = await clearDemoDocs(root);
+    expect(second.removed).toBe(0);
+    expect(second.kept).toBe(1);
+    expect(await readFile(edited, 'utf8')).toBe('edited by a person\n');
+  });
+
+  it('is a no op when the docs root is missing', async () => {
+    const missing = path.join(tmpdir(), 'mc-docs-missing', 'nope');
+    await expect(clearDemoDocs(missing)).resolves.toEqual({
+      removed: 0,
+      kept: 0,
+    });
   });
 });

@@ -16,7 +16,7 @@ Verified on a fresh clone with **Node v22.14.0** and **npm 11.17.0** (the `packa
 
 ## Screenshots
 
-These are the current screens after `npm run seed:demo` on this branch. The sidebar has no Overview page, so there is no Overview shot. Sessions and gateway logs stay empty until a real OpenClaw bridge posts them. That empty state is what a fresh clone shows.
+These are the current screens after an explicit `npm run seed:demo` on this branch. A fresh clone does not run that command, so the first screen is an empty state. The sidebar has no Overview page, so there is no Overview shot. Sessions and gateway logs stay empty until a real OpenClaw bridge posts them.
 
 The seeded bots are the sample roster. Agents, Office, and Team each show a Sample tag on those cards. System includes the Show sample bots switch. It stays off until you turn it on. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed.
 
@@ -80,7 +80,6 @@ cp .env.example .env
 set -a; . ./.env; set +a
 (cd apps/api && npx prisma generate)
 (cd apps/api && npx prisma migrate deploy)
-npm run seed:demo
 npm run dev
 ```
 
@@ -96,7 +95,6 @@ What each step is doing:
 | `set -a; . ./.env; set +a` | Puts `DATABASE_URL`, `INGEST_TOKEN`, `PORT`, `HOST`, and the rest into the environment. `turbo.json` only forwards listed variables into `npm run dev`. |
 | `npx prisma generate` | Builds the Prisma client. Run it from `apps/api`. |
 | `npx prisma migrate deploy` | Applies `apps/api/prisma/migrations`. The API does not migrate on this path. (The API container runs migrate on boot.) |
-| `npm run seed:demo` | Idempotent sample agents, cron jobs, tickets, projects, activity, approvals, memories, docs, devices, a mission line, and one custom tool. Safe to repeat. Refuses to run when `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run dev` | Turbo starts the API (`nest start --watch`) and the web app (`vite`) together. |
 
 Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template and are not read by the API. Do not commit `.env`.
@@ -121,7 +119,11 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `D
 4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, SSH tunnel, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks.
 5. The setup sheet text still tells you to look for an Overview page and for `/#/health`. Those routes are redirects now: `/#/` goes to Tasks, `/#/health` goes to System. Trust the sidebar chip and `/#/system`.
 
-`npm run seed:demo` is what fills the screenshots. Without it the board is empty, which is a valid first run, not a crash.
+A fresh setup does not load sample data. `npm run dev` after migrate shows empty states. That is a valid first run, not a crash.
+
+`npm run seed:demo` is what fills the screenshots. It writes sample agents, cron jobs, tickets, projects, runs, activity, approvals, memories, docs, devices, usage, a mission line, and one custom tool. It is idempotent. It refuses to run when `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`.
+
+`npm run seed:clear` deletes only those sample rows. It matches the seeded ids, or the usage marker on a day nothing has overwritten. Registered bots, snapshot rows, and rows you created through the API stay. A mission you edited stays. A doc you edited stays. It is idempotent. Running it twice exits 0 both times. The same production guard applies.
 
 ---
 
@@ -319,7 +321,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 ## What works without OpenClaw
 
-`npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI.
+`npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
 
 * Tasks and the backlog view, from seeded tickets.
 * Projects, including ticket counts, from seeded projects.
@@ -339,7 +341,7 @@ What this tree already does:
 * ✅ Calendar, Memory, Docs, Team (mission, people, devices), System
 * ✅ System panels for logs, sessions, settings, connection, and custom tools
 * ✅ `POST /events` intake, including `memory.snapshot` and `usage.snapshot` daily points (Today, 7 day, and month are summed on read)
-* ✅ Idempotent `seed:demo` so the UI works with no OpenClaw
+* ✅ Idempotent `seed:demo` and `seed:clear`. A fresh setup does not load sample data.
 * ✅ Optional `bridge/` sync from the OpenClaw CLI
 
 Still open:

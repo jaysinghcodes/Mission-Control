@@ -1,6 +1,10 @@
 import { chicagoDay, shiftChicagoDay } from '../memory/chicago-day';
 import { aggregateUsage } from './aggregate-usage';
-import { demoUsageBuckets } from './demo-usage';
+import {
+  demoUsageBuckets,
+  demoUsageId,
+  isUntouchedDemoUsage,
+} from './demo-usage';
 
 /** 07:58 and 23:30 America/Chicago on 2026-10-10 (CDT). */
 const MORNING = new Date('2026-10-10T12:58:00.000Z');
@@ -64,6 +68,36 @@ function expectWindows(now: Date) {
   expect(month.days).toHaveLength(Number(today.slice(8, 10)));
   expect(month.note).toBeNull();
 }
+
+describe('demo usage marker', () => {
+  it('tags each provider and keeps a stable id', () => {
+    const buckets = demoUsageBuckets(MORNING);
+    for (const bucket of buckets) {
+      expect(demoUsageId(bucket.day)).toBe(`demo-usage-${bucket.day}`);
+      expect(
+        isUntouchedDemoUsage({
+          id: demoUsageId(bucket.day),
+          providers: bucket.providers,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it('does not treat a bridge overwrite as sample data', () => {
+    expect(
+      isUntouchedDemoUsage({
+        id: 'demo-usage-2026-10-10',
+        providers: [{ name: 'zai', model: 'glm-5.2', cost: 1.25 }],
+      }),
+    ).toBe(false);
+    expect(
+      isUntouchedDemoUsage({
+        id: 'cuid-real',
+        providers: [{ name: 'zai', demo: true }],
+      }),
+    ).toBe(false);
+  });
+});
 
 describe('demoUsageBuckets', () => {
   it('at 07:58 local, Today equals today and 7d and month equal the seeded sums', () => {

@@ -300,6 +300,22 @@ export async function freshClone({
     await runInherit('npm', ['run', 'doctor'], { cwd: plan.cloneDir, env })
     await assertDevRejectsMissingHeader(env)
     const smokeEnv = await ensureBrowser(plan.cloneDir, env)
+    // A fresh database has no sample rows. Prove the empty states, then seed.
+    await runInherit('node', ['scripts/empty-state.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
+    await runInherit('npm', ['run', 'seed:demo'], { cwd: plan.cloneDir, env })
+    await waitFor(
+      'http://127.0.0.1:3000/health',
+      (res) => {
+        if (!res.ok) return false
+        try {
+          const body = JSON.parse(res.text)
+          return body.status === 'ok' && body.database === 'connected'
+        } catch {
+          return false
+        }
+      },
+      120000,
+    )
     await runInherit('node', ['scripts/ui-smoke.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
     await runInherit('npm', ['run', 'test:e2e'], { cwd: plan.cloneDir, env })
     await runInherit('node', ['scripts/roster-ui.e2e.mjs'], { cwd: plan.cloneDir, env: smokeEnv })
