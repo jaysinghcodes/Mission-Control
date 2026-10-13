@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { assertFullBleed } from './full-bleed.mjs'
 
 const web = (process.env.MC_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '')
 const api = (process.env.MC_API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '')
@@ -81,6 +82,7 @@ async function main() {
     await page.goto(`${web}/${hash}`, { waitUntil: 'domcontentloaded' })
     await page.getByRole('heading', { level: 1, name: heading }).waitFor({ timeout: 30000 })
     await settle()
+    await assertFullBleed(page)
   }
 
   try {

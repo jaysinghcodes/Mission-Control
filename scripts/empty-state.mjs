@@ -5,6 +5,7 @@
 
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
+import { assertFullBleed } from './full-bleed.mjs'
 
 const web = (process.env.MC_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '')
 
@@ -58,6 +59,7 @@ async function main() {
       const exact = new RegExp(`^${empty.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
       await page.locator('div').filter({ hasText: exact }).waitFor({ timeout: 20000 })
       await assertNoWindowDots(page)
+      await assertFullBleed(page)
     }
     if (errors.length) throw new Error(`Console errors:\n${errors.join('\n')}`)
     console.log('Empty states rendered with no window dots and no console errors.')

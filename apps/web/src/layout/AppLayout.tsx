@@ -7,7 +7,7 @@ import { API_URL } from '../lib/apiBase'
 import { isMissionControlHealth, reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
 
 /**
- * Shared window: vibrancy sidebar and account chip.
+ * Full bleed shell. The sidebar and the page fill the viewport.
  * Connection text is one nowrap line in the sidebar (it used to wrap in the
  * top bar at ~768px). Theme follows the system until a manual choice is saved.
  */
@@ -234,8 +234,7 @@ export default function AppLayout() {
   const onTasks = pathname === '/tasks' || pathname === '/tickets' || pathname === '/backlog'
 
   return (
-    <div className="h-full bg-[var(--mc-desk)] p-3 sm:p-4">
-      <div className="mc-window relative flex h-full min-h-0 overflow-hidden">
+      <div className="mc-window relative flex h-dvh w-screen overflow-hidden">
         {narrow && sidebarOpen && (
           <button
             type="button"
@@ -392,6 +391,5 @@ export default function AppLayout() {
           </main>
         </div>
       </div>
-    </div>
   )
 }
