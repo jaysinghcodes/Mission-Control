@@ -8,6 +8,7 @@ import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { activityNeedsYou, agentNeedsYou, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
+import { pluralize } from '../lib/pluralize'
 import { activityActor, deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
 import { useWorkLive } from '../lib/useWorkLive'
@@ -144,7 +145,7 @@ export default function Office() {
   const summary = agentsQ.data
     ? roster.length === 0
       ? 'The floor is empty'
-      : `${roster.length} agents · ${working} working${needsCount === 0 ? '' : needsCount === 1 ? ' · 1 needs you' : ` · ${needsCount} need you`}`
+      : `${pluralize(roster.length, 'agent')} · ${pluralize(working, 'working', 'working')}${needsCount === 0 ? '' : ` · ${pluralize(needsCount, 'needs you', 'need you')}`}`
     : 'Loading the floor…'
 
   const pipe = stageCounts(ticketRows)
@@ -263,7 +264,7 @@ export default function Office() {
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: focusMeta.color }} />
                 <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold">{focusMeta.label}</span>
                 <span className="min-w-0 text-[12px] text-mc-sub">
-                  {focusTickets.length === 1 ? '1 ticket on the board' : `${focusTickets.length} tickets on the board`}
+                  {`${pluralize(focusTickets.length, 'ticket')} on the board`}
                 </span>
                 <button type="button" onClick={clearRoom} className="ml-auto shrink-0 whitespace-nowrap text-[12px] font-semibold text-mc-accent-text">
                   All rooms

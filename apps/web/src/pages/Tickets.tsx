@@ -7,6 +7,7 @@ import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { rosterDisplayName } from '../data/roster'
 import { ticketCreateQueue } from '../lib/serialQueue'
 import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
+import { pluralize } from '../lib/pluralize'
 import { useBoardDrag } from '../lib/boardDrag'
 import { BoardDnd, CardDrag, ColumnDrop } from '../components/boardDnd'
 import { TicketRuns } from '../components/TicketRuns'
@@ -360,7 +361,7 @@ export default function Tickets() {
   const needs = shown.filter((t) => needsYou(t)).length
   const summary = !data
     ? (loading && !loadError ? 'Loading the board…' : 'Board not loaded')
-    : `${openCount} open${needs ? ` · ${needs} needs you` : ''} · ${doneRows.length} done`
+    : `${pluralize(openCount, 'open', 'open')}${needs ? ` · ${pluralize(needs, 'needs you', 'need you')}` : ''} · ${pluralize(doneRows.length, 'done', 'done')}`
 
   const DOT: Record<string, string> = { todo: 'var(--mc-gray)', build: 'var(--mc-blue)', qa: 'var(--mc-orange)', review: 'var(--mc-teal)', done: 'var(--mc-green)' }
   const detail = tickets.find((t) => t.id === detailId) ?? null
@@ -590,7 +591,7 @@ export default function Tickets() {
             </div>
             <SoftCard className="px-3 py-4 text-center">
               <div className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-mc-greenbg text-mc-greentext">✓</div>
-              <div className="mt-2 text-[12px] text-mc-sub2">{doneRows.length} done</div>
+              <div className="mt-2 text-[12px] text-mc-sub2">{pluralize(doneRows.length, 'done', 'done')}</div>
               <button type="button" onClick={() => setShowDone((v) => !v)} onPointerDown={(e) => e.stopPropagation()} className="mt-2 text-[13px] font-semibold text-mc-accent-text">
                 {showDone ? 'Hide' : 'Show all'}
               </button>

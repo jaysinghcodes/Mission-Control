@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { PageHeader, SoftCard, Btn, Banner, Toast, FieldError, EmptyState, StatusChip } from '../components/shell'
 import type { Project, ProjectDetailResp, ProjectTicket } from '../types'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * One project. Tickets stay when the project is archived.
@@ -66,7 +67,7 @@ export default function ProjectDetail() {
     void refetch()
   }
 
-  const progress = project ? `${project.doneCount} of ${project.ticketCount}` : ''
+  const progress = project ? `${project.doneCount} of ${pluralize(project.ticketCount, 'task')}` : ''
 
   return (
     <div>

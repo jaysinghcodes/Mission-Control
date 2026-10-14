@@ -3,19 +3,30 @@
  * Role text is not a seat. Logic lives in src/lib/office.ts.
  */
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import test from 'node:test'
 import ts from 'typescript'
 
-async function loadTs(rel) {
+const gen = new URL('./_gen/', import.meta.url)
+await mkdir(gen, { recursive: true })
+
+async function compile(rel, outName) {
   const src = await readFile(new URL(rel, import.meta.url), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   })
-  return import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'))
+  const out = new URL(outName, gen)
+  await writeFile(out, outputText)
+  return out
 }
 
-const office = await loadTs('../src/lib/office.ts')
+await compile('../src/lib/pluralize.ts', 'pluralize.js')
+const officeSrc = await readFile(new URL('../src/lib/office.ts', import.meta.url), 'utf8')
+const officeJs = ts.transpileModule(officeSrc, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText.replaceAll("from './pluralize'", "from './pluralize.js'")
+await writeFile(new URL('office.js', gen), officeJs)
+const office = await import(new URL('office.js', gen))
 
 const demo = [
   { id: 'speedy', name: 'Speedy', role: 'chief of staff', status: 'working', room: 'commons', currentTask: 'Planning ticket 5' },

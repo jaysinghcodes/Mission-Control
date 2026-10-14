@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useApi } from '../hooks/useApi'
 import { Card, Chip, Progress, SectionLabel } from '../components/ui'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * Health — ONLY live, tangible data. Real OS metrics from GET /system
@@ -53,7 +54,7 @@ export default function Health() {
       : []
 
   const metrics = [
-    { label: 'CPU', big: s ? `${s.cpu.pct}%` : '—', pct: s?.cpu.pct ?? 0, color: s && s.cpu.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `load ${s.cpu.load1} · ${s.cpu.cores} core(s)` : 'loading…' },
+    { label: 'CPU', big: s ? `${s.cpu.pct}%` : '—', pct: s?.cpu.pct ?? 0, color: s && s.cpu.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `load ${s.cpu.load1} · ${pluralize(s.cpu.cores, 'core')}` : 'loading…' },
     { label: 'Memory', big: s ? `${s.memory.pct}%` : '—', pct: s?.memory.pct ?? 0, color: s && s.memory.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.memory.totalGb - s.memory.freeGb} / ${s.memory.totalGb} GB` : 'loading…' },
     { label: 'Disk', big: s ? `${s.disk.pct}%` : '—', pct: s?.disk.pct ?? 0, color: s && s.disk.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.disk.usedGb} / ${s.disk.totalGb} GB` : 'loading…' },
   ]
@@ -86,7 +87,7 @@ export default function Health() {
           </div>
           <div className="text-[12.5px] text-mc-sub">
             {h
-              ? `uptime ${fmtUptime(h.uptimeSeconds)} · database ${h.database} · ${h.connectedClients} dashboard client(s)`
+              ? `uptime ${fmtUptime(h.uptimeSeconds)} · database ${h.database} · ${pluralize(h.connectedClients, 'dashboard client')}`
               : 'probe failed — check your SSH tunnel'}
           </div>
         </div>

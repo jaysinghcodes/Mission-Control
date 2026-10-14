@@ -3,6 +3,7 @@ import { useApi, apiPost } from '../hooks/useApi'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, Kicker, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import { countOnChicagoDay } from '../lib/chicago-day'
+import { pluralize } from '../lib/pluralize'
 import type { Agent, AgentsResp } from '../types'
 
 /**
@@ -45,7 +46,7 @@ export default function Approvals() {
   // Approval stores createdAt only. There is no decidedAt, resolvedAt, or
   // updatedAt, so "Decided today" uses createdAt as a Chicago calendar day.
   const summary = pendingQ.data
-    ? `${pending.length} waiting on you · ${countOnChicagoDay(decided)} decided today`
+    ? `${pluralize(pending.length, 'waiting on you', 'waiting on you')} · ${pluralize(countOnChicagoDay(decided), 'decided today', 'decided today')}`
     : 'Loading approvals…'
 
   async function decide(id: string, action: 'approve' | 'reject') {

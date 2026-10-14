@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApi, apiPost, apiSend } from '../hooks/useApi'
 import { Card, Chip, PillButton, Progress, SectionLabel } from '../components/ui'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * Usage & Cost — real usage snapshot pushed by the bridge (usage.snapshot)
@@ -39,6 +40,11 @@ const RANGES = ['24h', '7d', '30d', 'month']
 
 const fmt = (n: number | undefined): string => (typeof n === 'number' && Number.isFinite(n) ? `$${n.toFixed(2)}` : '—')
 const num = (n: number | undefined): string => (typeof n === 'number' ? n.toLocaleString() : '—')
+function tokenWords(n: number | undefined): string {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
+  if (n === 1) return pluralize(1, 'token')
+  return `${n.toLocaleString()} tokens`
+}
 
 export default function Usage() {
   const [range, setRange] = useState('24h')
@@ -163,7 +169,7 @@ export default function Usage() {
         <div className="mt-2 text-[30px] font-semibold">{usage ? fmt(usage.totalCost) : '—'}</div>
         <div className="text-[12px] text-mc-sub">
           {usage
-            ? `${num(usage.tokensIn)} tokens in · ${num(usage.tokensOut)} tokens out`
+            ? `${tokenWords(usage.tokensIn)} in · ${tokenWords(usage.tokensOut)} out`
             : error
               ? 'API unreachable'
               : 'No usage snapshot for this period yet — the bridge syncs every few minutes.'}

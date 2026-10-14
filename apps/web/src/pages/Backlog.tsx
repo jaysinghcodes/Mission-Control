@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { Card, Chip } from '../components/ui'
 import { Btn, PageHeader, Segmented, Banner } from '../components/shell'
+import { pluralize } from '../lib/pluralize'
 import { ticketCreateQueue } from '../lib/serialQueue'
 
 /**
@@ -149,7 +150,7 @@ export default function Backlog() {
     <div>
       <PageHeader
         title="Tasks"
-        summary={data ? `${rows.length} not started` : 'Loading the backlog…'}
+        summary={data ? pluralize(rows.length, 'not started', 'not started') : 'Loading the backlog…'}
         tools={
           <>
             <Segmented labels={['Board', 'Backlog']} active={1} onChange={(i) => { if (i === 0) openBoard() }} ariaLabel="Tasks view" />

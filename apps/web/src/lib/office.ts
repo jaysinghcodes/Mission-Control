@@ -7,6 +7,8 @@
  * Role text is not a seat.
  */
 
+import { pluralize } from './pluralize'
+
 export type DeskRoom = 'build' | 'qa' | 'ship' | 'deploy'
 export type Room = DeskRoom | 'commons'
 export type FloorMode = 'all' | 'gather' | 'meeting' | 'break'
@@ -100,10 +102,10 @@ export function roomByline(
 ): string {
   const n = crew.filter((agent) => agent.status === 'working' && !blockedIds.has(agent.id)).length
   if (n === 0) return 'Idle'
-  if (room === 'build') return n === 1 ? '1 in progress' : `${n} in progress`
-  if (room === 'qa') return n === 1 ? '1 testing' : `${n} testing`
-  if (room === 'ship') return n === 1 ? '1 ready' : `${n} ready`
-  return n === 1 ? '1 deploying' : `${n} deploying`
+  if (room === 'build') return pluralize(n, 'in progress', 'in progress')
+  if (room === 'qa') return pluralize(n, 'testing', 'testing')
+  if (room === 'ship') return pluralize(n, 'ready', 'ready')
+  return pluralize(n, 'deploying', 'deploying')
 }
 
 export function taskLine(agent: FloorAgent, blocked: boolean): string {
@@ -116,8 +118,8 @@ export function taskLine(agent: FloorAgent, blocked: boolean): string {
 export function commonsByline(crew: readonly FloorAgent[], mode: FloorMode): string {
   const n = crew.length
   if (n === 0) return 'Empty'
-  if (mode === 'break') return n === 1 ? '1 on break' : `${n} on break`
-  return n === 1 ? '1 agent' : `${n} agents`
+  if (mode === 'break') return pluralize(n, 'on break', 'on break')
+  return pluralize(n, 'agent')
 }
 
 /** Table caption. The first live line in the room; break has no topic. */

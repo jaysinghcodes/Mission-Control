@@ -5,6 +5,7 @@ import type { Agent, AgentsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, SearchInput, Face, StatusChip, EmptyState, Banner } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import { API_URL } from '../lib/apiBase'
+import { pluralize } from '../lib/pluralize'
 import { formatDocWhen } from '../lib/when'
 
 /**
@@ -103,7 +104,7 @@ export default function Docs() {
     ? (loading && !errorMessage ? 'Loading docs…' : 'Docs not loaded')
     : data.total === 0
       ? 'No docs yet'
-      : `${data.total} ${data.total === 1 ? 'doc' : 'docs'}`
+      : pluralize(data.total, 'doc')
 
   const shown = detail && detail.id === openId ? detail : null
   const title = shown?.title ?? open?.title ?? ''

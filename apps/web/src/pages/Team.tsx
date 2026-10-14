@@ -11,6 +11,7 @@ import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { OPERATOR_NAME } from '../config'
 import { ROSTER, agentCaption } from '../data/roster'
 import { formatChicagoSaved } from '../lib/chicago-day'
+import { pluralize } from '../lib/pluralize'
 import { OFFLINE_LABEL, isRegisteredOffline, orderedPeople, showSampleTag } from '../lib/sample-roster'
 import { useRosterView } from '../lib/useSampleRoster'
 
@@ -97,7 +98,7 @@ export default function Team() {
     <div>
       <PageHeader
         title="Team"
-        summary={`${owner} + ${roster.length} agents · ${online} online`}
+        summary={`${owner} + ${pluralize(roster.length, 'agent')} · ${pluralize(online, 'online', 'online')}`}
         tools={<Btn kind="primary" onClick={() => setInvite(true)}>Invite</Btn>}
       />
 
@@ -146,7 +147,7 @@ export default function Team() {
         <SoftCard className="px-6 py-5">
           <div className="flex items-center justify-between">
             <span className="text-[15px] font-semibold">People</span>
-            <span className="text-[12.5px] text-mc-sub">{people.length} {people.length === 1 ? 'person' : 'people'}</span>
+            <span className="text-[12.5px] text-mc-sub">{pluralize(people.length, 'person', 'people')}</span>
           </div>
           {!agentsQ.data && agentsQ.loading ? (
             <p className="mt-4 text-[13px] text-mc-sub">Loading people…</p>
@@ -188,7 +189,7 @@ export default function Team() {
         <SoftCard className="px-6 py-5">
           <div className="flex items-center justify-between">
             <span className="text-[15px] font-semibold">Agents</span>
-            <span className="text-[12.5px] text-mc-sub">{roster.length} · {working} working</span>
+            <span className="text-[12.5px] text-mc-sub">{pluralize(roster.length, 'agent')} · {pluralize(working, 'working', 'working')}</span>
           </div>
           {!agentsQ.data && agentsQ.loading ? (
             <p className="mt-4 text-[13px] text-mc-sub">Loading agents…</p>

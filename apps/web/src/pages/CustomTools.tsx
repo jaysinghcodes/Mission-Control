@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useApi, apiSend } from '../hooks/useApi'
 import { PageHeader, SoftCard, Btn, EmptyState, Banner, FieldError } from '../components/shell'
 import { ExperimentalBadge, FilledPrompt, PlainText } from '../components/tool-preview'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * Experimental custom tools (ticket 10).
@@ -76,7 +77,7 @@ export default function CustomTools() {
     ? (loading && !errorMessage ? 'Loading tools…' : 'Tools not loaded')
     : tools.length === 0
       ? 'No tools saved yet'
-      : `${tools.length} saved ${tools.length === 1 ? 'tool' : 'tools'}`
+      : pluralize(tools.length, 'saved tool')
 
   function resetForm() {
     setName('')

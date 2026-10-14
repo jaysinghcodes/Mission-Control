@@ -7,6 +7,7 @@ import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { agentCaption } from '../data/roster'
 import { agentNeedsYou, type ApprovalLike } from '../lib/board'
+import { pluralize } from '../lib/pluralize'
 import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
 import { useWorkLive } from '../lib/useWorkLive'
@@ -74,7 +75,7 @@ export default function Agents() {
     ? (loading && !errorMessage ? 'Loading agents…' : 'Agents not loaded')
     : roster.length === 0
       ? 'No agents yet'
-      : `${roster.length} agents · ${working} working${needs ? ` · ${needs} needs you` : ''}`
+      : `${pluralize(roster.length, 'agent')} · ${pluralize(working, 'working', 'working')}${needs ? ` · ${pluralize(needs, 'needs you', 'need you')}` : ''}`
 
   return (
     <div>
