@@ -76,6 +76,12 @@ export type DeletePlan =
 export type HeartbeatPlan =
   { ok: true; row: RosterAgent } | { ok: false; status: 404; message: string };
 
+/** Optional POST /agents/:id/heartbeat fields. Absent keys stay as stored. */
+export interface HeartbeatPatch {
+  currentTask?: string;
+  status?: string;
+}
+
 export interface StatusPatch {
   status?: string;
   currentTask?: string | null;
@@ -262,6 +268,7 @@ export function planRegister(
 export function planHeartbeat(
   row: RosterAgent | null,
   now: Date,
+  patch: HeartbeatPatch = {},
 ): HeartbeatPlan {
   if (!row || row.source !== 'registered') {
     return {
@@ -270,7 +277,17 @@ export function planHeartbeat(
       message: row ? 'agent is not registered' : 'agent not found',
     };
   }
-  return { ok: true, row: { ...row, lastSeenAt: now } };
+  return {
+    ok: true,
+    row: {
+      ...row,
+      lastSeenAt: now,
+      ...(patch.currentTask !== undefined
+        ? { currentTask: patch.currentTask }
+        : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+    },
+  };
 }
 
 export function planDelete(row: RosterAgent | null): DeletePlan {

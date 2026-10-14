@@ -28,8 +28,30 @@ describe('register docs', () => {
       'curl -sS -o /dev/null -w "%{http_code}\\n" -X POST "http://127.0.0.1:3000/agents/forge_helper/heartbeat"',
     );
     expect(section).toContain(
+      `'{"currentTask":"Shipping the notes","status":"working"}'`,
+    );
+    expect(section).toContain('status must be one of working, idle');
+    expect(section).toContain('unknown field <name>');
+    expect(section).toContain(
       'curl -sS -o /dev/null -w "%{http_code}\\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper"',
     );
     expect(section).toContain('x-ingest-token: $MC_TOKEN');
+  });
+
+  it('documents optional run status and curls that create queued, create running, and patch', () => {
+    const section = onboarding.split('### 4.6')[1]?.split('\n### 4.7')[0] ?? '';
+    expect(section.length).toBeGreaterThan(0);
+    expect(section).not.toMatch(/[\u2012\u2013\u2014\u2015]/);
+    expect(section).not.toContain('create does not accept');
+    expect(section).toContain(
+      'status must be one of queued, running, done, failed, needs_approval',
+    );
+    expect(section).toContain(
+      'curl -sS -D - -o /tmp/mc-run.json -X POST "http://127.0.0.1:3000/runs"',
+    );
+    expect(section).toContain(`'{"name":"Onboarding run","status":"running"}'`);
+    expect(section).toContain(`'{"name":"Queued onboarding run"}'`);
+    expect(section).toContain('PATCH "http://127.0.0.1:3000/runs/$RUN_ID"');
+    expect(onboarding).not.toMatch(/[\u2012\u2013\u2014\u2015]/);
   });
 });

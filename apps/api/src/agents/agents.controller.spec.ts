@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   NotFoundException,
   RequestMethod,
@@ -254,6 +255,102 @@ describe('AgentsController register, heartbeat, delete', () => {
     await expect(controller.heartbeat('forge')).rejects.toMatchObject({
       message: 'agent is not registered',
     });
+  });
+
+  it('a heartbeat body with currentTask and status updates the row and broadcasts', async () => {
+    const { rows, controller, res, broadcast } = harness();
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    broadcast.mockClear();
+    await controller.heartbeat('forge_helper', {
+      currentTask: 'Shipping the notes',
+      status: 'working',
+    });
+    expect(rows.get('forge_helper')).toMatchObject({
+      status: 'working',
+      currentTask: 'Shipping the notes',
+      source: 'registered',
+    });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(broadcast).toHaveBeenCalledWith(
+      'agents.snapshot',
+      expect.objectContaining({ id: 'forge_helper', action: 'heartbeat' }),
+    );
+  });
+
+  it('an empty heartbeat body only moves lastSeenAt', async () => {
+    const { rows, controller, res } = harness();
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    const row = rows.get('forge_helper')!;
+    row.status = 'idle';
+    row.currentTask = 'Keep me';
+    const before = row.lastSeenAt!.getTime();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await controller.heartbeat('forge_helper', {});
+    expect(row.status).toBe('idle');
+    expect(row.currentTask).toBe('Keep me');
+    expect(row.lastSeenAt!.getTime()).toBeGreaterThanOrEqual(before);
+    const seen = row.lastSeenAt!.getTime();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await controller.heartbeat('forge_helper');
+    expect(row.status).toBe('idle');
+    expect(row.currentTask).toBe('Keep me');
+    expect(row.lastSeenAt!.getTime()).toBeGreaterThanOrEqual(seen);
+  });
+
+  it('an unknown heartbeat field is 400 and does not write', async () => {
+    const { rows, controller, res, broadcast } = harness();
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    const before = rows.get('forge_helper')!.lastSeenAt;
+    broadcast.mockClear();
+    await expect(
+      controller.heartbeat('forge_helper', {
+        currentTask: 'Nope',
+        extra: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      controller.heartbeat('forge_helper', {
+        currentTask: 'Nope',
+        extra: true,
+      }),
+    ).rejects.toMatchObject({ message: 'unknown field extra', status: 400 });
+    expect(rows.get('forge_helper')!.lastSeenAt).toEqual(before);
+    expect(rows.get('forge_helper')!.currentTask).toBeNull();
+    expect(broadcast).not.toHaveBeenCalled();
+    await expect(
+      controller.heartbeat('missing_bot', { nope: 1 }),
+    ).rejects.toMatchObject({ message: 'unknown field nope', status: 400 });
+  });
+
+  it('an invalid heartbeat status is 400 and does not write', async () => {
+    const { rows, controller, res } = harness();
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    await expect(
+      controller.heartbeat('forge_helper', { status: 'running' }),
+    ).rejects.toMatchObject({
+      message: 'status must be one of working, idle',
+      status: 400,
+    });
+    await expect(
+      controller.heartbeat('forge_helper', { status: 1 }),
+    ).rejects.toMatchObject({
+      message: 'status must be a string',
+      status: 400,
+    });
+    expect(rows.get('forge_helper')!.status).toBe('idle');
+    expect(rows.get('forge_helper')!.currentTask).toBeNull();
   });
 
   it('criterion 5: delete removes a registered row and returns 409 for a default', async () => {

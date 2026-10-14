@@ -195,8 +195,38 @@ Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves sh
 | Call | Body | Notes |
 | --- | --- | --- |
 | `GET /runs?status=&ticketId=` | | Newest 50. `ticketId` keeps only runs linked to that ticket |
-| `POST /runs` | `{ name, agent?, ticketId? }` | 201 `{ run, ts }` for a queued run. No `error` key. Missing or blank name is 400 `name is required`. A non string name is 400 `name must be a string`. Name is at most 200 characters and agent at most 100. Longer is 400 and the message names the field. Unknown fields are 400 (`unknown field <name>`), including `status`, which create does not accept. Nothing extra is stored. `ticketId`, when set, must be an existing ticket id or the call is 404 `ticketId not found` and nothing is inserted. Null or blank stores no link |
+| `POST /runs` | `{ name, agent?, ticketId?, status? }` | 201 `{ run, ts }`. No `error` key. Missing or blank name is 400 `name is required`. A non string name is 400 `name must be a string`. Name is at most 200 characters and agent at most 100. Longer is 400 and the message names the field. `status` is optional and defaults to `queued`. Accepted values are `queued`, `running`, `done`, `failed`, `needs_approval`. A bad `status` is 400 `status must be one of queued, running, done, failed, needs_approval`. Omitted `status`, `queued`, and `needs_approval` emit `run.queued`. `running` sets `startedAt` and emits `run.started`. `done` sets `finishedAt` and emits `run.completed`. `failed` sets `finishedAt` and emits `run.failed`. A queued create keeps the previous event shape. The bridge still creates a queued run and then PATCHes it to `running`. Sending `status: "running"` on POST stores the same `startedAt` that PATCH would. Unknown fields are 400 (`unknown field <name>`). Nothing extra is stored. `ticketId`, when set, must be an existing ticket id or the call is 404 `ticketId not found` and nothing is inserted. Null or blank stores no link |
 | `PATCH /runs/:id` | `{ status?, progress?, agent?, ticketId? }` | 200 `{ run, ts }` with no `error` key. Unknown run id is 404 `run not found`. Unknown `ticketId` is 404 `ticketId not found` and the row is left unchanged. Unknown fields are 400. A bad `status`, `progress`, or `agent` is 400 and the message names that field. Agent is at most 100 characters. Status `queued`, `running`, `done`, `failed`, `needs_approval`. A body that changes no stored field returns 200 with the unchanged run and writes no activity event. A real change emits `run.started`, `run.completed`, `run.failed` or `run.queued`. `ticketId: null` clears the link |
+
+`$MC_TOKEN` is the ingest token from checklist step 2. When `INGEST_TOKEN` is unset on loopback outside production, omit the `x-ingest-token` line.
+
+```bash
+curl -sS -D - -o /tmp/mc-run.json -X POST "http://127.0.0.1:3000/runs" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"name":"Onboarding run","status":"running"}'
+```
+
+That returns HTTP 201 and `"status":"running"`.
+
+```bash
+curl -sS -D - -o /tmp/mc-run-queued.json -X POST "http://127.0.0.1:3000/runs" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"name":"Queued onboarding run"}'
+```
+
+That returns HTTP 201 and `"status":"queued"`. The next call reads the id from that file.
+
+```bash
+RUN_ID=$(python3 -c 'import json; print(json.load(open("/tmp/mc-run-queued.json"))["run"]["id"])')
+curl -sS -D - -o /tmp/mc-run-patched.json -X PATCH "http://127.0.0.1:3000/runs/$RUN_ID" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"status":"running"}'
+```
+
+That returns HTTP 200 and `"status":"running"`.
 
 ### 4.7 Models and spend
 
@@ -218,7 +248,7 @@ These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/se
 
 A bot adds or updates itself with `POST /agents/register`. The body is `{ "id", "name", "role?", "model?", "avatar?" }`. `id` is a lowercase slug of 1 to 64 characters using a to z, 0 to 9, and underscores. `name` is required and at most 200 characters. `role`, `model`, and `avatar` are optional and at most 200 characters. Unknown fields are 400 (`unknown field <name>`). A new id returns 201 `{ agent, ts }`. The same id again returns 200 and does not insert a second row. Registering a default or snapshot id keeps that row, sets `source` to `registered`, and keeps `position`, `color`, and `emoji`.
 
-`POST /agents/:id/heartbeat` returns 204 and sets `lastSeenAt`. It returns 404 when that id is not a registered bot (`agent not found` or `agent is not registered`). A registered bot with no register or heartbeat for 10 minutes reads `online: false` on `GET /agents` and `GET /agents/:id`. The row stays.
+`POST /agents/:id/heartbeat` returns 204 with an empty body and sets `lastSeenAt`. The JSON body is optional. No body and an empty object only set `lastSeenAt`. A body may include `currentTask` and `status`. `currentTask` is a non blank string of at most 200 characters. `status` must be `working` or `idle`. A bad `status` is 400 `status must be one of working, idle`. A non string `status` is 400 `status must be a string`. A non string `currentTask` is 400 `currentTask must be a string`. Unknown fields are 400 (`unknown field <name>`). A bad body is 400 before the id is checked. A missing bot with an unknown field is 400. It returns 404 when that id is not a registered bot (`agent not found` or `agent is not registered`) and the body is empty or valid. A registered bot with no register or heartbeat for 10 minutes reads `online: false` on `GET /agents` and `GET /agents/:id`. The row stays. The call still broadcasts `agents.snapshot`, so an open Agents, Office, or Team page refetches and shows the new `status` and `currentTask` without a reload.
 
 `DELETE /agents/:id` removes a registered bot and returns 204. A default row returns 409 `default agents cannot be deleted`. A snapshot row returns 409 `snapshot agents cannot be deleted`. A missing id returns 404 `agent not found`.
 
@@ -258,6 +288,15 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/
 That prints `204`.
 
 ```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/forge_helper/heartbeat" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"currentTask":"Shipping the notes","status":"working"}'
+```
+
+That prints `204`. `GET /agents/forge_helper` then shows `"status":"working"` and `"currentTask":"Shipping the notes"`.
+
+```bash
 curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper" \
   -H "x-ingest-token: $MC_TOKEN"
 ```
@@ -268,7 +307,7 @@ That prints `204`.
 
 * **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Those names match `apps/web/src/lib/board.ts`. To-Do and Backlog are not pipeline stages.
 * **Group work by project.** Create one project per product or repo and reuse it.
-* **Make runs visible.** For a longer job, `POST /runs` then `PATCH` with `running`, progress, and `done` or `failed`, or post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time.
+* **Make runs visible.** For a longer job, `POST /runs` with an optional `status`, or create the run queued and `PATCH` it to `running`, then send progress and `done` or `failed`. You can also post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time. The curls in section 4.6 do both.
 * **Ask, do not act, on gated work.** Put anything that needs your operator in an approval (via `approvals.snapshot`) and wait for the decision.
 * **Write daily memory** to `memory/YYYY-MM-DD.md` so Memory shows your day.
 * **Keep the bridge scheduled** so roster, cron, sessions, usage and memory stay current. `agents.snapshot` updates snapshot rows only. One bot can also call `POST /agents/register` (section 4.10).
