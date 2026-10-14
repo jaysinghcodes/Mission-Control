@@ -168,14 +168,9 @@ export class TicketsController {
       status,
       projectId,
     });
-    await this.persist('run.queued', {
-      name: `ticket ${ticket.key}`,
-      ticket: ticket.key,
-    });
-    this.gateway.broadcast('run.queued', {
-      name: `ticket ${ticket.key}`,
-      ticket: ticket.key,
-    });
+    const created = this.activityPayload(ticket, `ticket ${ticket.key}`);
+    await this.persist('run.queued', created);
+    this.gateway.broadcast('run.queued', created);
     return { ticket, ts: Date.now() };
   }
 
@@ -355,8 +350,9 @@ export class TicketsController {
     const label = data.status
       ? `ticket ${ticket.key} → ${ticket.status}`
       : `ticket ${ticket.key} updated`;
-    await this.persist('run.progress', { name: label, ticket: ticket.key });
-    this.gateway.broadcast('run.progress', { name: label, ticket: ticket.key });
+    const moved = this.activityPayload(ticket, label);
+    await this.persist('run.progress', moved);
+    this.gateway.broadcast('run.progress', moved);
     return { ticket, ts: Date.now() };
   }
 
@@ -490,6 +486,18 @@ export class TicketsController {
       throw new BadRequestException(`${field} must be an array of strings`);
     }
     return value; // narrowed by the checks above
+  }
+
+  /** Activity names the assignee so Office does not label the row system. */
+  private activityPayload(
+    ticket: { key: string | null; assignee: string | null },
+    name: string,
+  ): Record<string, unknown> {
+    return {
+      name,
+      ...(ticket.key ? { ticket: ticket.key } : {}),
+      ...(ticket.assignee ? { agent: ticket.assignee } : {}),
+    };
   }
 
   /** Write a run.* event to the persisted activity stream. */

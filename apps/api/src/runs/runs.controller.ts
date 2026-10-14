@@ -103,24 +103,11 @@ export class RunsController {
           : {}),
       },
     });
-    // A queued create keeps the previous event shape (id, name, ticketId).
+    // A queued create keeps id, name, and ticketId, and names the agent.
     // Any other initial status carries status and progress, matching PATCH.
-    const event =
-      status === 'queued'
-        ? {
-            id: run.id,
-            name: run.name,
-            ...(run.ticketId ? { ticketId: run.ticketId } : {}),
-          }
-        : {
-            id: run.id,
-            name: run.name,
-            status,
-            progress: run.progress,
-            ...(run.ticketId ? { ticketId: run.ticketId } : {}),
-          };
+    const event = this.activityPayload(run, status === 'queued');
     const eventType = this.eventType(status);
-    await this.persist(eventType, event);
+    await this.persist(eventType, event as Prisma.InputJsonValue);
     this.gateway.broadcast(eventType, event);
     return { run, ts: Date.now() };
   }
@@ -175,16 +162,10 @@ export class RunsController {
     });
     // Broadcast the transition so every open dashboard updates instantly.
     const eventType = this.eventType(nextStatus);
-    const event = {
-      id: run.id,
-      name: run.name,
-      status: nextStatus,
-      progress: run.progress,
-      ...(run.ticketId ? { ticketId: run.ticketId } : {}),
-    };
+    const event = this.activityPayload(run, false);
     // Persist too. The Activity page and Office build log load history from
     // the DB, so a run that moves fast must still leave a visible trail.
-    await this.persist(eventType, event);
+    await this.persist(eventType, event as Prisma.InputJsonValue);
     this.gateway.broadcast(eventType, event);
     return { run, ts: Date.now() };
   }
@@ -285,6 +266,30 @@ export class RunsController {
     const ticket = await this.prisma.ticket.findUnique({ where: { id } });
     if (!ticket) throw new NotFoundException('ticketId not found');
     return id;
+  }
+
+  /**
+   * Office activity reads `agent`. Include it on every run event.
+   * A queued create omits status and progress, matching the previous shape.
+   */
+  private activityPayload(
+    run: {
+      id: string;
+      name: string;
+      agent: string | null;
+      status: string;
+      progress: number;
+      ticketId: string | null;
+    },
+    queued: boolean,
+  ): Record<string, unknown> {
+    return {
+      id: run.id,
+      name: run.name,
+      ...(run.agent ? { agent: run.agent } : {}),
+      ...(queued ? {} : { status: run.status, progress: run.progress }),
+      ...(run.ticketId ? { ticketId: run.ticketId } : {}),
+    };
   }
 
   /** Write a run.* event to the persisted activity stream. */

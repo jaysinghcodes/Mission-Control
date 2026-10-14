@@ -330,6 +330,7 @@ describe('RunsController', () => {
     expect(gateway.broadcast).toHaveBeenLastCalledWith('run.queued', {
       id: queued.run.id,
       name: 'Ship',
+      agent: queued.run.agent,
     });
 
     const explicit = await controller.create({

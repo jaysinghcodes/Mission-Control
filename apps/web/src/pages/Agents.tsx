@@ -6,8 +6,10 @@ import { PageHeader, Segmented, StatusChip, Kicker, EmptyState, SearchInput } fr
 import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { agentCaption } from '../data/roster'
-import { agentNeedsYou, isWorking, type ApprovalLike } from '../lib/board'
+import { agentNeedsYou, type ApprovalLike } from '../lib/board'
+import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
+import { useWorkLive } from '../lib/useWorkLive'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
 import { useRosterView } from '../lib/useSampleRoster'
 
@@ -21,25 +23,30 @@ function tone(
   agent: Agent,
   pending: ApprovalLike[],
   tickets: { key?: string | null; title?: string | null; assignee?: string | null }[],
+  working: boolean,
 ): 'red' | 'green' | 'gray' {
   if (agentNeedsYou(agent, pending, tickets)) return 'red'
-  if (agent.status === 'working') return 'green'
+  if (working) return 'green'
   return 'gray'
 }
 
 export default function Agents() {
   const { data, loading, errorMessage, refetch } = useApi<AgentsResp>('/agents', { pollMs: 15000 })
   const approvalsQ = useApi<{ approvals: ApprovalLike[] }>('/approvals', { pollMs: 15000 })
-  const ticketsQ = useApi<{ tickets: { id: string; key: string | null; title: string; assignee: string | null }[] }>('/tickets', { pollMs: 15000 })
+  const ticketsQ = useApi<{ tickets: LiveTicket[] }>('/tickets', { pollMs: 15000 })
+  const runsQ = useApi<{ runs: LiveRun[] }>('/runs', { pollMs: 15000 })
   const { events } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
   const agents = data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
   const pending = approvalsQ.data?.approvals ?? []
   const tickets = ticketsQ.data?.tickets ?? []
-  const shownTone = (agent: Agent) => (isRegisteredOffline(agent, now) ? 'gray' : tone(agent, pending, tickets))
+  const runs = runsQ.data?.runs ?? []
+  const liveFor = (agent: Agent) => deriveLiveWork(agent, tickets, runs)
+  const shownTone = (agent: Agent) => (isRegisteredOffline(agent, now) ? 'gray' : tone(agent, pending, tickets, liveFor(agent).working))
 
   useRosterLive(events, refetch)
+  useWorkLive(events, ticketsQ.refetch, runsQ.refetch)
   useEffect(() => {
     if (events.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
   }, [events, refetchApprovals])
@@ -58,10 +65,10 @@ export default function Agents() {
     const q = query.trim().toLowerCase()
     if (!q) return true
     const cap = agentCaption(a.name, a.role)
-    return `${cap.name} ${cap.role} ${a.currentTask ?? ''} ${a.recentActivity ?? ''}`.toLowerCase().includes(q)
+    return `${cap.name} ${cap.role} ${liveFor(a).subtitle} ${a.recentActivity ?? ''}`.toLowerCase().includes(q)
   })
 
-  const working = roster.filter((a) => isWorking(a) && !isRegisteredOffline(a, now)).length
+  const working = roster.filter((a) => liveFor(a).working && !isRegisteredOffline(a, now)).length
   const needs = roster.filter((a) => shownTone(a) === 'red').length
   const summary = !data
     ? (loading && !errorMessage ? 'Loading agents…' : 'Agents not loaded')
@@ -94,8 +101,9 @@ export default function Agents() {
         {visible.map((agent) => {
           const cap = agentCaption(agent.name, agent.role)
           const offline = isRegisteredOffline(agent, now)
+          const live = liveFor(agent)
           const t = shownTone(agent)
-          const line = agent.currentTask || agent.recentActivity || (t === 'gray' ? 'Idle' : 'Working')
+          const line = live.subtitle
           const chip = offline ? OFFLINE_LABEL : t === 'red' ? 'Needs you' : t === 'green' ? 'Working' : 'Idle'
           return (
             <button
@@ -103,8 +111,18 @@ export default function Agents() {
               type="button"
               data-agent-id={agent.id}
               data-offline={offline ? 'true' : 'false'}
+              data-live-room={live.room}
+              data-live-subtitle={line}
+              data-live-source={live.source}
               ref={open?.id === agent.id ? trigger : undefined}
-              onClick={(e) => { trigger.current = e.currentTarget; setOpen(agent) }}
+              onClick={(e) => {
+                trigger.current = e.currentTarget
+                setOpen({
+                  ...agent,
+                  status: live.working ? 'working' : 'idle',
+                  currentTask: live.subtitle === 'Idle' ? agent.currentTask : live.subtitle,
+                })
+              }}
               className="mc-card px-4 py-4 text-left"
             >
               <div className="flex items-start gap-3">
@@ -113,7 +131,7 @@ export default function Agents() {
                   agents={agents}
                   px={72}
                   now={now}
-                  status={t === 'red' ? 'blocked' : agent.status}
+                  status={t === 'red' ? 'blocked' : live.working ? 'working' : 'idle'}
                 />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">

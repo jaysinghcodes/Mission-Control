@@ -2,7 +2,9 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
+import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
+import { useWorkLive } from '../lib/useWorkLive'
 import type { AgentsResp } from '../types'
 import { PageHeader, SoftCard, Btn, AgentName, Kicker, EmptyState, FieldError } from '../components/shell'
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
@@ -45,14 +47,20 @@ function deviceStatus(device: DeviceRow): { on: boolean; status: string } {
 
 export default function Team() {
   const agentsQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const ticketsQ = useApi<{ tickets: LiveTicket[] }>('/tickets', { pollMs: 20000 })
+  const runsQ = useApi<{ runs: LiveRun[] }>('/runs', { pollMs: 20000 })
   const missionQ = useApi<MissionResp>('/mission')
   const devicesQ = useApi<DevicesResp>('/devices', { pollMs: 30000 })
   const { events } = useLiveActivity()
   useRosterLive(events, agentsQ.refetch)
+  useWorkLive(events, ticketsQ.refetch, runsQ.refetch)
   const agents = agentsQ.data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
+  const tickets = ticketsQ.data?.tickets ?? []
+  const runs = runsQ.data?.runs ?? []
   const people = orderedPeople(roster, ROSTER.map((entry) => entry.name), (agent) => agentCaption(agent.name, agent.role).name)
-  const working = roster.filter((a) => a.status === 'working' && !isRegisteredOffline(a, now)).length
+  const liveFor = (agent: (typeof roster)[number]) => deriveLiveWork(agent, tickets, runs)
+  const working = roster.filter((a) => liveFor(a).working && !isRegisteredOffline(a, now)).length
   const devices = devicesQ.data?.devices ?? []
   const mission = missionQ.data?.mission ?? ''
   const placeholder = missionQ.data?.placeholder ?? ''
@@ -149,16 +157,22 @@ export default function Team() {
               {people.map((agent) => {
                 const cap = agentCaption(agent.name, agent.role)
                 const offline = isRegisteredOffline(agent, now)
+                const live = liveFor(agent)
+                const line = offline ? OFFLINE_LABEL : live.subtitle
                 return (
-                  <li key={agent.id} data-agent-id={agent.id} data-offline={offline ? 'true' : 'false'}>
-                    <Link to="/agents" className="flex shrink-0 items-center gap-2" aria-label={`${cap.name} · ${cap.role}${offline ? `, ${OFFLINE_LABEL}` : ''}`}>
-                      <RosterRobot agent={agent} agents={agents} px={36} now={now} />
+                  <li key={agent.id} data-agent-id={agent.id} data-offline={offline ? 'true' : 'false'} data-live-room={live.room} data-live-subtitle={line} data-live-source={live.source}>
+                    <Link to="/agents" className="flex shrink-0 items-center gap-2" aria-label={`${cap.name} · ${cap.role}, ${line}`}>
+                      <RosterRobot agent={agent} agents={agents} px={36} now={now} status={live.working ? 'working' : 'idle'} />
                       <span className="min-w-0">
                         <span className="flex flex-wrap items-center gap-1">
                           <AgentName name={agent.name} role={agent.role} size="md" />
                           {showSampleTag(agent) && <SampleTag />}
                         </span>
-                        {offline && <span className="block text-[11px] text-mc-sub">{OFFLINE_LABEL}</span>}
+                        {offline ? (
+                          <span className="block text-[11px] text-mc-sub">{OFFLINE_LABEL}</span>
+                        ) : line !== 'Idle' ? (
+                          <span className="block text-[11px] text-mc-sub">{line}</span>
+                        ) : null}
                       </span>
                     </Link>
                   </li>
@@ -185,11 +199,13 @@ export default function Team() {
               {people.map((agent) => {
                 const cap = agentCaption(agent.name, agent.role)
                 const offline = isRegisteredOffline(agent, now)
+                const live = liveFor(agent)
+                const line = offline ? OFFLINE_LABEL : live.subtitle
                 return (
-                  <Link key={agent.id} to="/agents" data-agent-id={agent.id} aria-label={`${cap.name} · ${cap.role}${offline ? `, ${OFFLINE_LABEL}` : ''}`} className="flex flex-col items-center rounded-lg">
-                    <RosterRobot agent={agent} agents={agents} px={46} now={now} />
+                  <Link key={agent.id} to="/agents" data-agent-id={agent.id} data-live-room={live.room} data-live-subtitle={line} aria-label={`${cap.name} · ${cap.role}, ${line}`} className="flex flex-col items-center rounded-lg">
+                    <RosterRobot agent={agent} agents={agents} px={46} now={now} status={live.working ? 'working' : 'idle'} />
                     {showSampleTag(agent) && <SampleTag />}
-                    {offline && <span className="text-[11px] text-mc-sub">{OFFLINE_LABEL}</span>}
+                    {(offline || line !== 'Idle') && <span className="text-[11px] text-mc-sub">{offline ? OFFLINE_LABEL : line}</span>}
                   </Link>
                 )
               })}

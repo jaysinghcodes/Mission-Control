@@ -92,17 +92,27 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 | Page | Route | What it shows | Fed by |
 | --- | --- | --- | --- |
 | Tasks | `/#/tasks` | Ticket kanban: To-Do, Build, QA, Review, Done. Backlog is `/#/tasks?view=backlog`. `/#/tickets` redirects to Tasks. `/#/backlog` redirects to the backlog view | `/tickets` |
-| Agents | `/#/agents` | Agent roster and profiles | `agents.snapshot` |
+| Agents | `/#/agents` | Agent roster and profiles. The Now line uses the same live placement as Office | `agents.snapshot`, `/tickets`, `/runs` |
 | Approvals | `/#/approvals` | Pending and decided approvals | `approvals.snapshot`, `/approvals` |
 | Projects | `/#/projects`, `/#/projects/:id` | Projects with ticket and done counts | `/projects` |
-| Office | `/#/office` | Floor seats from role text and status (Build, QA, Ship, Deploy, Commons). `run.*` events show in the activity list. They do not move agents between rooms. `/#/activity` and `/#/factory` redirect here | events, `/agents` |
+| Office | `/#/office` | Floor seats from live work (Build, QA, Ship, Deploy, Commons). Agents, Team, and Office share one placement. `/#/activity` and `/#/factory` redirect here | `/agents`, `/tickets`, `/runs`, events |
 | Pipeline | `/#/pipeline` | Tickets as Build, QA, Ship, Deploy (statuses build, qa, review, done) | `/tickets`, `/approvals`, `/runs` |
 | Calendar | `/#/calendar` | Weekly grid of cron jobs | `calendar.snapshot` |
 | Memory | `/#/memory` | Memory notes grouped by day (America/Chicago) | `memory.snapshot` |
 | Docs | `/#/docs` | Markdown files from `DOCS_ROOT` (default `data/docs`), read only in the browser | files on disk |
-| Team | `/#/team` | Mission, people, and devices. Not an org chart | `agents.snapshot`, `/mission`, `/devices` |
+| Team | `/#/team` | Mission, people, and devices. Not an org chart. People use the same live placement as Office | `agents.snapshot`, `/mission`, `/devices`, `/tickets`, `/runs` |
 | System | `/#/system` | Health, uptime, usage and cost (Today, 7d, month), sessions, activity. Panels: `/#/system/logs`, `/#/system/sessions`, `/#/system/settings`, `/#/system/tools`, `/#/system/connection`. `/#/health` and `/#/usage` redirect here | `/health`, `/system`, `/usage`, `/sessions` |
 | Connect | `/#/connect` | Setup and remote tunnel guide | |
+
+Office, Agents, and Team read one derived placement. Precedence:
+
+1. Active ticket. The bot is the assignee (id or name) of a ticket in `build`, `qa`, `review`, or `done` (`inprogress` counts as build). The room is that stage: Build, QA, Ship, Deploy. The subtitle is the ticket title. Several tickets: the newest `createdAt` wins, then the later stage.
+2. Active run. `status` is `running` or `needs_approval`, the run names this bot, and `ticketId` points at a ticket in one of those stages. The room is that ticket's stage. The subtitle is the ticket title, or the run name when the title is blank. A queued, done, or failed run does not take a desk. A run with no ticket in a stage does not take a desk.
+3. Heartbeat. The room is Commons. The subtitle is `currentTask` when it is non blank, otherwise Working or Idle from `status`.
+
+Role text is not a seat. A stored status does not pick a room. To Do and Backlog are not stages, so those tickets send the bot back to Commons when no active run applies. `run.*` socket events refetch tickets, runs, and activity. `agents.snapshot` refetches the roster. The page does not reload.
+
+Activity names the real agent. Ticket events include `agent` (the assignee). Run events include `agent` (the run agent). A row with no agent falls back to the ticket assignee, then the run agent. The word system is not a name.
 
 ## 4. How you report into Mission Control
 
@@ -305,7 +315,7 @@ That prints `204`.
 
 ## 5. Adapting your workflow
 
-* **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Those names match `apps/web/src/lib/board.ts`. To-Do and Backlog are not pipeline stages.
+* **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Office moves the assignee into that same room. Those names match `apps/web/src/lib/board.ts` and `apps/web/src/lib/live-work.ts`. To-Do and Backlog are not pipeline stages. A bot with no ticket in a stage and no active run sits in Commons.
 * **Group work by project.** Create one project per product or repo and reuse it.
 * **Make runs visible.** For a longer job, `POST /runs` with an optional `status`, or create the run queued and `PATCH` it to `running`, then send progress and `done` or `failed`. You can also post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time. The curls in section 4.6 do both.
 * **Ask, do not act, on gated work.** Put anything that needs your operator in an approval (via `approvals.snapshot`) and wait for the decision.

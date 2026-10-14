@@ -412,7 +412,11 @@ describe('TicketsController', () => {
         expect(gateway.broadcast).toHaveBeenCalledTimes(1);
         expect(gateway.broadcast).toHaveBeenCalledWith(
           'run.progress',
-          expect.objectContaining({ name: `ticket ${ticket.key} → build` }),
+          expect.objectContaining({
+            name: `ticket ${ticket.key} → build`,
+            agent: ticket.assignee,
+            ticket: ticket.key,
+          }),
         );
       });
 
