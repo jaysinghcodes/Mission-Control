@@ -110,6 +110,10 @@ describe('Tickets (e2e)', () => {
     }).compile();
     app = moduleFixture.createNestApplication();
     await app.init();
+    // Listen once. Supertest otherwise calls listen on the first request of
+    // a batch and closes that server when the request ends, which resets
+    // the other nine parallel creates.
+    await app.listen(0, '127.0.0.1');
     prisma = app.get(PrismaService);
     if (!prisma.dbReady) {
       throw new Error(

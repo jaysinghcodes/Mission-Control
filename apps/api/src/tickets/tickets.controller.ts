@@ -87,6 +87,14 @@ export class TicketsController {
    */
   private readonly writes = new KeyedMutex();
 
+  /**
+   * One create at a time in this process. Ten parallel creates used to open
+   * ten transactions that all waited on the advisory lock, which filled the
+   * pool. The tenth request then lost its socket, and shutdown still held
+   * the open transaction. The advisory lock still serializes other processes.
+   */
+  private readonly creates = new KeyedMutex();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: LiveActivityGateway,
@@ -148,6 +156,28 @@ export class TicketsController {
     const projectRef = this.parseProjectRef(body?.projectId);
     const projectId = projectRef.kind === 'id' ? projectRef.id : undefined;
 
+    // Queue synchronously, before any await, so parallel creates line up
+    // in receive order and only the head opens a transaction.
+    return this.creates.run('ticket-key', () =>
+      this.insertCreatedTicket({
+        title,
+        priority,
+        assignee,
+        tags,
+        status,
+        projectId,
+      }),
+    );
+  }
+
+  private async insertCreatedTicket(input: {
+    title: string;
+    priority: string;
+    assignee: string;
+    tags: string[];
+    status: string;
+    projectId?: string;
+  }) {
     // ── key allocation (QA-1 #5) ─────────────────────────────────────────
     // The old code did `count()` then `create({ key: MC-${150 + count} })` as
     // two separate, unlocked round-trips. Every create that read the count
@@ -160,14 +190,7 @@ export class TicketsController {
     // ONE transaction that first takes a transaction-scoped Postgres
     // advisory lock (see allocateKeyAndCreate). Concurrent creates queue on
     // that lock, so each one sees the previous one's committed MC-N.
-    const ticket = await this.allocateKeyAndCreate({
-      title,
-      priority,
-      assignee,
-      tags,
-      status,
-      projectId,
-    });
+    const ticket = await this.allocateKeyAndCreate(input);
     const created = this.activityPayload(ticket, `ticket ${ticket.key}`);
     await this.persist('run.queued', created);
     this.gateway.broadcast('run.queued', created);

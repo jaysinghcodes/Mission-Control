@@ -291,12 +291,26 @@ describe('TicketsController', () => {
       });
 
       it('10 parallel creates → 10 unique, consecutive keys', async () => {
-        const { controller } = makeController();
+        const { controller, prisma } = makeController();
+        let active = 0;
+        let max = 0;
+        const impl = prisma.$transaction.getMockImplementation();
+        if (!impl) throw new Error('transaction fake missing');
+        prisma.$transaction.mockImplementation(async (fn, ...rest) => {
+          active += 1;
+          max = Math.max(max, active);
+          try {
+            return await impl(fn, ...rest);
+          } finally {
+            active -= 1;
+          }
+        });
         const results = await Promise.all(
           Array.from({ length: 10 }, (_, i) =>
             controller.create({ title: `p${i}`, status: 'todo' }),
           ),
         );
+        expect(max).toBe(1);
         const keys = results.map((r) => r.ticket.key).sort();
         expect(new Set(keys).size).toBe(10);
         expect(keys).toEqual(

@@ -118,7 +118,14 @@ export class LiveActivityGateway
    * @param payload event payload (must be JSON-serializable)
    */
   broadcast(type: ActivityEventType, payload: Record<string, unknown>): void {
-    this.server.emit(type, { ...payload, ts: Date.now() });
+    // init() can broadcast before the socket server is attached. A throw
+    // here would reset the HTTP socket of the write that already committed.
+    if (!this.server) return;
+    try {
+      this.server.emit(type, { ...payload, ts: Date.now() });
+    } catch {
+      // The ticket or run is already stored. A dead socket is not a 500.
+    }
   }
 
   /** Number of currently connected dashboard clients (for /health). */
