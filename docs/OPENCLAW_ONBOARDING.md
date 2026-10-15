@@ -25,16 +25,30 @@ Every event is stored in the `ActivityEvent` table and broadcast live over Socke
 
 ## 2. Install and run
 
-Prerequisites: Node 20.17+ or 22.9+, npm, git, Docker with the compose plugin. Python 3 if you will run the bridge.
+The quick start is the Install and run block in the [README](../README.md). The fresh clone CI job runs those commands. OpenClaw is optional. The dashboard runs with no bridge and no OpenClaw CLI.
+
+Prerequisites: git, Node.js 20.17+ or 22.9+, npm 11.17.0, and Postgres 16 on `127.0.0.1:5432`. Python 3 only if you will run the bridge. Docker is optional.
+
+Create the database the template expects if it is not there yet: database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret.
 
 ```bash
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
 cd mission-control
 npm ci
 cp .env.example .env
+set -a; . ./.env; set +a
+(cd apps/api && npx prisma generate)
+(cd apps/api && npx prisma migrate deploy)
+npm run dev
 ```
 
-Edit `.env` before starting. Rules for you:
+Then open http://localhost:5173/#/tasks
+
+`npm run doctor` checks the setup from the repo root. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
+
+`npm run seed:demo` fills sample agents, tickets, projects, and usage. It is idempotent and only touches demo rows. `npm run seed:clear` deletes only those sample rows. Registered bots and rows you created through the API stay. A fresh setup does not load sample data.
+
+Edit `.env` before you expose the machine. Rules for you:
 
 * **Never invent secrets.** Ask your operator for any real key.
 * `INGEST_TOKEN`: the template value is `change-me`. Replace it with a random value (`openssl rand -hex 24` is fine) and tell your operator. Every write route checks it when it is set, including `POST /events`. The bridge refuses to run if this is blank. The web UI does not receive the value. Vite and nginx attach it.
@@ -44,7 +58,7 @@ Edit `.env` before starting. Rules for you:
 * `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them. Spend on System comes from `usage.snapshot`, not a live provider call.
 * Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`.
 
-Start the stack:
+Docker Compose is optional. `docker-compose.yml` is in the repo for a host that has Docker. The quick start above is the path the fresh clone CI job runs.
 
 ```bash
 docker compose up -d --build
@@ -54,25 +68,9 @@ docker compose logs api
 
 The api log should end with `mission-control api listening on 0.0.0.0:3000`. Compose sets `HOST=0.0.0.0` inside the container and runs `prisma migrate deploy` on api boot. That log line is the process text in `apps/api/src/main.ts`.
 
-Optional sample data (idempotent, only touches demo rows):
+The api has no `.env` loader. On the quick start path, the `set -a` export is required. Copy the root `.env.example` to the root `.env`. `apps/api/.env` is never loaded.
 
-```bash
-npm run seed:demo
-```
-
-Without Docker (Postgres still required):
-
-```bash
-set -a; . ./.env; set +a
-(cd apps/api && npx prisma migrate deploy)
-npm run dev
-```
-
-The api has no `.env` loader, so the `set -a` export is required on this path. Copy the root `.env.example` to the root `.env`. `apps/api/.env` is never loaded.
-
-If setup fails, run `npm run doctor` from the repo root. It prints one line per check and the command that fixes it. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
-
-On npm 11.17.0, `npm ci` skips the Prisma install scripts. Run `(cd apps/api && npx prisma generate)` before `npm test` or `npm run build`, or those commands fail to find `.prisma/client`.
+On npm 11.17.0, `npm ci` skips the Prisma install scripts. The quick start already runs `(cd apps/api && npx prisma generate)`. Run that again before `npm test` or `npm run build` if you have not, or those commands fail to find `.prisma/client`.
 
 Useful URLs (the web app uses hash routes, so always include `/#/`):
 
