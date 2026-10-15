@@ -1,10 +1,10 @@
 # Mission Control
 
-You host this command center yourself. It is the dashboard for an OpenClaw setup: a task board, agents, approvals, projects, an office floor, a pipeline, a calendar of cron jobs, memory, docs, a team page, and system health.
+You host this command center yourself. It is the dashboard for an OpenClaw setup, and it also runs with no OpenClaw at all. Home is the task board. Office is a full bleed floor with live rooms: Build, QA, Ship, Deploy, and a Commons. Sample bots, an empty floor, and one registered bot in a live room are all normal states. The rest of the sidebar is agents, approvals, projects, a pipeline, a calendar of cron jobs, memory, docs, a team page, and system health.
 
 The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then Calendar, Memory, Docs, Team, System. Overview is not a route. `/` redirects to `/tasks`.
 
-It also runs with no OpenClaw at all. Seed the demo data and click through the UI.
+OpenClaw is optional. `npm run seed:demo` fills the sample roster so you can click through the UI. `npm run seed:clear` removes only those sample rows. `npm run doctor` checks the local setup. A missing OpenClaw bridge does not fail that command.
 
 **OpenClaw agents start here:** [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). That file is meant to be pasted to an agent. It has the base URL placeholder, the `x-ingest-token` header, and the exact requests this API accepts. Every write route uses that header when `INGEST_TOKEN` is set.
 
@@ -16,55 +16,27 @@ Verified on a fresh clone with **Node v22.14.0** and **npm 11.17.0** (the `packa
 
 ## Screenshots
 
-These are the current screens after an explicit `npm run seed:demo` on this branch. A fresh clone does not run that command, so the first screen is an empty state. The sidebar has no Overview page, so there is no Overview shot. Sessions and gateway logs stay empty until a real OpenClaw bridge posts them.
+These five shots are a live run of this branch, 1440 by 900, light theme. `npm run seed:demo` loads the sample bots. A fresh clone does not run that command, so the first Office is empty. `npm run seed:clear` returns to that empty floor. Registered bots and rows you created through the API stay.
 
-The seeded bots are the sample roster. Agents, Office, and Team each show a Sample tag on those cards. System includes the Show sample bots switch. It stays off until you turn it on. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed.
+The seeded bots are the sample roster. Office shows a Sample tag on those cards. System includes the Show sample bots switch. It stays off until you turn it on. Once a registered bot exists, the sample bots hide until you turn that switch on. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed.
 
-| Tasks | Backlog |
+| Office with sample bots | Office with one registered bot in QA |
 | --- | --- |
-| ![Tasks board](docs/screenshots/tasks.png) | ![Tasks backlog](docs/screenshots/tasks-backlog.png) |
+| ![Office with sample bots after seed:demo](docs/screenshots/office-sample-bots.png) | ![Office with Live Quill in QA](docs/screenshots/office-registered-qa.png) |
 
-| Agents | Approvals |
+| Tasks board | System usage |
 | --- | --- |
-| ![Agents](docs/screenshots/agents.png) | ![Approvals](docs/screenshots/approvals.png) |
+| ![Tasks board](docs/screenshots/tasks-board.png) | ![System page with Today, the last 7 days, and the month](docs/screenshots/system-usage.png) |
 
-| Projects | Project detail |
-| --- | --- |
-| ![Projects](docs/screenshots/projects.png) | ![Project detail](docs/screenshots/project-detail.png) |
+![Empty Office after seed:clear](docs/screenshots/office-empty.png)
 
-| Office | Pipeline |
-| --- | --- |
-| ![Office](docs/screenshots/office.png) | ![Pipeline](docs/screenshots/pipeline.png) |
-
-| Calendar | Memory |
-| --- | --- |
-| ![Calendar](docs/screenshots/calendar.png) | ![Memory](docs/screenshots/memory.png) |
-
-| Docs | Team |
-| --- | --- |
-| ![Docs](docs/screenshots/docs.png) | ![Team](docs/screenshots/team.png) |
-
-| System | Setup |
-| --- | --- |
-| ![System, example data](docs/screenshots/system.png) | ![Setup](docs/screenshots/connect.png) |
-
-The System screenshot is example data from one seed. The dollar amounts depend on the date you run `npm run seed:demo`.
-
-System panels:
-
-| Logs | Sessions |
-| --- | --- |
-| ![Logs](docs/screenshots/system-logs.png) | ![Sessions](docs/screenshots/system-sessions.png) |
-
-| Settings | Connection |
-| --- | --- |
-| ![Settings](docs/screenshots/system-settings.png) | ![Connection](docs/screenshots/system-connection.png) |
-
-![Custom tools](docs/screenshots/system-tools.png)
+The sample Office is the floor after `npm run seed:demo`. Each bot sits in the room its live ticket or run picks. A done ticket does not hold a seat. The QA shot is one registered bot, Live Quill, on a ticket in QA, with the sample bots hidden. The Tasks board is those seeded tickets. System shows Today, the last 7 days, and the month to date from the seeded usage rows. The dollar amounts depend on the date you run `npm run seed:demo`. The empty Office is the floor after `npm run seed:clear`. Sessions and gateway logs stay empty until a real OpenClaw bridge posts them.
 
 ---
 
 ## Install and run
+
+This is the quick start. The fresh clone CI job runs these commands.
 
 Prerequisites that this run used: git, Node.js 22.14.0 (Node 20.17+ or 22.9+ satisfies the npm 11.17.0 engines range), npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`.
 
@@ -84,6 +56,12 @@ npm run dev
 ```
 
 Then open **http://localhost:5173/#/tasks**.
+
+OpenClaw is optional. The commands above do not start it.
+
+`npm run doctor` checks Node, the API port, `.env`, the database, migrations, the write token, and API health. A missing OpenClaw bridge is an info line. It does not fail the command.
+
+`npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data.
 
 `npm ci` prints an `allow-scripts` warning for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. The following `npx prisma generate` still completed, and migrate deployed 10 migrations.
 
@@ -152,7 +130,7 @@ Schema changes stay human reviewed. The app does not auto migrate on the `npm ru
 | `/#/approvals` | Pending and decided approvals |
 | `/#/projects` | Project list |
 | `/#/projects/<id>` | One project and its tickets |
-| `/#/office` | Office floor |
+| `/#/office` | Full bleed Office. Live rooms are Build, QA, Ship, Deploy, and Commons |
 | `/#/pipeline` | The same tickets as Build, QA, Ship, Deploy |
 | `/#/calendar` | Cron jobs for the week |
 | `/#/memory` | Memory notes |
@@ -214,18 +192,6 @@ That prints `204`. A default id returns 409. If register returns 401, run `npm r
 Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. The rows stay in the database. Turn on Show sample bots on System to bring them back. They show the Sample tag. The switch is saved in this browser and stays on after a reload. Delete every real bot and the defaults show again on their own. A bridge snapshot never removes a registered bot.
 
 A registered bot with no heartbeat for 10 minutes shows Offline. The label uses the existing idle robot, dimmed. The row is not deleted.
-
-| Samples hidden | Show sample bots | Offline |
-| --- | --- | --- |
-| ![Agents with a real bot and samples hidden](docs/screenshots/agents-real.png) | ![Agents with Show sample bots on](docs/screenshots/agents-samples-on.png) | ![A registered bot Offline](docs/screenshots/agents-offline.png) |
-
-| Office, samples hidden | Office, Sample tags | Office, Offline |
-| --- | --- | --- |
-| ![Office with samples hidden](docs/screenshots/office-real.png) | ![Office with Sample tags](docs/screenshots/office-samples-on.png) | ![Office with a bot Offline](docs/screenshots/office-offline.png) |
-
-| Team, samples hidden | Team, Sample tags | Team, Offline |
-| --- | --- | --- |
-| ![Team with samples hidden](docs/screenshots/team-real.png) | ![Team with Sample tags](docs/screenshots/team-samples-on.png) | ![Team with a bot Offline](docs/screenshots/team-offline.png) |
 
 Example that returned `202` against the running API (token redacted):
 
@@ -369,7 +335,7 @@ apps/web/                  React dashboard
 apps/api/                  NestJS API, Prisma schema, seed script
 bridge/                    Optional OpenClaw sync
 docs/OPENCLAW_ONBOARDING.md   Paste this to an OpenClaw agent
-docs/screenshots/          Current screen PNGs embedded above
+docs/screenshots/          Live screenshots embedded above
 wireframes/                Static wireframe art, not the running UI
 LOG.md                     Change log
 ONBOARDING.md              Human install steps for an agent to walk through
