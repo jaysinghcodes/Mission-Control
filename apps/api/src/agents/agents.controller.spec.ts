@@ -183,7 +183,12 @@ describe('AgentsController register, heartbeat, delete', () => {
     expect(rows.size).toBe(1);
     expect(broadcast).toHaveBeenCalledWith(
       'agents.snapshot',
-      expect.objectContaining({ id: 'forge_helper', action: 'register' }),
+      expect.objectContaining({
+        id: 'forge_helper',
+        action: 'register',
+        agent: 'Forge Helper',
+        name: 'Forge Helper registered',
+      }),
     );
   });
 
@@ -273,10 +278,23 @@ describe('AgentsController register, heartbeat, delete', () => {
       currentTask: 'Shipping the notes',
       source: 'registered',
     });
+    expect(broadcast).toHaveBeenCalledTimes(2);
+    expect(broadcast).toHaveBeenNthCalledWith(
+      1,
+      'agents.snapshot',
+      expect.objectContaining({ id: 'forge_helper', action: 'heartbeat' }),
+    );
+    expect(broadcast).toHaveBeenNthCalledWith(2, 'agent.status', {
+      name: 'Forge Helper is now working',
+      agent: 'Forge Helper',
+      status: 'working',
+    });
+    broadcast.mockClear();
+    await controller.heartbeat('forge_helper', { status: 'working' });
     expect(broadcast).toHaveBeenCalledTimes(1);
     expect(broadcast).toHaveBeenCalledWith(
       'agents.snapshot',
-      expect.objectContaining({ id: 'forge_helper', action: 'heartbeat' }),
+      expect.objectContaining({ action: 'heartbeat' }),
     );
   });
 
@@ -372,7 +390,12 @@ describe('AgentsController register, heartbeat, delete', () => {
     expect(rows.has('forge_helper')).toBe(false);
     expect(broadcast).toHaveBeenCalledWith(
       'agents.snapshot',
-      expect.objectContaining({ id: 'forge_helper', action: 'delete' }),
+      expect.objectContaining({
+        id: 'forge_helper',
+        action: 'delete',
+        agent: 'Forge Helper',
+        name: 'Forge Helper went offline',
+      }),
     );
     await expect(controller.remove('forge_helper')).rejects.toMatchObject({
       message: 'agent not found',

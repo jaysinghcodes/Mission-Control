@@ -1,11 +1,13 @@
 /**
  * Office floor placement.
  *
- * The locked picture (design-refs/ticket-9) is Build / QA / Ship / Deploy
- * desks plus a Commons. This module only decides who sits where for the
- * segmented filter. Task lines, activity, and pipeline counts stay on the
- * live agent / ticket / approval payloads.
+ * The locked picture is Build / QA / Ship / Deploy desks plus a Commons.
+ * Who sits where is the room already chosen by live work (see live-work.ts).
+ * This module only applies the segmented filter and the two desk cap.
+ * Role text is not a seat.
  */
+
+import { pluralize } from './pluralize'
 
 export type DeskRoom = 'build' | 'qa' | 'ship' | 'deploy'
 export type Room = DeskRoom | 'commons'
@@ -23,25 +25,21 @@ export interface FloorAgent {
   role?: string | null
   status?: string | null
   currentTask?: string | null
+  /** Live room from deriveLiveWork. Missing means Commons. */
+  room?: Room | null
 }
 
 export function floorMode(index: number): FloorMode {
   return FLOOR_MODES[index] ?? 'all'
 }
 
-function hay(agent: FloorAgent): string {
-  return `${agent.role ?? ''} ${agent.name}`.toLowerCase()
-}
-
-/** Home seat from role. Product sits in Ship (Atlas); the council sits in Commons. */
-export function homeRoom(agent: FloorAgent): Room {
-  const r = hay(agent)
-  if (/chief|research|support|scout|trend/.test(r)) return 'commons'
-  if (/qa|quality|security|alert/.test(r)) return 'qa'
-  if (/writer|summary|scribe|product/.test(r)) return 'ship'
-  if (/ops|data|deploy/.test(r)) return 'deploy'
-  if (/engineer|developer|development|\bdev\b|design/.test(r)) return 'build'
-  return agent.status === 'working' ? 'build' : 'commons'
+/** The room live work already chose. Role text is ignored. */
+export function seatRoom(agent: FloorAgent): Room {
+  const room = agent.room
+  if (room === 'build' || room === 'qa' || room === 'ship' || room === 'deploy' || room === 'commons') {
+    return room
+  }
+  return 'commons'
 }
 
 /** On the clock: working, or waiting on a decision. Idle agents are on break. */
@@ -55,18 +53,10 @@ function seatRank(agent: FloorAgent, blockedIds: ReadonlySet<string>): number {
   return 2
 }
 
-const COMMONS_SEAT = ['chief', 'research', 'scout', 'trend', 'support']
-
-function commonsSeat(agent: FloorAgent): number {
-  const r = hay(agent)
-  const i = COMMONS_SEAT.findIndex((key) => r.includes(key))
-  return i === -1 ? COMMONS_SEAT.length : i
-}
-
 /**
- * All working: everyone at their home seat (idle agents stay at their desk).
- * Gather: on-the-clock agents only, still at home.
- * Meeting: the Commons council only.
+ * All: everyone at their live room.
+ * Gather: on the clock only, still in that room.
+ * Meeting: on the clock agents whose live room is Commons.
  * Break: idle agents leave their desks and land in the Commons.
  */
 export function placeFloor<T extends FloorAgent>(
@@ -82,7 +72,7 @@ export function placeFloor<T extends FloorAgent>(
     commons: [],
   }
   for (const agent of agents) {
-    const home = homeRoom(agent)
+    const home = seatRoom(agent)
     const onClock = isOnClock(agent, blockedIds.has(agent.id))
     if (mode === 'gather' && !onClock) continue
     if (mode === 'meeting' && (home !== 'commons' || !onClock)) continue
@@ -100,7 +90,7 @@ export function placeFloor<T extends FloorAgent>(
     const extra = buckets[id].splice(DESK_CAP)
     buckets.commons.push(...extra)
   }
-  buckets.commons.sort((a, b) => commonsSeat(a) - commonsSeat(b) || a.name.localeCompare(b.name))
+  buckets.commons.sort((a, b) => a.name.localeCompare(b.name))
   return buckets
 }
 
@@ -112,10 +102,10 @@ export function roomByline(
 ): string {
   const n = crew.filter((agent) => agent.status === 'working' && !blockedIds.has(agent.id)).length
   if (n === 0) return 'Idle'
-  if (room === 'build') return n === 1 ? '1 in progress' : `${n} in progress`
-  if (room === 'qa') return n === 1 ? '1 testing' : `${n} testing`
-  if (room === 'ship') return n === 1 ? '1 ready' : `${n} ready`
-  return n === 1 ? '1 deploying' : `${n} deploying`
+  if (room === 'build') return pluralize(n, 'in progress', 'in progress')
+  if (room === 'qa') return pluralize(n, 'testing', 'testing')
+  if (room === 'ship') return pluralize(n, 'ready', 'ready')
+  return pluralize(n, 'deploying', 'deploying')
 }
 
 export function taskLine(agent: FloorAgent, blocked: boolean): string {
@@ -128,17 +118,17 @@ export function taskLine(agent: FloorAgent, blocked: boolean): string {
 export function commonsByline(crew: readonly FloorAgent[], mode: FloorMode): string {
   const n = crew.length
   if (n === 0) return 'Empty'
-  if (mode === 'break') return n === 1 ? '1 on break' : `${n} on break`
-  const council = crew.every((agent) => homeRoom(agent) === 'commons')
-  if (council) return `Build council · ${n} ${n === 1 ? 'agent' : 'agents'}`
-  return n === 1 ? '1 agent' : `${n} agents`
+  if (mode === 'break') return pluralize(n, 'on break', 'on break')
+  return pluralize(n, 'agent')
 }
 
-/** Table caption. The chief's task is the meeting topic; break has no topic. */
+/** Table caption. The first live line in the room; break has no topic. */
 export function commonsTopic(crew: readonly FloorAgent[], mode: FloorMode): string | null {
   if (mode === 'break' || crew.length === 0) return null
-  const chief = crew.find((agent) => /chief/.test(hay(agent)))
-  const line = (chief?.currentTask ?? crew.find((agent) => agent.currentTask?.trim())?.currentTask ?? '').trim()
+  const line = (crew.find((agent) => {
+    const task = agent.currentTask?.trim()
+    return !!task && task !== 'Idle'
+  })?.currentTask ?? '').trim()
   return line || null
 }
 

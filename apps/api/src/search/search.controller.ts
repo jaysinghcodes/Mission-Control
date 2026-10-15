@@ -124,6 +124,8 @@ export class SearchController {
       SELECT "id" FROM "ActivityEvent"
       WHERE "type" ILIKE ${needle}
          OR ("payload"->>'name') ILIKE ${needle}
+         OR ("payload"->>'title') ILIKE ${needle}
+         OR ("payload"->>'summary') ILIKE ${needle}
       ORDER BY "ts" DESC
       LIMIT 6`;
     if (hits.length === 0) return [];

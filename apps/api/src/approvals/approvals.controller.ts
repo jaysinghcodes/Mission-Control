@@ -65,7 +65,7 @@ export class ApprovalsController {
       } else {
         mergeResult = {
           ok: false,
-          message: 'PR metadata missing — cannot merge on GitHub',
+          message: 'PR metadata missing. Cannot merge on GitHub',
         };
       }
     }

@@ -84,7 +84,7 @@ export function AgentProfileDrawer({
     )
   }
 
-  const Dash = () => <span className="text-mc-faint">—</span>
+  const Dash = () => <span className="text-mc-faint">none</span>
 
   return (
     <div className="fixed inset-0 z-50">
@@ -96,7 +96,7 @@ export function AgentProfileDrawer({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`${name} — ${roleTitle} profile`}
+        aria-label={`${name}, ${roleTitle} profile`}
         tabIndex={-1}
         className="absolute inset-y-0 right-0 flex w-full flex-col bg-mc-card shadow-2xl outline-none sm:max-w-[420px] sm:border-l sm:border-mc-border"
       >

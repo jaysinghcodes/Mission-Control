@@ -43,9 +43,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 /** Same sentences the status buttons already show. */
 export function moveFailureNotice(status: string, httpStatus: number, error: string): string {
-  if (httpStatus === 404) return 'That ticket no longer exists — the board has been refreshed.'
+  if (httpStatus === 404) return 'That ticket no longer exists. The board has been refreshed.'
   const what = STATUS_LABEL[status] ?? status
-  return `Couldn't move ticket to ${what} — ${error}`
+  return `Couldn't move ticket to ${what}. ${error}`
 }
 
 export type DragPatchResult<T> =
@@ -272,7 +272,7 @@ export function useBoardDrag<T extends { id: string; status: string }>(
     try {
       result = await patchRef.current(id, status)
     } catch {
-      result = { ok: false, httpStatus: 0, error: 'API unreachable — is the server running?' }
+      result = { ok: false, httpStatus: 0, error: 'API unreachable. Is the server running?' }
     }
     // A newer drag may have replaced this ticket's queue while we waited.
     // settleDrag drops a response that is no longer the newest pending one.

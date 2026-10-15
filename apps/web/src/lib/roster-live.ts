@@ -21,3 +21,12 @@ export function rosterRefreshTs(
   const latest = latestRosterEventTs(events)
   return latest > seenTs ? latest : null
 }
+
+/**
+ * True on the transition into a live socket. A register that landed while
+ * the page was still loading is already in the database by then, and the
+ * broadcast itself was easy to miss. Polling is the slow fallback.
+ */
+export function rosterConnectRefresh(wasConnected: boolean, connected: boolean): boolean {
+  return connected && !wasConnected
+}

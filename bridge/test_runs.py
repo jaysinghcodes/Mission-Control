@@ -56,7 +56,12 @@ class PlanTest(unittest.TestCase):
             state,
         )
         self.assertEqual(events[0][0], "run.running")
+        self.assertEqual(events[0][1]["name"], "Run started")
+        self.assertEqual(events[0][1]["title"], "Morning Brief")
+        self.assertNotIn("→", events[0][1]["name"])
+        self.assertNotIn("←", events[0][1]["name"])
         self.assertEqual(events[0][1]["ticketId"], "ticket-9")
+        self.assertEqual(calls[0]["body"]["name"], "Morning Brief")
         self.assertEqual(calls[0]["op"], "create")
         self.assertEqual(calls[0]["body"]["ticketId"], "ticket-9")
         self.assertNotIn("ticketId", {k: calls[0]["body"][k] for k in calls[0]["body"] if k != "ticketId"})

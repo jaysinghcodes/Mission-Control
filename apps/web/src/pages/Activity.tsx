@@ -2,6 +2,7 @@ import { useApi } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { Card, Chip, PillButton, SectionLabel } from '../components/ui'
 import { AgentAvatar } from '../components/AgentAvatar'
+import { activityRailLine } from '../lib/activity-rail'
 import { rosterDisplayName } from '../data/roster'
 
 /**
@@ -11,18 +12,18 @@ import { rosterDisplayName } from '../data/roster'
 
 interface Agent { id: string; name: string; role: string | null; color: string; status: string; parentId?: string | null }
 interface AgentsResp { agents: Agent[] }
-interface EventApi { type: string; payload: { name?: string; agent?: string } | null; ts: string }
+interface EventApi { type: string; payload: { name?: string; agent?: string; title?: string; summary?: string } | null; ts: string }
 interface ActivityResp { events: EventApi[] }
 
 /**
  * Who the row is about. Bridge run events put the agent id on `agent` and
  * the job title on `name`. Prefer the agent so the sticker matches Team.
  */
-function eventSubject(payload: { name?: string; agent?: string } | null | undefined): string | null {
+function eventSubject(payload: { name?: string; agent?: string; title?: string } | null | undefined): string | null {
   const agent = payload?.agent?.trim()
   if (agent) return agent
-  const name = payload?.name?.trim()
-  return name || null
+  const title = payload?.title?.trim()
+  return title || null
 }
 
 /** Sticker for a stream row. A roster hit uses the live list (so a numbered
@@ -52,30 +53,30 @@ export default function Activity() {
   const roster = agents.data?.agents ?? []
   const stream = [
     ...(history.data?.events ?? []).map((e) => {
-      const face = streamFace(eventSubject(e.payload), roster)
+      const line = activityRailLine(e, roster)
+      if (!line) return null
+      const face = streamFace(line.actor?.name ?? eventSubject(e.payload), roster)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
         zone: e.type.split('.')[0]?.toUpperCase() ?? 'RUN',
-        desc: `${e.type}${e.payload?.name ? ' · ' + e.payload.name : ''}`,
+        desc: line.text,
         key: `h-${e.ts}`,
       }
     }),
     ...events.map((e, i) => {
-      const payload = {
-        name: typeof e.name === 'string' ? e.name : undefined,
-        agent: typeof e.agent === 'string' ? e.agent : undefined,
-      }
-      const face = streamFace(eventSubject(payload), roster)
+      const line = activityRailLine(e, roster)
+      if (!line) return null
+      const face = streamFace(line.actor?.name ?? null, roster)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
         zone: e.type.split('.')[0]?.toUpperCase() ?? 'RUN',
-        desc: e.type,
+        desc: line.text,
         key: `l-${e.ts}-${i}`,
       }
     }),
-  ].slice(0, 40)
+  ].filter((row): row is NonNullable<typeof row> => row != null).slice(0, 40)
 
   return (
     <div className="p-6">
@@ -105,7 +106,7 @@ export default function Activity() {
           </Card>
         ))}
         {roster.length === 0 && (
-          <Card className="w-full px-4 py-6 text-[12.5px] text-mc-faint">No agents synced yet — the bridge pushes the roster every few minutes.</Card>
+          <Card className="w-full px-4 py-6 text-[12.5px] text-mc-faint">No agents synced yet. The bridge pushes the roster every few minutes.</Card>
         )}
       </div>
 
@@ -114,7 +115,7 @@ export default function Activity() {
       <Card className="mt-3 rounded-2xl px-0 py-1 overflow-hidden">
         {stream.length === 0 && (
           <div className="px-[18px] py-8 text-[12.5px] text-mc-faint">
-            {connected ? 'Connected — waiting for the first event…' : 'No events yet. The bridge pushes real activity every few minutes.'}
+            {connected ? 'Connected. Waiting for the first event…' : 'No events yet. The bridge pushes real activity every few minutes.'}
           </div>
         )}
         {stream.map((ev) => (
@@ -128,7 +129,7 @@ export default function Activity() {
           </div>
         ))}
         <div className="px-[18px] py-3 text-[12px] font-semibold text-mc-greentext">
-          {connected ? '● Streaming live' : '● offline — API not reachable'}
+          {connected ? '● Streaming live' : '● offline. API not reachable'}
         </div>
       </Card>
     </div>

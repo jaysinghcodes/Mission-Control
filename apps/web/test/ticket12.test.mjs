@@ -158,7 +158,7 @@ test('dark UI renders the sticker halo; a 13th agent is a smaller numbered paren
   }))
   assert.match(qa, /filter="url\(#/)
   assert.match(qa, /width="40"/)
-  assert.match(qa, /Tester — QA robot/)
+  assert.match(qa, /Tester, QA robot/)
 
   const agents = [{ id: 'chief', name: 'Chief', role: 'chief of staff', status: 'idle', parentId: null }]
   for (let i = 1; i <= 12; i++) {

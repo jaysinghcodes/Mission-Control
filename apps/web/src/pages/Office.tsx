@@ -7,8 +7,12 @@ import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
-import { activityNeedsYou, agentNeedsYou, isWorking, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
+import { activityNeedsYou, agentNeedsYou, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
+import { activityRailLine } from '../lib/activity-rail'
+import { pluralize } from '../lib/pluralize'
+import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
+import { useWorkLive } from '../lib/useWorkLive'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
 import { useRosterView } from '../lib/useSampleRoster'
 import {
@@ -19,22 +23,22 @@ import {
   floorMode,
   placeFloor,
   roomByline,
-  taskLine,
   type DeskRoom,
   type Room,
 } from '../lib/office'
 
 /**
- * Office — a live picture of the floor.
- * Build / QA / Ship / Deploy desks, Commons, Activity and Pipeline.
- * Click an agent for the profile drawer. Click a room for that stage's tickets.
+ * Office. Build, QA, Ship, Deploy, and Commons follow live work.
+ * Agents, Team, and this floor share deriveLiveWork. Click an agent for
+ * the profile drawer. Click a room for that stage's tickets.
  * The segmented control filters who is on the floor (see placeFloor).
  */
 
-interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string; ticket?: string; run?: string; job?: string } | null; ts: string }
+interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string; ticket?: string; id?: string; run?: string; job?: string } | null; ts: string }
 interface ActivityResp { events: EventApi[] }
-interface Ticket { id?: string; status: string; key?: string | null; title?: string | null; assignee?: string | null }
+interface Ticket extends LiveTicket { id?: string; status: string }
 interface TicketsResp { tickets: Ticket[] }
+interface RunsResp { runs: LiveRun[] }
 interface ApprovalsResp { approvals: ApprovalLike[] }
 
 const ROOMS: { id: DeskRoom; label: string; color: string }[] = [
@@ -69,22 +73,31 @@ function Plant() {
   )
 }
 
+function shownLine(subtitle: string, blocked: boolean, offline: boolean): string {
+  if (offline) return OFFLINE_LABEL
+  if (blocked && (subtitle === 'Idle' || subtitle === 'Working')) return 'Needs approval'
+  return subtitle
+}
+
 export default function Office() {
   const agentsQ = useApi<AgentsResp>('/agents', { pollMs: 20000 })
   const activityQ = useApi<ActivityResp>('/activity?limit=12', { pollMs: 15000 })
   const ticketsQ = useApi<TicketsResp>('/tickets', { pollMs: 20000 })
+  const runsQ = useApi<RunsResp>('/runs', { pollMs: 20000 })
   const approvalsQ = useApi<ApprovalsResp>('/approvals', { pollMs: 15000 })
-  const { events: liveEvents } = useLiveActivity()
+  const { events: liveEvents, connected } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
   const agents = agentsQ.data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
   const pending = approvalsQ.data?.approvals ?? []
   const ticketRows = ticketsQ.data?.tickets ?? []
+  const runRows = runsQ.data?.runs ?? []
   const [params, setParams] = useSearchParams()
   const roomParam = params.get('room')
   const focus: Room | null = roomParam && ROOM_IDS.has(roomParam) ? (roomParam as Room) : null
 
-  useRosterLive(liveEvents, agentsQ.refetch)
+  useRosterLive(liveEvents, agentsQ.refetch, connected)
+  useWorkLive(liveEvents, ticketsQ.refetch, runsQ.refetch, activityQ.refetch)
   useEffect(() => {
     if (liveEvents.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
   }, [liveEvents, refetchApprovals])
@@ -99,6 +112,7 @@ export default function Office() {
 
   const floor = useMemo(() => {
     const blocked = new Set<string>()
+    const live = new Map(roster.map((agent) => [agent.id, deriveLiveWork(agent, ticketRows, runRows)]))
     for (const agent of roster) {
       if (!isRegisteredOffline(agent, now) && agentNeedsYou(agent, pending, ticketRows)) blocked.add(agent.id)
     }
@@ -106,24 +120,43 @@ export default function Office() {
     const visible = q
       ? roster.filter((agent) => {
           const cap = agentCaption(agent.name, agent.role)
-          return `${cap.name} ${cap.role} ${agent.currentTask ?? ''}`.toLowerCase().includes(q)
+          const subtitle = live.get(agent.id)?.subtitle ?? ''
+          return `${cap.name} ${cap.role} ${subtitle}`.toLowerCase().includes(q)
         })
       : roster
-    return { blocked, placed: placeFloor(visible, mode, blocked) }
-  }, [roster, mode, query, pending, ticketRows, now])
+    const seated = visible.map((agent) => {
+      const work = live.get(agent.id)
+      return {
+        ...agent,
+        room: work?.room ?? 'commons' as const,
+        status: work?.working ? 'working' : 'idle',
+        currentTask: work && work.subtitle !== 'Idle' ? work.subtitle : '',
+      }
+    })
+    return { blocked, live, placed: placeFloor(seated, mode, blocked) }
+  }, [roster, mode, query, pending, ticketRows, runRows, now])
   const placed = floor.placed
   const blockedIds = floor.blocked
 
-  const working = roster.filter((a) => isWorking(a) && !needs(a) && !isRegisteredOffline(a, now)).length
+  const working = roster.filter((a) => {
+    const work = floor.live.get(a.id)
+    return !!work?.working && !needs(a) && !isRegisteredOffline(a, now)
+  }).length
   const needsCount = roster.filter((a) => needs(a) && !isRegisteredOffline(a, now)).length
   const summary = agentsQ.data
     ? roster.length === 0
       ? 'The floor is empty'
-      : `${roster.length} agents · ${working} working${needsCount === 0 ? '' : needsCount === 1 ? ' · 1 needs you' : ` · ${needsCount} need you`}`
+      : `${pluralize(roster.length, 'agent')} · ${pluralize(working, 'working', 'working')}${needsCount === 0 ? '' : ` · ${pluralize(needsCount, 'needs you', 'need you')}`}`
     : 'Loading the floor…'
 
   const pipe = stageCounts(ticketRows)
-  const events = activityQ.data?.events ?? []
+  const events = (activityQ.data?.events ?? [])
+    .map((event, index) => {
+      const line = activityRailLine(event, agents, ticketRows, runRows)
+      return line ? { event, index, ...line } : null
+    })
+    .filter((row): row is NonNullable<typeof row> => row != null)
+    .slice(0, 6)
   const topic = commonsTopic(placed.commons, mode)
   const commonsLabel = commonsByline(placed.commons, mode)
 
@@ -189,13 +222,17 @@ export default function Office() {
                   {crew.map((agent) => {
                     const cap = agentCaption(agent.name, agent.role)
                     const offline = isRegisteredOffline(agent, now)
-                    const line = offline ? OFFLINE_LABEL : taskLine(agent, blockedIds.has(agent.id))
+                    const work = floor.live.get(agent.id)
+                    const line = shownLine(work?.subtitle ?? 'Idle', blockedIds.has(agent.id), offline)
                     return (
                       <button
                         key={agent.id}
                         type="button"
                         data-agent-id={agent.id}
                         data-offline={offline ? 'true' : 'false'}
+                        data-live-room={work?.room ?? 'commons'}
+                        data-live-subtitle={line}
+                        data-live-source={work?.source ?? 'heartbeat'}
                         onClick={() => setOpen(agent)}
                         aria-label={`${cap.name}, ${cap.role}, ${line}`}
                         className="relative mt-4 block w-full text-center"
@@ -234,7 +271,7 @@ export default function Office() {
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: focusMeta.color }} />
                 <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold">{focusMeta.label}</span>
                 <span className="min-w-0 text-[12px] text-mc-sub">
-                  {focusTickets.length === 1 ? '1 ticket on the board' : `${focusTickets.length} tickets on the board`}
+                  {`${pluralize(focusTickets.length, 'ticket')} on the board`}
                 </span>
                 <button type="button" onClick={clearRoom} className="ml-auto shrink-0 whitespace-nowrap text-[12px] font-semibold text-mc-accent-text">
                   All rooms
@@ -263,7 +300,7 @@ export default function Office() {
               <div id="office-room-detail">
               <div className="flex items-center gap-3">
                 <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold">Commons</span>
-                <span className="min-w-0 text-[12px] text-mc-sub">Idle and break agents land here. The build council meets at the table.</span>
+                <span className="min-w-0 text-[12px] text-mc-sub">Bots with no active ticket or run sit here.</span>
                 <button type="button" onClick={clearRoom} className="ml-auto shrink-0 whitespace-nowrap text-[12px] font-semibold text-mc-accent-text">
                   All rooms
                 </button>
@@ -292,13 +329,17 @@ export default function Office() {
                     {placed.commons.map((agent) => {
                       const cap = agentCaption(agent.name, agent.role)
                       const offline = isRegisteredOffline(agent, now)
-                      const line = offline ? OFFLINE_LABEL : taskLine(agent, blockedIds.has(agent.id))
+                      const work = floor.live.get(agent.id)
+                      const line = shownLine(work?.subtitle ?? 'Idle', blockedIds.has(agent.id), offline)
                       return (
                         <button
                           key={agent.id}
                           type="button"
                           data-agent-id={agent.id}
                           data-offline={offline ? 'true' : 'false'}
+                          data-live-room={work?.room ?? 'commons'}
+                          data-live-subtitle={line}
+                          data-live-source={work?.source ?? 'heartbeat'}
                           onClick={() => setOpen(agent)}
                           aria-label={`${cap.name}, ${cap.role}, ${line}`}
                           className="w-[96px] text-center"
@@ -317,6 +358,7 @@ export default function Office() {
                             {showSampleTag(agent) && <SampleTag />}
                           </div>
                           <div className="text-[11px] leading-tight text-mc-sub">{cap.role}</div>
+                          {!offline && line !== 'Idle' && <div className="text-[11px] leading-tight text-mc-sub">{line}</div>}
                           {offline && <div className="text-[11px] leading-tight text-mc-sub">{OFFLINE_LABEL}</div>}
                         </button>
                       )
@@ -334,39 +376,37 @@ export default function Office() {
           </SoftCard>
         </div>
 
-        <aside className="min-w-0">
+        <aside className="min-w-0" data-activity-rail="true">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold">Activity</span>
             <span className="shrink-0 whitespace-nowrap text-[12px] font-semibold text-mc-green">Live</span>
           </div>
           <div className="rounded-[14px] bg-mc-inner">
             {events.length === 0 && <p className="px-4 py-6 text-[12.5px] text-mc-sub">No activity yet. Seed or the bridge fills this list.</p>}
-            {events.slice(0, 6).map((e, i) => {
-              const name = e.payload?.agent || 'system'
-              const hit = roster.find((a) => a.name.toLowerCase() === name.toLowerCase())
-              const who = hit ?? { id: name, name, role: null, status: 'idle' }
-              const text = e.payload?.name || e.payload?.summary || e.type
+            {events.map(({ event: e, index, actor, text }) => {
+              const hit = actor ? agents.find((a) => a.id === actor.id) : undefined
+              const who = hit ?? (actor ? { id: actor.id, name: actor.name, role: actor.role, status: 'idle' } : null)
               const waiting = activityNeedsYou(e.payload, pending)
-              const failed = /fail/i.test(`${e.type} ${text}`)
+              const failed = /fail/i.test(text)
               const age = activityAge(e.ts, Date.now())
               const row = (
                 <>
-                  <Face agent={who} agents={agents} px={36} />
+                  {who ? <Face agent={who} agents={agents} px={36} /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-mc-fill" aria-hidden />}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
-                      <AgentName name={who.name} role={who.role} />
+                      {who ? <AgentName name={who.name} role={who.role} /> : <span className="text-[12px] font-semibold">{text}</span>}
                       <span className="shrink-0 whitespace-nowrap text-[11px] text-mc-sub">{age}</span>
                     </div>
-                    <div className={`truncate text-[12px] ${waiting ? 'text-mc-redtext' : failed ? 'text-mc-orangetext' : 'text-mc-sub2'}`}>{text}</div>
+                    {who && <div className={`truncate text-[12px] ${waiting ? 'text-mc-redtext' : failed ? 'text-mc-orangetext' : 'text-mc-sub2'}`}>{text}</div>}
                   </div>
                 </>
               )
               const cls = 'flex w-full gap-2 border-b border-mc-sep px-3 py-3 text-left last:border-0'
               if (!hit) {
-                return <div key={`${e.ts}-${i}`} className={cls}>{row}</div>
+                return <div key={`${e.ts}-${index}`} data-activity-agent={who?.name ?? ''} className={cls}>{row}</div>
               }
               return (
-                <button key={`${e.ts}-${i}`} type="button" onClick={() => setOpen(hit)} className={cls} aria-label={`${who.name}, ${text}`}>
+                <button key={`${e.ts}-${index}`} type="button" data-activity-agent={hit.name} onClick={() => setOpen(hit)} className={cls} aria-label={`${hit.name}, ${text}`}>
                   {row}
                 </button>
               )
@@ -381,6 +421,8 @@ export default function Office() {
               <button
                 key={room.id}
                 type="button"
+                data-pipeline-stage={room.id}
+                data-pipeline-count={pipe[i]}
                 aria-pressed={focus === room.id}
                 onClick={() => toggleRoom(room.id)}
                 className={`flex w-full items-center justify-between gap-2 border-b border-mc-sep px-4 py-3 text-left last:border-0 ${focus === room.id ? 'bg-mc-sel' : ''}`}

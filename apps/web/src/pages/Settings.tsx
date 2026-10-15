@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { Card, PillButton, SectionLabel } from '../components/ui'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * Settings — account & app controls (review fix: avatar menu → Settings).
@@ -37,7 +38,7 @@ export default function Settings() {
               {h ? `API ${h.status === 'ok' ? 'Connected' : 'Degraded'}` : 'Contacting API…'}
             </div>
             <div className="text-[12px] text-mc-sub">
-              {h ? `uptime ${Math.floor(h.uptimeSeconds / 60)}m · database ${h.database} · ${h.connectedClients} client(s)` : 'check your SSH tunnel'}
+              {h ? `uptime ${Math.floor(h.uptimeSeconds / 60)}m · database ${h.database} · ${pluralize(h.connectedClients, 'client')}` : 'check your SSH tunnel'}
             </div>
           </div>
         </div>
@@ -55,7 +56,7 @@ export default function Settings() {
       </Card>
 
       <p className="mt-6 text-[12px] text-mc-faint">
-        Mission Control binds to loopback only — the SSH tunnel is the sanctioned way in. Setup guide lives on the Connect page.
+        Mission Control binds to loopback only. The SSH tunnel is the sanctioned way in. Setup guide lives on the Connect page.
       </p>
     </div>
   )

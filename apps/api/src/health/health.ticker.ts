@@ -33,6 +33,9 @@ export class HealthTickerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.timer = setInterval(() => this.tick(), ms);
+    // The listening HTTP server keeps the process alive. This timer must
+    // not, or a test worker stays up after the app fails to close.
+    this.timer.unref();
     this.logger.log(`health ticker active every ${ms}ms`);
   }
 
@@ -44,9 +47,13 @@ export class HealthTickerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private tick(): void {
-    this.gateway.broadcast('health.tick', {
-      uptimeSeconds: Math.round(process.uptime()),
-      connectedClients: this.gateway.clientCount,
-    });
+    try {
+      this.gateway.broadcast('health.tick', {
+        uptimeSeconds: Math.round(process.uptime()),
+        connectedClients: this.gateway.clientCount,
+      });
+    } catch {
+      // The next tick tries again. An emit error must not crash the process.
+    }
   }
 }

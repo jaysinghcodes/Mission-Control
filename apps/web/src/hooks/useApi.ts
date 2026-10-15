@@ -193,7 +193,7 @@ function errorMessage(body: unknown, status: number): string {
     if (typeof b.message === 'string' && b.message) return b.message
     if (typeof b.error === 'string' && b.error) return b.error
   }
-  return status ? `Request failed (HTTP ${status})` : 'API unreachable — is the server running?'
+  return status ? `Request failed (HTTP ${status})` : 'API unreachable. Is the server running?'
 }
 
 /**

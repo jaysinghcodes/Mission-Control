@@ -6,6 +6,7 @@ import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { OPERATOR_ASSIGNEE } from '../config'
 import { STAGES, stageCounts, stageIndexForStatus, ticketNeedsYou, type ApprovalLike } from '../lib/board'
+import { pluralize } from '../lib/pluralize'
 import { startedIso } from '../lib/started'
 import { TicketRuns } from '../components/TicketRuns'
 import { runsForTicket } from '../lib/ticket-runs'
@@ -95,7 +96,7 @@ export default function Pipeline() {
   const needs = moving.filter((t) => ticketNeedsYou(t, pending)).length
 
   const summary = data
-    ? `${moving.length} moving${needs ? ` · ${needs} needs you` : ''} · ${done.length} finished`
+    ? `${pluralize(moving.length, 'moving', 'moving')}${needs ? ` · ${pluralize(needs, 'needs you', 'need you')}` : ''} · ${pluralize(done.length, 'finished', 'finished')}`
     : 'Loading the trail…'
 
   const faceFor = useMemo(() => {
@@ -143,7 +144,7 @@ export default function Pipeline() {
                     <span className="h-2.5 w-2.5 rounded-full" style={{ background: STAGE_COLOR[i] }} />
                     <span className="text-[15px] font-semibold">{name}</span>
                   </div>
-                  <div className="mt-1 text-[12px] text-mc-sub">{counts[i] === 0 ? 'Idle' : counts[i] === 1 ? '1 item' : `${counts[i]} items`}</div>
+                  <div className="mt-1 text-[12px] text-mc-sub">{counts[i] === 0 ? 'Idle' : pluralize(counts[i], 'item')}</div>
                 </div>
                 <div className="text-[30px] font-bold tracking-tight">{counts[i]}</div>
               </SoftCard>
@@ -202,7 +203,7 @@ export default function Pipeline() {
                     </div>
                     {open && (
                       <div className="mt-3 pl-16 text-[12.5px] text-mc-sub">
-                        {ticket.key ?? 'No key'} · started {fmt(startedIso(ticket, runs)) || '—'}
+                        {ticket.key ?? 'No key'} · started {fmt(startedIso(ticket, runs)) || 'none'}
                         {blocked ? ' · paused until you decide in Approvals' : ''}
                         <TicketRuns runs={runsForTicket(runs, ticket.id)} />
                       </div>

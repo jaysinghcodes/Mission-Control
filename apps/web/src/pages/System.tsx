@@ -5,6 +5,8 @@ import { useApiStatus } from '../lib/apiStatus'
 import { PageHeader, Segmented, SoftCard, StatusChip, Face, Kicker, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
+import { activityRailLine } from '../lib/activity-rail'
+import { pluralize } from '../lib/pluralize'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
 import Logs from './Logs'
@@ -84,6 +86,12 @@ function tokens(n: number | undefined): string {
   return String(n)
 }
 
+function tokenWords(n: number | undefined): string {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return 'No data'
+  if (n === 1) return pluralize(1, 'token')
+  return `${tokens(n)} tokens`
+}
+
 function barLabel(day: string, count: number): string {
   const [, month, date] = day.split('-').map(Number)
   if (!month || !date) return day
@@ -155,12 +163,14 @@ export default function System() {
     : 'Checking health…'
   const bridge = ingestFact(health.data?.lastIngestAt)
 
-  const issue = (activity.data?.events ?? []).find((e) => /fail|error|timeout/i.test(`${e.type} ${e.payload?.name ?? ''} ${e.payload?.summary ?? ''}`))
+  const issue = (activity.data?.events ?? [])
+    .map((event) => ({ event, line: activityRailLine(event, roster) }))
+    .find((row) => row.line && /fail|error|timeout/i.test(row.line.text))
 
   if (panel === 'logs' || panel === 'sessions' || panel === 'settings' || panel === 'connection' || panel === 'tools') {
     return (
       <div>
-        <Link to="/system" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">← System</Link>
+        <Link to="/system" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">Back to System</Link>
         {panel === 'logs' && <Logs />}
         {panel === 'sessions' && <Sessions />}
         {panel === 'settings' && <Settings />}
@@ -252,7 +262,7 @@ export default function System() {
                 <button key={p.id} type="button" onClick={() => setPeriod(i)} className={`rounded-xl px-3 py-2 text-left ${on ? 'bg-mc-sel' : ''}`}>
                   <div className="text-[12.5px] font-semibold text-mc-sub">{p.label}</div>
                   <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost) : 'No data'}</div>
-                  <div className="text-[12.5px] text-mc-sub">{tok === null ? 'No data yet' : `${tokens(tok)} tokens`}</div>
+                  <div className="text-[12.5px] text-mc-sub">{tok === null ? 'No data yet' : tokenWords(tok)}</div>
                 </button>
               )
             })}
@@ -276,7 +286,7 @@ export default function System() {
                     </button>
                     <div className="mt-1 flex items-center gap-1">
                       {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
-                      <span className="text-[12px] text-mc-sub">{who.length ? `${who.length} agents` : 'No agent tagged'}</span>
+                      <span className="text-[12px] text-mc-sub">{who.length ? pluralize(who.length, 'agent') : 'No agent tagged'}</span>
                     </div>
                     <div className="mt-3 space-y-1.5">
                       {PERIODS.map((p, i) => (
@@ -328,7 +338,7 @@ export default function System() {
                             </button>
                             <div className="mt-1 flex items-center gap-1">
                               {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
-                              <span className="text-[12px] text-mc-sub">{who.length ? `${who.length} agents` : 'No agent tagged'}</span>
+                              <span className="text-[12px] text-mc-sub">{who.length ? pluralize(who.length, 'agent') : 'No agent tagged'}</span>
                             </div>
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 text-right text-[14px]">{tokens((focus?.tokensIn ?? 0) + (focus?.tokensOut ?? 0))}</td>
@@ -360,14 +370,14 @@ export default function System() {
       )}
 
       <div className="mb-3 mt-8"><Kicker>Recent issues</Kicker></div>
-      {issue ? (
+      {issue?.line ? (
         <SoftCard className="flex flex-wrap items-center gap-3 px-4 py-3">
           <Face
-            agent={roster.find((a) => a.name === issue.payload?.agent) ?? { id: 'issue', name: issue.payload?.agent || 'Scout', role: null, status: 'idle' }}
+            agent={roster.find((a) => a.id === issue.line?.actor?.id || a.name === issue.line?.actor?.name) ?? { id: 'issue', name: issue.line.actor?.name || 'Scout', role: null, status: 'idle' }}
             agents={roster}
             px={34}
           />
-          <div className="min-w-0 flex-1 text-[14px] font-semibold">{issue.payload?.name || issue.payload?.summary || issue.type}</div>
+          <div className="min-w-0 flex-1 text-[14px] font-semibold">{issue.line.text}</div>
           <StatusChip label="Retrying" tone="orange" />
         </SoftCard>
       ) : (
@@ -377,7 +387,7 @@ export default function System() {
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           ['Logs', 'Live', 'logs'],
-          ['Sessions', `${sessions.data?.sessions.length ?? 0} active`, 'sessions'],
+          ['Sessions', pluralize(sessions.data?.sessions.length ?? 0, 'active', 'active'), 'sessions'],
           ['Connection', 'SSH tunnel', 'connection'],
           ['Settings', 'Theme, account', 'settings'],
           ['Custom tools', 'Experimental', 'tools'],

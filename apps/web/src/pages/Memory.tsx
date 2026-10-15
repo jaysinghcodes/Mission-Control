@@ -8,6 +8,7 @@ import { agentCaption } from '../data/roster'
 import { API_URL } from '../lib/apiBase'
 import { formatChicagoClock, formatChicagoDayHeading, formatChicagoSaved } from '../lib/chicago-day'
 import { groupMemoryByDay } from '../lib/memory-groups'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * Memory — notes the bridge posted (memory.snapshot) or seed:demo wrote.
@@ -135,7 +136,7 @@ export default function Memory() {
       ? 'No memories yet'
       : data.total === 0
         ? 'No matches'
-        : `${entries.length} ${entries.length === 1 ? 'memory' : 'memories'}`
+        : pluralize(entries.length, 'memory', 'memories')
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">

@@ -43,8 +43,17 @@ test('criterion 7: Agents, Office, and Team refetch on that event', async () => 
   for (const rel of ['../src/pages/Agents.tsx', '../src/pages/Office.tsx', '../src/pages/Team.tsx']) {
     const src = await readFile(new URL(rel, import.meta.url), 'utf8')
     assert.match(src, /useRosterLive\(/)
+    assert.match(src, /useRosterLive\([^)]*connected/)
   }
   const hook = await readFile(new URL('../src/lib/useRosterLive.ts', import.meta.url), 'utf8')
   assert.match(hook, /rosterRefreshTs/)
+  assert.match(hook, /rosterConnectRefresh/)
   assert.match(hook, /refetch\(/)
+})
+
+test('a socket connect refetches before the next poll', () => {
+  assert.equal(live.rosterConnectRefresh(false, false), false)
+  assert.equal(live.rosterConnectRefresh(false, true), true)
+  assert.equal(live.rosterConnectRefresh(true, true), false)
+  assert.equal(live.rosterConnectRefresh(true, false), false)
 })

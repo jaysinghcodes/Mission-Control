@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { activityRailLine } from '../lib/activity-rail'
 import { API_URL } from '../lib/apiBase'
 
 /**
@@ -9,7 +10,7 @@ import { API_URL } from '../lib/apiBase'
  * outside-click closes. Empty input / no results shows a hint.
  */
 
-interface Hit { id?: string; name?: string; title?: string; key?: string | null; agent?: string | null; desc?: string; tag?: string; type?: string; msg?: string; role?: string | null }
+interface Hit { id?: string; name?: string; title?: string; key?: string | null; agent?: string | null; desc?: string; tag?: string; type?: string; msg?: string; role?: string | null; payload?: { name?: string; summary?: string; title?: string } | null }
 interface SearchResults {
   tasks: Hit[]; tickets: Hit[]; agents: Hit[]; sessions: Hit[]; approvals: Hit[]; activity: Hit[]; logs: { tm: string; lvl: string; msg: string }[]
 }
@@ -30,7 +31,7 @@ const GROUPS: { key: keyof SearchResults; label: string; path: string; field: (h
   { key: 'agents', label: 'Agents', path: '/agents', field: (h) => h.name ?? '' },
   { key: 'sessions', label: 'Sessions', path: '/sessions', field: (h) => h.name ?? '' },
   { key: 'approvals', label: 'Approvals', path: '/approvals', field: (h) => h.desc ?? h.tag ?? '' },
-  { key: 'activity', label: 'Activity', path: '/activity', field: (h) => `${h.type ?? ''}${h.name ? ' · ' + h.name : ''}` },
+  { key: 'activity', label: 'Activity', path: '/activity', field: (h) => activityRailLine(h, [])?.text ?? '' },
   { key: 'logs', label: 'Logs', path: '/logs', field: (h) => h.msg ?? '' },
 ]
 
@@ -136,7 +137,7 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
             <div className="px-4 py-6 text-[12.5px] text-mc-faint">No results for “{q.trim()}”.</div>
           )}
           {GROUPS.map((g) => {
-            const hits = (results?.[g.key] ?? []) as Hit[]
+            const hits = ((results?.[g.key] ?? []) as Hit[]).filter((h) => g.field(h).trim() !== '')
             if (hits.length === 0) return null
             return (
               <div key={g.key} className="py-1.5">
@@ -161,7 +162,7 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
               machines without OpenClaw — explains why logs never match. */}
           {noLogSource && !loading && (
             <div className="px-4 pb-3 pt-1 text-[11px] text-mc-faint">
-              Logs not searched — no OpenClaw gateway log on this machine (see bridge/README.md).
+              Logs not searched. No OpenClaw gateway log on this machine (see bridge/README.md).
             </div>
           )}
         </div>

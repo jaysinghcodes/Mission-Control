@@ -179,7 +179,7 @@ export class ProjectsController {
 
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(
-        'nothing to update — send name and/or archived',
+        'nothing to update. Send name and/or archived',
       );
     }
 
@@ -207,7 +207,7 @@ export class ProjectsController {
     if (value === 'only') return { archivedAt: { not: null } };
     if (value === 'all') return {};
     throw new BadRequestException(
-      `invalid archived filter ${JSON.stringify(raw)} — expected active, only, or all`,
+      `invalid archived filter ${JSON.stringify(raw)}. Expected active, only, or all`,
     );
   }
 

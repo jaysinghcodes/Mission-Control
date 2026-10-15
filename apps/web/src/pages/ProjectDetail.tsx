@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
 import { PageHeader, SoftCard, Btn, Banner, Toast, FieldError, EmptyState, StatusChip } from '../components/shell'
 import type { Project, ProjectDetailResp, ProjectTicket } from '../types'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * One project. Tickets stay when the project is archived.
@@ -66,21 +67,21 @@ export default function ProjectDetail() {
     void refetch()
   }
 
-  const progress = project ? `${project.doneCount} of ${project.ticketCount}` : ''
+  const progress = project ? `${project.doneCount} of ${pluralize(project.ticketCount, 'task')}` : ''
 
   return (
     <div>
-      <Link to="/projects" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">← Projects</Link>
+      <Link to="/projects" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">Back to Projects</Link>
       {loadError && (
         <Banner>Couldn't load this project ({loadError}). {data ? 'Showing the last loaded page; retrying automatically.' : 'Retrying automatically.'}</Banner>
       )}
       {banner && <Banner onDismiss={() => setBanner(null)}>{banner}</Banner>}
-      {!project && !loadError && <p className="text-[13px] text-mc-sub">{loading ? 'Loading…' : 'Not loaded — see the notice above.'}</p>}
+      {!project && !loadError && <p className="text-[13px] text-mc-sub">{loading ? 'Loading…' : 'Not loaded. See the notice above.'}</p>}
       {project && (
         <>
           <PageHeader
             title={editing ? 'Rename project' : project.name}
-            summary={`${progress} done${project.archivedAt ? ' · Archived — tickets stay on the board' : ''}`}
+            summary={`${progress} done${project.archivedAt ? ' · Archived. Tickets stay on the board' : ''}`}
             tools={
               editing ? (
                 <>
@@ -119,7 +120,7 @@ export default function ProjectDetail() {
           {tickets.length === 0 ? (
             <EmptyState
               title="No tickets in this project yet."
-              body="Nothing is broken — this project has no tickets. Create one on the board while this project is selected, or assign an existing ticket from its card."
+              body="Nothing is broken. This project has no tickets. Create one on the board while this project is selected, or assign an existing ticket from its card."
             />
           ) : (
             <SoftCard className="divide-y divide-mc-sep">

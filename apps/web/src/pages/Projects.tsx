@@ -6,6 +6,7 @@ import type { Agent, AgentsResp, Project, ProjectsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, EmptyState, Banner, Toast, FieldError } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import { ticketNeedsYou, type ApprovalLike } from '../lib/board'
+import { pluralize } from '../lib/pluralize'
 
 /**
  * Projects — ticket 4, drawn as the Apple list.
@@ -98,7 +99,7 @@ export default function Projects() {
   const rows = filter === 1 ? archived : filter === 2 ? projects : active
   const done = active.reduce((s, p) => s + p.doneCount, 0)
   const total = active.reduce((s, p) => s + p.ticketCount, 0)
-  const summary = data ? `${active.length} active · ${done} of ${total} tasks done` : 'Loading projects…'
+  const summary = data ? `${pluralize(active.length, 'active', 'active')} · ${done} of ${pluralize(total, 'task')} done` : 'Loading projects…'
 
   function succeed(msg: string) {
     setBanner(null)
@@ -240,7 +241,7 @@ export default function Projects() {
                 <div className="w-[240px] max-w-full">
                   <div className="flex justify-between text-[13px]">
                     <span className="font-semibold">{p.doneCount} of {p.ticketCount} done</span>
-                    <span className="text-mc-sub">{p.ticketCount ? `${Math.round(frac * 100)}%` : '—'}</span>
+                    <span className="text-mc-sub">{p.ticketCount ? `${Math.round(frac * 100)}%` : 'none'}</span>
                   </div>
                   <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-mc-track">
                     <div className="h-full rounded-full" style={{ width: `${Math.round(frac * 100)}%`, background: finished ? 'var(--mc-green)' : 'var(--mc-accent)' }} />
@@ -278,7 +279,7 @@ export default function Projects() {
 
       {filter === 0 && archived.length > 0 && (
         <button type="button" onClick={() => setFilter(1)} className="mt-4 text-[13px] text-mc-sub">
-          {archived.length} archived project{archived.length === 1 ? '' : 's'} <span className="font-semibold text-mc-accent-text">Show</span>
+          {pluralize(archived.length, 'archived project')} <span className="font-semibold text-mc-accent-text">Show</span>
         </button>
       )}
       {loading && !data && <p className="text-[13px] text-mc-sub">Loading…</p>}

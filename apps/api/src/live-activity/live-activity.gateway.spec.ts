@@ -52,6 +52,12 @@ describe('LiveActivityGateway', () => {
     expect(gateway.clientCount).toBe(0);
   });
 
+  it('broadcast before the socket server exists does not throw', () => {
+    expect(() =>
+      gateway.broadcast('run.queued', { name: 'early' }),
+    ).not.toThrow();
+  });
+
   it('broadcasts typed events with a server timestamp', () => {
     const emit = jest.fn(
       (_event: string, _payload: { name: string; ts: number }) => {

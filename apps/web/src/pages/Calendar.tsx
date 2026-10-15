@@ -4,6 +4,9 @@ import { PageHeader, Segmented, SoftCard, Face, StatusChip, Btn, EmptyState } fr
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { chicagoDay } from '../lib/chicago-day'
+import { activityHaystack } from '../lib/activity-text'
+import { activityRailLine } from '../lib/activity-rail'
+import { pluralize } from '../lib/pluralize'
 import {
   chicagoClock,
   formatDayHeading,
@@ -100,7 +103,7 @@ export default function Calendar() {
   }
 
   function failed(job: Job): boolean {
-    return events.some((e) => /fail/i.test(e.type) && (e.payload?.name ?? '').toLowerCase().includes(job.name.toLowerCase()))
+    return events.some((e) => /fail/i.test(e.type) && activityHaystack(e.payload).toLowerCase().includes(job.name.toLowerCase()))
   }
 
   function occurs(job: Job, day: CalendarDay): boolean {
@@ -119,14 +122,14 @@ export default function Calendar() {
 
   const open = jobs.find((j) => j.id === openId) ?? null
   const history = open
-    ? events.filter((e) => (e.payload?.name ?? '').toLowerCase().includes(open.name.toLowerCase())).slice(0, 4)
+    ? events.filter((e) => activityHaystack(e.payload).toLowerCase().includes(open.name.toLowerCase())).slice(0, 4)
     : []
 
-  const retry = jobs.some((j) => failed(j))
+  const retries = jobs.filter((j) => failed(j)).length
   const summary = data
     ? jobs.length === 0
       ? 'No scheduled jobs yet'
-      : `${jobs.length} scheduled job${jobs.length === 1 ? '' : 's'}${retry ? ' · 1 retry' : ''}`
+      : `${pluralize(jobs.length, 'scheduled job')}${retries ? ` · ${pluralize(retries, 'retry')}` : ''}`
     : 'Loading the schedule…'
 
   function jumpToday() {
@@ -341,9 +344,11 @@ export default function Calendar() {
           {ran && <p className="mt-2 text-[13px] text-mc-sub">{ran}</p>}
           <div className="mt-3 text-[12px] font-semibold text-mc-sub">Recent history</div>
           {history.length === 0 && <p className="mt-1 text-[13px] text-mc-sub">No matching activity yet.</p>}
-          {history.map((e, i) => (
-            <p key={i} className="mt-1 text-[13px] text-mc-text">{e.type} · {e.payload?.summary || e.payload?.status || 'recorded'} · {new Date(e.ts).toLocaleString()}</p>
-          ))}
+          {history.map((e, i) => {
+            const line = activityRailLine(e, agents)
+            if (!line) return null
+            return <p key={i} className="mt-1 text-[13px] text-mc-text">{line.text} · {new Date(e.ts).toLocaleString()}</p>
+          })}
         </SoftCard>
       )}
     </div>
@@ -449,7 +454,7 @@ function MonthGrid({
           return (
             <button key={day.key} type="button" onClick={() => onPick(day.key)} className={`h-14 rounded-lg text-left ${on ? 'bg-mc-accent-fill text-white' : 'bg-mc-inner text-mc-text'} ${inMonth ? '' : 'opacity-40'}`}>
               <span className="block px-2 pt-1 text-[12px] font-semibold">{day.date}</span>
-              {count > 0 && <span className={`block px-2 text-[10px] ${on ? 'text-white' : 'text-mc-sub'}`}>{count} jobs</span>}
+              {count > 0 && <span className={`block px-2 text-[10px] ${on ? 'text-white' : 'text-mc-sub'}`}>{pluralize(count, 'job')}</span>}
             </button>
           )
         })}

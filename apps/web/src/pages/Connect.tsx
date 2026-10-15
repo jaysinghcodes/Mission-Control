@@ -68,7 +68,7 @@ async function probeApi(): Promise<{ ok: boolean; detail: string }> {
       if (res.ok || h?.service === 'mission-control') {
         return { ok: true, detail: `API ${h?.status ?? 'ok'} · database ${h?.database ?? 'connected'}` }
       }
-      detail = `API responded with ${res.status} — the connection is up but the API is unhappy.`
+      detail = `API responded with ${res.status}. The connection is up but the API is unhappy.`
     } catch {
       // try the next base
     }
@@ -257,7 +257,7 @@ export default function Connect() {
                 <p className="mt-1 text-[12.5px] text-mc-sub">
                   {step.id === 7
                     ? 'Keep the SSH session open, re-run the tunnel, then retry. If the stack is not up, finish the earlier steps on the host.'
-                    : 'Start the stack on the host (steps 1–4), then retry.'}
+                    : 'Start the stack on the host (steps 1 to 4), then retry.'}
                 </p>
               )}
             </div>

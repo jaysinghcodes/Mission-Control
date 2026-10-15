@@ -506,11 +506,12 @@ def cron_run_plan(
             ok = last_status in ("ok", "success", "done", "")
             terminal = "done" if ok else "failed"
             if started:
-                events.append(("run.running", _event_payload(name, jid, agent, ticket_id)))
+                events.append(("run.running", _event_payload("Run started", jid, agent, ticket_id, title=name)))
             if finished:
+                phrase = "Run finished" if ok else "Run failed"
                 events.append((
                     "run.completed" if ok else "run.failed",
-                    _event_payload(name, jid, agent, ticket_id, status=last_status or "ok"),
+                    _event_payload(phrase, jid, agent, ticket_id, title=name, status=last_status or "ok"),
                 ))
             if finished and not started and run_id:
                 calls.append({

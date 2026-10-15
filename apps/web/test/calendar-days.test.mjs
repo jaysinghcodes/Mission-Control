@@ -32,7 +32,7 @@ test('current week labels match each column date', () => {
     'SAT 10 2026-10-10',
     'SUN 11 2026-10-11',
   ])
-  assert.equal(days.formatWeekRange(week[0].key), 'Oct 5 – Oct 11, 2026')
+  assert.equal(days.formatWeekRange(week[0].key), 'Oct 5 to Oct 11, 2026')
 })
 
 test('a week that spans two months keeps labels on the right dates', () => {
@@ -50,7 +50,7 @@ test('a week that spans two months keeps labels on the right dates', () => {
   ])
   assert.equal(week[2].month, 9)
   assert.equal(week[3].month, 10)
-  assert.equal(days.formatWeekRange(week[0].key), 'Sep 28 – Oct 4, 2026')
+  assert.equal(days.formatWeekRange(week[0].key), 'Sep 28 to Oct 4, 2026')
 })
 
 test('week of Sunday Nov 1 2026 labels the DST fall-back day and places cron times', () => {

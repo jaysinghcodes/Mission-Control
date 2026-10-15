@@ -90,11 +90,11 @@ export default function Logs() {
         )}
         {stale && (
           <div className="text-mc-orangetext pt-2 pb-2">
-            Showing the last loaded log — refresh failed ({errorMessage}). Retrying every 10 s.
+            Showing the last loaded log. Refresh failed ({errorMessage}). Retrying every 10 s.
           </div>
         )}
         {!noSource && !unreachable && lines.length === 0 && (
-          <div className="text-mc-faint pt-2">No matching log lines{data ? '' : ' — waiting for the API…'}.</div>
+          <div className="text-mc-faint pt-2">{data ? 'No matching log lines.' : 'No matching log lines. Waiting for the API…'}</div>
         )}
         {lines.map((l, i) => (
           <div key={i} className="flex whitespace-pre py-[3px]">
@@ -110,7 +110,7 @@ export default function Logs() {
         ))}
         {/* Only claim a live tail when there is actually a log being tailed —
             and the latest refresh worked (item 7: no "streaming" over stale data). */}
-        {!noSource && data && !error && <div className="mt-3 text-[12px] font-semibold text-mc-greentext">● LIVE TAIL — streaming…</div>}
+        {!noSource && data && !error && <div className="mt-3 text-[12px] font-semibold text-mc-greentext">● LIVE TAIL, streaming…</div>}
       </div>
     </div>
   )

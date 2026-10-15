@@ -46,7 +46,7 @@ export class IngestController {
     const type = body?.type;
     if (!type || !this.isKnownType(type)) {
       throw new HttpException(
-        `unknown event type "${type ?? '(missing)'}" — allowed: ${KNOWN_TYPES.join(', ')}`,
+        `unknown event type "${type ?? '(missing)'}". Allowed: ${KNOWN_TYPES.join(', ')}`,
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -136,4 +136,5 @@ const KNOWN_TYPES: ActivityEventType[] = [
   'usage.snapshot',
   'approvals.snapshot',
   'memory.snapshot',
+  'agent.status',
 ];

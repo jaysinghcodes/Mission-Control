@@ -118,7 +118,7 @@ export function formatWeekRange(startKey: string): string {
   const endKey = shiftDay(startKey, 6)
   const left = formatKey(startKey, { month: 'short', day: 'numeric' })
   const right = formatKey(endKey, { month: 'short', day: 'numeric', year: 'numeric' })
-  return `${left} – ${right}`
+  return `${left} to ${right}`
 }
 
 export function formatMonthTitle(dayKey: string): string {

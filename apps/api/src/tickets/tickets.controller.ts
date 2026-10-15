@@ -15,6 +15,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { operatorName } from '../config/operator';
 import { KeyedMutex } from './keyed-mutex';
 import {
+  ticketCreated,
+  ticketMoved,
+  ticketUpdated,
+} from '../activity/activity-text';
+import {
   CREATE_STATUSES,
   DEFAULT_CREATE_STATUS,
   TICKET_STATUSES,
@@ -87,6 +92,14 @@ export class TicketsController {
    */
   private readonly writes = new KeyedMutex();
 
+  /**
+   * One create at a time in this process. Ten parallel creates used to open
+   * ten transactions that all waited on the advisory lock, which filled the
+   * pool. The tenth request then lost its socket, and shutdown still held
+   * the open transaction. The advisory lock still serializes other processes.
+   */
+  private readonly creates = new KeyedMutex();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: LiveActivityGateway,
@@ -148,6 +161,28 @@ export class TicketsController {
     const projectRef = this.parseProjectRef(body?.projectId);
     const projectId = projectRef.kind === 'id' ? projectRef.id : undefined;
 
+    // Queue synchronously, before any await, so parallel creates line up
+    // in receive order and only the head opens a transaction.
+    return this.creates.run('ticket-key', () =>
+      this.insertCreatedTicket({
+        title,
+        priority,
+        assignee,
+        tags,
+        status,
+        projectId,
+      }),
+    );
+  }
+
+  private async insertCreatedTicket(input: {
+    title: string;
+    priority: string;
+    assignee: string;
+    tags: string[];
+    status: string;
+    projectId?: string;
+  }) {
     // ── key allocation (QA-1 #5) ─────────────────────────────────────────
     // The old code did `count()` then `create({ key: MC-${150 + count} })` as
     // two separate, unlocked round-trips. Every create that read the count
@@ -160,22 +195,13 @@ export class TicketsController {
     // ONE transaction that first takes a transaction-scoped Postgres
     // advisory lock (see allocateKeyAndCreate). Concurrent creates queue on
     // that lock, so each one sees the previous one's committed MC-N.
-    const ticket = await this.allocateKeyAndCreate({
-      title,
-      priority,
-      assignee,
-      tags,
-      status,
-      projectId,
-    });
-    await this.persist('run.queued', {
-      name: `ticket ${ticket.key}`,
-      ticket: ticket.key,
-    });
-    this.gateway.broadcast('run.queued', {
-      name: `ticket ${ticket.key}`,
-      ticket: ticket.key,
-    });
+    const ticket = await this.allocateKeyAndCreate(input);
+    const created = this.activityPayload(
+      ticket,
+      ticketCreated(ticket.key ?? 'Ticket'),
+    );
+    await this.persist('run.queued', created);
+    this.gateway.broadcast('run.queued', created);
     return { ticket, ts: Date.now() };
   }
 
@@ -352,11 +378,13 @@ export class TicketsController {
     // nothing happened, and the activity feed should only show real moves.
     if (!changed) return { ticket, ts: Date.now() };
 
+    const key = ticket.key ?? 'Ticket';
     const label = data.status
-      ? `ticket ${ticket.key} → ${ticket.status}`
-      : `ticket ${ticket.key} updated`;
-    await this.persist('run.progress', { name: label, ticket: ticket.key });
-    this.gateway.broadcast('run.progress', { name: label, ticket: ticket.key });
+      ? ticketMoved(key, ticket.status)
+      : ticketUpdated(key);
+    const moved = this.activityPayload(ticket, label);
+    await this.persist('run.progress', moved);
+    this.gateway.broadcast('run.progress', moved);
     return { ticket, ts: Date.now() };
   }
 
@@ -372,7 +400,7 @@ export class TicketsController {
       const status = typeof body.status === 'string' ? body.status.trim() : '';
       if (!isTicketStatus(status)) {
         throw new BadRequestException(
-          `invalid status ${JSON.stringify(body.status)} — expected one of: ${TICKET_STATUSES.join(', ')}`,
+          `invalid status ${JSON.stringify(body.status)}. Expected one of: ${TICKET_STATUSES.join(', ')}`,
         );
       }
       data.status = status;
@@ -394,7 +422,7 @@ export class TicketsController {
     // An empty/irrelevant body would be a silent no-op 200 — make it explicit.
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(
-        'nothing to update — send status, assignee, priority and/or projectId',
+        'nothing to update. Send status, assignee, priority and/or projectId',
       );
     }
     return data;
@@ -454,7 +482,7 @@ export class TicketsController {
     }
     if (rows[0].archivedAt) {
       throw new BadRequestException(
-        `project "${rows[0].name}" is archived — unarchive it before assigning tickets`,
+        `project "${rows[0].name}" is archived. Unarchive it before assigning tickets`,
       );
     }
   }
@@ -465,7 +493,7 @@ export class TicketsController {
     const status = typeof raw === 'string' ? raw.trim() : '';
     if (!isCreateStatus(status)) {
       throw new BadRequestException(
-        `invalid create status ${JSON.stringify(raw)} — new tickets may only start in: ${CREATE_STATUSES.join(', ')}`,
+        `invalid create status ${JSON.stringify(raw)}. New tickets may only start in: ${CREATE_STATUSES.join(', ')}`,
       );
     }
     return status;
@@ -490,6 +518,18 @@ export class TicketsController {
       throw new BadRequestException(`${field} must be an array of strings`);
     }
     return value; // narrowed by the checks above
+  }
+
+  /** Activity names the assignee so Office does not label the row system. */
+  private activityPayload(
+    ticket: { key: string | null; assignee: string | null },
+    name: string,
+  ): Record<string, unknown> {
+    return {
+      name,
+      ...(ticket.key ? { ticket: ticket.key } : {}),
+      ...(ticket.assignee ? { agent: ticket.assignee } : {}),
+    };
   }
 
   /** Write a run.* event to the persisted activity stream. */

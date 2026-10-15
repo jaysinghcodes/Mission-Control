@@ -21,22 +21,6 @@ import { bodyMessage } from './lint-helpers';
  * FAST here, before Nest boots and before any create runs — and clean up
  * every ticket + its activity events we create, even when a test fails.
  */
-/** A dropped socket. HTTP 4xx and 5xx are not this. */
-function isDroppedConnection(err: unknown): boolean {
-  let message = '';
-  if (typeof err === 'string') message = err;
-  else if (err instanceof Error) message = err.message;
-  const code =
-    err && typeof err === 'object' && 'code' in err
-      ? String((err as { code?: unknown }).code)
-      : '';
-  return (
-    code === 'ECONNRESET' ||
-    message.includes('ECONNRESET') ||
-    message.includes('socket hang up')
-  );
-}
-
 if (!process.env.DATABASE_URL) {
   throw new Error(
     'Tickets e2e refuses to run without DATABASE_URL.\n' +
@@ -110,6 +94,10 @@ describe('Tickets (e2e)', () => {
     }).compile();
     app = moduleFixture.createNestApplication();
     await app.init();
+    // Listen once. Supertest otherwise calls listen on the first request of
+    // a batch and closes that server when the request ends, which resets
+    // the other nine parallel creates.
+    await app.listen(0, '127.0.0.1');
     prisma = app.get(PrismaService);
     if (!prisma.dbReady) {
       throw new Error(
@@ -302,70 +290,14 @@ describe('Tickets (e2e)', () => {
   });
 
   describe('concurrent creates (QA-1 #5)', () => {
-    it('10 parallel POSTs → 10 unique MC-N keys', async () => {
-      const postOnce = (i: number) =>
-        call()
-          .post('/tickets')
-          .send({ title: `e2e parallel ${i}`, status: 'todo' });
-
-      const first = await Promise.allSettled(
-        Array.from({ length: 10 }, (_, i) => postOnce(i)),
+    it('10 parallel POSTs return 10 unique MC-N keys', async () => {
+      const settled = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          call()
+            .post('/tickets')
+            .send({ title: `e2e parallel ${i}`, status: 'todo' }),
+        ),
       );
-      const rejected = first.filter((result) => result.status === 'rejected');
-      const fulfilled = first.filter((result) => result.status === 'fulfilled');
-      for (const result of fulfilled) {
-        if (result.value.status !== 201) continue;
-        const ticket = ticketFrom(result.value).ticket;
-        if (ticket?.id) created.push(ticket.id);
-      }
-
-      const httpFailure = fulfilled.find(
-        (result) => result.value.status !== 201,
-      );
-      const otherReject = rejected.find(
-        (result) => !isDroppedConnection(result.reason),
-      );
-      if (rejected.length > 0 || httpFailure) {
-        console.log(
-          'parallel ticket create first batch:',
-          JSON.stringify(
-            first.map((result) => {
-              if (result.status === 'rejected') {
-                const reason: unknown = result.reason;
-                const message =
-                  typeof reason === 'string'
-                    ? reason
-                    : reason instanceof Error
-                      ? reason.message
-                      : '';
-                const code =
-                  reason && typeof reason === 'object' && 'code' in reason
-                    ? String((reason as { code?: unknown }).code)
-                    : '';
-                return { error: message, code };
-              }
-              const body: unknown = result.value.body as unknown;
-              return {
-                status: result.value.status,
-                body,
-              };
-            }),
-          ),
-        );
-      }
-      if (otherReject && otherReject.status === 'rejected') {
-        throw otherReject.reason;
-      }
-      if (httpFailure) {
-        expect(httpFailure.value.status).toBe(201);
-      }
-
-      let settled = fulfilled.map((result) => result.value);
-      if (rejected.length > 0) {
-        settled = await Promise.all(
-          Array.from({ length: 10 }, (_, i) => postOnce(i)),
-        );
-      }
       for (const res of settled) {
         expect(res.status).toBe(201);
         const ticket = ticketFrom(res).ticket;

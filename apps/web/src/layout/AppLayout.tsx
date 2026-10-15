@@ -197,7 +197,7 @@ export default function AppLayout() {
         }
       } catch {
         if (cancelled) return
-        reportUnreachable(timedOut ? `no answer within ${HEARTBEAT_TIMEOUT_MS / 1000} s` : 'API unreachable — is the server running?')
+        reportUnreachable(timedOut ? `no answer within ${HEARTBEAT_TIMEOUT_MS / 1000} s` : 'API unreachable. Is the server running?')
       } finally {
         clearTimeout(ceiling)
       }

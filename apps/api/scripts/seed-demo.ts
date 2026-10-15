@@ -177,16 +177,16 @@ const TICKETS = [
 // Activity: `minsAgo` gives a believable spread on first insert. Types are
 // from the ingest KNOWN_TYPES union so pages color them like real events.
 const ACTIVITY = [
-  { id: 'demo-act-01', minsAgo: 95, type: 'run.started', payload: { name: 'Morning Brief', agent: LEAD } },
-  { id: 'demo-act-02', minsAgo: 92, type: 'run.completed', payload: { name: 'Morning Brief', agent: LEAD, status: 'done' } },
-  { id: 'demo-act-03', minsAgo: 70, type: 'run.queued', payload: { name: 'ticket DEMO-3', ticket: 'DEMO-3' } },
-  { id: 'demo-act-04', minsAgo: 64, type: 'run.running', payload: { name: 'ticket DEMO-3', ticket: 'DEMO-3', agent: 'Forge' } },
-  { id: 'demo-act-05', minsAgo: 51, type: 'run.progress', payload: { name: 'ticket DEMO-3', agent: 'Forge', progress: 60 } },
-  { id: 'demo-act-06', minsAgo: 40, type: 'run.running', payload: { name: 'ticket DEMO-4', ticket: 'DEMO-4', agent: 'Sentinel' } },
-  { id: 'demo-act-07', minsAgo: 33, type: 'run.failed', payload: { name: 'Trend Radar', agent: 'Scout', status: 'failed', summary: 'demo: upstream timeout' } },
+  { id: 'demo-act-01', minsAgo: 95, type: 'run.started', payload: { name: 'Run started', title: 'Morning Brief', agent: LEAD } },
+  { id: 'demo-act-02', minsAgo: 92, type: 'run.completed', payload: { name: 'Run finished', title: 'Morning Brief', agent: LEAD, status: 'done' } },
+  { id: 'demo-act-03', minsAgo: 70, type: 'run.queued', payload: { name: 'DEMO-3 created', ticket: 'DEMO-3' } },
+  { id: 'demo-act-04', minsAgo: 64, type: 'run.running', payload: { name: 'DEMO-3 moved to Build', ticket: 'DEMO-3', agent: 'Forge' } },
+  { id: 'demo-act-05', minsAgo: 51, type: 'run.progress', payload: { name: 'DEMO-3 updated', ticket: 'DEMO-3', agent: 'Forge', progress: 60 } },
+  { id: 'demo-act-06', minsAgo: 40, type: 'run.running', payload: { name: 'DEMO-4 moved to QA', ticket: 'DEMO-4', agent: 'Sentinel' } },
+  { id: 'demo-act-07', minsAgo: 33, type: 'run.failed', payload: { name: 'Run failed', title: 'Trend Radar', agent: 'Scout', status: 'failed', summary: 'upstream timeout' } },
   { id: 'demo-act-08', minsAgo: 21, type: 'approval.new', payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis', ticket: 'DEMO-4' } },
-  { id: 'demo-act-09', minsAgo: 12, type: 'run.done', payload: { name: 'ticket DEMO-6', ticket: 'DEMO-6', agent: 'Aegis' } },
-  { id: 'demo-act-10', minsAgo: 4, type: 'run.completed', payload: { name: 'Inbox Poll', agent: 'Patch', status: 'done' } },
+  { id: 'demo-act-09', minsAgo: 12, type: 'run.done', payload: { name: 'DEMO-6 moved to Done', ticket: 'DEMO-6', agent: 'Aegis' } },
+  { id: 'demo-act-10', minsAgo: 4, type: 'run.completed', payload: { name: 'Run finished', title: 'Inbox Poll', agent: 'Patch', status: 'done' } },
 ];
 
 // One pending approval so the Approvals page (and the `approval.new` event

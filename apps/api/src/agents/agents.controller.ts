@@ -16,6 +16,11 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  agentRegistered,
+  agentStatusName,
+  agentWentOffline,
+} from '../activity/activity-text';
 import { AGENT_STATUSES, isAgentStatus } from './agent-status';
 import {
   NAME_MAX,
@@ -104,7 +109,7 @@ export class AgentsController {
     const saved = plan.created
       ? await this.insertRegistered(plan.row)
       : await this.updateRegistered(plan.row);
-    await this.emit('register', saved.id, saved.source, true);
+    await this.emit('register', saved.id, saved.source, true, saved.name);
     res.status(plan.created ? 201 : 200);
     return { agent: this.present(saved, now), ts: Date.now() };
   }
@@ -126,6 +131,7 @@ export class AgentsController {
     const found = await this.prisma.agent.findUnique({ where: { id } });
     const plan = planHeartbeat(found ? asRosterAgent(found) : null, now, patch);
     if (!plan.ok) throw new NotFoundException(plan.message);
+    const previousStatus = found?.status;
     await this.prisma.agent.update({
       where: { id },
       data: {
@@ -137,6 +143,13 @@ export class AgentsController {
       },
     });
     await this.emit('heartbeat', id, 'registered', false);
+    if (
+      patch.status !== undefined &&
+      patch.status !== previousStatus &&
+      found
+    ) {
+      await this.persistStatus(found.name, patch.status);
+    }
   }
 
   /**
@@ -153,7 +166,7 @@ export class AgentsController {
       throw new ConflictException(plan.message);
     }
     await this.prisma.agent.delete({ where: { id } });
-    await this.emit('delete', id, 'registered', true);
+    await this.emit('delete', id, 'registered', true, found?.name);
   }
 
   private present<T extends { source: string; lastSeenAt: Date | null }>(
@@ -350,13 +363,44 @@ export class AgentsController {
     throw err;
   }
 
+  /** A real status change leaves a sentence on the activity rail. */
+  private async persistStatus(name: string, status: string): Promise<void> {
+    const payload = {
+      name: agentStatusName(name, status),
+      agent: name,
+      status,
+    };
+    try {
+      await this.prisma.activityEvent.create({
+        data: { type: 'agent.status', payload, source: 'api' },
+      });
+    } catch {
+      // History is best effort. The live line still goes out.
+    }
+    this.gateway.broadcast('agent.status', payload);
+  }
+
   private async emit(
     action: 'register' | 'heartbeat' | 'delete',
     id: string,
     source: string,
     persist: boolean,
+    agentName?: string,
   ): Promise<void> {
-    const payload = { id, source, action };
+    const name = agentName?.trim() ?? '';
+    const sentence =
+      action === 'register' && name
+        ? agentRegistered(name)
+        : action === 'delete' && name
+          ? agentWentOffline(name)
+          : '';
+    const payload = {
+      id,
+      source,
+      action,
+      ...(name ? { agent: name } : {}),
+      ...(sentence ? { name: sentence } : {}),
+    };
     if (persist) {
       try {
         await this.prisma.activityEvent.create({

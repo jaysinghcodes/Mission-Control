@@ -144,7 +144,7 @@ test('a failed PATCH snaps the card back to its original column and position and
   assert.deepEqual(view.ids('To-Do'), ['a', 'b'])
   assert.deepEqual(view.ids('QA'), [])
   assert.deepEqual(view.ids('Build'), ['c'])
-  assert.equal(view.alert(), "Couldn't move ticket to QA — Request failed (HTTP 503)")
+  assert.equal(view.alert(), "Couldn't move ticket to QA. Request failed (HTTP 503)")
   await view.unmount()
 })
 
@@ -198,13 +198,13 @@ test('a fast double drag that both fail returns the card to its original column'
   await act(async () => { view.api.moveTo('a', 'done') })
   assert.deepEqual(view.ids('Done'), ['a'])
 
-  const fail = () => ({ ok: false, httpStatus: 0, error: 'API unreachable — is the server running?' })
+  const fail = () => ({ ok: false, httpStatus: 0, error: 'API unreachable. Is the server running?' })
   // Newer failure first, then the earlier one (the API died under both).
   await act(async () => { resolvers[1](fail()) })
   await act(async () => { resolvers[0](fail()) })
   assert.deepEqual(view.ids('To-Do'), ['a', 'b'])
   assert.deepEqual(view.ids('Done'), [])
-  assert.equal(view.alert(), "Couldn't move ticket to Done — API unreachable — is the server running?")
+  assert.equal(view.alert(), "Couldn't move ticket to Done. API unreachable. Is the server running?")
   await view.unmount()
 })
 
