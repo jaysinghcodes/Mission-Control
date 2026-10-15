@@ -283,6 +283,22 @@ describe('agent merge', () => {
       expect(untouched.row.status).toBe(bot.status);
       expect(untouched.row.currentTask).toBe(bot.currentTask);
     }
+    const busy = row({
+      ...bot,
+      status: 'working',
+      currentTask: 'Shipping the notes',
+    });
+    const idle = planHeartbeat(busy, now, { status: 'idle' });
+    expect(idle.ok && idle.row.currentTask).toBe(null);
+    expect(idle.ok && idle.row.status).toBe('idle');
+    const idleKeepsNone = planHeartbeat(busy, now, {
+      status: 'idle',
+      currentTask: 'Still writing',
+    });
+    expect(idleKeepsNone.ok && idleKeepsNone.row.currentTask).toBe(null);
+    const cleared = planHeartbeat(busy, now, { currentTask: null });
+    expect(cleared.ok && cleared.row.currentTask).toBe(null);
+    expect(cleared.ok && cleared.row.status).toBe('working');
     expect(planHeartbeat(null, now)).toEqual({
       ok: false,
       status: 404,

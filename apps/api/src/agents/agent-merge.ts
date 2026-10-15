@@ -76,9 +76,12 @@ export type DeletePlan =
 export type HeartbeatPlan =
   { ok: true; row: RosterAgent } | { ok: false; status: 404; message: string };
 
-/** Optional POST /agents/:id/heartbeat fields. Absent keys stay as stored. */
+/**
+ * Optional POST /agents/:id/heartbeat fields. Absent keys stay as stored.
+ * currentTask null clears the task. status idle clears it too.
+ */
 export interface HeartbeatPatch {
-  currentTask?: string;
+  currentTask?: string | null;
   status?: string;
 }
 
@@ -277,14 +280,15 @@ export function planHeartbeat(
       message: row ? 'agent is not registered' : 'agent not found',
     };
   }
+  let nextTask: string | null | undefined = undefined;
+  if (patch.status === 'idle') nextTask = null;
+  else if (patch.currentTask !== undefined) nextTask = patch.currentTask;
   return {
     ok: true,
     row: {
       ...row,
       lastSeenAt: now,
-      ...(patch.currentTask !== undefined
-        ? { currentTask: patch.currentTask }
-        : {}),
+      ...(nextTask !== undefined ? { currentTask: nextTask } : {}),
       ...(patch.status !== undefined ? { status: patch.status } : {}),
     },
   };

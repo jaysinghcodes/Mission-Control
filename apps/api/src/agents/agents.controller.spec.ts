@@ -349,6 +349,52 @@ describe('AgentsController register, heartbeat, delete', () => {
     ).rejects.toMatchObject({ message: 'unknown field nope', status: 400 });
   });
 
+  it('idle, null, and blank clear currentTask and do not 400', async () => {
+    const { rows, controller, res } = harness();
+    await controller.register(
+      { id: 'forge_helper', name: 'Forge Helper' },
+      res,
+    );
+    const current = () => rows.get('forge_helper')!;
+    current().status = 'working';
+    current().currentTask = 'Shipping the notes';
+
+    await controller.heartbeat('forge_helper', { status: 'idle' });
+    expect(current().status).toBe('idle');
+    expect(current().currentTask).toBeNull();
+
+    current().status = 'working';
+    current().currentTask = 'Shipping the notes';
+    await controller.heartbeat('forge_helper', {
+      status: 'idle',
+      currentTask: 'Still writing',
+    });
+    expect(current().status).toBe('idle');
+    expect(current().currentTask).toBeNull();
+
+    current().status = 'working';
+    current().currentTask = 'Shipping the notes';
+    await controller.heartbeat('forge_helper', { currentTask: null });
+    expect(current().status).toBe('working');
+    expect(current().currentTask).toBeNull();
+
+    current().currentTask = 'Shipping the notes';
+    await controller.heartbeat('forge_helper', { currentTask: '' });
+    expect(current().currentTask).toBeNull();
+
+    current().currentTask = 'Shipping the notes';
+    await controller.heartbeat('forge_helper', { currentTask: '   ' });
+    expect(current().currentTask).toBeNull();
+
+    await expect(
+      controller.heartbeat('forge_helper', { currentTask: 4 }),
+    ).rejects.toMatchObject({
+      message: 'currentTask must be a string',
+      status: 400,
+    });
+    expect(current().currentTask).toBeNull();
+  });
+
   it('an invalid heartbeat status is 400 and does not write', async () => {
     const { rows, controller, res } = harness();
     await controller.register(
