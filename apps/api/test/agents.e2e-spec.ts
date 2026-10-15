@@ -451,24 +451,37 @@ describe('Agents register (e2e)', () => {
     expect(asNull.status).toBe(204);
     const afterNull = await request(app.getHttpServer()).get(`/agents/${id}`);
     expect(agentFrom(afterNull)).toMatchObject({
-      status: 'working',
+      status: 'idle',
       currentTask: null,
     });
 
     await prisma.agent.update({
       where: { id },
-      data: { currentTask: 'Shipping the notes' },
+      data: { status: 'working', currentTask: 'Shipping the notes' },
     });
     const blank = await call()
       .post(`/agents/${id}/heartbeat`)
       .send({ currentTask: '' });
     expect(blank.status).toBe(204);
+    const afterBlank = await request(app.getHttpServer()).get(`/agents/${id}`);
+    expect(agentFrom(afterBlank)).toMatchObject({
+      status: 'idle',
+      currentTask: null,
+    });
+
+    await prisma.agent.update({
+      where: { id },
+      data: { status: 'working', currentTask: 'Shipping the notes' },
+    });
     const spaces = await call()
       .post(`/agents/${id}/heartbeat`)
       .send({ currentTask: '   ' });
     expect(spaces.status).toBe(204);
-    const afterBlank = await request(app.getHttpServer()).get(`/agents/${id}`);
-    expect(agentFrom(afterBlank).currentTask).toBeNull();
+    const afterSpaces = await request(app.getHttpServer()).get(`/agents/${id}`);
+    expect(agentFrom(afterSpaces)).toMatchObject({
+      status: 'idle',
+      currentTask: null,
+    });
 
     const typed = await call()
       .post(`/agents/${id}/heartbeat`)

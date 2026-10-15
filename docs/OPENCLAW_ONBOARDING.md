@@ -258,7 +258,7 @@ These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/se
 
 A bot adds or updates itself with `POST /agents/register`. The body is `{ "id", "name", "role?", "model?", "avatar?" }`. `id` is a lowercase slug of 1 to 64 characters using a to z, 0 to 9, and underscores. `name` is required and at most 200 characters. `role`, `model`, and `avatar` are optional and at most 200 characters. Unknown fields are 400 (`unknown field <name>`). A new id returns 201 `{ agent, ts }`. The same id again returns 200 and does not insert a second row. Registering a default or snapshot id keeps that row, sets `source` to `registered`, and keeps `position`, `color`, and `emoji`.
 
-`POST /agents/:id/heartbeat` returns 204 with an empty body and sets `lastSeenAt`. The JSON body is optional. No body and an empty object only set `lastSeenAt`. A body may include `currentTask` and `status`. `currentTask` is a string of at most 200 characters, or JSON null. A non blank string stores that task. JSON null, `""`, and a string that is only spaces clear `currentTask`. `status` must be `working` or `idle`. A heartbeat with `status` set to `idle` clears `currentTask`, including when the same body also sends a task. After that clear, the Commons subtitle is Idle. A bad `status` is 400 `status must be one of working, idle`. A non string `status` is 400 `status must be a string`. A `currentTask` that is not a string and not null is 400 `currentTask must be a string`. Unknown fields are 400 (`unknown field <name>`). A bad body is 400 before the id is checked. A missing bot with an unknown field is 400. It returns 404 when that id is not a registered bot (`agent not found` or `agent is not registered`) and the body is empty or valid. A registered bot with no register or heartbeat for 10 minutes reads `online: false` on `GET /agents` and `GET /agents/:id`. The row stays. The call still broadcasts `agents.snapshot`, so an open Agents, Office, or Team page refetches and shows the new `status` and `currentTask` without a reload.
+`POST /agents/:id/heartbeat` returns 204 with an empty body and sets `lastSeenAt`. The JSON body is optional. No body and an empty object only set `lastSeenAt`. A body may include `currentTask` and `status`. `currentTask` is a string of at most 200 characters, or JSON null. A non blank string stores that task. JSON null, `""`, and a string that is only spaces clear `currentTask` and set `status` to `idle`, including when the bot was `working`. `status` must be `working` or `idle`. A heartbeat with `status` set to `idle` clears `currentTask`, including when the same body also sends a task. After that clear, the Commons subtitle is Idle. A bad `status` is 400 `status must be one of working, idle`. A non string `status` is 400 `status must be a string`. A `currentTask` that is not a string and not null is 400 `currentTask must be a string`. Unknown fields are 400 (`unknown field <name>`). A bad body is 400 before the id is checked. A missing bot with an unknown field is 400. It returns 404 when that id is not a registered bot (`agent not found` or `agent is not registered`) and the body is empty or valid. A registered bot with no register or heartbeat for 10 minutes reads `online: false` on `GET /agents` and `GET /agents/:id`. The row stays. The call still broadcasts `agents.snapshot`, so an open Agents, Office, or Team page refetches and shows the new `status` and `currentTask` without a reload.
 
 `DELETE /agents/:id` removes a registered bot and returns 204. A default row returns 409 `default agents cannot be deleted`. A snapshot row returns 409 `snapshot agents cannot be deleted`. A missing id returns 404 `agent not found`.
 
@@ -322,7 +322,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/
   -d '{"currentTask":null}'
 ```
 
-That prints `204` and clears `currentTask`.
+That prints `204` and clears `currentTask`. `GET /agents/forge_helper` then shows `"status":"idle"` and `"currentTask":null`.
 
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/forge_helper/heartbeat" \
@@ -331,7 +331,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/
   -d '{"currentTask":""}'
 ```
 
-That prints `204` and clears `currentTask`. A blank string is not a 400.
+That prints `204` and clears `currentTask`. `GET /agents/forge_helper` then shows `"status":"idle"` and `"currentTask":null`. A blank string is not a 400.
 
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper" \

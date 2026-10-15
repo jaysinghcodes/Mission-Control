@@ -118,9 +118,10 @@ export class AgentsController {
    * POST /agents/:id/heartbeat. 204 for a registered bot, 404 otherwise.
    * Sets lastSeenAt. An optional body may set currentTask and status.
    * No body leaves those fields as they are. status idle clears
-   * currentTask. Null or a blank currentTask clears it. A non blank
-   * string stores it. Does not create a row. A bad body is 400 before
-   * the id is checked.
+   * currentTask and sets status idle. Null, blank, or whitespace only
+   * currentTask does the same, including when the bot was working. A
+   * non blank string stores it. Does not create a row. A bad body is
+   * 400 before the id is checked.
    */
   @Post(':id/heartbeat')
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -134,23 +135,22 @@ export class AgentsController {
     const plan = planHeartbeat(found ? asRosterAgent(found) : null, now, patch);
     if (!plan.ok) throw new NotFoundException(plan.message);
     const previousStatus = found?.status;
+    const previousTask = found?.currentTask ?? null;
     await this.prisma.agent.update({
       where: { id },
       data: {
         lastSeenAt: plan.row.lastSeenAt,
-        ...(patch.status !== undefined ? { status: plan.row.status } : {}),
-        ...(patch.status === 'idle' || patch.currentTask !== undefined
+        ...(plan.row.status !== previousStatus
+          ? { status: plan.row.status }
+          : {}),
+        ...(plan.row.currentTask !== previousTask
           ? { currentTask: plan.row.currentTask }
           : {}),
       },
     });
     await this.emit('heartbeat', id, 'registered', false);
-    if (
-      patch.status !== undefined &&
-      patch.status !== previousStatus &&
-      found
-    ) {
-      await this.persistStatus(found.name, patch.status);
+    if (plan.row.status !== previousStatus && found) {
+      await this.persistStatus(found.name, plan.row.status);
     }
   }
 

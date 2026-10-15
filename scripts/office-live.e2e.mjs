@@ -2,9 +2,10 @@
  * Live Office. A ticket moves through build, qa, and review.
  * Done returns the bot to Commons. Pipeline still counts that ticket
  * in Deploy. An active run on the done ticket seats Deploy until the
- * run finishes. A heartbeat can set a task, and idle, null, or blank
- * clears it. Register and delete show on the Office rail without
- * waiting for the poll. Teardown removes the agents and the ticket.
+ * run finishes. A heartbeat can set a task. Idle, null, or blank clears
+ * it and sets status idle, including when the bot was working. Register
+ * and delete show on the Office rail without waiting for the poll.
+ * Teardown removes the agents and the ticket.
  *
  * The API and the web app must already be running.
  */
@@ -416,20 +417,32 @@ async function main() {
     await bot(agents).scrollIntoViewIfNeeded()
     await shot(agents, 'agents-cleared-task.png')
 
-    const again = await apiSend('POST', `/agents/${agentId}/heartbeat`, { currentTask: 'Notes again' })
+    const again = await apiSend('POST', `/agents/${agentId}/heartbeat`, {
+      currentTask: 'Notes again',
+      status: 'working',
+    })
     if (again.status !== 204) throw new Error(`task heartbeat returned ${again.status} ${again.text}`)
     await expectAll(pages, 'commons', 'Notes again', 2000)
     const asNull = await apiSend('POST', `/agents/${agentId}/heartbeat`, { currentTask: null })
     if (asNull.status !== 204) throw new Error(`null currentTask returned ${asNull.status} ${asNull.text}`)
-    if ((await taskOf(agentId)).task !== null) throw new Error('null currentTask did not clear the task')
+    const afterNull = await taskOf(agentId)
+    if (afterNull.task !== null || afterNull.agentStatus !== 'idle') {
+      throw new Error(`null currentTask left the bot working (${JSON.stringify(afterNull)})`)
+    }
     await expectAll(pages, 'commons', 'Idle', 2000)
 
-    const restore = await apiSend('POST', `/agents/${agentId}/heartbeat`, { currentTask: 'Notes again' })
+    const restore = await apiSend('POST', `/agents/${agentId}/heartbeat`, {
+      currentTask: 'Notes again',
+      status: 'working',
+    })
     if (restore.status !== 204) throw new Error(`restore heartbeat returned ${restore.status} ${restore.text}`)
     await expectAll(pages, 'commons', 'Notes again', 2000)
     const blank = await apiSend('POST', `/agents/${agentId}/heartbeat`, { currentTask: '' })
     if (blank.status !== 204) throw new Error(`blank currentTask returned ${blank.status} ${blank.text}`)
-    if ((await taskOf(agentId)).task !== null) throw new Error('blank currentTask did not clear the task')
+    const afterBlank = await taskOf(agentId)
+    if (afterBlank.task !== null || afterBlank.agentStatus !== 'idle') {
+      throw new Error(`blank currentTask left the bot working (${JSON.stringify(afterBlank)})`)
+    }
     await expectAll(pages, 'commons', 'Idle', 2000)
 
     const rail = await apiSend('POST', '/agents/register', {

@@ -375,15 +375,28 @@ describe('AgentsController register, heartbeat, delete', () => {
     current().status = 'working';
     current().currentTask = 'Shipping the notes';
     await controller.heartbeat('forge_helper', { currentTask: null });
-    expect(current().status).toBe('working');
+    expect(current().status).toBe('idle');
     expect(current().currentTask).toBeNull();
 
+    current().status = 'working';
     current().currentTask = 'Shipping the notes';
     await controller.heartbeat('forge_helper', { currentTask: '' });
+    expect(current().status).toBe('idle');
     expect(current().currentTask).toBeNull();
 
+    current().status = 'working';
     current().currentTask = 'Shipping the notes';
     await controller.heartbeat('forge_helper', { currentTask: '   ' });
+    expect(current().status).toBe('idle');
+    expect(current().currentTask).toBeNull();
+
+    current().status = 'working';
+    current().currentTask = 'Shipping the notes';
+    await controller.heartbeat('forge_helper', {
+      status: 'working',
+      currentTask: null,
+    });
+    expect(current().status).toBe('idle');
     expect(current().currentTask).toBeNull();
 
     await expect(

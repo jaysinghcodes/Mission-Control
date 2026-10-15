@@ -298,7 +298,19 @@ describe('agent merge', () => {
     expect(idleKeepsNone.ok && idleKeepsNone.row.currentTask).toBe(null);
     const cleared = planHeartbeat(busy, now, { currentTask: null });
     expect(cleared.ok && cleared.row.currentTask).toBe(null);
-    expect(cleared.ok && cleared.row.status).toBe('working');
+    expect(cleared.ok && cleared.row.status).toBe('idle');
+    const blank = planHeartbeat(busy, now, { currentTask: '' });
+    expect(blank.ok && blank.row.currentTask).toBe(null);
+    expect(blank.ok && blank.row.status).toBe('idle');
+    const spaces = planHeartbeat(busy, now, { currentTask: '   ' });
+    expect(spaces.ok && spaces.row.currentTask).toBe(null);
+    expect(spaces.ok && spaces.row.status).toBe('idle');
+    const clearWins = planHeartbeat(busy, now, {
+      status: 'working',
+      currentTask: null,
+    });
+    expect(clearWins.ok && clearWins.row.currentTask).toBe(null);
+    expect(clearWins.ok && clearWins.row.status).toBe('idle');
     expect(planHeartbeat(null, now)).toEqual({
       ok: false,
       status: 404,
