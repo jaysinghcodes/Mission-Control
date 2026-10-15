@@ -2,7 +2,7 @@ import { useApi } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { Card, Chip, PillButton, SectionLabel } from '../components/ui'
 import { AgentAvatar } from '../components/AgentAvatar'
-import { activityText } from '../lib/activity-text'
+import { activityRailLine } from '../lib/activity-rail'
 import { rosterDisplayName } from '../data/roster'
 
 /**
@@ -53,34 +53,30 @@ export default function Activity() {
   const roster = agents.data?.agents ?? []
   const stream = [
     ...(history.data?.events ?? []).map((e) => {
-      const face = streamFace(eventSubject(e.payload), roster)
-      const line = activityText(e.payload)
+      const line = activityRailLine(e, roster)
+      if (!line) return null
+      const face = streamFace(line.actor?.name ?? eventSubject(e.payload), roster)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
         zone: e.type.split('.')[0]?.toUpperCase() ?? 'RUN',
-        desc: line ? `${e.type} · ${line}` : e.type,
+        desc: line.text,
         key: `h-${e.ts}`,
       }
     }),
     ...events.map((e, i) => {
-      const payload = {
-        name: typeof e.name === 'string' ? e.name : undefined,
-        title: typeof e.title === 'string' ? e.title : undefined,
-        summary: typeof e.summary === 'string' ? e.summary : undefined,
-        agent: typeof e.agent === 'string' ? e.agent : undefined,
-      }
-      const face = streamFace(eventSubject(payload), roster)
-      const line = activityText(payload)
+      const line = activityRailLine(e, roster)
+      if (!line) return null
+      const face = streamFace(line.actor?.name ?? null, roster)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
         zone: e.type.split('.')[0]?.toUpperCase() ?? 'RUN',
-        desc: line ? `${e.type} · ${line}` : e.type,
+        desc: line.text,
         key: `l-${e.ts}-${i}`,
       }
     }),
-  ].slice(0, 40)
+  ].filter((row): row is NonNullable<typeof row> => row != null).slice(0, 40)
 
   return (
     <div className="p-6">

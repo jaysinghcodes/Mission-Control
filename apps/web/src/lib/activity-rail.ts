@@ -1,0 +1,104 @@
+/**
+ * One sentence for an activity row. Office, Calendar, and System all use
+ * this. A row with no sentence is omitted. An event type string is never
+ * a sentence.
+ */
+import { activityText } from './activity-text'
+import {
+  activityActor,
+  type ActivityActor,
+  type ActivityPayload,
+  type LiveRun,
+  type LiveTicket,
+} from './live-work'
+
+const EVENT_TYPE = /^(?:agents|agent|run|ticket|health|approval|sessions|session|calendar|memory|usage)\.[a-z0-9_.]+$/i
+
+export interface RailPayload extends ActivityPayload {
+  summary?: string | null
+  title?: string | null
+  action?: string | null
+  status?: string | null
+  agents?: unknown
+}
+
+export interface RailEvent {
+  type?: string
+  payload?: RailPayload | null
+  name?: unknown
+  summary?: unknown
+  title?: unknown
+  agent?: unknown
+  id?: unknown
+  action?: unknown
+  status?: unknown
+  agents?: unknown
+  ticket?: unknown
+}
+
+export interface RailLine {
+  actor: ActivityActor | null
+  text: string
+}
+
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function isEventType(text: string): boolean {
+  return EVENT_TYPE.test(text.trim())
+}
+
+function payloadOf(event: RailEvent): RailPayload | null {
+  if (event.payload && typeof event.payload === 'object') return event.payload
+  const id = textOf(event.id)
+  const agent = textOf(event.agent)
+  const name = textOf(event.name)
+  const summary = textOf(event.summary)
+  const action = textOf(event.action)
+  const status = textOf(event.status)
+  const ticket = textOf(event.ticket)
+  if (!id && !agent && !name && !summary && !action && !status && !ticket && !event.agents) return null
+  return {
+    id: id || null,
+    agent: agent || null,
+    name: name || null,
+    summary: summary || null,
+    title: textOf(event.title) || null,
+    action: action || null,
+    status: status || null,
+    ticket: ticket || null,
+    agents: event.agents,
+  }
+}
+
+function sentenceFor(payload: RailPayload, actorName: string): string {
+  const action = textOf(payload.action)
+  if (action === 'register') return `${actorName} registered`
+  if (action === 'delete') return `${actorName} went offline`
+  const status = textOf(payload.status).toLowerCase().replace(/_/g, ' ')
+  if (status && action !== 'heartbeat') return `${actorName} is now ${status}`
+  return ''
+}
+
+/**
+ * The line to show, or null when the row is a snapshot refresh or has
+ * nothing to say. payload.id is read as a roster id by activityActor.
+ */
+export function activityRailLine(
+  event: RailEvent,
+  roster: readonly { id: string; name: string; role?: string | null }[],
+  tickets: readonly LiveTicket[] = [],
+  runs: readonly LiveRun[] = [],
+): RailLine | null {
+  const payload = payloadOf(event)
+  const storedRaw = activityText(payload)
+  const stored = storedRaw && !isEventType(storedRaw) && storedRaw !== (event.type ?? '') ? storedRaw : ''
+  const action = textOf(payload?.action)
+  const refresh = Array.isArray(payload?.agents) || action === 'heartbeat'
+  if (refresh && !stored) return null
+  const actor = activityActor(payload, roster, tickets, runs)
+  const text = stored || (actor ? sentenceFor(payload ?? {}, actor.name) : '')
+  if (!text || isEventType(text) || text === event.type) return null
+  return { actor, text }
+}

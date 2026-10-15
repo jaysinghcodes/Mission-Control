@@ -126,7 +126,7 @@ test('the office page keeps headers on one line and opens a drawer plus a room d
   assert.equal(page.includes('truncate text-[12px] text-mc-sub'), false)
   assert.match(page, /placeFloor/)
   assert.match(page, /deriveLiveWork/)
-  assert.match(page, /activityActor/)
+  assert.match(page, /activityRailLine/)
   assert.equal(page.includes("|| 'system'"), false)
   assert.match(page, /All working', 'Gather', 'Meeting', 'Break'/)
   assert.match(page, /office-room-detail/)

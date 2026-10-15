@@ -3,7 +3,7 @@ import { useLiveActivity } from '../hooks/useLiveActivity'
 import { useApi } from '../hooks/useApi'
 import { Bot, KpiCard, PillButton, SectionLabel } from '../components/ui'
 // Operator name comes from VITE_OPERATOR_NAME (see config.ts) — no hardcoded names.
-import { activityText } from '../lib/activity-text'
+import { activityRailLine } from '../lib/activity-rail'
 import { greeting } from '../config'
 
 /**
@@ -36,19 +36,16 @@ export default function Overview() {
     { value: spend != null ? `$${spend.toFixed(2)}` : 'none', label: 'Spend · 24H' },
   ]
 
-  const liveRows = events.slice(0, 6).map((ev, i) => {
-    const p = ev.payload && typeof ev.payload === 'object' ? (ev.payload as Record<string, unknown>) : {}
-    const line = activityText({
-      name: 'name' in p ? p.name : ev.name,
-      summary: 'summary' in p ? p.summary : ev.summary,
-    })
+  const liveRows = events.map((ev, i) => {
+    const line = activityRailLine(ev, [])
+    if (!line) return null
     return {
-      agent: ev.type === 'health.tick' ? 'system' : 'openclaw',
-      color: ev.type === 'run.failed' ? 'var(--mc-red)' : ev.type === 'run.completed' ? 'var(--mc-green)' : 'var(--mc-blue)',
-      action: line ? `${ev.type} · ${line}` : ev.type,
+      agent: line.actor?.name ?? 'openclaw',
+      color: /fail/i.test(line.text) ? 'var(--mc-red)' : /finished/i.test(line.text) ? 'var(--mc-green)' : 'var(--mc-blue)',
+      action: line.text,
       key: `${ev.ts}-${i}`,
     }
-  })
+  }).filter((row): row is NonNullable<typeof row> => row != null).slice(0, 6)
 
   return (
     <div className="p-6">

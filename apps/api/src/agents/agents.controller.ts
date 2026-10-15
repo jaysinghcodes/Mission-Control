@@ -16,7 +16,11 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
-import { agentStatusName } from '../activity/activity-text';
+import {
+  agentRegistered,
+  agentStatusName,
+  agentWentOffline,
+} from '../activity/activity-text';
 import { AGENT_STATUSES, isAgentStatus } from './agent-status';
 import {
   NAME_MAX,
@@ -105,7 +109,7 @@ export class AgentsController {
     const saved = plan.created
       ? await this.insertRegistered(plan.row)
       : await this.updateRegistered(plan.row);
-    await this.emit('register', saved.id, saved.source, true);
+    await this.emit('register', saved.id, saved.source, true, saved.name);
     res.status(plan.created ? 201 : 200);
     return { agent: this.present(saved, now), ts: Date.now() };
   }
@@ -162,7 +166,7 @@ export class AgentsController {
       throw new ConflictException(plan.message);
     }
     await this.prisma.agent.delete({ where: { id } });
-    await this.emit('delete', id, 'registered', true);
+    await this.emit('delete', id, 'registered', true, found?.name);
   }
 
   private present<T extends { source: string; lastSeenAt: Date | null }>(
@@ -381,8 +385,22 @@ export class AgentsController {
     id: string,
     source: string,
     persist: boolean,
+    agentName?: string,
   ): Promise<void> {
-    const payload = { id, source, action };
+    const name = agentName?.trim() ?? '';
+    const sentence =
+      action === 'register' && name
+        ? agentRegistered(name)
+        : action === 'delete' && name
+          ? agentWentOffline(name)
+          : '';
+    const payload = {
+      id,
+      source,
+      action,
+      ...(name ? { agent: name } : {}),
+      ...(sentence ? { name: sentence } : {}),
+    };
     if (persist) {
       try {
         await this.prisma.activityEvent.create({

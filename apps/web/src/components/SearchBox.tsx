@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { activityText } from '../lib/activity-text'
+import { activityRailLine } from '../lib/activity-rail'
 import { API_URL } from '../lib/apiBase'
 
 /**
@@ -31,10 +31,7 @@ const GROUPS: { key: keyof SearchResults; label: string; path: string; field: (h
   { key: 'agents', label: 'Agents', path: '/agents', field: (h) => h.name ?? '' },
   { key: 'sessions', label: 'Sessions', path: '/sessions', field: (h) => h.name ?? '' },
   { key: 'approvals', label: 'Approvals', path: '/approvals', field: (h) => h.desc ?? h.tag ?? '' },
-  { key: 'activity', label: 'Activity', path: '/activity', field: (h) => {
-    const line = activityText(h.payload ?? h)
-    return line ? `${h.type ?? 'activity'} · ${line}` : (h.type ?? '')
-  } },
+  { key: 'activity', label: 'Activity', path: '/activity', field: (h) => activityRailLine(h, [])?.text ?? '' },
   { key: 'logs', label: 'Logs', path: '/logs', field: (h) => h.msg ?? '' },
 ]
 
@@ -140,7 +137,7 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
             <div className="px-4 py-6 text-[12.5px] text-mc-faint">No results for “{q.trim()}”.</div>
           )}
           {GROUPS.map((g) => {
-            const hits = (results?.[g.key] ?? []) as Hit[]
+            const hits = ((results?.[g.key] ?? []) as Hit[]).filter((h) => g.field(h).trim() !== '')
             if (hits.length === 0) return null
             return (
               <div key={g.key} className="py-1.5">

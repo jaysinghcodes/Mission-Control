@@ -7,10 +7,13 @@
  * The API and the web app must already be running.
  */
 
+import { createRequire } from 'node:module'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
 import { io } from 'socket.io-client'
+
+const require = createRequire(new URL('../apps/api/package.json', import.meta.url))
 
 const web = (process.env.MC_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '')
 const api = (process.env.MC_API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '')
@@ -174,8 +177,27 @@ async function move(id, status) {
   if (res.status !== 200) throw new Error(`PATCH ${status} returned ${res.status} ${res.text}`)
 }
 
+async function deleteTicket(id) {
+  if (!id) return
+  const url = process.env.DATABASE_URL
+  if (!url) throw new Error('live office teardown needs DATABASE_URL to remove the ticket')
+  const { Client } = require('pg')
+  const client = new Client({ connectionString: url })
+  await client.connect()
+  try {
+    await client.query(
+      `DELETE FROM "ActivityEvent" WHERE payload->>'ticket' IN (SELECT key FROM "Ticket" WHERE id = $1)`,
+      [id],
+    )
+    await client.query(`DELETE FROM "Ticket" WHERE id = $1`, [id])
+  } finally {
+    await client.end()
+  }
+}
+
 async function main() {
   await waitForLiveFeed()
+  let ticketId = ''
   const removed = await apiSend('DELETE', `/agents/${agentId}`)
   if (removed.status !== 204 && removed.status !== 404) {
     throw new Error(`cleanup DELETE returned ${removed.status} ${removed.text}`)
@@ -213,6 +235,7 @@ async function main() {
     if (created.status !== 201) throw new Error(`create ticket returned ${created.status} ${created.text}`)
     const ticket = created.json?.ticket
     if (!ticket?.id) throw new Error('create ticket did not return an id')
+    ticketId = ticket.id
 
     const [buildBefore, qaBefore, shipBefore, deployBefore] = await stablePipelines(page)
 
@@ -245,6 +268,9 @@ async function main() {
     const activity = await page.locator('[data-activity-rail="true"]').innerText()
     if (/\bsystem\b/i.test(activity)) throw new Error(`activity still named system\n${activity.slice(0, 500)}`)
     if (!activity.includes(agentName)) throw new Error('activity did not name Live Quill')
+    if (/\b(?:agents|agent|run|ticket)\.[a-z]/.test(activity)) {
+      throw new Error(`activity showed an event type\n${activity.slice(0, 500)}`)
+    }
     await shot(page, 'office-after-qa.png')
     await shot(page, 'office-activity.png')
 
@@ -299,6 +325,7 @@ async function main() {
     console.log('Live Office passed.')
   } finally {
     await browser.close()
+    if (ticketId) await deleteTicket(ticketId)
     await apiSend('DELETE', `/agents/${agentId}`).catch(() => {})
   }
 }

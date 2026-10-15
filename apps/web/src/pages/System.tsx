@@ -5,7 +5,7 @@ import { useApiStatus } from '../lib/apiStatus'
 import { PageHeader, Segmented, SoftCard, StatusChip, Face, Kicker, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
-import { activityText } from '../lib/activity-text'
+import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
@@ -163,7 +163,9 @@ export default function System() {
     : 'Checking health…'
   const bridge = ingestFact(health.data?.lastIngestAt)
 
-  const issue = (activity.data?.events ?? []).find((e) => /fail|error|timeout/i.test(`${e.type} ${e.payload?.name ?? ''} ${e.payload?.summary ?? ''}`))
+  const issue = (activity.data?.events ?? [])
+    .map((event) => ({ event, line: activityRailLine(event, roster) }))
+    .find((row) => row.line && /fail|error|timeout/i.test(row.line.text))
 
   if (panel === 'logs' || panel === 'sessions' || panel === 'settings' || panel === 'connection' || panel === 'tools') {
     return (
@@ -368,14 +370,14 @@ export default function System() {
       )}
 
       <div className="mb-3 mt-8"><Kicker>Recent issues</Kicker></div>
-      {issue ? (
+      {issue?.line ? (
         <SoftCard className="flex flex-wrap items-center gap-3 px-4 py-3">
           <Face
-            agent={roster.find((a) => a.name === issue.payload?.agent) ?? { id: 'issue', name: issue.payload?.agent || 'Scout', role: null, status: 'idle' }}
+            agent={roster.find((a) => a.id === issue.line?.actor?.id || a.name === issue.line?.actor?.name) ?? { id: 'issue', name: issue.line.actor?.name || 'Scout', role: null, status: 'idle' }}
             agents={roster}
             px={34}
           />
-          <div className="min-w-0 flex-1 text-[14px] font-semibold">{activityText(issue.payload, issue.type)}</div>
+          <div className="min-w-0 flex-1 text-[14px] font-semibold">{issue.line.text}</div>
           <StatusChip label="Retrying" tone="orange" />
         </SoftCard>
       ) : (

@@ -4,7 +4,8 @@ import { PageHeader, Segmented, SoftCard, Face, StatusChip, Btn, EmptyState } fr
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { chicagoDay } from '../lib/chicago-day'
-import { activityHaystack, activityText } from '../lib/activity-text'
+import { activityHaystack } from '../lib/activity-text'
+import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import {
   chicagoClock,
@@ -343,9 +344,11 @@ export default function Calendar() {
           {ran && <p className="mt-2 text-[13px] text-mc-sub">{ran}</p>}
           <div className="mt-3 text-[12px] font-semibold text-mc-sub">Recent history</div>
           {history.length === 0 && <p className="mt-1 text-[13px] text-mc-sub">No matching activity yet.</p>}
-          {history.map((e, i) => (
-            <p key={i} className="mt-1 text-[13px] text-mc-text">{activityText(e.payload, e.type)} · {new Date(e.ts).toLocaleString()}</p>
-          ))}
+          {history.map((e, i) => {
+            const line = activityRailLine(e, agents)
+            if (!line) return null
+            return <p key={i} className="mt-1 text-[13px] text-mc-text">{line.text} · {new Date(e.ts).toLocaleString()}</p>
+          })}
         </SoftCard>
       )}
     </div>

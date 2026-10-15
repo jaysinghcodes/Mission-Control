@@ -178,7 +178,8 @@ export interface ActivityActor {
 
 /**
  * Who an activity row is about. Prefer payload.agent, then the ticket
- * assignee, then the run's agent. The word system is never a name.
+ * assignee, then payload.id when it is a roster id, then the run's agent.
+ * The word system is never a name.
  */
 export function activityActor(
   payload: ActivityPayload | null | undefined,
@@ -194,6 +195,13 @@ export function activityActor(
       const ticket = tickets.find((row) => row.key === ref || row.id === ref)
       const assignee = ticket?.assignee?.trim() ?? ''
       if (assignee && !NOT_AN_AGENT.has(assignee.toLowerCase())) label = assignee
+    }
+  }
+  if (!label) {
+    const id = (payload?.id ?? '').trim()
+    if (id) {
+      const agent = roster.find((row) => row.id.toLowerCase() === id.toLowerCase())
+      if (agent) label = agent.name
     }
   }
   if (!label) {

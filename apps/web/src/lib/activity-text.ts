@@ -29,13 +29,13 @@ export function plainActivity(raw: string): string {
   return text.replace(/[→←]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+/** The stored sentence. An empty payload stays empty. Callers do not pass an event type. */
 export function activityText(
   source: { name?: unknown; summary?: unknown; title?: unknown } | null | undefined,
-  fallback = '',
 ): string {
   const name = typeof source?.name === 'string' ? source.name.trim() : ''
   const summary = typeof source?.summary === 'string' ? source.summary.trim() : ''
-  return plainActivity(name || summary || fallback)
+  return plainActivity(name || summary)
 }
 
 /** Job title plus the sentence, so Calendar can still match a scheduled job. */

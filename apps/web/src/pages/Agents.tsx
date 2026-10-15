@@ -36,7 +36,7 @@ export default function Agents() {
   const approvalsQ = useApi<{ approvals: ApprovalLike[] }>('/approvals', { pollMs: 15000 })
   const ticketsQ = useApi<{ tickets: LiveTicket[] }>('/tickets', { pollMs: 15000 })
   const runsQ = useApi<{ runs: LiveRun[] }>('/runs', { pollMs: 15000 })
-  const { events } = useLiveActivity()
+  const { events, connected } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
   const agents = data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
@@ -46,7 +46,7 @@ export default function Agents() {
   const liveFor = (agent: Agent) => deriveLiveWork(agent, tickets, runs)
   const shownTone = (agent: Agent) => (isRegisteredOffline(agent, now) ? 'gray' : tone(agent, pending, tickets, liveFor(agent).working))
 
-  useRosterLive(events, refetch)
+  useRosterLive(events, refetch, connected)
   useWorkLive(events, ticketsQ.refetch, runsQ.refetch)
   useEffect(() => {
     if (events.some((e) => e.type.startsWith('approval'))) void refetchApprovals()

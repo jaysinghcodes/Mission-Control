@@ -52,8 +52,8 @@ export default function Team() {
   const runsQ = useApi<{ runs: LiveRun[] }>('/runs', { pollMs: 20000 })
   const missionQ = useApi<MissionResp>('/mission')
   const devicesQ = useApi<DevicesResp>('/devices', { pollMs: 30000 })
-  const { events } = useLiveActivity()
-  useRosterLive(events, agentsQ.refetch)
+  const { events, connected } = useLiveActivity()
+  useRosterLive(events, agentsQ.refetch, connected)
   useWorkLive(events, ticketsQ.refetch, runsQ.refetch)
   const agents = agentsQ.data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)

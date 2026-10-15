@@ -8,9 +8,9 @@ import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { activityNeedsYou, agentNeedsYou, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
-import { activityText } from '../lib/activity-text'
+import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
-import { activityActor, deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
+import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
 import { useWorkLive } from '../lib/useWorkLive'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
@@ -85,7 +85,7 @@ export default function Office() {
   const ticketsQ = useApi<TicketsResp>('/tickets', { pollMs: 20000 })
   const runsQ = useApi<RunsResp>('/runs', { pollMs: 20000 })
   const approvalsQ = useApi<ApprovalsResp>('/approvals', { pollMs: 15000 })
-  const { events: liveEvents } = useLiveActivity()
+  const { events: liveEvents, connected } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
   const agents = agentsQ.data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
@@ -96,7 +96,7 @@ export default function Office() {
   const roomParam = params.get('room')
   const focus: Room | null = roomParam && ROOM_IDS.has(roomParam) ? (roomParam as Room) : null
 
-  useRosterLive(liveEvents, agentsQ.refetch)
+  useRosterLive(liveEvents, agentsQ.refetch, connected)
   useWorkLive(liveEvents, ticketsQ.refetch, runsQ.refetch, activityQ.refetch)
   useEffect(() => {
     if (liveEvents.some((e) => e.type.startsWith('approval'))) void refetchApprovals()
@@ -150,7 +150,13 @@ export default function Office() {
     : 'Loading the floor…'
 
   const pipe = stageCounts(ticketRows)
-  const events = activityQ.data?.events ?? []
+  const events = (activityQ.data?.events ?? [])
+    .map((event, index) => {
+      const line = activityRailLine(event, agents, ticketRows, runRows)
+      return line ? { event, index, ...line } : null
+    })
+    .filter((row): row is NonNullable<typeof row> => row != null)
+    .slice(0, 6)
   const topic = commonsTopic(placed.commons, mode)
   const commonsLabel = commonsByline(placed.commons, mode)
 
@@ -377,32 +383,30 @@ export default function Office() {
           </div>
           <div className="rounded-[14px] bg-mc-inner">
             {events.length === 0 && <p className="px-4 py-6 text-[12.5px] text-mc-sub">No activity yet. Seed or the bridge fills this list.</p>}
-            {events.slice(0, 6).map((e, i) => {
-              const actor = activityActor(e.payload, agents, ticketRows, runRows)
+            {events.map(({ event: e, index, actor, text }) => {
               const hit = actor ? agents.find((a) => a.id === actor.id) : undefined
               const who = hit ?? (actor ? { id: actor.id, name: actor.name, role: actor.role, status: 'idle' } : null)
-              const text = activityText(e.payload, e.type)
               const waiting = activityNeedsYou(e.payload, pending)
-              const failed = /fail/i.test(`${e.type} ${text}`)
+              const failed = /fail/i.test(text)
               const age = activityAge(e.ts, Date.now())
               const row = (
                 <>
                   {who ? <Face agent={who} agents={agents} px={36} /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-mc-fill" aria-hidden />}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
-                      {who ? <AgentName name={who.name} role={who.role} /> : <span className="text-[12px] font-semibold">Update</span>}
+                      {who ? <AgentName name={who.name} role={who.role} /> : <span className="text-[12px] font-semibold">{text}</span>}
                       <span className="shrink-0 whitespace-nowrap text-[11px] text-mc-sub">{age}</span>
                     </div>
-                    <div className={`truncate text-[12px] ${waiting ? 'text-mc-redtext' : failed ? 'text-mc-orangetext' : 'text-mc-sub2'}`}>{text}</div>
+                    {who && <div className={`truncate text-[12px] ${waiting ? 'text-mc-redtext' : failed ? 'text-mc-orangetext' : 'text-mc-sub2'}`}>{text}</div>}
                   </div>
                 </>
               )
               const cls = 'flex w-full gap-2 border-b border-mc-sep px-3 py-3 text-left last:border-0'
               if (!hit) {
-                return <div key={`${e.ts}-${i}`} data-activity-agent={who?.name ?? ''} className={cls}>{row}</div>
+                return <div key={`${e.ts}-${index}`} data-activity-agent={who?.name ?? ''} className={cls}>{row}</div>
               }
               return (
-                <button key={`${e.ts}-${i}`} type="button" data-activity-agent={who?.name ?? ''} onClick={() => setOpen(hit)} className={cls} aria-label={`${who?.name ?? 'Update'}, ${text}`}>
+                <button key={`${e.ts}-${index}`} type="button" data-activity-agent={hit.name} onClick={() => setOpen(hit)} className={cls} aria-label={`${hit.name}, ${text}`}>
                   {row}
                 </button>
               )

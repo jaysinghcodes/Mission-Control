@@ -183,7 +183,12 @@ describe('AgentsController register, heartbeat, delete', () => {
     expect(rows.size).toBe(1);
     expect(broadcast).toHaveBeenCalledWith(
       'agents.snapshot',
-      expect.objectContaining({ id: 'forge_helper', action: 'register' }),
+      expect.objectContaining({
+        id: 'forge_helper',
+        action: 'register',
+        agent: 'Forge Helper',
+        name: 'Forge Helper registered',
+      }),
     );
   });
 
@@ -385,7 +390,12 @@ describe('AgentsController register, heartbeat, delete', () => {
     expect(rows.has('forge_helper')).toBe(false);
     expect(broadcast).toHaveBeenCalledWith(
       'agents.snapshot',
-      expect.objectContaining({ id: 'forge_helper', action: 'delete' }),
+      expect.objectContaining({
+        id: 'forge_helper',
+        action: 'delete',
+        agent: 'Forge Helper',
+        name: 'Forge Helper went offline',
+      }),
     );
     await expect(controller.remove('forge_helper')).rejects.toMatchObject({
       message: 'agent not found',

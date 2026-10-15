@@ -47,6 +47,14 @@ export function agentStatusName(name: string, status: string): string {
   return `${name} is now ${word}`;
 }
 
+export function agentRegistered(name: string): string {
+  return `${name} registered`;
+}
+
+export function agentWentOffline(name: string): string {
+  return `${name} went offline`;
+}
+
 const LEGACY_MOVE = /^(?:ticket\s+)?([A-Za-z]+-\d+)\s*→\s*(\w+)\s*$/;
 
 /** Turn a stored line into the sentence the UI should show. */
@@ -56,12 +64,12 @@ export function plainActivity(raw: string): string {
   return text.replace(/[→←]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/** The stored sentence. An empty payload stays empty. Callers do not pass an event type. */
 export function activityText(
   source: { name?: unknown; summary?: unknown } | null | undefined,
-  fallback = '',
 ): string {
   const name = typeof source?.name === 'string' ? source.name.trim() : '';
   const summary =
     typeof source?.summary === 'string' ? source.summary.trim() : '';
-  return plainActivity(name || summary || fallback);
+  return plainActivity(name || summary);
 }

@@ -1,6 +1,8 @@
 import {
   activityText,
+  agentRegistered,
   agentStatusName,
+  agentWentOffline,
   plainActivity,
   runActivityName,
   stageName,
@@ -32,6 +34,8 @@ describe('activity text', () => {
     expect(runActivityName('queued')).toBe('Run queued');
     expect(agentStatusName('Forge', 'working')).toBe('Forge is now working');
     expect(agentStatusName('Forge', 'idle')).toBe('Forge is now idle');
+    expect(agentRegistered('Live Quill')).toBe('Live Quill registered');
+    expect(agentWentOffline('Live Quill')).toBe('Live Quill went offline');
   });
 
   it('rewrites a stored arrow line and never leaves an arrow', () => {
@@ -45,6 +49,8 @@ describe('activity text', () => {
       ticketUpdated('MC-151'),
       runActivityName('running'),
       agentStatusName('Forge', 'working'),
+      agentRegistered('Live Quill'),
+      agentWentOffline('Live Quill'),
       activityText({ name: 'ticket MC-151 → build' }),
       activityText({ name: 'Run started' }),
       activityText({ name: 'Forge is now working' }),

@@ -137,6 +137,14 @@ test('activity names the assignee and never the word system', () => {
   assert.equal(missing, null)
   const runNamed = live.activityActor({ id: 'r1', name: 'Write' }, roster, tickets, [{ id: 'r1', agent: 'Live Quill' }])
   assert.equal(runNamed.id, 'live_quill')
+  const fromRosterId = live.activityActor(
+    { id: 'live_quill', action: 'register' },
+    roster,
+    tickets,
+    [{ id: 'live_quill', agent: 'Someone Else' }],
+  )
+  assert.equal(fromRosterId.name, 'Live Quill')
+  assert.equal(fromRosterId.id, 'live_quill')
 })
 
 test('Agents, Team, and Office all read deriveLiveWork', async () => {
