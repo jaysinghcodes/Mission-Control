@@ -2,15 +2,19 @@
  * One live placement for Agents, Team, and Office.
  *
  * Precedence, first match wins:
- * 1. Active ticket. The bot is the assignee (id or name) of a ticket in a
- *    pipeline stage: build, qa, review, or done (inprogress counts as build).
- *    The room is that stage. The subtitle is the ticket title.
- *    Several tickets: newest createdAt, then the later stage.
- * 2. Active run. status is running or needs_approval, the run names this bot,
- *    and ticketId points at a ticket in a pipeline stage. The room is that
- *    ticket's stage. The subtitle is the ticket title, or the run name.
- *    A queued, done, or failed run is not active. A run with no ticket in a
- *    stage does not take a desk.
+ * 1. Active ticket. The bot is the assignee (id or name) of a ticket in
+ *    build, qa, or review (inprogress counts as build). The room is that
+ *    stage. The subtitle is the ticket title. Several tickets: newest
+ *    createdAt, then the later stage. A ticket in done does not seat its
+ *    bot. The bot returns to Commons. Pipeline still counts that ticket
+ *    in Deploy.
+ * 2. Active run, when no active ticket applies. status is running or
+ *    needs_approval, the run names this bot, and ticketId points at a
+ *    ticket in build, qa, review, or done. The room is that ticket's
+ *    stage. Deploy seats a bot only when this run points at a ticket in
+ *    done. A run on a review ticket seats Ship. The subtitle is the
+ *    ticket title, or the run name. A queued, done, or failed run is not
+ *    active. A run with no ticket in a stage does not take a desk.
  * 3. Heartbeat. Room is Commons. The subtitle is currentTask when it is
  *    non blank, otherwise Working or Idle from status.
  *
@@ -80,6 +84,12 @@ function stageRoom(status: string | null | undefined): Exclude<LiveRoom, 'common
   return STAGE_ROOM[index] ?? null
 }
 
+/** Done is idle. Pipeline still counts it as Deploy. It does not seat a bot. */
+function ticketSeats(status: string | null | undefined): boolean {
+  const index = liveStageIndex(status)
+  return index !== null && index < 3
+}
+
 function timeMs(iso: string | null | undefined): number {
   if (!iso) return 0
   const n = Date.parse(iso)
@@ -110,7 +120,7 @@ export function deriveLiveWork(
   runs: readonly LiveRun[],
 ): LiveWork {
   const assigned = tickets.filter(
-    (ticket) => samePerson(agent, ticket.assignee) && stageRoom(ticket.status),
+    (ticket) => samePerson(agent, ticket.assignee) && ticketSeats(ticket.status),
   )
   assigned.sort((a, b) => {
     const byTime = timeMs(b.createdAt) - timeMs(a.createdAt)
@@ -221,11 +231,21 @@ export function activityActor(
   return { id: label, name: label, role: null }
 }
 
-/** Newest run or agent status socket event, or 0 when none has arrived. */
-export function latestWorkEventTs(events: readonly { type: string; ts: number }[]): number {
+/**
+ * Newest socket event that should refetch tickets, runs, and activity.
+ * run.* and agent.status move work. A register or delete snapshot moves
+ * the Office rail. A heartbeat snapshot does not, so a task clear does
+ * not wait on the activity poll.
+ */
+export function latestWorkEventTs(
+  events: readonly { type: string; ts: number; action?: unknown }[],
+): number {
   let latest = 0
   for (const event of events) {
-    const work = event.type.startsWith('run.') || event.type === 'agent.status'
+    const action = typeof event.action === 'string' ? event.action : ''
+    const rosterWrite =
+      event.type === 'agents.snapshot' && (action === 'register' || action === 'delete')
+    const work = event.type.startsWith('run.') || event.type === 'agent.status' || rosterWrite
     if (work && event.ts > latest) latest = event.ts
   }
   return latest

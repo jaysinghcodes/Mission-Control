@@ -76,9 +76,13 @@ export type DeletePlan =
 export type HeartbeatPlan =
   { ok: true; row: RosterAgent } | { ok: false; status: 404; message: string };
 
-/** Optional POST /agents/:id/heartbeat fields. Absent keys stay as stored. */
+/**
+ * Optional POST /agents/:id/heartbeat fields. Absent keys stay as stored.
+ * status idle, or currentTask null, blank, or whitespace only, clears the
+ * task and sets status idle.
+ */
 export interface HeartbeatPatch {
-  currentTask?: string;
+  currentTask?: string | null;
   status?: string;
 }
 
@@ -265,6 +269,11 @@ export function planRegister(
   };
 }
 
+/** Null, blank, and whitespace only clear the task, same as status idle. */
+function clearsTask(task: string | null | undefined): boolean {
+  return task !== undefined && (task === null || task.trim() === '');
+}
+
 export function planHeartbeat(
   row: RosterAgent | null,
   now: Date,
@@ -277,15 +286,16 @@ export function planHeartbeat(
       message: row ? 'agent is not registered' : 'agent not found',
     };
   }
+  const clear = patch.status === 'idle' || clearsTask(patch.currentTask);
+  const nextTask = clear ? null : patch.currentTask;
+  const nextStatus = clear ? 'idle' : patch.status;
   return {
     ok: true,
     row: {
       ...row,
       lastSeenAt: now,
-      ...(patch.currentTask !== undefined
-        ? { currentTask: patch.currentTask }
-        : {}),
-      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(nextTask !== undefined ? { currentTask: nextTask } : {}),
+      ...(nextStatus !== undefined ? { status: nextStatus } : {}),
     },
   };
 }

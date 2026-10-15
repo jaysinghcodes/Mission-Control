@@ -104,13 +104,13 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 | System | `/#/system` | Health, uptime, usage and cost (Today, 7d, month), sessions, activity. Panels: `/#/system/logs`, `/#/system/sessions`, `/#/system/settings`, `/#/system/tools`, `/#/system/connection`. `/#/health` and `/#/usage` redirect here | `/health`, `/system`, `/usage`, `/sessions` |
 | Connect | `/#/connect` | Setup and remote tunnel guide | |
 
-Office, Agents, and Team read one derived placement. Precedence:
+Office, Agents, and Team read one derived placement. Precedence, first match wins:
 
-1. Active ticket. The bot is the assignee (id or name) of a ticket in `build`, `qa`, `review`, or `done` (`inprogress` counts as build). The room is that stage: Build, QA, Ship, Deploy. The subtitle is the ticket title. Several tickets: the newest `createdAt` wins, then the later stage.
-2. Active run. `status` is `running` or `needs_approval`, the run names this bot, and `ticketId` points at a ticket in one of those stages. The room is that ticket's stage. The subtitle is the ticket title, or the run name when the title is blank. A queued, done, or failed run does not take a desk. A run with no ticket in a stage does not take a desk.
+1. Active ticket. The bot is the assignee (id or name) of a ticket in `build`, `qa`, or `review` (`inprogress` counts as build). The room is that stage: Build, QA, or Ship. The subtitle is the ticket title. Several tickets: the newest `createdAt` wins, then the later stage. A ticket in `done` does not seat its bot. The bot returns to Commons.
+2. Active run, when no active ticket applies. `status` is `running` or `needs_approval`, the run names this bot, and `ticketId` points at a ticket in `build`, `qa`, `review`, or `done`. The room is that ticket's stage. Deploy seats a bot only when this run points at a ticket in `done` and no higher precedence ticket applies. A run that points at a ticket in `review` seats Ship. The subtitle is the ticket title, or the run name when the title is blank. A queued, done, or failed run does not take a desk. A run with no ticket in a stage does not take a desk.
 3. Heartbeat. The room is Commons. The subtitle is `currentTask` when it is non blank, otherwise Working or Idle from `status`.
 
-Role text is not a seat. A stored status does not pick a room. To Do and Backlog are not stages, so those tickets send the bot back to Commons when no active run applies. `run.*` socket events refetch tickets, runs, and activity. `agents.snapshot` refetches the roster. The page does not reload.
+Role text is not a seat. A stored status does not pick a room. To Do and Backlog are not stages, so those tickets send the bot back to Commons when no active run applies. Pipeline still counts a done ticket in the Deploy column. `run.*` and `agent.status` socket events refetch tickets, runs, and activity. `agents.snapshot` refetches the roster. A register or a delete also refetches activity, so the Office rail updates without waiting for the next poll. The page does not reload.
 
 Activity names the real agent. Ticket events include `agent` (the assignee). Run events include `agent` (the run agent). A row with no agent falls back to the ticket assignee, then the run agent. The word system is not a name.
 
@@ -258,7 +258,7 @@ These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/se
 
 A bot adds or updates itself with `POST /agents/register`. The body is `{ "id", "name", "role?", "model?", "avatar?" }`. `id` is a lowercase slug of 1 to 64 characters using a to z, 0 to 9, and underscores. `name` is required and at most 200 characters. `role`, `model`, and `avatar` are optional and at most 200 characters. Unknown fields are 400 (`unknown field <name>`). A new id returns 201 `{ agent, ts }`. The same id again returns 200 and does not insert a second row. Registering a default or snapshot id keeps that row, sets `source` to `registered`, and keeps `position`, `color`, and `emoji`.
 
-`POST /agents/:id/heartbeat` returns 204 with an empty body and sets `lastSeenAt`. The JSON body is optional. No body and an empty object only set `lastSeenAt`. A body may include `currentTask` and `status`. `currentTask` is a non blank string of at most 200 characters. `status` must be `working` or `idle`. A bad `status` is 400 `status must be one of working, idle`. A non string `status` is 400 `status must be a string`. A non string `currentTask` is 400 `currentTask must be a string`. Unknown fields are 400 (`unknown field <name>`). A bad body is 400 before the id is checked. A missing bot with an unknown field is 400. It returns 404 when that id is not a registered bot (`agent not found` or `agent is not registered`) and the body is empty or valid. A registered bot with no register or heartbeat for 10 minutes reads `online: false` on `GET /agents` and `GET /agents/:id`. The row stays. The call still broadcasts `agents.snapshot`, so an open Agents, Office, or Team page refetches and shows the new `status` and `currentTask` without a reload.
+`POST /agents/:id/heartbeat` returns 204 with an empty body and sets `lastSeenAt`. The JSON body is optional. No body and an empty object only set `lastSeenAt`. A body may include `currentTask` and `status`. `currentTask` is a string of at most 200 characters, or JSON null. A non blank string stores that task. JSON null, `""`, and a string that is only spaces clear `currentTask` and set `status` to `idle`, including when the bot was `working`. `status` must be `working` or `idle`. A heartbeat with `status` set to `idle` clears `currentTask`, including when the same body also sends a task. After that clear, the Commons subtitle is Idle. A bad `status` is 400 `status must be one of working, idle`. A non string `status` is 400 `status must be a string`. A `currentTask` that is not a string and not null is 400 `currentTask must be a string`. Unknown fields are 400 (`unknown field <name>`). A bad body is 400 before the id is checked. A missing bot with an unknown field is 400. It returns 404 when that id is not a registered bot (`agent not found` or `agent is not registered`) and the body is empty or valid. A registered bot with no register or heartbeat for 10 minutes reads `online: false` on `GET /agents` and `GET /agents/:id`. The row stays. The call still broadcasts `agents.snapshot`, so an open Agents, Office, or Team page refetches and shows the new `status` and `currentTask` without a reload.
 
 `DELETE /agents/:id` removes a registered bot and returns 204. A default row returns 409 `default agents cannot be deleted`. A snapshot row returns 409 `snapshot agents cannot be deleted`. A missing id returns 404 `agent not found`.
 
@@ -307,6 +307,33 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/
 That prints `204`. `GET /agents/forge_helper` then shows `"status":"working"` and `"currentTask":"Shipping the notes"`.
 
 ```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/forge_helper/heartbeat" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"status":"idle"}'
+```
+
+That prints `204`. `GET /agents/forge_helper` then shows `"status":"idle"` and `"currentTask":null`.
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/forge_helper/heartbeat" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"currentTask":null}'
+```
+
+That prints `204` and clears `currentTask`. `GET /agents/forge_helper` then shows `"status":"idle"` and `"currentTask":null`.
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/forge_helper/heartbeat" \
+  -H "content-type: application/json" \
+  -H "x-ingest-token: $MC_TOKEN" \
+  -d '{"currentTask":""}'
+```
+
+That prints `204` and clears `currentTask`. `GET /agents/forge_helper` then shows `"status":"idle"` and `"currentTask":null`. A blank string is not a 400.
+
+```bash
 curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper" \
   -H "x-ingest-token: $MC_TOKEN"
 ```
@@ -315,7 +342,7 @@ That prints `204`.
 
 ## 5. Adapting your workflow
 
-* **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Office moves the assignee into that same room. Those names match `apps/web/src/lib/board.ts` and `apps/web/src/lib/live-work.ts`. To-Do and Backlog are not pipeline stages. A bot with no ticket in a stage and no active run sits in Commons.
+* **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Office seats the assignee in Build, QA, or Ship. A done ticket stays in the Deploy count and does not seat the bot. An active run on that ticket seats Deploy until the run finishes, then the bot returns to Commons. Those names match `apps/web/src/lib/board.ts` and `apps/web/src/lib/live-work.ts`. To-Do and Backlog are not pipeline stages. A bot with no ticket in a stage and no active run sits in Commons.
 * **Group work by project.** Create one project per product or repo and reuse it.
 * **Make runs visible.** For a longer job, `POST /runs` with an optional `status`, or create the run queued and `PATCH` it to `running`, then send progress and `done` or `failed`. You can also post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time. The curls in section 4.6 do both.
 * **Ask, do not act, on gated work.** Put anything that needs your operator in an approval (via `approvals.snapshot`) and wait for the decision.

@@ -30,6 +30,11 @@ describe('register docs', () => {
     expect(section).toContain(
       `'{"currentTask":"Shipping the notes","status":"working"}'`,
     );
+    expect(section).toContain(`'{"status":"idle"}'`);
+    expect(section).toContain(`'{"currentTask":null}'`);
+    expect(section).toContain(`'{"currentTask":""}'`);
+    expect(section).toContain('clears `currentTask`');
+    expect(section).toContain('Commons subtitle is Idle');
     expect(section).toContain('status must be one of working, idle');
     expect(section).toContain('unknown field <name>');
     expect(section).toContain(

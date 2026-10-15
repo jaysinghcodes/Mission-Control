@@ -60,7 +60,7 @@ test('an active ticket stage beats the run and the heartbeat, and role does not 
   assert.equal(placed.working, true)
 })
 
-test('todo and backlog are not desks, and done is Deploy', () => {
+test('todo, backlog, and done do not seat a bot, and pipeline still counts done', () => {
   const todo = live.deriveLiveWork(
     { id: 'q', name: 'Quill', status: 'idle', currentTask: null },
     [{ id: 't', title: 'Notes', status: 'todo', assignee: 'Quill', createdAt: '2026-10-01T00:00:00Z' }],
@@ -71,12 +71,86 @@ test('todo and backlog are not desks, and done is Deploy', () => {
   assert.equal(todo.working, false)
 
   const done = live.deriveLiveWork(
-    { id: 'q', name: 'Quill', status: 'idle' },
+    { id: 'q', name: 'Quill', status: 'idle', currentTask: 'Keep me' },
     [{ id: 't', title: 'Notes', status: 'done', assignee: 'Quill' }],
     [],
   )
-  assert.equal(done.room, 'deploy')
-  assert.equal(done.subtitle, 'Notes')
+  assert.equal(done.room, 'commons')
+  assert.equal(done.subtitle, 'Keep me')
+  assert.equal(done.source, 'heartbeat')
+  assert.deepEqual(board.stageCounts([{ status: 'done' }, { status: 'review' }, { status: 'done' }]), [0, 0, 1, 2])
+})
+
+test('an active run on a done ticket seats Deploy, then Commons when the run finishes', () => {
+  const quill = { id: 'q', name: 'Quill', status: 'idle', currentTask: '' }
+  const ticket = { id: 't', title: 'Notes', status: 'done', assignee: 'Quill' }
+  const running = live.deriveLiveWork(
+    quill,
+    [ticket],
+    [{ id: 'r', name: 'Ship notes', agent: 'Quill', status: 'running', ticketId: 't' }],
+  )
+  assert.equal(running.room, 'deploy')
+  assert.equal(running.subtitle, 'Notes')
+  assert.equal(running.source, 'run')
+
+  const approval = live.deriveLiveWork(
+    quill,
+    [ticket],
+    [{ id: 'r', name: 'Ship notes', agent: 'Quill', status: 'needs_approval', ticketId: 't' }],
+  )
+  assert.equal(approval.room, 'deploy')
+  assert.equal(approval.source, 'run')
+
+  const finished = live.deriveLiveWork(
+    quill,
+    [ticket],
+    [{ id: 'r', name: 'Ship notes', agent: 'Quill', status: 'done', ticketId: 't' }],
+  )
+  assert.equal(finished.room, 'commons')
+  assert.equal(finished.subtitle, 'Idle')
+  assert.equal(finished.source, 'heartbeat')
+})
+
+test('a review ticket outranks a run on a done ticket, and a review run seats Ship', () => {
+  const held = live.deriveLiveWork(
+    { id: 'q', name: 'Quill', status: 'idle' },
+    [
+      { id: 'done', title: 'Shipped', status: 'done', assignee: 'Quill', createdAt: '2026-10-03T00:00:00Z' },
+      { id: 'rev', title: 'Still shipping', status: 'review', assignee: 'Quill', createdAt: '2026-10-01T00:00:00Z' },
+    ],
+    [{ id: 'r', name: 'Ship notes', agent: 'Quill', status: 'running', ticketId: 'done' }],
+  )
+  assert.equal(held.room, 'ship')
+  assert.equal(held.subtitle, 'Still shipping')
+  assert.equal(held.source, 'ticket')
+
+  const reviewRun = live.deriveLiveWork(
+    { id: 'forge', name: 'Forge', status: 'idle', currentTask: 'Heartbeat line' },
+    [{ id: 'rev', title: 'Still shipping', status: 'review', assignee: 'Quill' }],
+    [{ id: 'r', name: 'Ship notes', agent: 'Forge', status: 'running', ticketId: 'rev' }],
+  )
+  assert.equal(reviewRun.room, 'ship')
+  assert.equal(reviewRun.source, 'run')
+})
+
+test('register and delete snapshots refetch work, and a heartbeat snapshot does not', () => {
+  const quiet = live.latestWorkEventTs([
+    { type: 'agents.snapshot', ts: 5, action: 'heartbeat' },
+    { type: 'hello', ts: 9 },
+  ])
+  assert.equal(quiet, 0)
+  assert.equal(
+    live.latestWorkEventTs([{ type: 'agents.snapshot', ts: 12, action: 'register' }]),
+    12,
+  )
+  assert.equal(
+    live.latestWorkEventTs([{ type: 'agents.snapshot', ts: 14, action: 'delete' }]),
+    14,
+  )
+  assert.equal(
+    live.latestWorkEventTs([{ type: 'run.started', ts: 3 }, { type: 'agent.status', ts: 4 }]),
+    4,
+  )
 })
 
 test('an active run uses the linked ticket stage when the bot is not the assignee', () => {

@@ -94,6 +94,7 @@ describe('Agents register (e2e)', () => {
             'e2e_hb_empty',
             'e2e_hb_unknown',
             'e2e_hb_status',
+            'e2e_hb_clear',
             'e2e_delete_me',
             'e2e_delete_default',
             'e2e_live',
@@ -401,6 +402,92 @@ describe('Agents register (e2e)', () => {
     expect(after!.lastSeenAt!.getTime()).toBeGreaterThanOrEqual(
       before!.lastSeenAt!.getTime(),
     );
+  });
+
+  it('idle, null, and blank clear currentTask and return 204', async () => {
+    const id = 'e2e_hb_clear';
+    created.push(id);
+    const registered = await call()
+      .post('/agents/register')
+      .send({ id, name: 'E2E Heartbeat Clear' });
+    expect(registered.status).toBe(201);
+
+    const working = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ currentTask: 'Shipping the notes', status: 'working' });
+    expect(working.status).toBe(204);
+
+    const idle = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ status: 'idle' });
+    expect(idle.status).toBe(204);
+    expect(idle.text).toBe('');
+    const afterIdle = await request(app.getHttpServer()).get(`/agents/${id}`);
+    expect(agentFrom(afterIdle)).toMatchObject({
+      status: 'idle',
+      currentTask: null,
+    });
+
+    await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ currentTask: 'Shipping the notes', status: 'working' });
+    const idleWithTask = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ status: 'idle', currentTask: 'Still writing' });
+    expect(idleWithTask.status).toBe(204);
+    const afterBoth = await request(app.getHttpServer()).get(`/agents/${id}`);
+    expect(agentFrom(afterBoth)).toMatchObject({
+      status: 'idle',
+      currentTask: null,
+    });
+
+    await prisma.agent.update({
+      where: { id },
+      data: { status: 'working', currentTask: 'Shipping the notes' },
+    });
+    const asNull = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ currentTask: null });
+    expect(asNull.status).toBe(204);
+    const afterNull = await request(app.getHttpServer()).get(`/agents/${id}`);
+    expect(agentFrom(afterNull)).toMatchObject({
+      status: 'idle',
+      currentTask: null,
+    });
+
+    await prisma.agent.update({
+      where: { id },
+      data: { status: 'working', currentTask: 'Shipping the notes' },
+    });
+    const blank = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ currentTask: '' });
+    expect(blank.status).toBe(204);
+    const afterBlank = await request(app.getHttpServer()).get(`/agents/${id}`);
+    expect(agentFrom(afterBlank)).toMatchObject({
+      status: 'idle',
+      currentTask: null,
+    });
+
+    await prisma.agent.update({
+      where: { id },
+      data: { status: 'working', currentTask: 'Shipping the notes' },
+    });
+    const spaces = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ currentTask: '   ' });
+    expect(spaces.status).toBe(204);
+    const afterSpaces = await request(app.getHttpServer()).get(`/agents/${id}`);
+    expect(agentFrom(afterSpaces)).toMatchObject({
+      status: 'idle',
+      currentTask: null,
+    });
+
+    const typed = await call()
+      .post(`/agents/${id}/heartbeat`)
+      .send({ currentTask: 4 });
+    expect(typed.status).toBe(400);
+    expect(bodyMessage(typed)).toBe('currentTask must be a string');
   });
 
   it('an unknown heartbeat field is 400 and does not write', async () => {
