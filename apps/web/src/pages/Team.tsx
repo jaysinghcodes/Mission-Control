@@ -254,7 +254,7 @@ export default function Team() {
 
       {invite && (
         <Sheet title="Invite a teammate" onClose={() => setInvite(false)}>
-          <p className="text-[14px] text-mc-sub2">This build does not send invites. Share the setup guide — they connect with the SSH tunnel in ONBOARDING.md.</p>
+          <p className="text-[14px] text-mc-sub2">This build does not send invites. Share the setup guide. They connect with the SSH tunnel in ONBOARDING.md.</p>
           <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setInvite(false)}>Open setup</Link>
         </Sheet>
       )}

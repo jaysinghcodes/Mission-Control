@@ -131,7 +131,7 @@ export class CustomToolsController {
       body?.inputs === undefined
     ) {
       throw new BadRequestException(
-        'nothing to update — send name, description, promptTemplate, and/or inputs',
+        'nothing to update. Send name, description, promptTemplate, and/or inputs',
       );
     }
     const current = this.toJson(existing);

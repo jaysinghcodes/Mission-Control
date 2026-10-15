@@ -16,6 +16,7 @@ import {
   type ActivityEventType,
 } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { runActivityName } from '../activity/activity-text';
 import { operatorName } from '../config/operator';
 import { isRunStatus, RUN_STATUSES } from './run-status';
 
@@ -285,7 +286,8 @@ export class RunsController {
   ): Record<string, unknown> {
     return {
       id: run.id,
-      name: run.name,
+      name: runActivityName(queued ? 'queued' : run.status),
+      title: run.name,
       ...(run.agent ? { agent: run.agent } : {}),
       ...(queued ? {} : { status: run.status, progress: run.progress }),
       ...(run.ticketId ? { ticketId: run.ticketId } : {}),

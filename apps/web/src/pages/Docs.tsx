@@ -129,7 +129,7 @@ export default function Docs() {
 
       {openId && (
         <SoftCard className="mb-4 px-6 py-5">
-          <button type="button" onClick={() => setOpenId(null)} className="text-[13px] font-semibold text-mc-accent-text">← All docs</button>
+          <button type="button" onClick={() => setOpenId(null)} className="text-[13px] font-semibold text-mc-accent-text">Back to all docs</button>
           <h2 className="mt-3 text-[24px] font-bold tracking-tight">{title}</h2>
           {shown && (shown.html ?? '').trim() ? (
             <div className="mc-doc mt-4 max-w-3xl" dangerouslySetInnerHTML={{ __html: shown.html }} />

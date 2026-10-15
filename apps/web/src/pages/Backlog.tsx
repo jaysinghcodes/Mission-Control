@@ -101,7 +101,7 @@ export default function Backlog() {
         if (r.ok) return
         failedCreates.current.push(t)
         const names = failedCreates.current.map((x) => `"${x}"`).join(', ')
-        showNotice(`Couldn't create ${names} — ${r.error}`, 'warn')
+        showNotice(`Couldn't create ${names}. ${r.error}`, 'warn')
         // Never clobber a title typed while this create was queued/in flight.
         setTitle((cur) => (cur.trim() ? cur : t))
       })
@@ -125,10 +125,10 @@ export default function Backlog() {
     const label = row.key ?? row.id.slice(0, 8)
     if (r.ok) {
       mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.filter((t) => t.id !== row.id) } : prev))
-      showNotice(`${label} moved to To-Do — find it on the board.`, 'ok')
+      showNotice(`${label} moved to To Do. Find it on the board.`, 'ok')
     } else {
       showNotice(
-        r.status === 404 ? `${label} no longer exists — the list has been refreshed.` : `Couldn't move ${label} to To-Do — ${r.error}`,
+        r.status === 404 ? `${label} no longer exists. The list has been refreshed.` : `Couldn't move ${label} to To Do. ${r.error}`,
         'warn',
       )
     }
@@ -204,7 +204,7 @@ export default function Backlog() {
             {!data
               ? loading && !loadError
                 ? 'Loading…'
-                : 'Not loaded — see the notice above.'
+                : 'Not loaded. See the notice above.'
               : 'Backlog is empty. Use the field above to add a ticket, then move it to To-Do when it is ready.'}
           </div>
         )}
@@ -226,7 +226,7 @@ export default function Backlog() {
                 disabled={moving.has(row.id)}
                 className="h-6 shrink-0 whitespace-nowrap px-3 rounded-full bg-mc-bluebg text-mc-bluetext text-[10.5px] font-semibold hover:opacity-80 transition-opacity disabled:opacity-50"
               >
-                {moving.has(row.id) ? 'Moving…' : '→ To-Do'}
+                {moving.has(row.id) ? 'Moving…' : 'Move to To Do'}
               </button>
             </div>
           </div>

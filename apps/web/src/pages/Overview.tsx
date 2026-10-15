@@ -3,6 +3,7 @@ import { useLiveActivity } from '../hooks/useLiveActivity'
 import { useApi } from '../hooks/useApi'
 import { Bot, KpiCard, PillButton, SectionLabel } from '../components/ui'
 // Operator name comes from VITE_OPERATOR_NAME (see config.ts) — no hardcoded names.
+import { activityText } from '../lib/activity-text'
 import { greeting } from '../config'
 
 /**
@@ -32,16 +33,19 @@ export default function Overview() {
     { value: String(running), label: 'Tasks Running' },
     { value: String(pending), label: 'Pending Approvals' },
     { value: String(shipped), label: 'Shipped Today' },
-    { value: spend != null ? `$${spend.toFixed(2)}` : '—', label: 'Spend · 24H' },
+    { value: spend != null ? `$${spend.toFixed(2)}` : 'none', label: 'Spend · 24H' },
   ]
 
   const liveRows = events.slice(0, 6).map((ev, i) => {
     const p = ev.payload && typeof ev.payload === 'object' ? (ev.payload as Record<string, unknown>) : {}
-    const name = 'name' in p ? String(p.name) : ''
+    const line = activityText({
+      name: 'name' in p ? p.name : ev.name,
+      summary: 'summary' in p ? p.summary : ev.summary,
+    })
     return {
       agent: ev.type === 'health.tick' ? 'system' : 'openclaw',
       color: ev.type === 'run.failed' ? 'var(--mc-red)' : ev.type === 'run.completed' ? 'var(--mc-green)' : 'var(--mc-blue)',
-      action: `${ev.type}${name ? ' · ' + name : ''}`,
+      action: line ? `${ev.type} · ${line}` : ev.type,
       key: `${ev.ts}-${i}`,
     }
   })
@@ -77,11 +81,11 @@ export default function Overview() {
               ))
             ) : (
               <div className="py-6 text-[12.5px] text-mc-faint">
-                {connected ? 'Connected — waiting for the first event…' : '● offline — API not reachable'}
+                {connected ? 'Connected. Waiting for the first event…' : '● offline. API not reachable'}
               </div>
             )}
             <div className="mt-3 text-[12px] text-mc-faint">
-              {connected ? '● streaming live' : '● offline — API not reachable'}
+              {connected ? '● streaming live' : '● offline. API not reachable'}
             </div>
           </div>
         </div>
@@ -101,7 +105,7 @@ export default function Overview() {
                 </div>
               ))
             ) : (
-              <div className="py-6 text-[12.5px] text-mc-faint">Nothing pending — you're all caught up.</div>
+              <div className="py-6 text-[12.5px] text-mc-faint">Nothing pending. You're all caught up.</div>
             )}
           </div>
         </div>

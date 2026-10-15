@@ -5,6 +5,7 @@ import { useApiStatus } from '../lib/apiStatus'
 import { PageHeader, Segmented, SoftCard, StatusChip, Face, Kicker, EmptyState } from '../components/shell'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
+import { activityText } from '../lib/activity-text'
 import { pluralize } from '../lib/pluralize'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
@@ -167,7 +168,7 @@ export default function System() {
   if (panel === 'logs' || panel === 'sessions' || panel === 'settings' || panel === 'connection' || panel === 'tools') {
     return (
       <div>
-        <Link to="/system" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">← System</Link>
+        <Link to="/system" className="mb-3 inline-block text-[13px] font-semibold text-mc-accent-text">Back to System</Link>
         {panel === 'logs' && <Logs />}
         {panel === 'sessions' && <Sessions />}
         {panel === 'settings' && <Settings />}
@@ -374,7 +375,7 @@ export default function System() {
             agents={roster}
             px={34}
           />
-          <div className="min-w-0 flex-1 text-[14px] font-semibold">{issue.payload?.name || issue.payload?.summary || issue.type}</div>
+          <div className="min-w-0 flex-1 text-[14px] font-semibold">{activityText(issue.payload, issue.type)}</div>
           <StatusChip label="Retrying" tone="orange" />
         </SoftCard>
       ) : (

@@ -97,8 +97,8 @@ export const TASK_GROUPS: TaskGroup[] = [
   {
     title: 'Queued',
     rows: [
-      { name: 'Draft content brief for launch', agent: 'Quill', status: 'queued', prog: 0, started: '—', dur: '—' },
-      { name: 'Scan competitor pricing pages', agent: 'Scout', status: 'queued', prog: 0, started: '—', dur: '—' },
+      { name: 'Draft content brief for launch', agent: 'Quill', status: 'queued', prog: 0, started: 'none', dur: 'none' },
+      { name: 'Scan competitor pricing pages', agent: 'Scout', status: 'queued', prog: 0, started: 'none', dur: 'none' },
     ],
   },
   {
@@ -245,14 +245,14 @@ export const OFFICE_BOTS = [
 ]
 
 export const OFFICE_TRANSIT = [
-  { name: 'Scout', color: agentColor('Scout'), chip: '→ QA', chipBg: 'var(--mc-greenbg)', chipFg: 'var(--mc-greentext)' },
-  { name: 'Quill', color: agentColor('Quill'), chip: '→ REVIEW', chipBg: 'var(--mc-tealbg)', chipFg: 'var(--mc-tealtext)' },
+  { name: 'Scout', color: agentColor('Scout'), chip: 'QA', chipBg: 'var(--mc-greenbg)', chipFg: 'var(--mc-greentext)' },
+  { name: 'Quill', color: agentColor('Quill'), chip: 'Review', chipBg: 'var(--mc-tealbg)', chipFg: 'var(--mc-tealtext)' },
 ]
 
 export const OFFICE_LOG = [
   { tm: '12:04:33', agent: 'Henry', msg: 'committed 8f3a2c1 · task-executor v0.2', color: 'var(--mc-bluetext)' },
-  { tm: '12:04:19', agent: 'Charlie', msg: 'scaffold modules wired → BUILD', color: 'var(--mc-bluetext)' },
-  { tm: '12:03:41', agent: 'Scout', msg: 'passed QA gate → moving to REVIEW', color: 'var(--mc-greentext)' },
+  { tm: '12:04:19', agent: 'Charlie', msg: 'scaffold modules wired, now in Build', color: 'var(--mc-bluetext)' },
+  { tm: '12:03:41', agent: 'Scout', msg: 'passed the QA gate, moving to Review', color: 'var(--mc-greentext)' },
 ]
 
 /* ── Live Activity ───────────────────────────────────────────────────────── */
@@ -269,7 +269,7 @@ export interface ActivityEvent { tm: string; agent: string; color: string; zone:
 export const ACTIVITY_EVENTS: ActivityEvent[] = [
   { tm: '12:01:42', agent: 'Henry', color: agentColor('Henry'), zone: 'BUILD', desc: 'web_search · openclaw gateway auth', accent: 'var(--mc-bluetext)' },
   { tm: '12:02:03', agent: 'Ralph', color: agentColor('Ralph'), zone: 'QA', desc: 'read · wireframes/gen_v4.py', accent: 'var(--mc-bluetext)' },
-  { tm: '12:02:14', agent: 'Henry', color: agentColor('Henry'), zone: 'BUILD', desc: 'Deployment started — build #42', accent: 'var(--mc-purpletext)' },
+  { tm: '12:02:14', agent: 'Henry', color: agentColor('Henry'), zone: 'BUILD', desc: 'Deployment started. Build 42', accent: 'var(--mc-purpletext)' },
   { tm: '12:03:18', agent: 'Ralph', color: agentColor('Ralph'), zone: 'QA', desc: 'exec · node wstest.mjs · exit 0', accent: 'var(--mc-bluetext)' },
   { tm: '12:03:41', agent: 'Scout', color: agentColor('Scout'), zone: 'RESEARCH', desc: 'web_fetch · docs.openclaw.ai/tailscale', accent: 'var(--mc-bluetext)' },
   { tm: '12:04:19', agent: 'Charlie', color: agentColor('Charlie'), zone: 'BUILD', desc: 'EAI_AGAIN · api.deepseek.com (retry 2/3)', accent: 'var(--mc-redtext)' },
@@ -310,7 +310,7 @@ export const SESSION_ROWS: SessionRow[] = [
 export const USAGE_PROVIDERS = [
   { name: 'DeepSeek', dot: 'var(--mc-blue)', model: 'deepseek-v4-flash', cost: '$1.05', pct: 82, detail: 'input 980K · output 260K' },
   { name: 'Z.AI (GLM)', dot: 'var(--mc-purple)', model: 'glm-5.2', cost: '$0.31', pct: 15, detail: 'input 210K · output 68K' },
-  { name: 'Other / fallback', dot: 'var(--mc-faint)', model: '—', cost: '$0.12', pct: 3, detail: 'input 18K · output 4K' },
+  { name: 'Other / fallback', dot: 'var(--mc-faint)', model: 'none', cost: '$0.12', pct: 3, detail: 'input 18K · output 4K' },
 ]
 
 /* ── Logs ────────────────────────────────────────────────────────────────── */

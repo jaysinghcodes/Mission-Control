@@ -56,7 +56,7 @@ export default function Settings() {
       </Card>
 
       <p className="mt-6 text-[12px] text-mc-faint">
-        Mission Control binds to loopback only — the SSH tunnel is the sanctioned way in. Setup guide lives on the Connect page.
+        Mission Control binds to loopback only. The SSH tunnel is the sanctioned way in. Setup guide lives on the Connect page.
       </p>
     </div>
   )

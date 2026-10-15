@@ -273,10 +273,23 @@ describe('AgentsController register, heartbeat, delete', () => {
       currentTask: 'Shipping the notes',
       source: 'registered',
     });
+    expect(broadcast).toHaveBeenCalledTimes(2);
+    expect(broadcast).toHaveBeenNthCalledWith(
+      1,
+      'agents.snapshot',
+      expect.objectContaining({ id: 'forge_helper', action: 'heartbeat' }),
+    );
+    expect(broadcast).toHaveBeenNthCalledWith(2, 'agent.status', {
+      name: 'Forge Helper is now working',
+      agent: 'Forge Helper',
+      status: 'working',
+    });
+    broadcast.mockClear();
+    await controller.heartbeat('forge_helper', { status: 'working' });
     expect(broadcast).toHaveBeenCalledTimes(1);
     expect(broadcast).toHaveBeenCalledWith(
       'agents.snapshot',
-      expect.objectContaining({ id: 'forge_helper', action: 'heartbeat' }),
+      expect.objectContaining({ action: 'heartbeat' }),
     );
   });
 

@@ -121,8 +121,8 @@ export function AgentAvatar({
   // The SVG's own <title> is the accessible name. The badge is aria-hidden
   // so the number isn't read twice.
   const label = face.childNumber != null
-    ? `${name}, child ${face.childNumber}${parentName ? ` of ${parentName}` : ''} — ${spec.role} robot`
-    : `${name} — ${spec.role} robot`
+    ? `${name}, child ${face.childNumber}${parentName ? ` of ${parentName}` : ''}, ${spec.role} robot`
+    : `${name}, ${spec.role} robot`
   const status = robotStatus(agent.status)
   // Badge diameter tracks the robot so a 22px copy still gets a readable digit.
   const badge = Math.max(14, Math.round(px * 0.4))

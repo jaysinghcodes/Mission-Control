@@ -213,11 +213,12 @@ export function activityActor(
   return { id: label, name: label, role: null }
 }
 
-/** Newest run.* socket event, or 0 when none has arrived. */
+/** Newest run or agent status socket event, or 0 when none has arrived. */
 export function latestWorkEventTs(events: readonly { type: string; ts: number }[]): number {
   let latest = 0
   for (const event of events) {
-    if (event.type.startsWith('run.') && event.ts > latest) latest = event.ts
+    const work = event.type.startsWith('run.') || event.type === 'agent.status'
+    if (work && event.ts > latest) latest = event.ts
   }
   return latest
 }

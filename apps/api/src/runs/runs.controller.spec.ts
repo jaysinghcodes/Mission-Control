@@ -329,7 +329,8 @@ describe('RunsController', () => {
     expect(queued.run.finishedAt).toBeNull();
     expect(gateway.broadcast).toHaveBeenLastCalledWith('run.queued', {
       id: queued.run.id,
-      name: 'Ship',
+      name: 'Run queued',
+      title: 'Ship',
       agent: queued.run.agent,
     });
 

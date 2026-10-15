@@ -8,6 +8,7 @@ import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { activityNeedsYou, agentNeedsYou, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
+import { activityText } from '../lib/activity-text'
 import { pluralize } from '../lib/pluralize'
 import { activityActor, deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
@@ -380,7 +381,7 @@ export default function Office() {
               const actor = activityActor(e.payload, agents, ticketRows, runRows)
               const hit = actor ? agents.find((a) => a.id === actor.id) : undefined
               const who = hit ?? (actor ? { id: actor.id, name: actor.name, role: actor.role, status: 'idle' } : null)
-              const text = e.payload?.name || e.payload?.summary || e.type
+              const text = activityText(e.payload, e.type)
               const waiting = activityNeedsYou(e.payload, pending)
               const failed = /fail/i.test(`${e.type} ${text}`)
               const age = activityAge(e.ts, Date.now())

@@ -238,7 +238,7 @@ export default function Tickets() {
         if (r.ok) return
         failedCreates.current.push(t)
         const names = failedCreates.current.map((x) => `"${x}"`).join(', ')
-        showNotice(`Couldn't create ${names} — ${r.error}`)
+        showNotice(`Couldn't create ${names}. ${r.error}`)
         // Restore the failed title only into an EMPTY input — never clobber
         // a title the user typed while this request was queued/in flight.
         setTitle((cur) => (cur.trim() ? cur : t))
@@ -284,8 +284,8 @@ export default function Tickets() {
       const what = STATUS_LABEL[status] ?? status
       showNotice(
         r.status === 404
-          ? 'That ticket no longer exists — the board has been refreshed.'
-          : `Couldn't move ticket to ${what} — ${r.error}`,
+          ? 'That ticket no longer exists. The board has been refreshed.'
+          : `Couldn't move ticket to ${what}. ${r.error}`,
       )
     }
     void refetch()
@@ -318,8 +318,8 @@ export default function Tickets() {
     } else if (!r.ok) {
       showNotice(
         r.status === 404
-          ? (r.error ?? 'That ticket or project no longer exists — the board has been refreshed.')
-          : `Couldn't update the project — ${r.error}`,
+          ? (r.error ?? 'That ticket or project no longer exists. The board has been refreshed.')
+          : `Couldn't update the project. ${r.error}`,
       )
     }
     void refetch()
@@ -571,7 +571,7 @@ export default function Tickets() {
                 <div className="space-y-3">
                   {rows.length === 0 && (
                     <div className="px-1 py-4 text-[12px] text-mc-sub">
-                      {!data ? (loading && !loadError ? 'Loading…' : 'Not loaded — see the notice above.') : `Nothing in ${col.title} yet.`}
+                      {!data ? (loading && !loadError ? 'Loading…' : 'Not loaded. See the notice above.') : `Nothing in ${col.title} yet.`}
                     </div>
                   )}
                   {rows.map((t) => (

@@ -54,7 +54,7 @@ export const OS_STEPS: Record<OsKey, { name: string; cmd: string; note: string }
   windows: {
     name: 'Windows',
     cmd: 'ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000 ubuntu@<your-server-ip>',
-    note: 'Open PowerShell — OpenSSH is built in. Replace <your-server-ip> with your OpenClaw host.',
+    note: 'Open PowerShell. OpenSSH is built in. Replace <your-server-ip> with your OpenClaw host.',
   },
   linux: {
     name: 'Linux',
@@ -82,11 +82,11 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'Node.js 20.17+ (or 22.9+) — the root `packageManager` is `npm@11.17.0`, which requires `^20.17 || >=22.9` — and git.',
+      'Node.js 20.17+ (or 22.9+). The root `packageManager` is `npm@11.17.0`, which requires `^20.17 || >=22.9`, and git.',
       'Docker with the compose plugin (used for Postgres, and optionally the api + web containers).',
       // Ticket 3: OpenClaw is the live data source but no longer a hard
       // prerequisite — tickets work out of the box and seed:demo fills the rest.
-      'Optional: your OpenClaw instance running — it is the live data source (step 6). Without it, the tickets loop works and `npm run seed:demo` fills sample data.',
+      'Optional: your OpenClaw instance running. It is the live data source (step 6). Without it, the tickets loop works and `npm run seed:demo` fills sample data.',
     ],
     commands: [
       {
@@ -115,15 +115,15 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'Docker Compose reads exactly one env file: the **root** `.env` (next to `docker-compose.yml`). `apps/api/.env.example` is only a template for non-Docker runs — copy the root template:',
-      'Then go through every variable with the human who owns the real values — never invent one (see the secrets note below).',
+      'Docker Compose reads exactly one env file: the **root** `.env` (next to `docker-compose.yml`). `apps/api/.env.example` is only a template for non-Docker runs. Copy the root template:',
+      'Then go through every variable with the human who owns the real values. Never invent one (see the secrets note below).',
     ],
     commands: [{ label: 'Copy the env template', cmd: 'cp .env.example .env' }],
     secrets: true,
     vars: [
       {
         name: 'DATABASE_URL',
-        desc: 'Keep the template default — compose’s Postgres matches it. Change it only if you override `POSTGRES_PASSWORD` in `.env`.',
+        desc: 'Keep the template default. Compose’s Postgres matches it. Change it only if you override `POSTGRES_PASSWORD` in `.env`.',
       },
       {
         name: 'INGEST_TOKEN',
@@ -131,7 +131,7 @@ export const STEP_DATA: ConnectStep[] = [
       },
       {
         name: 'SOCKET_TOKEN',
-        desc: 'Optional — guards the dashboard’s live socket when the api runs in production. Blank → `dev-socket-token` (the stack is loopback-only). If you set a real value, set it **before the first `docker compose build`** — it is baked into the web bundle.',
+        desc: 'Optional. Guards the dashboard’s live socket when the api runs in production. Blank becomes `dev-socket-token` (the stack is loopback-only). If you set a real value, set it **before the first `docker compose build`**. It is baked into the web bundle.',
       },
       {
         name: 'WEB_ORIGIN',
@@ -139,7 +139,7 @@ export const STEP_DATA: ConnectStep[] = [
       },
       {
         name: 'GITHUB_TOKEN · DEEPSEEK_API_KEY · ZAI_API_KEY (optional)',
-        desc: 'Ask the human to paste these only if they want those features — GitHub enables PR approvals → auto-merge; DeepSeek/ZAI keys enable live balances on Health/Usage. Everything else works without them.',
+        desc: 'Ask the human to paste these only if they want those features. GitHub enables PR approvals and auto-merge. DeepSeek and ZAI keys enable live balances on Health and Usage. Everything else works without them.',
       },
     ],
     confirmable: true,
@@ -152,7 +152,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       'Wait for all three services to be up: db healthy, api, web. The first `--build` compiles the images, so it takes a while.',
       'Confirm the api is **not** crash-looping: `docker compose logs api` should end with the migrations applied and `mission-control api listening on 0.0.0.0:3000`.',
-      'Prefer no Docker? Postgres is still required — the dev path (export the root `.env`, `npx prisma migrate deploy`, `npm run dev`) is in ONBOARDING.md step 4. No OpenClaw? `npm run seed:demo` fills sample data.',
+      'Prefer no Docker? Postgres is still required. The dev path (export the root `.env`, `npx prisma migrate deploy`, `npm run dev`) is in ONBOARDING.md step 4. No OpenClaw? `npm run seed:demo` fills sample data.',
     ],
     commands: [
       { label: 'Build + start', cmd: 'docker compose up -d --build' },
@@ -166,9 +166,9 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'verify',
     phaseLabel: 'VERIFY',
     body: [
-      'Open `http://localhost:5173/#/` — the Overview loads and the topbar shows a green “Connected” dot (live socket).',
+      'Open `http://localhost:5173/#/`. The Overview loads and the topbar shows a green “Connected” dot (live socket).',
       '`/health` shows real uptime, client count, and database state; empty states show actions, never fake numbers.',
-      'Dot stays red on the Docker path? The api is down, or the `SOCKET_TOKEN` baked into the web build doesn’t match the api’s — set it in `.env` and rebuild with `docker compose up -d --build`.',
+      'Dot stays red on the Docker path? The api is down, or the `SOCKET_TOKEN` baked into the web build doesn’t match the api’s. Set it in `.env` and rebuild with `docker compose up -d --build`.',
     ],
     probe: 'health',
     confirmable: false,
@@ -181,10 +181,10 @@ export const STEP_DATA: ConnectStep[] = [
     // Ticket 3: copy now points at the vendored `bridge/` (mc-bridge-sync.py)
     // instead of a private per-machine cron script. Text-only change.
     body: [
-      'Optional — skip without OpenClaw. The bridge ships in this repo: `bridge/mc-bridge-sync.py` (Python 3, stdlib only) reads OpenClaw via the `openclaw` CLI and POSTs agents/sessions/calendar/usage/approvals snapshots + `run.*` events to `http://127.0.0.1:3000/events`.',
+      'Optional. Skip without OpenClaw. The bridge ships in this repo: `bridge/mc-bridge-sync.py` (Python 3, stdlib only) reads OpenClaw via the `openclaw` CLI and POSTs agents, sessions, calendar, usage, and approvals snapshots plus `run.*` events to `http://127.0.0.1:3000/events`.',
       'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events. Every other write route checks that same header. Set it explicitly. The bridge refuses a blank token.',
-      'Try `--dry-run` first, then a real sync, then schedule it every ~5 min (system cron or an OpenClaw cron job — see `bridge/README.md`). A 401 means the bridge and api disagree on the token (blank `INGEST_TOKEN` → compose uses `dev-ingest-token`).',
-      'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). Mission Control’s starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these — they cap OpenClaw fan-out.',
+      'Try `--dry-run` first, then a real sync, then schedule it every ~5 min (system cron or an OpenClaw cron job, see `bridge/README.md`). A 401 means the bridge and api disagree on the token (blank `INGEST_TOKEN` means compose uses `dev-ingest-token`).',
+      'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). Mission Control’s starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these. They cap OpenClaw fan-out.',
     ],
     commands: [
       { label: 'Preview, then sync once', cmd: 'python3 bridge/mc-bridge-sync.py --dry-run\npython3 bridge/mc-bridge-sync.py' },
@@ -212,7 +212,7 @@ export const STEP_DATA: ConnectStep[] = [
     // Ticket 3: mirror ONBOARDING.md step 8 — say plainly what works with no
     // OpenClaw vs what needs the step-6 bridge (no overclaiming).
     body: [
-      '**No OpenClaw needed:** Tickets — create one on Backlog → To-Do → Build → QA → Review → Done; every move persists and survives a refresh.',
+      '**No OpenClaw needed:** Tickets. Create one, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.',
       '**No OpenClaw needed:** after `npm run seed:demo`, Calendar / Team / Office / Live Activity show labelled sample data.',
       '**Needs the step-6 bridge:** your real cron jobs on Calendar, the real roster on Team, Office bots moving on real `run.*` events, and live agent activity.',
     ],
@@ -307,7 +307,7 @@ export function SecretsCallout({ vars }: { vars: StepVar[] }) {
         </span>
         <div>
           <p className="text-[13px] font-semibold leading-snug text-mc-text">
-            Never invent or guess credentials — ask the human who owns them.
+            Never invent or guess credentials. Ask the human who owns them.
           </p>
           <p className="mt-1 text-[12px] leading-relaxed text-mc-sub">
             Pause and ask for every real secret; redact secrets in any echoed output; show the command before running it;
@@ -316,7 +316,7 @@ export function SecretsCallout({ vars }: { vars: StepVar[] }) {
         </div>
       </div>
       <div className="mt-3 border-t border-mc-border/60 pt-3">
-        <SectionLabel>Required vars — the root .env</SectionLabel>
+        <SectionLabel>Required vars, the root .env</SectionLabel>
         <div className="mt-2.5 space-y-2.5">
           {vars.map((v) => (
             <div key={v.name}>
@@ -325,7 +325,7 @@ export function SecretsCallout({ vars }: { vars: StepVar[] }) {
             </div>
           ))}
         </div>
-        <p className="mt-2.5 text-[12px] text-mc-faint">{fmt('`.env` is git-ignored — never commit it.')}</p>
+        <p className="mt-2.5 text-[12px] text-mc-faint">{fmt('`.env` is git-ignored. Never commit it.')}</p>
       </div>
     </div>
   )
@@ -389,7 +389,7 @@ export function ConnectStepCard({
                   to={l.to}
                   className="inline-flex h-8 items-center rounded-full border border-mc-border bg-mc-card px-4 text-[12.5px] font-semibold text-mc-sub transition-colors duration-150 hover:text-mc-text focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary"
                 >
-                  {l.label} →
+                  {l.label}
                 </Link>
               ),
             )}
@@ -399,7 +399,7 @@ export function ConnectStepCard({
         {step.confirmable &&
           (confirmed ? (
             <div className="mt-4 flex flex-wrap items-center gap-2 text-[12.5px] font-semibold text-mc-greentext">
-              <span>✓ Done — you confirmed this</span>
+              <span>✓ Done. You confirmed this</span>
               <button
                 type="button"
                 onClick={() => onUndo(step.id)}
@@ -410,7 +410,7 @@ export function ConnectStepCard({
             </div>
           ) : (
             <div className="mt-4">
-              <PillButton label="✓ Mark done — I did this" onClick={() => onConfirm(step.id)} />
+              <PillButton label="✓ Mark done. I did this" onClick={() => onConfirm(step.id)} />
             </div>
           ))}
       </div>

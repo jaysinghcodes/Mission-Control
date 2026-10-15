@@ -427,7 +427,7 @@ describe('TicketsController', () => {
         expect(gateway.broadcast).toHaveBeenCalledWith(
           'run.progress',
           expect.objectContaining({
-            name: `ticket ${ticket.key} → build`,
+            name: `${ticket.key} moved to Build`,
             agent: ticket.assignee,
             ticket: ticket.key,
           }),
@@ -533,7 +533,7 @@ describe('TicketsController', () => {
       await expect(
         controller.create({ title: 't', projectId: 'p-archived' }),
       ).rejects.toThrow(
-        'project "Old roadmap" is archived — unarchive it before assigning tickets',
+        'project "Old roadmap" is archived. Unarchive it before assigning tickets',
       );
       expect(prisma.ticket.create).not.toHaveBeenCalled();
     });

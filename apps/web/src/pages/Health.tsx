@@ -54,9 +54,9 @@ export default function Health() {
       : []
 
   const metrics = [
-    { label: 'CPU', big: s ? `${s.cpu.pct}%` : '—', pct: s?.cpu.pct ?? 0, color: s && s.cpu.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `load ${s.cpu.load1} · ${pluralize(s.cpu.cores, 'core')}` : 'loading…' },
-    { label: 'Memory', big: s ? `${s.memory.pct}%` : '—', pct: s?.memory.pct ?? 0, color: s && s.memory.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.memory.totalGb - s.memory.freeGb} / ${s.memory.totalGb} GB` : 'loading…' },
-    { label: 'Disk', big: s ? `${s.disk.pct}%` : '—', pct: s?.disk.pct ?? 0, color: s && s.disk.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.disk.usedGb} / ${s.disk.totalGb} GB` : 'loading…' },
+    { label: 'CPU', big: s ? `${s.cpu.pct}%` : 'none', pct: s?.cpu.pct ?? 0, color: s && s.cpu.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `load ${s.cpu.load1} · ${pluralize(s.cpu.cores, 'core')}` : 'loading…' },
+    { label: 'Memory', big: s ? `${s.memory.pct}%` : 'none', pct: s?.memory.pct ?? 0, color: s && s.memory.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.memory.totalGb - s.memory.freeGb} / ${s.memory.totalGb} GB` : 'loading…' },
+    { label: 'Disk', big: s ? `${s.disk.pct}%` : 'none', pct: s?.disk.pct ?? 0, color: s && s.disk.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.disk.usedGb} / ${s.disk.totalGb} GB` : 'loading…' },
   ]
 
   // Provider balances — one card PER provider (DeepSeek + GLM + any added
@@ -76,7 +76,7 @@ export default function Health() {
   return (
     <div className="p-6">
       <div className="text-[22px] font-semibold">System Health</div>
-      <div className="mt-1 text-[13px] text-mc-sub">Live vitals from the machine running your OpenClaw instance — nothing hardcoded.</div>
+      <div className="mt-1 text-[13px] text-mc-sub">Live vitals from the machine running your OpenClaw instance. Nothing hardcoded.</div>
 
       {/* Gateway/API banner — real */}
       <Card className="mt-6 px-5 py-4 flex items-center gap-4">
@@ -88,7 +88,7 @@ export default function Health() {
           <div className="text-[12.5px] text-mc-sub">
             {h
               ? `uptime ${fmtUptime(h.uptimeSeconds)} · database ${h.database} · ${pluralize(h.connectedClients, 'dashboard client')}`
-              : 'probe failed — check your SSH tunnel'}
+              : 'probe failed. Check your SSH tunnel'}
           </div>
         </div>
         <Chip label={`HOST · ${s?.os.platform ?? '?'} ${s?.os.arch ?? ''}`} bg="var(--mc-inner)" fg="var(--mc-sub)" h={24} fs="text-[11px]" />
@@ -113,7 +113,7 @@ export default function Health() {
         <div className="flex gap-[10px] mt-3 flex-wrap">
           {providerCards.length === 0 && (
             <Card className="w-full px-4 py-4 text-[12px] text-mc-faint">
-              No balance data yet — the bridge syncs every few minutes.
+              No balance data yet. The bridge syncs every few minutes.
             </Card>
           )}
           {providerCards.map((p) => (
@@ -141,11 +141,11 @@ export default function Health() {
         <SectionLabel>Host</SectionLabel>
         <div className="mt-3">
           {[
-            { k: 'Hostname', v: s?.os.hostname ?? '—' },
-            { k: 'OS', v: s ? `${s.os.platform} ${s.os.release} (${s.os.arch})` : '—' },
-            { k: 'Node', v: s?.os.node ?? '—' },
-            { k: 'Host uptime', v: s ? fmtUptime(s.uptimeSeconds) : '—' },
-            { k: 'CPU', v: s?.cpu.model ?? '—' },
+            { k: 'Hostname', v: s?.os.hostname ?? 'none' },
+            { k: 'OS', v: s ? `${s.os.platform} ${s.os.release} (${s.os.arch})` : 'none' },
+            { k: 'Node', v: s?.os.node ?? 'none' },
+            { k: 'Host uptime', v: s ? fmtUptime(s.uptimeSeconds) : 'none' },
+            { k: 'CPU', v: s?.cpu.model ?? 'none' },
           ].map((r) => (
             <div key={r.k} className="flex py-[6px] text-[12.5px]">
               <span className="w-[150px] text-mc-sub">{r.k}</span>

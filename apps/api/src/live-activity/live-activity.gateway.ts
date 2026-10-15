@@ -41,7 +41,8 @@ export type ActivityEventType =
   | 'calendar.snapshot'
   | 'usage.snapshot'
   | 'approvals.snapshot'
-  | 'memory.snapshot';
+  | 'memory.snapshot'
+  | 'agent.status';
 
 /**
  * LiveActivityGateway — realtime event bus for Mission Control.

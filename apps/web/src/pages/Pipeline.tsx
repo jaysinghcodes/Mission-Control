@@ -203,7 +203,7 @@ export default function Pipeline() {
                     </div>
                     {open && (
                       <div className="mt-3 pl-16 text-[12.5px] text-mc-sub">
-                        {ticket.key ?? 'No key'} · started {fmt(startedIso(ticket, runs)) || '—'}
+                        {ticket.key ?? 'No key'} · started {fmt(startedIso(ticket, runs)) || 'none'}
                         {blocked ? ' · paused until you decide in Approvals' : ''}
                         <TicketRuns runs={runsForTicket(runs, ticket.id)} />
                       </div>

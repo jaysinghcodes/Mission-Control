@@ -4,6 +4,7 @@ import { PageHeader, Segmented, SoftCard, Face, StatusChip, Btn, EmptyState } fr
 import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { chicagoDay } from '../lib/chicago-day'
+import { activityHaystack, activityText } from '../lib/activity-text'
 import { pluralize } from '../lib/pluralize'
 import {
   chicagoClock,
@@ -101,7 +102,7 @@ export default function Calendar() {
   }
 
   function failed(job: Job): boolean {
-    return events.some((e) => /fail/i.test(e.type) && (e.payload?.name ?? '').toLowerCase().includes(job.name.toLowerCase()))
+    return events.some((e) => /fail/i.test(e.type) && activityHaystack(e.payload).toLowerCase().includes(job.name.toLowerCase()))
   }
 
   function occurs(job: Job, day: CalendarDay): boolean {
@@ -120,7 +121,7 @@ export default function Calendar() {
 
   const open = jobs.find((j) => j.id === openId) ?? null
   const history = open
-    ? events.filter((e) => (e.payload?.name ?? '').toLowerCase().includes(open.name.toLowerCase())).slice(0, 4)
+    ? events.filter((e) => activityHaystack(e.payload).toLowerCase().includes(open.name.toLowerCase())).slice(0, 4)
     : []
 
   const retries = jobs.filter((j) => failed(j)).length
@@ -343,7 +344,7 @@ export default function Calendar() {
           <div className="mt-3 text-[12px] font-semibold text-mc-sub">Recent history</div>
           {history.length === 0 && <p className="mt-1 text-[13px] text-mc-sub">No matching activity yet.</p>}
           {history.map((e, i) => (
-            <p key={i} className="mt-1 text-[13px] text-mc-text">{e.type} · {e.payload?.summary || e.payload?.status || 'recorded'} · {new Date(e.ts).toLocaleString()}</p>
+            <p key={i} className="mt-1 text-[13px] text-mc-text">{activityText(e.payload, e.type)} · {new Date(e.ts).toLocaleString()}</p>
           ))}
         </SoftCard>
       )}

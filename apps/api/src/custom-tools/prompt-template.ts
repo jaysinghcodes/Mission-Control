@@ -134,7 +134,7 @@ export function assertPlaceholdersMatch(
     const inner = match[1] ?? '';
     if (!IDENT.test(inner)) {
       throw new ToolValidationError(
-        `placeholder {{${inner}}} is not a valid input name — use letters, digits, and underscores, like {{topic}}`,
+        `placeholder {{${inner}}} is not a valid input name. Use letters, digits, and underscores, like {{topic}}`,
       );
     }
     if (!defined.has(inner) && !seen.has(inner)) {

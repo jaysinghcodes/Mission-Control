@@ -42,7 +42,7 @@ export default function Sessions() {
         {error && <div className="px-[18px] py-8 text-[12.5px] text-mc-faint">API unreachable.</div>}
         {!error && rows.length === 0 && (
           <div className="px-[18px] py-8 text-[12.5px] text-mc-faint">
-            No sessions synced yet — the bridge pushes real sessions every few minutes.
+            No sessions synced yet. The bridge pushes real sessions every few minutes.
           </div>
         )}
         {rows.map((row) => (
@@ -53,12 +53,12 @@ export default function Sessions() {
               <Bot color="var(--mc-primary)" scale={0.8} />
               <span className="text-[12px] font-medium truncate">{row.agent}</span>
             </div>
-            <div className="font-mono text-[12px] text-mc-sub truncate" style={{ width: COLS[2].w }}>{row.model ?? '—'}</div>
+            <div className="font-mono text-[12px] text-mc-sub truncate" style={{ width: COLS[2].w }}>{row.model ?? 'none'}</div>
             <div className="flex items-center gap-2" style={{ width: COLS[3].w }}>
               <Progress pct={row.ctx} color={ctxColor(row.ctx)} w="w-[90px]" />
               <span className="text-[11.5px] text-mc-sub">{row.ctx}%</span>
             </div>
-            <div className="text-[12px] text-mc-faint" style={{ width: COLS[4].w }}>{row.lastActivity ?? '—'}</div>
+            <div className="text-[12px] text-mc-faint" style={{ width: COLS[4].w }}>{row.lastActivity ?? 'none'}</div>
           </div>
         ))}
       </Card>

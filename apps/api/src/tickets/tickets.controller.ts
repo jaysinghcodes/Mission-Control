@@ -15,6 +15,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { operatorName } from '../config/operator';
 import { KeyedMutex } from './keyed-mutex';
 import {
+  ticketCreated,
+  ticketMoved,
+  ticketUpdated,
+} from '../activity/activity-text';
+import {
   CREATE_STATUSES,
   DEFAULT_CREATE_STATUS,
   TICKET_STATUSES,
@@ -191,7 +196,10 @@ export class TicketsController {
     // advisory lock (see allocateKeyAndCreate). Concurrent creates queue on
     // that lock, so each one sees the previous one's committed MC-N.
     const ticket = await this.allocateKeyAndCreate(input);
-    const created = this.activityPayload(ticket, `ticket ${ticket.key}`);
+    const created = this.activityPayload(
+      ticket,
+      ticketCreated(ticket.key ?? 'Ticket'),
+    );
     await this.persist('run.queued', created);
     this.gateway.broadcast('run.queued', created);
     return { ticket, ts: Date.now() };
@@ -370,9 +378,10 @@ export class TicketsController {
     // nothing happened, and the activity feed should only show real moves.
     if (!changed) return { ticket, ts: Date.now() };
 
+    const key = ticket.key ?? 'Ticket';
     const label = data.status
-      ? `ticket ${ticket.key} → ${ticket.status}`
-      : `ticket ${ticket.key} updated`;
+      ? ticketMoved(key, ticket.status)
+      : ticketUpdated(key);
     const moved = this.activityPayload(ticket, label);
     await this.persist('run.progress', moved);
     this.gateway.broadcast('run.progress', moved);
@@ -391,7 +400,7 @@ export class TicketsController {
       const status = typeof body.status === 'string' ? body.status.trim() : '';
       if (!isTicketStatus(status)) {
         throw new BadRequestException(
-          `invalid status ${JSON.stringify(body.status)} — expected one of: ${TICKET_STATUSES.join(', ')}`,
+          `invalid status ${JSON.stringify(body.status)}. Expected one of: ${TICKET_STATUSES.join(', ')}`,
         );
       }
       data.status = status;
@@ -413,7 +422,7 @@ export class TicketsController {
     // An empty/irrelevant body would be a silent no-op 200 — make it explicit.
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(
-        'nothing to update — send status, assignee, priority and/or projectId',
+        'nothing to update. Send status, assignee, priority and/or projectId',
       );
     }
     return data;
@@ -473,7 +482,7 @@ export class TicketsController {
     }
     if (rows[0].archivedAt) {
       throw new BadRequestException(
-        `project "${rows[0].name}" is archived — unarchive it before assigning tickets`,
+        `project "${rows[0].name}" is archived. Unarchive it before assigning tickets`,
       );
     }
   }
@@ -484,7 +493,7 @@ export class TicketsController {
     const status = typeof raw === 'string' ? raw.trim() : '';
     if (!isCreateStatus(status)) {
       throw new BadRequestException(
-        `invalid create status ${JSON.stringify(raw)} — new tickets may only start in: ${CREATE_STATUSES.join(', ')}`,
+        `invalid create status ${JSON.stringify(raw)}. New tickets may only start in: ${CREATE_STATUSES.join(', ')}`,
       );
     }
     return status;

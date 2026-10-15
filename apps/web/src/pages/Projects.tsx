@@ -241,7 +241,7 @@ export default function Projects() {
                 <div className="w-[240px] max-w-full">
                   <div className="flex justify-between text-[13px]">
                     <span className="font-semibold">{p.doneCount} of {p.ticketCount} done</span>
-                    <span className="text-mc-sub">{p.ticketCount ? `${Math.round(frac * 100)}%` : '—'}</span>
+                    <span className="text-mc-sub">{p.ticketCount ? `${Math.round(frac * 100)}%` : 'none'}</span>
                   </div>
                   <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-mc-track">
                     <div className="h-full rounded-full" style={{ width: `${Math.round(frac * 100)}%`, background: finished ? 'var(--mc-green)' : 'var(--mc-accent)' }} />
