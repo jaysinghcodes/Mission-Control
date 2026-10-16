@@ -58,7 +58,7 @@ nginx on the web port proxies `/api` and `/socket.io` to the API. The page and t
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
 
-The script ends by running doctor (`node scripts/doctor.mjs`). Doctor checks Node, the API port, `.env`, the database, migrations, the write token, and API health. A missing OpenClaw bridge is an info line. It does not fail doctor. If doctor prints a failing line, the script still prints the URL and then exits non zero.
+The script ends by running doctor (`node scripts/doctor.mjs`). On the Docker path it first waits up to 90 seconds for the API health check on `MC_API_PORT` (default 3000). Doctor then checks that host port. The database and migration lines are info, because Compose runs Postgres and the API container applies migrations. A Docker install does not need `npm ci` for those checks. A missing OpenClaw bridge is an info line. It does not fail doctor. If doctor prints a failing line, the script still prints the URL and then exits non zero.
 
 Compose still has a blank token fallback (`dev-ingest-token` and `dev-socket-token`) for a manual copy of `.env.example`. `bash install.sh` writes real tokens first, so that fallback is not the installed path.
 
@@ -271,7 +271,7 @@ npm test
 npm run build
 ```
 
-`npm run doctor` prints one line per check, in this order: Node, the API port (`PORT`, default 3000), `.env`, the database, migrations, the write token, API health, then an info line for the optional OpenClaw bridge. It does not check the web port 5173. OpenClaw staying down does not fail the command. Run it from the repo root when setup fails, or after `npm run dev` is up.
+`npm run doctor` prints one line per check, in this order: Node, the API port, `.env`, the database, migrations, the write token, API health, then an info line for the optional OpenClaw bridge. The native path uses `PORT` (default 3000). When the Compose API service is running, the port check uses `MC_API_PORT` (default 3000) and the database and migration lines are info. It does not check the web port 5173. OpenClaw staying down does not fail the command. Run it from the repo root when setup fails, or after `npm run dev` is up.
 
 On this clone, after that generate, `npm test` passed (API Jest: 37 suites, 255 tests; web: 65 tests) and `npm run build` passed. This pass used Node 22.23.3. Six of the nine tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres unreachable, that file is the only API failure: 6 failed, 249 passed, 255 total. The unknown event type check and the production missing token checks (`POST /events` and `POST /tickets` with no token) return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
 

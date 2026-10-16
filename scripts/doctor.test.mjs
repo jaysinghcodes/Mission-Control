@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -12,11 +13,13 @@ import {
   FIX_MIGRATIONS,
   FIX_NODE,
   FIX_TOKEN,
+  apiListenPort,
   hasDashPunctuation,
   inspectApiPort,
   nodeSupported,
   readHealthIdentity,
   report,
+  runDoctor,
   tokenState,
 } from './doctor.mjs'
 
@@ -324,6 +327,55 @@ test('OpenClaw staying unreachable does not fail the command', () => {
   assert.equal(result.code, 0)
   assert.match(result.lines[7], /^info openclaw:/)
   assert.doesNotMatch(result.lines[7], /^fail /)
+})
+
+test('docker mode uses MC_API_PORT and native mode keeps PORT', () => {
+  assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000' }), 3000)
+  assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000', MC_API_PORT: '3880' }), 3880)
+  assert.equal(apiListenPort({ PORT: '3000', MC_API_PORT: '3880' }), 3000)
+  assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', MC_API_PORT: 'nope' }), null)
+})
+
+test('docker doctor reports host database checks as info and checks the custom API port', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-'))
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(
+      JSON.stringify({
+        service: 'mission-control',
+        status: 'ok',
+        database: 'connected',
+        db: 'up',
+      }),
+    )
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    writeFileSync(
+      path.join(dir, '.env'),
+      [
+        'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
+        'PORT=3000',
+        `MC_API_PORT=${port}`,
+        'HOST=127.0.0.1',
+        'INGEST_TOKEN=abc123',
+        '',
+      ].join('\n'),
+    )
+    const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
+    assert.equal(result.code, 0, result.lines.join('\n'))
+    assert.equal(result.lines.some((line) => line.startsWith('fail ')), false)
+    assert.match(result.lines[1], new RegExp(`^pass ports: Port ${port} is already running\\.$`))
+    assert.match(result.lines[3], /^info database: /)
+    assert.match(result.lines[4], /^info migrations: /)
+    assert.equal(result.lines[6], 'pass health: The health check says the database is up.')
+    assert.equal(result.lines.some((line) => /Port 3000/.test(line)), false)
+    for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('docs point at npm run doctor and do not use dash punctuation in that guidance', () => {

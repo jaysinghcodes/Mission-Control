@@ -43,7 +43,7 @@ The API loads the root `.env` when that file is on disk, and it runs `prisma mig
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. That log line is the process text in `apps/api/src/main.ts`. Compose sets `HOST=0.0.0.0` inside the container.
 
-The installer runs doctor from the repo root. `npm run doctor` is that same check. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
+The installer runs doctor from the repo root. `npm run doctor` is that same check. On the Docker path the installer waits for the API health check on `MC_API_PORT` (default 3000), and doctor checks that host port. Database and migration lines are info, because Compose runs Postgres and applies migrations. A Docker install does not need `npm ci` for those checks. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
 
 `npm run seed:demo` fills sample agents, tickets, projects, and usage. It is idempotent and only touches demo rows. It does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. Registered bots and rows you created through the API stay. A fresh setup does not load sample data.
 

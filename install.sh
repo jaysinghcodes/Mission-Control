@@ -85,6 +85,10 @@ api_port() {
   port_or "$(env_value PORT)" "3000"
 }
 
+docker_api_port() {
+  port_or "$(env_value MC_API_PORT)" "3000"
+}
+
 db_port() {
   port_or "$(env_value MC_DB_PORT)" "5432"
 }
@@ -160,6 +164,8 @@ start_docker() {
     echo "Docker Compose did not start the stack." >&2
     exit 1
   fi
+  echo "Waiting for the API health check on port $(docker_api_port)."
+  wait_on_port "$(docker_api_port)"
 }
 
 require_node_22() {
@@ -215,15 +221,20 @@ require_postgres_16() {
   esac
 }
 
-health_ok() {
+health_ok_port() {
   local port
-  port="$(api_port)"
+  port="$1"
   # Any HTTP 200 on this port is not enough. Only the Mission Control health body counts.
   node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' "$port" >/dev/null 2>&1
 }
 
-wait_ready() {
-  local seconds i
+health_ok() {
+  health_ok_port "$(api_port)"
+}
+
+wait_on_port() {
+  local port seconds i
+  port="$1"
   seconds="${MC_INSTALL_READY_SECONDS:-90}"
   if [[ "$seconds" == "0" ]]; then
     return 0
@@ -233,13 +244,17 @@ wait_ready() {
   fi
   i=0
   while [[ "$i" -lt "$seconds" ]]; do
-    if health_ok; then
+    if health_ok_port "$port"; then
       return 0
     fi
     i=$((i + 1))
     sleep 1
   done
-  echo "The API did not answer on port $(api_port) yet. Doctor will report the health check."
+  echo "The API did not answer on port ${port} yet. Doctor will report the health check."
+}
+
+wait_ready() {
+  wait_on_port "$(api_port)"
 }
 
 start_native() {
@@ -268,7 +283,11 @@ finish() {
   doctor_code=0
   if command -v node >/dev/null 2>&1 && [[ -f scripts/doctor.mjs ]]; then
     set +e
-    node scripts/doctor.mjs
+    if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+      MC_DOCTOR_DOCKER=1 MC_API_PORT="$(docker_api_port)" node scripts/doctor.mjs
+    else
+      node scripts/doctor.mjs
+    fi
     doctor_code=$?
     set -e
   elif command -v node >/dev/null 2>&1; then
@@ -288,7 +307,9 @@ main() {
     clone_and_reexec
   fi
   ensure_env
+  USE_DOCKER=0
   if have_docker; then
+    USE_DOCKER=1
     start_docker
   else
     start_native
