@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { LiveActivityGateway } from './live-activity.gateway';
 import { Server, Socket } from 'socket.io';
+import { resetBundledPeerCache } from '../auth/bundled-proxy';
 import { hashPassword } from '../auth/password';
 import { signSession } from '../auth/session';
 import { revokeSessions } from '../auth/session-state';
@@ -99,6 +100,18 @@ describe('LiveActivityGateway', () => {
     expect(event).toBe('run.started');
     expect(payload.name).toBe('Trend Radar');
     expect(typeof payload.ts).toBe('number');
+  });
+
+  it('does not treat the tunnel listener as loopback', () => {
+    process.env.BUNDLED_PROXY = '127.0.0.1';
+    resetBundledPeerCache();
+    const { client, disconnect } = fakeSocket('127.0.0.1');
+    client.handshake.headers['x-mc-remote'] = '1';
+    gateway.handleConnection(client);
+    expect(disconnect).toHaveBeenCalledWith(true);
+    expect(gateway.clientCount).toBe(0);
+    delete process.env.BUNDLED_PROXY;
+    resetBundledPeerCache();
   });
 
   it('rejects a remote socket without a session cookie', () => {

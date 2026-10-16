@@ -41,6 +41,7 @@ test('compose yaml lists db, api, and web on loopback', () => {
   assert.equal(compose.services.api.environment.LOGIN_FAIL_LIMIT, '${LOGIN_FAIL_LIMIT:-5}')
   assert.equal(compose.services.api.environment.LOGIN_WINDOW_SECONDS, '${LOGIN_WINDOW_SECONDS:-60}')
   assert.equal(compose.services.api.environment.LOGIN_BACKOFF_MAX_SECONDS, '${LOGIN_BACKOFF_MAX_SECONDS:-900}')
+  assert.equal(compose.services.api.environment.BUNDLED_PROXY, '${BUNDLED_PROXY:-web}')
   assert.equal(compose.services.api.environment.TRUSTED_PROXY, '${TRUSTED_PROXY:-}')
   assert.equal(compose.volumes['mc-auth'], null)
   assert.equal(compose.services.api.environment.SOCKET_TOKEN, undefined)
@@ -48,10 +49,14 @@ test('compose yaml lists db, api, and web on loopback', () => {
   assert.equal(compose.services.web.build.args.VITE_SOCKET_TOKEN, undefined)
   assert.equal(compose.services.web.environment, undefined)
   assert.deepEqual(compose.services.web.depends_on, ['api'])
+  assert.deepEqual(compose.services.web.ports, [
+    '127.0.0.1:${MC_WEB_PORT:-5173}:5173',
+    '127.0.0.1:${MC_REMOTE_PORT:-3011}:3011',
+  ])
   for (const spec of [
     compose.services.db.ports[0],
     compose.services.api.ports[0],
-    compose.services.web.ports[0],
+    ...compose.services.web.ports,
   ]) {
     assert.match(spec, /^127\.0\.0\.1:/)
   }
@@ -77,7 +82,34 @@ test('nginx proxies /api and /socket.io and does not inject a write token', () =
   assert.match(nginx, /proxy_set_header Upgrade \$http_upgrade;/)
   assert.match(nginx, /proxy_set_header Connection "upgrade";/)
   assert.doesNotMatch(nginx, /VITE_API_URL/)
+  assert.doesNotMatch(nginx, /\$proxy_add_x_forwarded_for/)
+  assert.doesNotMatch(nginx, /\$http_x_real_ip/)
+  assert.doesNotMatch(nginx, /\$http_x_forwarded_proto/)
+  const servers = [...nginx.matchAll(/server \{([\s\S]*?)\n\}/g)].map((match) => match[1])
+  assert.equal(servers.length, 2)
+  const local = servers.find((block) => block.includes('listen 5173;'))
+  const remote = servers.find((block) => block.includes('listen 3011;'))
+  assert.ok(local)
+  assert.ok(remote)
+  assert.doesNotMatch(local, /\$http_x_forwarded_for/)
+  for (const block of [locationBlock(local, '/api/'), locationBlock(local, '/socket\\.io/')]) {
+    assert.match(block, /proxy_set_header X-MC-Remote "";/)
+    assert.match(block, /proxy_set_header X-Real-IP \$remote_addr;/)
+    assert.match(block, /proxy_set_header X-Forwarded-For \$remote_addr;/)
+    assert.match(block, /proxy_set_header X-Forwarded-Proto \$scheme;/)
+  }
+  for (const block of [locationBlock(remote, '/api/'), locationBlock(remote, '/socket\\.io/')]) {
+    assert.match(block, /proxy_set_header X-MC-Remote 1;/)
+    assert.match(block, /proxy_set_header CF-Connecting-IP \$http_cf_connecting_ip;/)
+    assert.match(block, /proxy_set_header X-Forwarded-For \$http_x_forwarded_for;/)
+  }
 })
+
+function locationBlock(src, name) {
+  const match = new RegExp(`location ${name} \\{([\\s\\S]*?)\\n    \\}`).exec(src)
+  assert.ok(match, `missing location ${name}`)
+  return match[1]
+}
 
 test('Dockerfiles copy files that exist and the web API url defaults to blank', () => {
   const api = read('apps/api/Dockerfile')

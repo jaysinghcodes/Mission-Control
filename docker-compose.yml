@@ -8,14 +8,17 @@
 # The browser uses that one port. nginx proxies /api and /socket.io.
 # No OpenClaw? `npm run seed:demo` (from the host) fills sample data.
 # Published ports bind 127.0.0.1 only. Inside the api container HOST is
-# 0.0.0.0, and the peer is the Docker bridge address of the web container,
-# not 127.0.0.1. That is why Compose asks for the dashboard password.
+# 0.0.0.0. nginx records the client address and the API trusts the web
+# service (BUNDLED_PROXY, default web). A browser on the host still signs
+# in. That host has its own login lock. The tunnel port never uses it.
 # Leave TRUSTED_PROXY unset. Do not point it at the Docker bridge.
 #
-# Host ports are overridable. 5432, 3000, and 5173 are often taken:
-#   MC_DB_PORT=55432 MC_API_PORT=3200 MC_WEB_PORT=5273 docker compose up -d --build
+# Host ports are overridable. 5432, 3000, 5173, and 3011 are often taken:
+#   MC_DB_PORT=55432 MC_API_PORT=3200 MC_WEB_PORT=5273 MC_REMOTE_PORT=4011 docker compose up -d --build
 # Only the host side of each mapping moves. Inside the compose network the
-# services still talk on 5432, 3000, and 5173.
+# services still talk on 5432, 3000, and 5173. nginx also listens on 3011.
+# MC_WEB_PORT is the owner port. SSH tunnels use that port.
+# MC_REMOTE_PORT (default 3011) is for Cloudflare Tunnel and Tailscale Serve.
 # WEB_ORIGIN follows MC_WEB_PORT unless you set it (see .env.example).
 # The browser does not use MC_API_PORT. Leave VITE_API_URL unset so the page
 # stays on the web port. Set VITE_API_URL only for a different API origin,
@@ -81,8 +84,15 @@ services:
       LOGIN_FAIL_LIMIT: ${LOGIN_FAIL_LIMIT:-5}
       LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-60}
       LOGIN_BACKOFF_MAX_SECONDS: ${LOGIN_BACKOFF_MAX_SECONDS:-900}
-      # Leave this empty. The API decides loopback from the socket address.
-      # Trusting the Docker bridge would let a browser skip the password.
+      # Hostname of the bundled nginx on this network. The API resolves it
+      # and trusts X-Forwarded-For and X-Real-IP only from that peer.
+      # The default is the web service name. Set an IP or another hostname
+      # when that service is renamed. This is not the Docker bridge.
+      BUNDLED_PROXY: ${BUNDLED_PROXY:-web}
+      # Extra proxies, comma separated. Blank stays blank. The bundled
+      # nginx is trusted through BUNDLED_PROXY, not through this list.
+      # Do not set this to the Docker bridge. That would let a browser
+      # skip the password.
       TRUSTED_PROXY: ${TRUSTED_PROXY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Display only. Default assignee for new tickets and runs. Blank means Operator.
@@ -149,7 +159,11 @@ services:
       - api
     ports:
       # Host port overridable (item 6); nginx still listens on 5173 inside.
+      # This is the owner port. SSH tunnels use it.
       - "127.0.0.1:${MC_WEB_PORT:-5173}:5173"
+      # Tunnel port. Cloudflare Tunnel and Tailscale Serve use the host side.
+      # nginx listens on 3011 inside. Default host port is 3011.
+      - "127.0.0.1:${MC_REMOTE_PORT:-3011}:3011"
 
 volumes:
   mc-db:

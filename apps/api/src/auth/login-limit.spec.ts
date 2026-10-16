@@ -3,8 +3,10 @@ import {
   DEFAULT_LOGIN_FAIL_LIMIT,
   DEFAULT_LOGIN_WINDOW_SECONDS,
   LOGIN_LIMIT_MESSAGE,
+  LOGIN_LIMIT_MESSAGE_COMPOSE,
   loginBlock,
   loginLimitConfig,
+  loginLimitMessage,
   recordLoginFailure,
   recordLoginSuccess,
   resetLoginLimits,
@@ -41,7 +43,17 @@ describe('login rate limit', () => {
       windowSeconds: 60,
       maxBackoffSeconds: 900,
     });
-    expect(LOGIN_LIMIT_MESSAGE).toBe('Too many tries. Try again in a minute.');
+    expect(LOGIN_LIMIT_MESSAGE).toBe(
+      'Too many tries. Try again in a minute. npm run login:reset clears the lock.',
+    );
+    expect(loginLimitMessage({})).toBe(LOGIN_LIMIT_MESSAGE);
+    expect(loginLimitMessage({ MC_COMPOSE: '1' })).toBe(
+      LOGIN_LIMIT_MESSAGE_COMPOSE,
+    );
+    expect(LOGIN_LIMIT_MESSAGE_COMPOSE).toContain(
+      'docker compose exec api npm run login:reset',
+    );
+    expect(LOGIN_LIMIT_MESSAGE).not.toContain('docker compose exec');
   });
 
   it('blocks the 6th try inside the window and allows it after the wait', () => {

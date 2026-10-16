@@ -1,11 +1,14 @@
 import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
+import { ensureBundledPeers } from './bundled-proxy';
+import { isLoopbackAddress } from './client-address';
 import {
-  LOGIN_LIMIT_MESSAGE,
   loginBlock,
+  loginLimitMessage,
   recordLoginFailure,
   recordLoginSuccess,
+  resetLoginLimits,
 } from './login-limit';
 import { hashPassword, MAX_PASSWORD, passwordMatches } from './password';
 import {
@@ -41,11 +44,12 @@ export class AuthController {
   }
 
   @Post('login')
-  login(
+  async login(
     @Req() req: Request,
     @Res() res: Response,
     @Body() body: unknown,
-  ): void {
+  ): Promise<void> {
+    await ensureBundledPeers();
     const loopback = requestLoopback(req);
     const ip = peerAddress(req) ?? 'unknown';
     if (!loopback) {
@@ -54,7 +58,7 @@ export class AuthController {
         res.setHeader('Retry-After', String(block.retryAfter));
         res.status(429).json({
           statusCode: 429,
-          message: LOGIN_LIMIT_MESSAGE,
+          message: loginLimitMessage(),
         });
         return;
       }
@@ -67,6 +71,22 @@ export class AuthController {
     }
     if (!loopback) recordLoginSuccess(ip);
     applySessionCookie(res, token);
+    res.status(204).send();
+  }
+
+  /**
+   * Clears every login lock. The socket itself must be loopback.
+   * A forwarded header cannot clear the lock, including from nginx.
+   * npm run login:reset calls this on 127.0.0.1. Under Compose that
+   * command runs inside the api container.
+   */
+  @Post('login-reset')
+  resetLogins(@Req() req: Request, @Res() res: Response): void {
+    if (!isLoopbackAddress(req.socket?.remoteAddress)) {
+      res.status(401).json({ statusCode: 401, message: 'unauthorized' });
+      return;
+    }
+    resetLoginLimits();
     res.status(204).send();
   }
 

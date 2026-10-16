@@ -6,7 +6,8 @@ import { requestLoopback, validSession } from './session';
 /**
  * Dashboard reads and writes.
  *
- * Loopback, judged from the socket address, stays open.
+ * Loopback stays open. Loopback is the socket address only. A forwarded
+ * header does not open the dashboard, and the tunnel listener never does.
  * Any other peer needs a session cookie. Agent ingest and the login
  * routes skip this check.
  */

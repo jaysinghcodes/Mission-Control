@@ -24,4 +24,5 @@ COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 COPY apps/web/nginx.conf.template /etc/nginx/templates/default.conf.template
 ENV NGINX_ENVSUBST_FILTER=^$$
 EXPOSE 5173
+EXPOSE 3011
 CMD ["nginx", "-g", "daemon off;"]

@@ -3,7 +3,8 @@
  *
  * Defaults: 5 failures inside 60 seconds, then a wait of 60 seconds.
  * Each later lockout doubles until 15 minutes. Loopback never calls this.
- * The counters live in memory and clear when the process restarts.
+ * The counters live in memory. A restart clears them. So does
+ * npm run login:reset, which calls POST /auth/login-reset on loopback.
  */
 
 export const DEFAULT_LOGIN_FAIL_LIMIT = 5;
@@ -11,7 +12,24 @@ export const DEFAULT_LOGIN_WINDOW_SECONDS = 60;
 export const DEFAULT_LOGIN_BACKOFF_MAX_SECONDS = 15 * 60;
 
 /** Shown on the sign in page and returned as the 429 message. */
-export const LOGIN_LIMIT_MESSAGE = 'Too many tries. Try again in a minute.';
+export const LOGIN_LIMIT_MESSAGE =
+  'Too many tries. Try again in a minute. npm run login:reset clears the lock.';
+
+/** Same wait, with the command that works inside the api container. */
+export const LOGIN_LIMIT_MESSAGE_COMPOSE =
+  'Too many tries. Try again in a minute. docker compose exec api npm run login:reset clears the lock.';
+
+/**
+ * Compose is MC_COMPOSE=1, set by docker-compose.yml. The sentence is
+ * chosen when the request is handled, not baked into one string.
+ */
+export function loginLimitMessage(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env.MC_COMPOSE === '1'
+    ? LOGIN_LIMIT_MESSAGE_COMPOSE
+    : LOGIN_LIMIT_MESSAGE;
+}
 
 export interface LoginLimitConfig {
   limit: number;
