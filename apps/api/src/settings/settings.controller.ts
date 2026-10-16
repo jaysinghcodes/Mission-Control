@@ -19,8 +19,8 @@ import { readSettingsPatch } from './settings-patch';
  * timezone stays null until a zone is saved. Reads then use the server zone.
  * setupDone stays false until the first open is finished or skipped.
  * crewMap is agent id to seat id. The web applies those seats only
- * when the mode is crew. PUT is a write, so the shared token
- * middleware covers it the same way as every other write.
+ * when the mode is crew. PUT is a dashboard write. Loopback stays open.
+ * Any other peer needs the session cookie.
  */
 @Controller('settings')
 export class SettingsController {

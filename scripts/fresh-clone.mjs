@@ -218,8 +218,8 @@ function envFromClone(cloneDir) {
 
 async function assertProductionWriteRejected(cloneDir, env) {
   const prodEnv = { ...env, NODE_ENV: 'production', PORT: '3001', HOST: '127.0.0.1' }
-  // A blank value stays blank. The API loads .env but does not replace it,
-  // so this process still has no write token.
+  // A blank value stays blank. The API loads .env but does not replace it.
+  // Loopback dashboard writes stay open. Ingest without a token is 401.
   prodEnv.INGEST_TOKEN = ''
   const logPath = path.join(cloneDir, 'production-api.log')
   const fd = openSync(logPath, 'w')
@@ -231,18 +231,29 @@ async function assertProductionWriteRejected(cloneDir, env) {
   })
   try {
     await waitFor('http://127.0.0.1:3001/health', (res) => res.ok, 120000)
-    const res = await fetch('http://127.0.0.1:3001/tickets', {
+    const tickets = await fetch('http://127.0.0.1:3001/tickets', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 'production no token' }),
+      body: JSON.stringify({ title: 'production loopback' }),
     })
-    const body = await res.json().catch(() => null)
-    if (res.status !== 401 || body?.message !== 'unauthorized') {
+    const ticketBody = await tickets.json().catch(() => null)
+    if (tickets.status !== 201 || ticketBody?.ticket?.title !== 'production loopback') {
       throw new Error(
-        `Expected 401 unauthorized for a production write with no token, got ${res.status} ${JSON.stringify(body)}`,
+        `Expected 201 for a production loopback dashboard write, got ${tickets.status} ${JSON.stringify(ticketBody)}`,
       )
     }
-    console.log('production write with no token returned 401')
+    const events = await fetch('http://127.0.0.1:3001/events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'hello', payload: {} }),
+    })
+    const eventBody = await events.json().catch(() => null)
+    if (events.status !== 401 || eventBody?.message !== 'unauthorized') {
+      throw new Error(
+        `Expected 401 unauthorized for production ingest with no token, got ${events.status} ${JSON.stringify(eventBody)}`,
+      )
+    }
+    console.log('production loopback dashboard write is open and ingest without a token is 401')
   } catch (err) {
     console.error(tail(logPath))
     throw err
@@ -253,21 +264,29 @@ async function assertProductionWriteRejected(cloneDir, env) {
 }
 
 async function assertDevRejectsMissingHeader(env) {
-  const res = await fetch('http://127.0.0.1:3000/tickets', {
+  const tickets = await fetch('http://127.0.0.1:3000/tickets', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title: 'direct write without token' }),
+    body: JSON.stringify({ title: 'direct dashboard write' }),
   })
-  const body = await res.json().catch(() => null)
-  if (res.status !== 401 || body?.message !== 'unauthorized') {
+  if (tickets.status === 401) {
+    throw new Error('A loopback dashboard write must stay open when the caller is this machine.')
+  }
+  const events = await fetch('http://127.0.0.1:3000/events', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'hello', payload: {} }),
+  })
+  const body = await events.json().catch(() => null)
+  if (events.status !== 401 || body?.message !== 'unauthorized') {
     throw new Error(
-      `Expected 401 unauthorized when INGEST_TOKEN is set and the header is missing, got ${res.status} ${JSON.stringify(body)}`,
+      `Expected 401 unauthorized when INGEST_TOKEN is set and the ingest header is missing, got ${events.status} ${JSON.stringify(body)}`,
     )
   }
   if (!env.INGEST_TOKEN) {
     throw new Error('The example env did not set INGEST_TOKEN, so this check is not meaningful.')
   }
-  console.log('direct write without x-ingest-token returned 401')
+  console.log('direct ingest without x-ingest-token returned 401')
 }
 
 async function ensureBrowser(cloneDir, env) {

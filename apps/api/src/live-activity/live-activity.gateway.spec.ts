@@ -1,5 +1,7 @@
 import { LiveActivityGateway } from './live-activity.gateway';
 import { Server, Socket } from 'socket.io';
+import { hashPassword } from '../auth/password';
+import { signSession } from '../auth/session';
 
 /**
  * Unit tests for LiveActivityGateway (GLM review 🟡 #11 — zero coverage).
@@ -14,8 +16,10 @@ describe('LiveActivityGateway', () => {
     process.env.NODE_ENV = 'test';
   });
 
-  /** Build a fake socket with the pieces handleConnection touches. */
-  function fakeSocket(overrides: Partial<Socket> = {}): {
+  function fakeSocket(
+    address = '127.0.0.1',
+    cookie?: string,
+  ): {
     client: Socket;
     emit: jest.Mock;
     disconnect: jest.Mock;
@@ -24,10 +28,13 @@ describe('LiveActivityGateway', () => {
     const disconnect = jest.fn();
     const client = {
       id: `socket-${Math.random()}`,
-      handshake: { auth: {} },
+      handshake: {
+        auth: {},
+        address,
+        headers: cookie ? { cookie } : {},
+      },
       emit,
       disconnect,
-      ...overrides,
     } as unknown as Socket;
     return { client, emit, disconnect };
   }
@@ -75,9 +82,8 @@ describe('LiveActivityGateway', () => {
     expect(typeof payload.ts).toBe('number');
   });
 
-  it('rejects unauthenticated connections in production', () => {
-    process.env.NODE_ENV = 'production';
-    const { client, disconnect } = fakeSocket();
+  it('rejects a remote socket without a session cookie', () => {
+    const { client, disconnect } = fakeSocket('203.0.113.10');
 
     gateway.handleConnection(client);
 
@@ -85,17 +91,17 @@ describe('LiveActivityGateway', () => {
     expect(gateway.clientCount).toBe(0);
   });
 
-  it('accepts connections with a valid token in production', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.SOCKET_TOKEN = 'secret-token';
-    const { client, disconnect } = fakeSocket({
-      handshake: { auth: { token: 'secret-token' } },
-    });
+  it('accepts a remote socket that presents the session cookie', () => {
+    process.env.SESSION_SECRET = 'socket-secret';
+    process.env.DASHBOARD_PASSWORD_HASH = hashPassword('pw');
+    const cookie = `mc_session=${encodeURIComponent(signSession('socket-secret', 3600))}`;
+    const { client, disconnect } = fakeSocket('203.0.113.10', cookie);
 
     gateway.handleConnection(client);
 
     expect(disconnect).not.toHaveBeenCalled();
     expect(gateway.clientCount).toBe(1);
-    delete process.env.SOCKET_TOKEN;
+    delete process.env.SESSION_SECRET;
+    delete process.env.DASHBOARD_PASSWORD_HASH;
   });
 });

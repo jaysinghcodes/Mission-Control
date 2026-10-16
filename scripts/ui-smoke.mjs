@@ -1,8 +1,8 @@
 /**
  * Browser check against the running dev server.
  * Office, Tickets, Runs, and System must render with no console errors.
- * A task created from the page is a write through the UI. The page does not
- * send x-ingest-token. The dev proxy attaches it from the example env.
+ * A task created from the page is a dashboard write through the UI.
+ * Loopback stays open. The page does not send x-ingest-token.
  */
 
 import { spawn } from 'node:child_process'

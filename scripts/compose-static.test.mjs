@@ -34,11 +34,14 @@ test('compose yaml lists db, api, and web on loopback', () => {
   assert.equal(compose.volumes['mc-db'], null)
   assert.match(compose.services.api.environment.DATABASE_URL, /@db:5432\/mission_control$/)
   assert.equal(compose.services.api.environment.HOST, '0.0.0.0')
-  assert.equal(compose.services.api.environment.INGEST_TOKEN, '${INGEST_TOKEN:-dev-ingest-token}')
-  assert.equal(compose.services.api.environment.SOCKET_TOKEN, '${SOCKET_TOKEN:-dev-socket-token}')
+  assert.equal(compose.services.api.environment.INGEST_TOKEN, '${INGEST_TOKEN:-}')
+  assert.equal(compose.services.api.environment.DASHBOARD_PASSWORD_HASH, '${DASHBOARD_PASSWORD_HASH:-}')
+  assert.equal(compose.services.api.environment.SESSION_SECRET, '${SESSION_SECRET:-}')
+  assert.equal(compose.services.api.environment.TRUSTED_PROXY, '${TRUSTED_PROXY:-}')
+  assert.equal(compose.services.api.environment.SOCKET_TOKEN, undefined)
   assert.equal(compose.services.web.build.args.VITE_API_URL, '${VITE_API_URL:-}')
-  assert.equal(compose.services.web.build.args.VITE_SOCKET_TOKEN, '${SOCKET_TOKEN:-dev-socket-token}')
-  assert.equal(compose.services.web.environment.INGEST_TOKEN, '${INGEST_TOKEN:-dev-ingest-token}')
+  assert.equal(compose.services.web.build.args.VITE_SOCKET_TOKEN, undefined)
+  assert.equal(compose.services.web.environment, undefined)
   assert.deepEqual(compose.services.web.depends_on, ['api'])
   for (const spec of [
     compose.services.db.ports[0],
@@ -55,11 +58,12 @@ test('compose yaml lists db, api, and web on loopback', () => {
   assert.equal(compose.services.web.build.dockerfile, 'apps/web/Dockerfile')
 })
 
-test('nginx proxies /api and /socket.io and still injects the write token', () => {
+test('nginx proxies /api and /socket.io and does not inject a write token', () => {
   const nginx = read('apps/web/nginx.conf.template')
   assert.match(nginx, /location \/api\/ \{/)
   assert.match(nginx, /proxy_pass http:\/\/api:3000\/;/)
-  assert.match(nginx, /proxy_set_header x-ingest-token "\$\{INGEST_TOKEN\}";/)
+  assert.doesNotMatch(nginx, /x-ingest-token/)
+  assert.doesNotMatch(nginx, /INGEST_TOKEN/)
   assert.match(nginx, /location \/socket\.io\/ \{/)
   assert.match(nginx, /proxy_pass http:\/\/api:3000;/)
   assert.match(nginx, /proxy_set_header Upgrade \$http_upgrade;/)

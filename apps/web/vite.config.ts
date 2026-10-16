@@ -6,11 +6,9 @@ import tailwindcss from '@tailwindcss/vite'
 const webRoot = fileURLToPath(new URL('.', import.meta.url))
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
-
 /**
- * Same origin `/api` forwards to the API. The token is read here, on the
- * server, and attached only to writes. It is not defined into the bundle.
+ * Same origin `/api` forwards to the API. The browser sends the session
+ * cookie. This proxy does not attach a write token or a socket token.
  */
 function apiTarget(): string {
   return (process.env.VITE_API_URL || `http://127.0.0.1:${process.env.PORT || 3000}`).replace(/\/+$/, '')
@@ -21,15 +19,6 @@ function apiProxy(): ProxyOptions {
     target: apiTarget(),
     changeOrigin: true,
     rewrite: (path) => path.replace(/^\/api/, '') || '/',
-    configure: (proxy) => {
-      proxy.on('proxyReq', (proxyReq, req) => {
-        const method = (req.method || '').toUpperCase()
-        if (!WRITE_METHODS.has(method)) return
-        const token = process.env.INGEST_TOKEN
-        if (typeof token !== 'string' || token.trim() === '') return
-        proxyReq.setHeader('x-ingest-token', token)
-      })
-    },
   }
 }
 

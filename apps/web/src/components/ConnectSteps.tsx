@@ -99,8 +99,8 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'One command writes random tokens, starts the stack, runs doctor, and prints the URL.',
-      'A second run keeps the existing `.env`. It does not replace tokens or any other value.',
+      'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and prints the URL. The password is shown once.',
+      'A second run keeps the existing `.env`. It fills a missing dashboard password or session secret and does not replace other values.',
       'When the openclaw command is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that timer is not available. macOS uses launchd. Remove it with `bash install.sh --uninstall-schedule`.',
     ],
     commands: [
@@ -129,11 +129,19 @@ export const STEP_DATA: ConnectStep[] = [
       },
       {
         name: 'INGEST_TOKEN',
-        desc: 'Shared secret for every API write, including POST /events. The dashboard does not put this value in browser code or local storage. The dev server and nginx attach it for you. `bash install.sh` writes a random value when `.env` is created and does not replace it later. You MAY generate one with `openssl rand -hex 24`. If it is blank and the API is on loopback, writes stay open and the API logs a warning. If it is blank and the API binds anywhere else, the API refuses to start. A manual blank value still makes Compose use `dev-ingest-token`. The installer does not leave the token blank.',
+        desc: 'Shared secret for agent ingest: POST /events, register, heartbeat, and run writes. The dashboard does not send this header. `bash install.sh` writes a random value when `.env` is created and does not replace it later. You MAY generate one with `openssl rand -hex 24`. If it is blank and the API is on loopback, ingest stays open outside production and the API logs a warning. Production with no token returns 401 on ingest. If it is blank and the API binds anywhere else, the API refuses to start. Compose does not invent a token.',
       },
       {
-        name: 'SOCKET_TOKEN',
-        desc: 'Guards the live socket when the API runs in production. `bash install.sh` writes a random value. A blank value becomes `dev-socket-token` only when Compose starts without that installer. If you set a real value yourself, set it **before the first `docker compose build`**. It is baked into the web bundle.',
+        name: 'DASHBOARD_PASSWORD_HASH',
+        desc: 'scrypt hash of the dashboard password. `bash install.sh` writes it and prints the password once. The file stores the hash only. Leave it blank on a loopback `npm run dev` and the dashboard stays open. Compose requires it because the API sees the Docker network, not loopback.',
+      },
+      {
+        name: 'SESSION_SECRET',
+        desc: 'Signs the session cookie. `bash install.sh` writes a random value. A second run does not replace it.',
+      },
+      {
+        name: 'TRUSTED_PROXY',
+        desc: 'Optional. Comma separated addresses of proxies whose X-Forwarded-For header is trusted. Leave this blank. Do not set it to the Docker bridge, or a browser could skip the password.',
       },
       {
         name: 'WEB_ORIGIN',
@@ -171,7 +179,7 @@ export const STEP_DATA: ConnectStep[] = [
       'Open `http://localhost:5173/#/tasks`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.',
       'The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent\'s own name, then confirms the detected provider. Skip finishes that open. Change each one later under System, then Settings. Open Tasks for the board and System for health.',
       'Health on this same origin shows uptime, client count, and database state. Empty states show actions.',
-      'Dot stays red? The API is down, or `SOCKET_TOKEN` in the web build does not match the API. Set it in `.env` and run `docker compose up -d --build` again.',
+      'Dot stays red? The API is down, or this browser has no session. On Compose, sign in with the password the installer printed.',
     ],
     probe: 'health',
     confirmable: false,
@@ -189,7 +197,7 @@ export const STEP_DATA: ConnectStep[] = [
       'When the openclaw command is on PATH, `bash install.sh` installs the schedule: a systemd user timer on Linux, cron if that timer is not available, or launchd on macOS. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The job runs `bridge/mc-bridge-sync.py` with `MC_BRIDGE_REGISTER` (default 1). Remove it with `bash install.sh --uninstall-schedule`.',
       'The bridge is `bridge/mc-bridge-sync.py` (Python 3, stdlib only). It reads OpenClaw through the openclaw command and POSTs agents, sessions, calendar, usage, approvals, and models snapshots plus `run.*` events. Models come from `~/.openclaw/openclaw.json`. When that file has no model, the bridge runs `openclaw models list`. Usage prices tokens from `config/prices.json`. A reported costUsd wins. The API URL comes from `MC_API_URL`, then the API port.',
       'System probes the gateway at `OPENCLAW_GATEWAY_HOST` and `OPENCLAW_GATEWAY_PORT`. The default is 127.0.0.1 port 18789. Gateway logs are read from `OPENCLAW_LOG_DIR`. The default is `/tmp/openclaw`.',
-      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events. Every other write route checks that same header. Set it explicitly. The bridge refuses a blank token. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). With no schedule, that age is an info line.',
+      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events, register, heartbeat, and run writes. Dashboard routes use the session cookie instead. Set the token explicitly. The bridge refuses a blank token. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). With no schedule, that age is an info line.',
       'Try `--dry-run` first, then a real sync. A 401 means the bridge and the API disagree on the token. Read `INGEST_TOKEN` from the root `.env`. The installer stores it there and does not print it.',
       'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). The Mission Control starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these. They cap OpenClaw fan-out. The installer offers this merge and does not edit the file.',
     ],

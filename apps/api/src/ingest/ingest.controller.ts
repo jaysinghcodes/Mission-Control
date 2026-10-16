@@ -21,8 +21,8 @@ import { SnapshotsService } from '../snapshots/snapshots.service';
  * gateway broadcasts it to every connected client over Socket.IO, and the
  * event is PERSISTED so pages can load history (v2).
  *
- * Auth lives in WriteAuthMiddleware, the same check as every other write.
- * Send header `x-ingest-token` when INGEST_TOKEN is set. This controller
+ * Auth lives in WriteAuthMiddleware. Send header `x-ingest-token` when
+ * INGEST_TOKEN is set. Dashboard routes do not use this header. This controller
  * only validates the event. Event `type` is a fixed list, so producers
  * cannot invent arbitrary event names.
  */

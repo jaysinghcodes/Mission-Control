@@ -6,6 +6,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { webOrigins } from '../cors-origins';
+import { requestLoopback, validSession } from '../auth/session';
 
 /**
  * Event types the gateway may broadcast. Union type so callers can't
@@ -52,18 +53,17 @@ export type ActivityEventType =
  * events (scheduled run status, agent state changes, health ticks) without
  * polling. This is the transport PR 3 wires the frontend into.
  *
- * Security (vibe-dev-workflow red lines — GLM review 🔴 #2):
- *  - In production (NODE_ENV=production), connections WITHOUT a valid
- *    SOCKET_TOKEN in the handshake are rejected at connect time. This guard
- *    makes it impossible to accidentally ship an open socket.
- *  - In dev, connections are allowed freely (localhost only by default).
+ * Security:
+ *  - Off loopback, the handshake must carry the dashboard session cookie.
+ *    Loopback is the socket address, not X-Forwarded-For, unless TRUSTED_PROXY
+ *    lists that peer. The web bundle does not contain a socket token.
  *  - The gateway only emits server-authored events; it never echoes
  *    client-supplied payloads.
  */
 @WebSocketGateway({
   cors: {
     origin: webOrigins(),
-    credentials: false,
+    credentials: true,
   },
 })
 export class LiveActivityGateway
@@ -82,20 +82,20 @@ export class LiveActivityGateway
    * @param client the connecting socket
    */
   handleConnection(client: Socket): void {
-    // Production guard: require SOCKET_TOKEN in the handshake auth payload.
-    if (process.env.NODE_ENV === 'production') {
-      const token = readHandshakeToken(client.handshake.auth);
-      if (
-        typeof token !== 'string' ||
-        !token ||
-        token !== process.env.SOCKET_TOKEN
-      ) {
-        console.warn(
-          '[socket] rejected unauthenticated connection in production',
-        );
-        client.disconnect(true);
-        return;
-      }
+    const headers = client.handshake.headers ?? {};
+    const cookie = headerValue(headers.cookie);
+    const forwarded = headers['x-forwarded-for'];
+    const allowed = requestLoopback({
+      socket: { remoteAddress: client.handshake.address },
+      headers: {
+        cookie,
+        'x-forwarded-for': forwarded,
+      },
+    });
+    if (!allowed && !validSession(cookie)) {
+      console.warn('[socket] rejected unauthenticated connection');
+      client.disconnect(true);
+      return;
     }
 
     this.connectedClients.add(client.id);
@@ -136,8 +136,8 @@ export class LiveActivityGateway
   }
 }
 
-/** Handshake auth is an open record. Only an exact string token is accepted. */
-function readHandshakeToken(auth: object | null | undefined): unknown {
-  if (!auth || !('token' in auth)) return undefined;
-  return (auth as { token?: unknown }).token;
+function headerValue(value: string | string[] | undefined): string | undefined {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value[0];
+  return undefined;
 }

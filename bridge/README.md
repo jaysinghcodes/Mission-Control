@@ -53,9 +53,10 @@ file is an info line. A stale file is an info line when no schedule is installed
 | `MC_BRIDGE_APPROVALS_CMD` | unset | Optional command printing pending approvals as JSON (see below). Unset means approvals stay untouched. |
 | `MC_BRIDGE_STATE_FILE` | `bridge/.state/last-run.json` | Where run-diff state is kept (git-ignored). |
 
-> **Token gotcha:** if `INGEST_TOKEN` is blank in `.env`, compose silently falls
-> back to `dev-ingest-token` for the api, but the bridge refuses to guess and
-> exits 2. Set the value explicitly in `.env` and both sides agree.
+> **Token gotcha:** if `INGEST_TOKEN` is blank in `.env`, compose leaves it
+> blank. In production the api then returns 401 on ingest, and the bridge
+> refuses to guess and exits 2. Set the value explicitly in `.env` and both
+> sides agree.
 
 Flags: `--dry-run` (print events as JSON lines, post nothing, write no state),
 `--from-dir DIR` (read `DIR/{agents,sessions,cron,approvals}.json` instead of the
@@ -71,7 +72,7 @@ python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw
 
 Transport: `POST {MC_API_URL}/events`, headers `content-type: application/json`
 and `x-ingest-token: <INGEST_TOKEN>`, body `{ "type": <event>, "payload": {…} }`.
-The api answers `202 {accepted:true}`. When `INGEST_TOKEN` is set, a missing or wrong `x-ingest-token` is `401` with JSON `{"statusCode":401,"message":"unauthorized"}`. The same header is required on every other write route. `400` means an unknown type or a non object payload. The allowed types are the
+The api answers `202 {accepted:true}`. When `INGEST_TOKEN` is set, a missing or wrong `x-ingest-token` is `401` with JSON `{"statusCode":401,"message":"unauthorized"}`. That header is for ingest, not for dashboard routes. `400` means an unknown type or a non object payload. The allowed types are the
 `KNOWN_TYPES` union in `apps/api/src/ingest/ingest.controller.ts`; snapshot
 handling lives in `apps/api/src/snapshots/snapshots.service.ts`. **Every event is
 also persisted to `ActivityEvent` and broadcast on the socket.**
