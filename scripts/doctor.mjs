@@ -129,11 +129,16 @@ const MC_BLANK_FALLTHROUGH = [
   'MC_BRIDGE_UNIT_NAME',
   'MC_BRIDGE_LAUNCHD_LABEL',
   'MC_BRIDGE_CRON_MARK',
+  'DASHBOARD_PASSWORD_HASH',
+  'SESSION_SECRET',
 ]
 
 /**
  * File values fill in first. A set process value wins, including a blank,
- * except MC_*_PORT: a blank there falls through to the file, then the default.
+ * except the keys in MC_BLANK_FALLTHROUGH. A blank there falls through to
+ * the file. That includes the dashboard hash and session secret, so a
+ * parent shell that sourced an empty template does not hide the values
+ * bash install.sh just wrote.
  */
 export function effectiveEnv(fileEnv, processEnv = process.env) {
   const env = { ...fileEnv }

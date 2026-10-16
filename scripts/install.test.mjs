@@ -491,6 +491,13 @@ test('a compose failure does not print the URL', () => {
 test('docker without Node still prints the URL and a readable doctor line', () => {
   const fx = freshDir()
   try {
+    const python = spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' })
+    assert.equal(python.status, 0, python.stderr)
+    const executable = python.stdout.trim()
+    writeExe(
+      path.join(fx.bin, 'python3'),
+      `#!/bin/sh\nexec ${shellQuote(executable)} "$@"\n`,
+    )
     const result = runInstall(fx.repo, {
       ...fx.env,
       PATH: `${fx.bin}:/usr/bin:/bin`,

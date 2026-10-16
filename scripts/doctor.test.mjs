@@ -376,6 +376,27 @@ test('MC port environment wins over .env and a blank shell value does not', () =
   assert.equal(over.MC_DB_PORT, '55880')
   assert.equal(effectiveEnv(file, { MC_API_PORT: '  ' }).MC_API_PORT, '3881')
   assert.equal(
+    effectiveEnv(
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:file', SESSION_SECRET: 'file-secret' },
+      { DASHBOARD_PASSWORD_HASH: '', SESSION_SECRET: '   ' },
+    ).DASHBOARD_PASSWORD_HASH,
+    'scrypt:file',
+  )
+  assert.equal(
+    effectiveEnv(
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:file', SESSION_SECRET: 'file-secret' },
+      { DASHBOARD_PASSWORD_HASH: '', SESSION_SECRET: '   ' },
+    ).SESSION_SECRET,
+    'file-secret',
+  )
+  assert.equal(
+    effectiveEnv(
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:file', SESSION_SECRET: 'file-secret' },
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:proc', SESSION_SECRET: 'proc-secret' },
+    ).SESSION_SECRET,
+    'proc-secret',
+  )
+  assert.equal(
     effectiveEnv({ MC_BRIDGE_STALE_SECONDS: '90' }, { MC_BRIDGE_STALE_SECONDS: '  ' }).MC_BRIDGE_STALE_SECONDS,
     '90',
   )
