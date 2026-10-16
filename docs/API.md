@@ -37,9 +37,9 @@ From a checkout you already have, run `bash install.sh` in the repo root. That i
 
 Then open the URL it prints. The default is http://localhost:5173/#/tasks
 
-`bash install.sh` creates `.env` only when that file is missing. It writes `INGEST_TOKEN` as a random value, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. The password is printed once. The file stores only the hash. A second run keeps every value already in `.env`. If the hash or the session secret is missing, that run fills only the missing one. The script does not print the ingest token or the session secret.
+`bash install.sh` creates `.env` only when that file is missing. It writes `INGEST_TOKEN` as a random value, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. The password is printed once. The file stores only the hash. A second run keeps every value already in `.env` when the hash and the session secret are set. If either is missing, that run fills only the missing one. The script does not print the ingest token or the session secret. `DATABASE_URL` on a new file uses the resolved `MC_DB_PORT`. A plain second run leaves `.env` unchanged. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still `localhost` or `127.0.0.1` on the previous port. A custom URL is left as is. Tokens and secrets are not rotated.
 
-The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service. nginx proxies `/api` and `/socket.io`, so the page stays on port 5173. Leave `VITE_API_URL` unset.
+The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the API container does not use the host port. nginx proxies `/api` and `/socket.io`, so the page stays on port 5173. Leave `VITE_API_URL` unset. `npm run seed:demo` on the host uses the `DATABASE_URL` in `.env`.
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. That log line is the process text in `apps/api/src/main.ts`. Compose sets `HOST=0.0.0.0` inside the container.
 
@@ -59,7 +59,7 @@ Edit `.env` before you expose the machine. Rules for you:
 * `SOCKET_TOKEN`: retired. Dashboard login replaced the socket token that issue 36 baked into the web bundle. Leave it blank. The installer does not generate it, and the web image does not receive it.
 * `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
 * `OPENCLAW_GATEWAY_HOST` and `OPENCLAW_GATEWAY_PORT` are the gateway probe. Defaults are `127.0.0.1` and `18789`. `OPENCLAW_LOG_DIR` is the gateway log directory. The default is `/tmp/openclaw`. `GIT_SHA` is the commit shown by `GET /health` when set. A checkout uses git when it is unset. Spend on System comes from `usage.snapshot`.
-* Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` in the shell or in `.env`. The shell wins. A new `.env` keeps the shell values. An existing `.env` is not rewritten. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
+* Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` in the shell or in `.env`. The shell wins, then `.env`, then the defaults. A new `.env` keeps the shell values. A plain second run leaves `.env` unchanged. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL is `localhost` or `127.0.0.1` on the previous port, and it updates the `MC_DB_PORT` line. A custom URL is left as is. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
 
 ### Advanced: Node and Postgres
 

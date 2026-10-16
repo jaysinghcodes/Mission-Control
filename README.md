@@ -50,7 +50,7 @@ Then open the URL the script prints. The default is **http://localhost:5173/#/ta
 
 `bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes `INGEST_TOKEN` as a random value, and it writes `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. The password is printed once. The file stores only the hash. A second run keeps every value already in `.env`. If the hash or the session secret is missing, that run fills only the missing one and does not change other keys. The script does not print the ingest token or the session secret.
 
-Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, and `MC_WEB_PORT` from the environment are written into a new `.env`. An existing `.env` is left as it is. A shell value still wins for that run.
+Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, and `MC_WEB_PORT` from the environment are written into a new `.env`. A plain second run leaves `.env` unchanged. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL uses `localhost` or `127.0.0.1` and its port is the previous `MC_DB_PORT`, or 5432 when none was stored. That same run updates the `MC_DB_PORT` line. A custom URL, including another host or a URL with no port, is left as is and the installer says so. Tokens and secrets are not rotated. A shell value still wins for that run.
 
 OpenClaw is optional. The command above does not start the OpenClaw gateway. `npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
 
@@ -58,7 +58,7 @@ When the `openclaw` command is on PATH, `bash install.sh` installs a bridge sche
 
 Doctor reads the sync timestamp at `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). A missing timestamp is an info line. A timestamp older than `MC_BRIDGE_STALE_SECONDS` (default 600) is a failing line. A missing `openclaw` command is still an info line and does not by itself fail doctor. The installer also offers `bridge/openclaw.starter.json`. Merge that file into `~/.openclaw/openclaw.json` if you want it. The installer does not edit that file.
 
-The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the image does not contain a `.env` file. A variable that is already set wins over the file, including a blank value.
+The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the image does not contain a `.env` file. A variable that is already set wins over the file, including a blank value. The host `DATABASE_URL` is what `npm run seed:demo` uses. On a new `.env` its port is the resolved `MC_DB_PORT`.
 
 nginx on the web port proxies `/api` and `/socket.io` to the API. The page and the live socket stay on port 5173. Leave `VITE_API_URL` unset. Set it only when the browser should call a different API origin, then rebuild the web image.
 
@@ -117,7 +117,7 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. Do
 | API | Direct clients use `http://127.0.0.1:3000`. The browser does not. It calls `/api` on the web port. |
 | Postgres | `127.0.0.1:5432`, database `mission_control` |
 
-`docker-compose.yml` publishes those ports on `127.0.0.1` only (`MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` override the host side). Inside Compose the API binds `0.0.0.0:3000` and nginx listens on `5173`. Moving `MC_API_PORT` does not change the browser unless you also set `VITE_API_URL`.
+`docker-compose.yml` publishes those ports on `127.0.0.1` only (`MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` override the host side). Inside Compose the API binds `0.0.0.0:3000` and nginx listens on `5173`. Moving `MC_API_PORT` does not change the browser unless you also set `VITE_API_URL`. `bash install.sh` writes the resolved `MC_DB_PORT` into a new `DATABASE_URL` for commands on the host. A later run updates that URL only when it is still the stock host and port. Compose still connects the API to `db:5432`.
 
 ### First run
 

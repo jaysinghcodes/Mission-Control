@@ -6,7 +6,10 @@
 # Linux uses a systemd user timer, or cron when that timer is not available.
 # macOS uses launchd. The schedule PATH includes the openclaw directory and the python3 directory.
 # Remove it with: bash install.sh --uninstall-schedule. That also removes the sync timestamp.
-# A second run keeps every value already in .env. It fills a missing dashboard password hash or session secret.
+# A plain second run leaves .env unchanged when the dashboard hash and session secret are already set.
+# A new shell MC_DB_PORT updates a stock DATABASE_URL and that port line.
+# A custom DATABASE_URL is left as is.
+# A missing dashboard password hash or session secret is filled. Other keys stay.
 # The ingest token is not printed. A new dashboard password is printed once.
 
 set -euo pipefail
@@ -57,10 +60,11 @@ new_token() {
   printf '%s' "$token"
 }
 
-env_value() {
-  local key line value
-  key="$1"
-  line="$(grep -E "^[[:space:]]*${key}=" .env 2>/dev/null | tail -n 1 || true)"
+file_env_value() {
+  local file key line value
+  file="$1"
+  key="$2"
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" 2>/dev/null | tail -n 1 || true)"
   value="${line#*=}"
   value="${value#\"}"
   value="${value%\"}"
@@ -69,6 +73,17 @@ env_value() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+env_value() {
+  file_env_value .env "$1"
+}
+
+env_file_mode() {
+  local file mode
+  file="$1"
+  mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%OLp' "$file" 2>/dev/null || true)"
+  printf '%s' "$mode"
 }
 
 port_or() {
@@ -137,6 +152,52 @@ db_port() {
   resolved_port MC_DB_PORT "5432"
 }
 
+# Shell, then the named file, then the default. Used while .env is still a temp file.
+resolved_port_file() {
+  local key fallback file chosen
+  key="$1"
+  fallback="$2"
+  file="$3"
+  chosen="${!key-}"
+  if [[ -z "$chosen" ]]; then
+    chosen="$(file_env_value "$file" "$key")"
+  fi
+  port_or "$chosen" "$fallback"
+}
+
+# Keep the user, password, host, database, and query. Change only the port.
+database_url_with_port() {
+  local url port head explicit path
+  url="$1"
+  port="$2"
+  if [[ ! "$url" =~ ^postgres(ql)?:// ]]; then
+    printf '%s' "$url"
+    return 0
+  fi
+  if [[ "$url" =~ ^(postgres(ql)?://([^@/]+@)?(\[[^]]+\]|[^:/?#]+)):([0-9]+)([/?].*)?$ ]]; then
+    head="${BASH_REMATCH[1]}"
+    explicit="${BASH_REMATCH[5]}"
+    path="${BASH_REMATCH[6]-}"
+    if [[ "$explicit" == "$port" ]]; then
+      printf '%s' "$url"
+      return 0
+    fi
+    printf '%s:%s%s' "$head" "$port" "$path"
+    return 0
+  fi
+  if [[ "$url" =~ ^(postgres(ql)?://([^@/]+@)?(\[[^]]+\]|[^:/?#]+))([/?].*)?$ ]]; then
+    if [[ "$port" == "5432" ]]; then
+      printf '%s' "$url"
+      return 0
+    fi
+    head="${BASH_REMATCH[1]}"
+    path="${BASH_REMATCH[5]-}"
+    printf '%s:%s%s' "$head" "$port" "$path"
+    return 0
+  fi
+  printf '%s' "$url"
+}
+
 apply_shell_ports() {
   local file key value tmp2 line saw wrote
   file="$1"
@@ -192,6 +253,101 @@ write_env_key() {
     printf '%s=%s\n' "$key" "$value" >> "$tmp2"
   fi
   mv "$tmp2" "$file"
+}
+
+# The port already stored in the file, or 5432 when that line is missing.
+stored_db_port() {
+  local file value
+  file="$1"
+  value="$(file_env_value "$file" MC_DB_PORT)"
+  port_or "$value" "5432"
+}
+
+# A valid MC_DB_PORT from the shell, or empty when the shell did not set one.
+shell_db_port() {
+  local value
+  value="${MC_DB_PORT-}"
+  if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -ge 1 ]] && [[ "$value" -le 65535 ]]; then
+    printf '%s' "$value"
+  fi
+}
+
+# Stock means localhost or 127.0.0.1 with an explicit port equal to the previous port.
+# A URL with no port is not stock.
+database_url_is_stock() {
+  local url previous
+  url="$1"
+  previous="$2"
+  [[ "$url" =~ ^postgres(ql)?://([^@/]+@)?(localhost|127\.0\.0\.1):([0-9]+)([/?].*)?$ ]] || return 1
+  [[ "${BASH_REMATCH[4]}" == "$previous" ]]
+}
+
+# A shell MC_DB_PORT replaces the value in an existing file. Other keys stay.
+persist_shell_db_port() {
+  local file value current
+  file="$1"
+  MC_DB_PORT_UPDATED=0
+  value="${MC_DB_PORT-}"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt 1 ]] || [[ "$value" -gt 65535 ]]; then
+    return 0
+  fi
+  current="$(file_env_value "$file" MC_DB_PORT)"
+  if [[ "$current" == "$value" ]]; then
+    return 0
+  fi
+  write_env_key "$file" MC_DB_PORT "$value"
+  MC_DB_PORT_UPDATED=1
+}
+
+# A rerun rewrites DATABASE_URL only when a new shell MC_DB_PORT differs from
+# the stored port and the URL is the stock host and port. Otherwise a custom
+# URL is left as is. A plain rerun changes no line.
+rerun_env_ports() {
+  local file previous shell_port current next
+  file="$1"
+  previous="$(stored_db_port "$file")"
+  shell_port="$(shell_db_port)"
+  current="$(file_env_value "$file" DATABASE_URL)"
+  MC_DB_PORT_UPDATED=0
+  MC_DATABASE_URL_UPDATED=0
+  if [[ -n "$shell_port" && "$shell_port" != "$previous" ]] && database_url_is_stock "$current" "$previous"; then
+    persist_shell_db_port "$file"
+    next="$(database_url_with_port "$current" "$shell_port")"
+    if [[ "$next" != "$current" ]]; then
+      write_env_key "$file" DATABASE_URL "$next"
+      MC_DATABASE_URL_UPDATED=1
+      echo "Set DATABASE_URL to port ${shell_port}."
+    fi
+    return 0
+  fi
+  if [[ -n "$current" ]] && ! database_url_is_stock "$current" "$previous"; then
+    echo "DATABASE_URL is custom, so it was left as is. Update its port by hand if needed."
+  fi
+}
+
+# Point DATABASE_URL at the resolved port when creating .env. A missing key is
+# added only when allow_create is 1. Tokens and other secrets are not touched.
+sync_database_url() {
+  local file port allow current next
+  file="$1"
+  port="$2"
+  allow="${3:-0}"
+  MC_DATABASE_URL_UPDATED=0
+  current="$(file_env_value "$file" DATABASE_URL)"
+  if [[ -z "$current" ]]; then
+    if [[ "$allow" != "1" ]]; then
+      return 0
+    fi
+    next="postgresql://postgres:postgres@localhost:${port}/mission_control"
+  else
+    next="$(database_url_with_port "$current" "$port")"
+    if [[ "$next" == "$current" ]]; then
+      return 0
+    fi
+  fi
+  write_env_key "$file" DATABASE_URL "$next"
+  MC_DATABASE_URL_UPDATED=1
+  echo "Set DATABASE_URL to port ${port}."
 }
 
 # Shell values for a new .env only. An existing .env is never rewritten.
@@ -336,31 +492,39 @@ write_env_assignments() {
 ensure_env() {
   local ingest tmp old_umask got_ingest got_hash got_secret mode
   if [[ -f .env ]]; then
+    mode="$(env_file_mode .env)"
+    rerun_env_ports .env
     got_hash="$(env_value DASHBOARD_PASSWORD_HASH)"
     got_secret="$(env_value SESSION_SECRET)"
-    if [[ -n "$got_hash" && -n "$got_secret" ]]; then
-      echo "Keeping the existing .env. Tokens and other values were not changed."
+    if [[ -z "$got_hash" || -z "$got_secret" ]]; then
+      generate_dashboard_secrets || exit 1
+      if [[ -n "$got_hash" ]]; then
+        MC_NEW_HASH="$got_hash"
+        MC_NEW_PASSWORD=""
+      fi
+      if [[ -n "$got_secret" ]]; then
+        MC_NEW_SECRET="$got_secret"
+      fi
+      old_umask="$(umask)"
+      umask 077
+      tmp="$(mktemp "${TMPDIR:-/tmp}/mc-env.XXXXXX")"
+      write_env_assignments .env "$tmp" "" "$MC_NEW_HASH" "$MC_NEW_SECRET"
+      chmod "$mode" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+      mv "$tmp" .env
+      umask "$old_umask"
+      echo "Added the missing dashboard login values to .env."
+      if [[ -n "$MC_NEW_PASSWORD" ]]; then
+        echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+      fi
       return 0
     fi
-    generate_dashboard_secrets || exit 1
-    if [[ -n "$got_hash" ]]; then
-      MC_NEW_HASH="$got_hash"
-      MC_NEW_PASSWORD=""
-    fi
-    if [[ -n "$got_secret" ]]; then
-      MC_NEW_SECRET="$got_secret"
-    fi
-    old_umask="$(umask)"
-    umask 077
-    tmp="$(mktemp "${TMPDIR:-/tmp}/mc-env.XXXXXX")"
-    mode="$(stat -c '%a' .env 2>/dev/null || stat -f '%OLp' .env)"
-    write_env_assignments .env "$tmp" "" "$MC_NEW_HASH" "$MC_NEW_SECRET"
-    chmod "$mode" "$tmp" 2>/dev/null || chmod 600 "$tmp"
-    mv "$tmp" .env
-    umask "$old_umask"
-    echo "Added the missing dashboard login values to .env."
-    if [[ -n "$MC_NEW_PASSWORD" ]]; then
-      echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+    if [[ "$MC_DB_PORT_UPDATED" -eq 1 || "$MC_DATABASE_URL_UPDATED" -eq 1 ]]; then
+      if [[ -n "$mode" ]]; then
+        chmod "$mode" .env || true
+      fi
+      echo "Tokens and secrets were not changed."
+    else
+      echo "Keeping the existing .env. Tokens and other values were not changed."
     fi
     return 0
   fi
@@ -376,6 +540,7 @@ ensure_env() {
   write_env_assignments .env.example "$tmp" "$ingest" "$MC_NEW_HASH" "$MC_NEW_SECRET"
   apply_shell_ports "$tmp"
   apply_shell_schedule "$tmp"
+  sync_database_url "$tmp" "$(resolved_port_file MC_DB_PORT 5432 "$tmp")" 1
   chmod 600 "$tmp"
   mv "$tmp" .env
   umask "$old_umask"
