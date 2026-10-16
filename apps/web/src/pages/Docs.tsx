@@ -10,9 +10,9 @@ import { pluralize } from '../lib/pluralize'
 import { formatDocWhen } from '../lib/when'
 
 /**
- * Docs — the ticket 13 cards grid, wired to GET /docs.
+ * Docs. The ticket 13 cards grid, wired to GET /docs.
  * The API reads DOCS_ROOT. This page never reads disk and never sends a
- * filesystem path: each card opens by the server-issued id. Read-only.
+ * filesystem path. Each card opens by the server-issued id. Read only.
  */
 
 interface DocItem {
@@ -29,6 +29,7 @@ interface DocItem {
 interface DocList {
   docs: DocItem[]
   total: number
+  dir?: string
 }
 
 interface DocDetail extends DocItem {
@@ -145,7 +146,9 @@ export default function Docs() {
       {!openId && data && data.total === 0 && (
         <EmptyState
           title="No docs yet"
-          body="Specs, briefs, and notes show up here after the docs folder has files. This page does not read the disk."
+          body={data.dir
+            ? `No markdown in ${data.dir}. DOCS_ROOT sets that folder. npm run seed:demo writes sample docs. This page does not read a path you type.`
+            : 'No markdown yet. DOCS_ROOT sets the folder (the default is data/docs). npm run seed:demo writes sample docs. This page does not read a path you type.'}
         >
           <Link to="/connect" className="mt-3 inline-block text-[13px] font-semibold text-mc-accent-text">Setup</Link>
           <p className="mt-2 text-[13px] text-mc-sub">

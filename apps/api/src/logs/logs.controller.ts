@@ -32,6 +32,7 @@ export class LogsController {
       // New (additive) fields for the empty state — old clients ignore them.
       available: tail.available,
       reason: tail.reason,
+      dir: tail.dir,
       ts: Date.now(),
     };
   }

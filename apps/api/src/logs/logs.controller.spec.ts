@@ -43,6 +43,7 @@ describe('OpenClaw log empty states (ticket 2)', () => {
     readdirSync.mockImplementation(enoent);
     const res = new LogsController().list('10');
     expect(res.available).toBe(false);
+    expect(res.dir).toBe('/var/log/openclaw-test');
     expect(res.reason).toMatch(/\/var\/log\/openclaw-test/);
     expect(res.reason).not.toMatch(/\/tmp\/openclaw/);
   });

@@ -19,6 +19,8 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
   (derived from sessions token counts) →  usage.snapshot (daily points, up to 30 days)
   ~/.openclaw/openclaw.json               models.snapshot
     (fallback: openclaw models list)
+  openclaw devices list --json            devices.snapshot devices
+  openclaw nodes list --json              devices.snapshot nodes
   TCP connect to 127.0.0.1                gateway.snapshot
     (OPENCLAW_GATEWAY_PORT or 18789)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
@@ -125,8 +127,8 @@ class Sources:
     """
     Where raw OpenClaw data comes from. Two modes:
       * CLI (default): shell out to `openclaw … --json`.
-      * --from-dir DIR: read DIR/{agents,sessions,cron,approvals}.json — used
-        for testing the mapping without an OpenClaw install (see bridge/examples).
+      * --from-dir DIR: read DIR/{agents,sessions,cron,approvals,devices,nodes}.json.
+        Used for testing the mapping without an OpenClaw install (see bridge/examples).
     Every getter returns parsed JSON or None (= source unavailable → skip).
     """
 
@@ -174,6 +176,27 @@ class Sources:
 
     def cron(self) -> Optional[Any]:
         return self._file("cron") if self.from_dir else self._cli(["openclaw", "cron", "list", "--all", "--json"])
+
+    def devices(self) -> Optional[Any]:
+        return self._file("devices") if self.from_dir else self._cli(["openclaw", "devices", "list", "--json"])
+
+    def nodes(self) -> Optional[Any]:
+        """Paired and pending nodes. Live `connected` comes from the list.
+
+        When the list has rows and none carry a boolean `connected`, also
+        read `openclaw nodes status --json` and copy that flag across.
+        `--from-dir` never shells out.
+        """
+        if self.from_dir:
+            return self._file("nodes")
+        listed = self._cli(["openclaw", "nodes", "list", "--json"])
+        if listed is None:
+            return None
+        if nodes_missing_connected(listed):
+            status = self._cli(["openclaw", "nodes", "status", "--json"])
+            if status is not None:
+                return overlay_node_status(listed, status)
+        return listed
 
     def approvals(self) -> Optional[Any]:
         """
@@ -267,6 +290,247 @@ def to_ms(v: Any) -> Optional[int]:
         except ValueError:
             return None
     return None
+
+
+def _clip(value: Any, limit: int) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("\x00", "").strip()[:limit]
+
+
+def _iso_ms(ms: Optional[int]) -> Optional[str]:
+    if ms is None:
+        return None
+    try:
+        return datetime.datetime.fromtimestamp(
+            ms / 1000, datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _dicts(value: Any) -> List[Dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def split_pair_payload(
+    raw: Any,
+) -> Optional[Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Optional[List[Dict[str, Any]]]]]:
+    """(paired, pending, nodes catalog) or None when the shape is not a list."""
+    if isinstance(raw, list):
+        return (_dicts(raw), [], None)
+    if not isinstance(raw, dict):
+        return None
+    has_pair = isinstance(raw.get("paired"), list) or isinstance(raw.get("pending"), list)
+    has_nodes = isinstance(raw.get("nodes"), list)
+    if not has_pair and not has_nodes:
+        return None
+    catalog = _dicts(raw.get("nodes")) if has_nodes else None
+    paired = _dicts(raw.get("paired")) if isinstance(raw.get("paired"), list) else []
+    pending = _dicts(raw.get("pending")) if isinstance(raw.get("pending"), list) else []
+    return (paired, pending, catalog)
+
+
+def nodes_missing_connected(raw: Any) -> bool:
+    parsed = split_pair_payload(raw)
+    if parsed is None:
+        return False
+    paired, _pending, catalog = parsed
+    rows = catalog if catalog is not None else paired
+    if not rows:
+        return False
+    return not any(isinstance(row.get("connected"), bool) for row in rows)
+
+
+def overlay_node_status(listed: Any, status: Any) -> Any:
+    """Copy live connection fields from nodes status onto a nodes list."""
+    parsed = split_pair_payload(status)
+    if parsed is None or not isinstance(listed, dict):
+        return listed
+    paired, _pending, catalog = parsed
+    live_rows = catalog if catalog is not None else paired
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for row in live_rows:
+        nid = _clip(first(row, "nodeId", "deviceId", "id"), 200)
+        if nid:
+            by_id[nid] = row
+    if not by_id:
+        return listed
+
+    def paint(items: Any) -> Any:
+        if not isinstance(items, list):
+            return items
+        out: List[Any] = []
+        for item in items:
+            if not isinstance(item, dict):
+                out.append(item)
+                continue
+            nid = _clip(first(item, "nodeId", "deviceId", "id"), 200)
+            live = by_id.get(nid)
+            if not live:
+                out.append(item)
+                continue
+            nxt = dict(item)
+            if isinstance(live.get("connected"), bool):
+                nxt["connected"] = live["connected"]
+            for key in ("connectedAtMs", "lastConnectedAtMs", "platform", "displayName"):
+                if nxt.get(key) in (None, "") and live.get(key) not in (None, ""):
+                    nxt[key] = live[key]
+            out.append(nxt)
+        return out
+
+    merged = dict(listed)
+    if isinstance(merged.get("paired"), list):
+        merged["paired"] = paint(merged["paired"])
+    if isinstance(merged.get("nodes"), list):
+        merged["nodes"] = paint(merged["nodes"])
+    return merged
+
+
+def _device_type(row: Dict[str, Any]) -> str:
+    roles = row.get("roles")
+    if isinstance(roles, list):
+        for role in roles:
+            text = _clip(role, 80)
+            if text:
+                return text
+    role = _clip(row.get("role"), 80)
+    return role or "device"
+
+
+def _node_type(row: Dict[str, Any]) -> str:
+    platform = _clip(first(row, "platform", "deviceFamily"), 80)
+    return platform or "node"
+
+
+def _machine_name(row: Dict[str, Any], fallback: str) -> str:
+    name = _clip(first(row, "operatorLabel", "displayName", "name", "clientId"), 200)
+    return name or fallback
+
+
+def _pending_id(row: Dict[str, Any], live_ids: Set[str]) -> Optional[str]:
+    raw_id = _clip(first(row, "deviceId", "nodeId", "id"), 200)
+    if raw_id and raw_id in live_ids:
+        return None
+    token = _clip(first(row, "requestId", "id"), 180) or raw_id
+    if not token:
+        return None
+    pid = token if token.startswith("pending:") else f"pending:{token}"
+    if len(pid) > 200 or pid.startswith("demo-") or pid in live_ids:
+        return None
+    return pid
+
+
+def _connection_fields(item: Dict[str, Any], pending: bool) -> Dict[str, Any]:
+    """Online only from a real connection. Pairing time is never last seen.
+
+    `connected: true` is online, and lastSeenAt is then empty. A last seen
+    field (lastSeenAt, lastConnectedAtMs, connectedAtMs) is lastSeenAt only
+    while the machine is not online. approvedAtMs and pairedAt are pairedAt.
+    A pending request uses requestedAt and is not online.
+    """
+    if pending:
+        requested = to_ms(
+            first(item, "requestedAtMs", "requestedAt", "ts", "createdAtMs")
+        )
+        return {
+            "online": False,
+            "lastSeenAt": None,
+            "pairedAt": None,
+            "requestedAt": _iso_ms(requested),
+        }
+    online = item.get("connected") is True
+    seen = to_ms(
+        first(
+            item,
+            "lastSeenAtMs",
+            "lastSeenAt",
+            "lastConnectedAtMs",
+            "connectedAtMs",
+        )
+    )
+    paired = to_ms(
+        first(item, "pairedAtMs", "pairedAt", "approvedAtMs", "createdAtMs")
+    )
+    return {
+        "online": online,
+        "lastSeenAt": None if online else _iso_ms(seen),
+        "pairedAt": _iso_ms(paired),
+        "requestedAt": None,
+    }
+
+
+def map_openclaw_devices(raw: Any) -> Optional[List[Dict[str, Any]]]:
+    """Paired and pending devices, or None when the payload is not a list.
+
+    A paired row with no connected flag and no last seen field is paired,
+    not online. approvedAtMs is pairedAt, never lastSeenAt.
+    """
+    parsed = split_pair_payload(raw)
+    if parsed is None:
+        return None
+    paired, pending, _catalog = parsed
+    rows: Dict[str, Dict[str, Any]] = {}
+    for item in paired:
+        did = _clip(first(item, "deviceId", "id"), 200)
+        if not did or did.startswith("demo-"):
+            continue
+        rows[did] = {
+            "id": did,
+            "name": _machine_name(item, did),
+            "type": _device_type(item),
+            **_connection_fields(item, False),
+        }
+    for item in pending:
+        pid = _pending_id(item, set(rows))
+        if not pid:
+            continue
+        label = _clip(first(item, "deviceId", "id"), 200) or pid
+        rows[pid] = {
+            "id": pid,
+            "name": _machine_name(item, label),
+            "type": "pending",
+            **_connection_fields(item, True),
+        }
+    return list(rows.values())
+
+
+def map_openclaw_nodes(raw: Any) -> Optional[List[Dict[str, Any]]]:
+    """Paired and pending nodes, or None when the payload is not a list.
+
+    `connected: true` is online. A missing flag stays offline. lastSeenAt
+    comes from a last seen field, not from approvedAtMs.
+    """
+    parsed = split_pair_payload(raw)
+    if parsed is None:
+        return None
+    paired, pending, catalog = parsed
+    live = catalog if catalog is not None else paired
+    rows: Dict[str, Dict[str, Any]] = {}
+    for item in live:
+        nid = _clip(first(item, "nodeId", "deviceId", "id"), 200)
+        if not nid or nid.startswith("demo-"):
+            continue
+        rows[nid] = {
+            "id": nid,
+            "name": _machine_name(item, nid),
+            "type": _node_type(item),
+            **_connection_fields(item, False),
+        }
+    for item in pending:
+        pid = _pending_id(item, set(rows))
+        if not pid:
+            continue
+        label = _clip(first(item, "nodeId", "deviceId", "id"), 200) or pid
+        rows[pid] = {
+            "id": pid,
+            "name": _machine_name(item, label),
+            "type": "pending",
+            **_connection_fields(item, True),
+        }
+    return list(rows.values())
 
 
 def ago(ms: Optional[int], now_ms: int) -> Optional[str]:
@@ -1861,7 +2125,7 @@ def record_sync() -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="OpenClaw → Mission Control bridge (one sync per run)")
     ap.add_argument("--dry-run", action="store_true", help="print events as JSON lines; post nothing")
-    ap.add_argument("--from-dir", type=Path, help="read <dir>/{agents,sessions,cron,approvals}.json instead of the CLI")
+    ap.add_argument("--from-dir", type=Path, help="read <dir>/{agents,sessions,cron,approvals,devices,nodes}.json instead of the CLI")
     ap.add_argument(
         "--memory-dir",
         type=Path,
@@ -1930,6 +2194,16 @@ def main() -> int:
         state["_mcUsage"] = usage_state
         if usage_payload["points"]:
             events.append(("usage.snapshot", usage_payload))
+
+    device_rows = map_openclaw_devices(src.devices())
+    node_rows = map_openclaw_nodes(src.nodes())
+    machines: Dict[str, Any] = {}
+    if device_rows is not None:
+        machines["devices"] = device_rows
+    if node_rows is not None:
+        machines["nodes"] = node_rows
+    if machines:
+        events.append(("devices.snapshot", machines))
 
     approvals_rows = as_list(src.approvals(), "approvals")
     if approvals_rows is not None:

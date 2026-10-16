@@ -36,11 +36,11 @@ See [API.md](API.md#42-events-post-events).
 
 ### 4.3 The bridge (recommended for snapshots)
 
-See [API.md](API.md#43-the-bridge-recommended-for-snapshots).
+The bridge also posts `devices.snapshot` from `openclaw devices list` and `openclaw nodes list`. See [API.md](API.md#43-the-bridge-recommended-for-snapshots).
 
 ### 4.4 Tickets: your units of work
 
-See [API.md](API.md#44-tickets-your-units-of-work).
+POST /tickets and PATCH /tickets/<id> are the ticket calls. [PASTE_IN.md](PASTE_IN.md) shows them. See [API.md](API.md#44-tickets-your-units-of-work).
 
 ### 4.5 Projects
 
@@ -48,7 +48,7 @@ See [API.md](API.md#45-projects).
 
 ### 4.6 Runs
 
-See [API.md](API.md#46-runs).
+POST /runs and PATCH /runs/<id> are the run calls. [PASTE_IN.md](PASTE_IN.md) shows them. See [API.md](API.md#46-runs).
 
 ### 4.7 Models and spend
 

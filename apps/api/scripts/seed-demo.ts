@@ -549,9 +549,9 @@ async function main(): Promise<void> {
   });
   if (!missionBefore) counts.mission++;
 
-  // Devices. Fixed ids + update: {}. The bridge has no devices channel, so
-  // these rows stay until someone deletes them. Online machines have no
-  // last-seen; the offline one records minutes before this seed.
+  // Devices. Fixed ids + update: {}. Sample rows stay until seed:clear
+  // or a devices.snapshot, which removes source demo. Online machines
+  // have no last-seen; the offline one records minutes before this seed.
   const deviceNow = Date.now();
   for (const d of DEMO_DEVICES) {
     const before = await prisma.device.findUnique({ where: { id: d.id }, select: { id: true } });
@@ -564,6 +564,8 @@ async function main(): Promise<void> {
         type: d.type,
         online: d.online,
         lastSeenAt: d.lastSeenMinAgo == null ? null : new Date(deviceNow - d.lastSeenMinAgo * 60_000),
+        source: 'demo',
+        kind: 'device',
       },
     });
     if (!before) counts.devices++;

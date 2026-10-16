@@ -121,7 +121,7 @@ With no `openclaw` binary, `--dry-run` exits 0 and posts nothing. That was verif
 
 `bash install.sh` already schedules that command when `openclaw` is on PATH. Do not add a second cron line. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The schedule PATH includes the `openclaw` directory and the `python3` directory. `bash install.sh --uninstall-schedule` removes the schedule, removes the sync timestamp, and leaves every other cron line and service unit alone. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). A missing timestamp is an info line. A stale timestamp is also an info line when no schedule is installed.
 
-Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) when OpenClaw should bring the dashboard up. The operator only says yes. A 401 means the header `x-ingest-token` does not match the API `INGEST_TOKEN`. That line is in [docs/API.md](docs/API.md#41-auth). The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
+Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) when OpenClaw should bring the dashboard up. The operator only says yes. A 401 means the token is wrong, or that route is for the dashboard only. That line is in [docs/API.md](docs/API.md#41-auth). The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
 
 Optional starter limits, merged into `~/.openclaw/openclaw.json` and not a replacement of that file: `agents.defaults.subagents.maxChildrenPerAgent` is 3 and `maxConcurrent` is 4, from `bridge/openclaw.starter.json`. The API does not read those keys. The installer offers this merge and does not edit the file.
 
@@ -148,6 +148,6 @@ With the bridge:
 
 3. Calendar jobs become the real cron list. `calendar.snapshot` replaces the table.
 4. Agents and the office floor follow `agents.snapshot`, and also `POST /agents/register` and `DELETE /agents/:id`, which broadcast that same event. `run.*` events show up as activity. A ticket move also writes activity, so a local move is not proof the bridge ran.
-5. `/#/system` shows a recent OpenClaw bridge time after any accepted `POST /events`. Sessions stay empty until `sessions.snapshot`. Logs stay empty until the log directory has a gateway log. That directory is `OPENCLAW_LOG_DIR`, default `/tmp/openclaw`. Provider rows stay empty until `models.snapshot`. The empty sentence is "No providers found yet. Run the bridge to detect them."
+5. `/#/system` shows a recent OpenClaw bridge time after any accepted `POST /events`. Sessions stay empty until `sessions.snapshot`. Logs stay empty until the log directory has a gateway log. That directory is `OPENCLAW_LOG_DIR`, default `/tmp/openclaw`, and the empty state names the directory `GET /logs` returns. Provider rows stay empty until `models.snapshot`. The empty sentence is "No providers found yet. Run the bridge to detect them." Team devices follow `devices.snapshot` from `openclaw devices list` and `openclaw nodes list`. Until that snapshot, the devices card explains how to fill it.
 
 Tell the operator where `.env` lives, that it must not be committed, and that OpenClaw is optional for looking around.

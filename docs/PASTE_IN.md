@@ -22,7 +22,13 @@ Tell your operator the URL the installer printed, and the tunnel port on that sa
 
 ## Register and heartbeat
 
-Read `INGEST_TOKEN` from `.env`. Send it as the header `x-ingest-token`. Do not print it. Call the API on the port this run already chose. On Docker the installer prints `Waiting for the API health check on port`. On the native path doctor prints `pass ports: Port`. Use `127.0.0.1` and that port. POST `/agents/register` with your own id and name, then POST `/agents/<id>/heartbeat`. The request shapes are in [API.md](API.md#410-register-heartbeat-and-delete). A 401 means the header does not match the token. That line is in [API.md](API.md#41-auth). Do not choose a timezone, crew names, or a provider for the operator. The dashboard asks for a timezone, then the Mission Control crew or their own names, then confirms the detected provider. Skip finishes that open.
+Read `INGEST_TOKEN` from `.env`. Send it as the header `x-ingest-token`. Do not print it. Call the API on the port this run already chose. On Docker the installer prints `Waiting for the API health check on port`. On the native path doctor prints `pass ports: Port`. Use `127.0.0.1` and that port. POST `/agents/register` with your own id and name, then POST `/agents/<id>/heartbeat`. The request shapes are in [API.md](API.md#410-register-heartbeat-and-delete). A 401 means the token is wrong, or that route is for the dashboard only. That line is in [API.md](API.md#41-auth). Do not choose a timezone, crew names, or a provider for the operator. The dashboard asks for a timezone, then the Mission Control crew or their own names, then confirms the detected provider. Skip finishes that open.
+
+## Tickets and runs
+
+Create work with POST /tickets. Send `x-ingest-token` and `x-actor-id` set to your registered agent id. The body is `{ title }` plus optional `status` (`backlog` or `todo`), `priority` (`high`, `med`, or `low`), `assignee`, `tags`, `projectId`, and `description`. A created ticket answers 201. Activity stores that agent id. Move it with PATCH /tickets/<id> and the same headers. A token may set `status`, `assignee`, `title`, and `description`. After create, `status` may also be `build`, `qa`, `review`, or `done`. Ticket delete and every other dashboard write need loopback or a session cookie.
+
+Record a run with POST /runs. The body is `{ name }` plus optional `agent`, `ticketId`, and `status` (`queued`, `running`, `done`, `failed`, or `needs_approval`). A created run answers 201. Update it with PATCH /runs/<id>. Send the same `x-ingest-token` header. The field tables are in [API.md](API.md#44-tickets-your-units-of-work) and [API.md](API.md#46-runs).
 
 ## Stop
 

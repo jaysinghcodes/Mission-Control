@@ -113,6 +113,9 @@ export class IngestController {
       case 'models.snapshot':
         await this.snapshots.applyModels(payload);
         break;
+      case 'devices.snapshot':
+        await this.snapshots.applyDevices(payload);
+        break;
       default:
         break;
     }
@@ -166,6 +169,7 @@ const KNOWN_TYPES: ActivityEventType[] = [
   'approvals.snapshot',
   'memory.snapshot',
   'models.snapshot',
+  'devices.snapshot',
   'gateway.snapshot',
   'agent.status',
 ];

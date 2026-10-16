@@ -9,10 +9,14 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { operatorName } from '../config/operator';
+import { requestLoopback, validSession } from '../auth/session';
+import { isAgentSlug } from '../agents/agent-merge';
 import { KeyedMutex } from './keyed-mutex';
 import {
   ticketCreated,
@@ -49,6 +53,9 @@ interface CreateTicketBody {
   status?: unknown;
   /** Omit or null → no project. A string must be an active project's id. */
   projectId?: unknown;
+  description?: unknown;
+  /** Registered agent id when the write uses the ingest token. */
+  actor?: unknown;
 }
 
 /** Body accepted by PATCH /tickets/:id (partial update). */
@@ -56,8 +63,12 @@ interface UpdateTicketBody {
   status?: unknown;
   assignee?: unknown;
   priority?: unknown;
+  title?: unknown;
+  description?: unknown;
   /** string → move to that project. null → unassign. Omit → leave it. */
   projectId?: unknown;
+  /** Registered agent id when the write uses the ingest token. */
+  actor?: unknown;
 }
 
 /** Fields a PATCH may write. projectId null means "clear the project". */
@@ -66,6 +77,22 @@ interface TicketPatch {
   assignee?: string;
   priority?: string;
   projectId?: string | null;
+  title?: string;
+  description?: string;
+}
+
+type TicketWriteMode = 'dashboard' | 'agent';
+
+/**
+ * Loopback and a session cookie are dashboard writes. A request that
+ * reached this controller any other way was allowed by the ingest token.
+ * Unit tests call the methods with no request, and those stay dashboard.
+ */
+function ticketWriteMode(req: Request | undefined): TicketWriteMode {
+  if (!req?.headers) return 'dashboard';
+  if (requestLoopback(req)) return 'dashboard';
+  if (validSession(req.headers.cookie)) return 'dashboard';
+  return 'agent';
 }
 
 /**
@@ -131,7 +158,7 @@ export class TicketsController {
 
   @Post()
   @HttpCode(201)
-  async create(@Body() body: CreateTicketBody) {
+  async create(@Body() body: CreateTicketBody, @Req() req?: Request) {
     // ── title: required, non-blank string ────────────────────────────────
     // Previously a missing title returned 201 + { error } (finding E), which
     // the web helper treated as success. Now it is a real 400.
@@ -161,29 +188,44 @@ export class TicketsController {
     // so we never attach a ticket to a project that was archived first.
     const projectRef = this.parseProjectRef(body?.projectId);
     const projectId = projectRef.kind === 'id' ? projectRef.id : undefined;
+    const description =
+      this.optionalString(body?.description, 'description') ?? '';
+    const mode = ticketWriteMode(req);
 
     // Queue synchronously, before any await, so parallel creates line up
     // in receive order and only the head opens a transaction.
-    return this.creates.run('ticket-key', () =>
-      this.insertCreatedTicket({
-        title,
-        priority,
-        assignee,
-        tags,
-        status,
-        projectId,
-      }),
-    );
+    return this.creates.run('ticket-key', async () => {
+      const actor =
+        mode === 'agent' && req
+          ? await this.requireRegisteredActor(req, body?.actor)
+          : undefined;
+      return this.insertCreatedTicket(
+        {
+          title,
+          priority,
+          assignee,
+          tags,
+          status,
+          projectId,
+          description,
+        },
+        actor,
+      );
+    });
   }
 
-  private async insertCreatedTicket(input: {
-    title: string;
-    priority: string;
-    assignee: string;
-    tags: string[];
-    status: string;
-    projectId?: string;
-  }) {
+  private async insertCreatedTicket(
+    input: {
+      title: string;
+      priority: string;
+      assignee: string;
+      tags: string[];
+      status: string;
+      projectId?: string;
+      description: string;
+    },
+    actor?: string,
+  ) {
     // ── key allocation (QA-1 #5) ─────────────────────────────────────────
     // The old code did `count()` then `create({ key: MC-${150 + count} })` as
     // two separate, unlocked round-trips. Every create that read the count
@@ -200,6 +242,7 @@ export class TicketsController {
     const created = await this.activityPayload(
       ticket,
       ticketCreated(ticket.key ?? 'Ticket'),
+      actor,
     );
     await this.persist('run.queued', created);
     this.gateway.broadcast('run.queued', created);
@@ -238,6 +281,7 @@ export class TicketsController {
     assignee: string;
     tags: string[];
     status: string;
+    description: string;
     /** Set only when the caller named a project. Checked before the key lock
      *  so a 400/404 does not queue behind unrelated creates — but still
      *  inside this transaction, so the project row lock is held until the
@@ -276,6 +320,7 @@ export class TicketsController {
             assignee: data.assignee,
             tags: data.tags,
             status: data.status,
+            description: data.description,
             ...(data.projectId !== undefined
               ? { projectId: data.projectId }
               : {}),
@@ -317,17 +362,28 @@ export class TicketsController {
    *     refetches, so a browser refresh never disagrees with what it shows.
    */
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() body: UpdateTicketBody) {
+  async update(
+    @Param('id') id: string,
+    @Body() body: UpdateTicketBody,
+    @Req() req?: Request,
+  ) {
     // NB: `async` is fine for ordering — an async function runs synchronously
     // up to its first `await`, and there is none before `writes.run(...)`.
     // It also turns validation throws into rejected promises (uniform for
     // callers/tests); Nest maps both to the same HTTP response.
-    const data = this.validateUpdate(body);
-    return this.writes.run(id, () => this.applyUpdate(id, data));
+    const mode = ticketWriteMode(req);
+    const data = this.validateUpdate(body, mode);
+    return this.writes.run(id, async () => {
+      const actor =
+        mode === 'agent' && req
+          ? await this.requireRegisteredActor(req, body?.actor)
+          : undefined;
+      return this.applyUpdate(id, data, actor);
+    });
   }
 
   /** The serialized part of PATCH — only ever runs one-at-a-time per id. */
-  private async applyUpdate(id: string, data: TicketPatch) {
+  private async applyUpdate(id: string, data: TicketPatch, actor?: string) {
     const { ticket, changed } = await this.prisma.$transaction(async (tx) => {
       // Row lock: blocks any other transaction that wants this row until we
       // commit. Table/column names are quoted because Prisma created them
@@ -344,9 +400,11 @@ export class TicketsController {
           assignee: string | null;
           priority: string;
           projectId: string | null;
+          title: string;
+          description: string;
         }[]
       >`
-        SELECT "id", "status", "assignee", "priority", "projectId"
+        SELECT "id", "status", "assignee", "priority", "projectId", "title", "description"
         FROM "Ticket" WHERE "id" = ${id} FOR UPDATE`;
       if (locked.length === 0) {
         // Finding E: this used to be a 200 { error }. Throwing inside the
@@ -383,7 +441,7 @@ export class TicketsController {
     const label = data.status
       ? ticketMoved(key, ticket.status)
       : ticketUpdated(key);
-    const moved = await this.activityPayload(ticket, label);
+    const moved = await this.activityPayload(ticket, label, actor);
     await this.persist('run.progress', moved);
     this.gateway.broadcast('run.progress', moved);
     return { ticket, ts: Date.now() };
@@ -394,7 +452,19 @@ export class TicketsController {
    * Finding D: `{ status: "banana" }` used to save and make the card vanish
    * from every column; unknown statuses are now a 400.
    */
-  private validateUpdate(body: UpdateTicketBody): TicketPatch {
+  private validateUpdate(
+    body: UpdateTicketBody,
+    mode: TicketWriteMode = 'dashboard',
+  ): TicketPatch {
+    if (mode === 'agent' && body && typeof body === 'object') {
+      for (const key of ['priority', 'projectId', 'tags'] as const) {
+        if (Object.prototype.hasOwnProperty.call(body, key)) {
+          throw new BadRequestException(
+            'a token may set status, assignee, title, and description only',
+          );
+        }
+      }
+    }
     const data: TicketPatch = {};
 
     if (body?.status !== undefined && body?.status !== null) {
@@ -410,6 +480,23 @@ export class TicketsController {
     if (assignee !== undefined) data.assignee = assignee;
     const priority = this.optionalString(body?.priority, 'priority');
     if (priority !== undefined) data.priority = priority;
+    if (body && 'title' in body && body.title !== undefined) {
+      const title = this.optionalString(body.title, 'title') ?? '';
+      if (!title.trim()) {
+        throw new BadRequestException('title is required');
+      }
+      data.title = title.trim();
+    }
+    if (body && 'description' in body && body.description !== undefined) {
+      if (body.description === null) {
+        throw new BadRequestException('description must be a string');
+      }
+      const description = this.optionalString(body.description, 'description');
+      if (description === undefined) {
+        throw new BadRequestException('description must be a string');
+      }
+      data.description = description;
+    }
 
     // projectId is special: null is a real write (unassign), a string is a
     // move, and a missing field means "leave the project alone". The
@@ -423,7 +510,9 @@ export class TicketsController {
     // An empty/irrelevant body would be a silent no-op 200 — make it explicit.
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(
-        'nothing to update. Send status, assignee, priority and/or projectId',
+        mode === 'agent'
+          ? 'nothing to update. Send status, assignee, title, and/or description'
+          : 'nothing to update. Send status, assignee, title, description, priority and/or projectId',
       );
     }
     return data;
@@ -529,7 +618,16 @@ export class TicketsController {
   private async activityPayload(
     ticket: { key: string | null; assignee: string | null },
     name: string,
+    actor?: string,
   ): Promise<Record<string, unknown>> {
+    if (actor) {
+      return {
+        name,
+        ...(ticket.key ? { ticket: ticket.key } : {}),
+        agent: actor,
+        actor,
+      };
+    }
     const roster = await loadAgentNames(this.prisma);
     const agent = ticket.assignee
       ? (resolveIngestAgent(ticket.assignee, roster) ?? ticket.assignee)
@@ -539,6 +637,31 @@ export class TicketsController {
       ...(ticket.key ? { ticket: ticket.key } : {}),
       ...(agent ? { agent } : {}),
     };
+  }
+
+  /**
+   * A token write names the agent in x-actor-id, or in body actor when
+   * the header is blank. The id must already be a registered agent.
+   */
+  private async requireRegisteredActor(
+    req: Request,
+    bodyActor: unknown,
+  ): Promise<string> {
+    const header = req.headers['x-actor-id'];
+    const headerId = typeof header === 'string' ? header.trim() : '';
+    const fromBody = typeof bodyActor === 'string' ? bodyActor.trim() : '';
+    const id = headerId || fromBody;
+    if (!id || !isAgentSlug(id)) {
+      throw new BadRequestException('actor must be a registered agent id');
+    }
+    const row = await this.prisma.agent.findUnique({
+      where: { id },
+      select: { id: true, source: true },
+    });
+    if (!row || row.source !== 'registered') {
+      throw new BadRequestException('actor must be a registered agent id');
+    }
+    return row.id;
   }
 
   /** Write a run.* event to the persisted activity stream. */

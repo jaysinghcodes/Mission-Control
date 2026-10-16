@@ -1,0 +1,26 @@
+{
+  "pending": [
+    {
+      "requestId": "nreq-1",
+      "nodeId": "mac-1",
+      "displayName": "Kitchen Mac",
+      "ts": 1710000001000
+    }
+  ],
+  "paired": [
+    {
+      "nodeId": "mac-1",
+      "displayName": "Kitchen Mac",
+      "platform": "macos",
+      "connected": true,
+      "lastConnectedAtMs": 1710000002000
+    },
+    {
+      "nodeId": "phone-1",
+      "displayName": "Pocket",
+      "platform": "ios",
+      "connected": false,
+      "lastConnectedAtMs": 1700000000000
+    }
+  ]
+}

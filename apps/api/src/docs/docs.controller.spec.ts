@@ -221,6 +221,10 @@ describe('Docs API', () => {
     const gone = await request(app.getHttpServer()).get('/docs').expect(200);
     expect(docList(gone).docs).toEqual([]);
     expect(docList(gone).total).toBe(0);
+    expect(responseJson<{ dir: string }>(gone).dir).toBe(
+      path.normalize(missing),
+    );
+    expect(JSON.stringify(responseJson(gone))).not.toMatch(/root:/);
     expect(gone.body).not.toHaveProperty('error');
     await request(app.getHttpServer())
       .get('/docs/open')
@@ -232,6 +236,9 @@ describe('Docs API', () => {
     const blank = await request(app.getHttpServer()).get('/docs').expect(200);
     expect(docList(blank).docs).toEqual([]);
     expect(docList(blank).total).toBe(0);
+    expect(responseJson<{ dir: string }>(blank).dir).toBe(
+      path.normalize(empty),
+    );
 
     await mkdir(path.join(empty, 'notes'), { recursive: true });
     const still = await request(app.getHttpServer()).get('/docs').expect(200);

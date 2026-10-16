@@ -38,9 +38,11 @@ export class MissionController {
 /**
  * DevicesController — machines on the Team page (ticket 7).
  *
- * GET /devices → `{ devices }`. An empty table is 200 with `devices: []`,
- * which the page renders as the empty state. There is no write route:
- * rows come from seed:demo. The bridge has no devices channel.
+ * GET /devices returns `{ devices }`. An empty table is 200 with
+ * `devices: []`, which the page renders as the empty state. There is
+ * no dashboard write. Sample rows come from seed:demo. Live rows come
+ * from devices.snapshot. `online` is a live connection. `pairedAt` and
+ * `requestedAt` are pairing and request times, not last seen.
  */
 @Controller('devices')
 export class DevicesController {
@@ -58,6 +60,8 @@ export class DevicesController {
         type: row.type,
         online: row.online,
         lastSeenAt: row.lastSeenAt ? row.lastSeenAt.toISOString() : null,
+        pairedAt: row.pairedAt ? row.pairedAt.toISOString() : null,
+        requestedAt: row.requestedAt ? row.requestedAt.toISOString() : null,
       })),
       ts: Date.now(),
     };

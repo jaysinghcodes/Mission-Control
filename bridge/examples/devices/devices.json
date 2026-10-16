@@ -1,0 +1,19 @@
+{
+  "pending": [
+    {
+      "requestId": "req-1",
+      "deviceId": "new-phone",
+      "displayName": "New Phone",
+      "ts": 1710000000000
+    }
+  ],
+  "paired": [
+    {
+      "deviceId": "mac-1",
+      "displayName": "Kitchen Mac",
+      "roles": ["operator"],
+      "approvedAtMs": 1700000000000,
+      "tokens": [{ "token": "secret-token" }]
+    }
+  ]
+}
