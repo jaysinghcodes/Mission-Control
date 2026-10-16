@@ -2,7 +2,7 @@
 
 This is the short guide. Paste [PASTE_IN.md](PASTE_IN.md) into OpenClaw. The operator only says yes. That file runs the installer, reports the URL, then registers and sends a heartbeat.
 
-The API reference, including the 401 line, is [API.md](API.md). OpenClaw is optional. `npm run seed:demo` runs without it. `npm run doctor` checks the local setup.
+The API reference, including the 401 line, is [API.md](API.md). OpenClaw is optional. `npm run seed:demo` runs without it. `npm run doctor` checks the local setup. The README opens with the one line installer. Longer install notes are in [INSTALL.md](INSTALL.md).
 
 Each heading below is an old anchor. The sentence under it points at the same section in the API reference.
 
@@ -12,11 +12,11 @@ Mission Control is the dashboard. The description is in [API.md](API.md#1-what-m
 
 ## 2. Install and run
 
-Run `bash install.sh`. Docker is first. If Docker is missing, the installer says so and uses Node.js 22 and Postgres 16. It writes a random ingest token, a dashboard password hash, and a session secret to `.env` (mode 600), resolves ports from the shell, then `.env`, then the defaults, and writes `DATABASE_URL` with that `MC_DB_PORT` on a new file. A plain second run leaves `.env` unchanged. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. It installs a removable bridge schedule. Remove that schedule with `bash install.sh --uninstall-schedule`. Report the URL the installer prints. `npm run doctor` reads the bridge sync age. Under Compose the bridge checks the gateway at 127.0.0.1 on the configured port and posts gateway.snapshot with x-ingest-token, and System shows Unknown when that report is missing or older than GATEWAY_STATUS_MAX_AGE_MS (default 600000). A native install, or an explicit OPENCLAW_GATEWAY_HOST, probes that host directly on OPENCLAW_GATEWAY_PORT (default 18789). A down or unknown gateway does not stop `npm run seed:demo`. Before Compose starts, the installer creates the host docs directory as the user running the script. That user can delete the checkout, including `data/docs`. CI runs `bash install.sh` with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker. Details are in [API.md](API.md#2-install-and-run) and the README section Install and run.
+Run `bash install.sh`. Docker is first. If Docker is missing, the installer says so and uses Node.js 22 and Postgres 16. It writes a random ingest token, a dashboard password hash, and a session secret to `.env` (mode 600), resolves ports from the shell, then `.env`, then the defaults, and writes `DATABASE_URL` with that `MC_DB_PORT` on a new file. A plain second run leaves `.env` unchanged. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. It installs a removable bridge schedule. Remove that schedule with `bash install.sh --uninstall-schedule`. Report the URL the installer prints. `npm run doctor` reads the bridge sync age. Under Compose the bridge checks the gateway at 127.0.0.1 on the configured port and posts gateway.snapshot with x-ingest-token, and System shows Unknown when that report is missing or older than GATEWAY_STATUS_MAX_AGE_MS (default 600000). A native install, or an explicit OPENCLAW_GATEWAY_HOST, probes that host directly on OPENCLAW_GATEWAY_PORT (default 18789). A down or unknown gateway does not stop `npm run seed:demo`. Before Compose starts, the installer creates the host docs directory as the user running the script. That user can delete the checkout, including `data/docs`. CI runs `bash install.sh` with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker. Details are in [API.md](API.md#2-install-and-run), [INSTALL.md](INSTALL.md), and the README section Install and run. The README also puts that same curl command on the first screen.
 
 ### Advanced: Node and Postgres
 
-The native path is in [API.md](API.md#advanced-node-and-postgres) and the README section Advanced: Node and Postgres. `bash install.sh` uses it only when Docker is missing.
+The native path is in [API.md](API.md#advanced-node-and-postgres), [INSTALL.md](INSTALL.md#advanced-node-and-postgres), and the README section Advanced: Node and Postgres. `bash install.sh` uses it only when Docker is missing.
 
 ## 3. What each screen shows
 
