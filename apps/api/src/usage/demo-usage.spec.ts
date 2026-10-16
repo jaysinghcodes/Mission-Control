@@ -1,17 +1,21 @@
 import { chicagoDay, shiftChicagoDay } from '../memory/chicago-day';
-import { aggregateUsage } from './aggregate-usage';
+import { aggregateUsage, calendarDay } from './aggregate-usage';
 import {
   demoUsageBuckets,
   demoUsageId,
   isUntouchedDemoUsage,
 } from './demo-usage';
+import { applyUsagePrices } from './price-usage';
+import { loadPriceTable } from './prices';
+import { usageTimeZone } from './zone-time';
 
 /** 07:58 and 23:30 America/Chicago on 2026-10-10 (CDT). */
 const MORNING = new Date('2026-10-10T12:58:00.000Z');
 const EVENING = new Date('2026-10-11T04:30:00.000Z');
+const CHICAGO = 'America/Chicago';
 
 function expectWindows(now: Date) {
-  const buckets = demoUsageBuckets(now);
+  const buckets = demoUsageBuckets(now, CHICAGO);
   const today = chicagoDay(now);
   expect(buckets).toHaveLength(30);
   expect(new Set(buckets.map((b) => b.day)).size).toBe(30);
@@ -100,13 +104,57 @@ describe('demo usage marker', () => {
 });
 
 describe('demoUsageBuckets', () => {
-  it('at 07:58 local, Today equals today and 7d and month equal the seeded sums', () => {
+  it('at 07:58 Chicago, Today equals today and 7d and month equal the seeded sums', () => {
     expect(chicagoDay(MORNING)).toBe('2026-10-10');
     expectWindows(MORNING);
   });
 
-  it('at 23:30 local, Today equals today and 7d and month equal the seeded sums', () => {
+  it('at 23:30 Chicago, Today equals today and 7d and month equal the seeded sums', () => {
     expect(chicagoDay(EVENING)).toBe('2026-10-10');
     expectWindows(EVENING);
+  });
+
+  it('defaults to the server timezone', () => {
+    const zone = usageTimeZone();
+    const buckets = demoUsageBuckets(MORNING);
+    expect(buckets[0].day).toBe(calendarDay(MORNING, zone));
+    expect(buckets[0].at.getTime()).toBe(MORNING.getTime());
+  });
+
+  it('prices seeded tokens from the table and leaves Ollama at zero', () => {
+    const buckets = demoUsageBuckets(MORNING, CHICAGO);
+    const today = buckets[0];
+    const agg = aggregateUsage(
+      [
+        {
+          at: today.at,
+          totalCost: today.totalCost,
+          tokensIn: today.tokensIn,
+          tokensOut: today.tokensOut,
+          providers: today.providers,
+        },
+      ],
+      '24h',
+      MORNING.getTime(),
+      CHICAGO,
+    );
+    const priced = applyUsagePrices(agg, loadPriceTable(), new Set());
+    expect(priced.usage?.priceLabel ?? null).toBeNull();
+    expect(priced.usage?.totalCost).toBeGreaterThan(0);
+    const local = priced.usage?.groups?.find(
+      (line) => line.provider === 'ollama',
+    );
+    expect(local?.cost).toBe(0);
+    expect(local?.priceLabel).toBeNull();
+    expect(local?.tokensIn).toBeGreaterThan(0);
+    const quill = priced.usage?.groups?.find((line) => line.bot === 'Quill');
+    expect(quill?.cost).toBeGreaterThan(0);
+    expect(priced.usage?.groups?.map((line) => line.bot).sort()).toEqual([
+      'Lens',
+      'Local',
+      'Nova',
+      'Quill',
+      'Sage',
+    ]);
   });
 });

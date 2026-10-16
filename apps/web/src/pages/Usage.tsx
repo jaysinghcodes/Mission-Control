@@ -1,91 +1,155 @@
 import { useState } from 'react'
 import { useApi } from '../hooks/useApi'
-import { Card, PillButton, SectionLabel } from '../components/ui'
-import { pluralize } from '../lib/pluralize'
+import { EmptyState, PageHeader, Segmented, SoftCard } from '../components/shell'
 
 /**
- * Usage and cost. Spend comes from usage.snapshot. This page does not
- * call a provider and it does not show an account balance.
- * /#/usage redirects to System. This file stays so an old import still builds.
+ * Cost so far. GET /usage prices tokens from config/prices.json.
+ * A provider costUsd wins. Local providers are $0. Unknown models say
+ * "Price not set". The page does not read a live balance.
  */
 
-interface Provider {
-  name?: string
-  model?: string
-  cost?: number
-  detail?: string
-  tokensIn?: number
-  tokensOut?: number
+interface UsageGroup {
+  day: string
+  bot: string
+  model: string
+  provider?: string
+  tokensIn: number
+  tokensOut: number
+  cost: number | null
+  priceLabel: string | null
 }
 
 interface Usage {
   period: string
   totalCost: number
+  priceLabel?: string | null
   tokensIn: number
   tokensOut: number
-  providers: Provider[] | Record<string, Provider> | null
+  groups?: UsageGroup[]
 }
-interface UsageResp { usage: Usage | null }
 
-const RANGES = ['24h', '7d', '30d', 'month']
+interface UsageResp {
+  usage: Usage | null
+  note?: string | null
+  timeZone?: string
+}
 
-const fmt = (n: number | undefined): string => (typeof n === 'number' && Number.isFinite(n) ? `$${n.toFixed(2)}` : 'none')
-function tokenWords(n: number | undefined): string {
-  if (typeof n !== 'number' || !Number.isFinite(n)) return 'none'
-  if (n === 1) return pluralize(1, 'token')
-  return `${n.toLocaleString()} tokens`
+const PERIODS = [
+  { id: '24h', label: 'Today' },
+  { id: '7d', label: 'Last 7 days' },
+  { id: 'month', label: 'Month to date' },
+] as const
+
+function costText(cost: number | null | undefined, label?: string | null): string {
+  if (label === 'Price not set') return 'Price not set'
+  if (typeof cost !== 'number' || !Number.isFinite(cost)) return 'Price not set'
+  if (cost === 0) return '$0.00'
+  const abs = Math.abs(cost)
+  if (abs < 0.01) return `$${cost.toFixed(4)}`
+  return `$${cost.toFixed(2)}`
+}
+
+function tokenCount(n: number | undefined): string {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '0'
+  return n.toLocaleString('en-US')
+}
+
+function dayLabel(day: string): string {
+  const [year, month, date] = day.split('-').map(Number)
+  if (!year || !month || !date) return day
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(year, month - 1, date)))
 }
 
 export default function Usage() {
-  const [range, setRange] = useState('24h')
-  const { data, error } = useApi<UsageResp>(`/usage?period=${range}`, { pollMs: 30000 })
-  const usage = data?.usage
-
-  let providers: Provider[] = []
-  if (Array.isArray(usage?.providers)) providers = usage.providers
-  else if (usage?.providers && typeof usage.providers === 'object') providers = Object.values(usage.providers)
+  const [period, setPeriod] = useState(0)
+  const id = PERIODS[period].id
+  const { data, error } = useApi<UsageResp>(`/usage?period=${id}`, { pollMs: 30000 })
+  const usage = data?.usage ?? null
+  const groups = usage?.groups ?? []
+  const unpriced = groups.some((row) => row.priceLabel === 'Price not set')
 
   return (
-    <div className="p-6">
-      <div className="text-[22px] font-semibold">Usage and cost</div>
-      <div className="mt-1 text-[13px] text-mc-sub">Estimated spend from the bridge. Open System for the same numbers.</div>
+    <div>
+      <PageHeader
+        title="Usage"
+        summary="Cost so far from tokens and the price table. A reported provider cost is used when OpenClaw sends one."
+        tools={
+          <Segmented
+            labels={PERIODS.map((item) => item.label)}
+            active={period}
+            onChange={setPeriod}
+            ariaLabel="Spend period"
+          />
+        }
+      />
 
-      <div className="flex gap-3 mt-6 items-center">
-        {RANGES.map((r) => (
-          <PillButton key={r} label={r === 'month' ? 'This month' : r} on={range === r} onClick={() => setRange(r)} />
-        ))}
-      </div>
+      {!data && !error && (
+        <EmptyState title="Waiting for the API" body="Usage loads from the bridge snapshot. If this stays here, the API is not answering." />
+      )}
+      {error && !data && (
+        <EmptyState title="Usage not loaded" body="Waiting for the API. If it stays down, cost on this page is missing rather than zero." />
+      )}
+      {data && !usage && (
+        <EmptyState
+          title="No usage yet"
+          body="Run the bridge, or run npm run seed:demo on a machine without OpenClaw. Today, the last 7 days, and the month to date stay empty until a daily point exists."
+        />
+      )}
 
-      <Card className="mt-6 px-4 py-4">
-        <SectionLabel>Total estimated spend</SectionLabel>
-        <div className="mt-2 text-[30px] font-semibold">{usage ? fmt(usage.totalCost) : 'none'}</div>
-        <div className="text-[12px] text-mc-sub">
-          {usage
-            ? `${tokenWords(usage.tokensIn)} in, ${tokenWords(usage.tokensOut)} out`
-            : error
-              ? 'API unreachable'
-              : 'No usage snapshot for this period yet.'}
-        </div>
-      </Card>
+      {data && usage && (
+        <>
+          <SoftCard className="px-6 py-5">
+            <div className="text-[12px] font-semibold text-mc-sub">{PERIODS[period].label}</div>
+            <div className="mt-1 text-[32px] font-bold tracking-tight">{costText(usage.totalCost, usage.priceLabel)}</div>
+            <div className="mt-1 text-[13px] text-mc-sub">
+              {tokenCount(usage.tokensIn)} tokens in, {tokenCount(usage.tokensOut)} tokens out
+            </div>
+            <p className="mt-2 text-[12.5px] text-mc-sub">
+              Days follow the server clock{data.timeZone ? ` (${data.timeZone})` : ''}. Ollama and any local provider are $0.00.
+            </p>
+            {data.note ? <p className="mt-2 text-[13px] text-mc-sub">{data.note}</p> : null}
+            {unpriced ? (
+              <p className="mt-2 text-[13px] text-mc-sub">
+                Some models have no price. Their tokens are listed and they are not added into the total.
+              </p>
+            ) : null}
+          </SoftCard>
 
-      <div className="flex gap-[18px] mt-6 flex-wrap">
-        {providers.map((p, i) => (
-          <Card key={p.name ?? `provider-${i}`} className="w-[248px] px-4 py-3">
-            <div className="text-[14.5px] font-semibold">{p.name ?? 'Provider'}</div>
-            <div className="mt-2 font-mono text-[12px] text-mc-sub">{p.model ?? 'none'}</div>
-            <div className="mt-2 text-[24px] font-semibold">{fmt(p.cost)}</div>
-            <div className="text-[11px] text-mc-sub">{p.detail ?? 'estimated spend'}</div>
-            {typeof p.tokensIn === 'number' && (
-              <div className="mt-2 text-[11px] text-mc-faint">{tokenWords(p.tokensIn)} in, {tokenWords(p.tokensOut)} out</div>
-            )}
-          </Card>
-        ))}
-        {providers.length === 0 && !error && (
-          <Card className="w-full px-4 py-6 text-[12.5px] text-mc-faint">
-            No provider spend yet. The bridge posts usage when it can read sessions.
-          </Card>
-        )}
-      </div>
+          <SoftCard className="mt-4 overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[11.5px] text-mc-sub">
+                  <th className="whitespace-nowrap px-4 py-2 font-semibold">Day</th>
+                  <th className="whitespace-nowrap px-4 py-2 font-semibold">Bot</th>
+                  <th className="whitespace-nowrap px-4 py-2 font-semibold">Model</th>
+                  <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Tokens in</th>
+                  <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Tokens out</th>
+                  <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((row) => (
+                  <tr key={`${row.day}-${row.bot}-${row.model}`} className="border-t border-mc-sep">
+                    <td className="whitespace-nowrap px-4 py-3 text-[13.5px]">{dayLabel(row.day)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-[14px] font-semibold">{row.bot}</td>
+                    <td className="px-4 py-3 font-mono text-[12.5px]">{row.model}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{tokenCount(row.tokensIn)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{tokenCount(row.tokensOut)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-[14px] font-semibold tabular-nums">
+                      {costText(row.cost, row.priceLabel)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </SoftCard>
+        </>
+      )}
     </div>
   )
 }

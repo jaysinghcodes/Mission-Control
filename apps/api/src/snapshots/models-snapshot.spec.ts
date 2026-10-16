@@ -135,6 +135,7 @@ describe('applyModels', () => {
         label: 'Quill',
         agentId: 'quill',
         agentName: 'Quill',
+        local: false,
       },
       {
         provider: 'ollama',
@@ -142,6 +143,7 @@ describe('applyModels', () => {
         label: null,
         agentId: null,
         agentName: null,
+        local: true,
       },
     ]);
   });

@@ -9,7 +9,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { DEMO_DOCS } from '../src/docs/demo-docs';
-import { chicagoDay } from '../src/memory/chicago-day';
+import { calendarDay } from '../src/usage/aggregate-usage';
+import { usageTimeZone } from '../src/usage/zone-time';
 import {
   DEMO_ACTIVITY_IDS,
   DEMO_AGENT_IDS,
@@ -350,7 +351,8 @@ describe('seed:clear (e2e)', () => {
     expect(usageRows.filter((row) => isUntouchedDemoUsage(row))).toHaveLength(
       0,
     );
-    const overwritten = usageRows.find((row) => row.day === chicagoDay(today));
+    const usageDay = calendarDay(new Date(today), usageTimeZone());
+    const overwritten = usageRows.find((row) => row.day === usageDay);
     expect(overwritten).toBeTruthy();
     expect(overwritten?.id.startsWith('demo-usage-')).toBe(true);
     expect(overwritten?.totalCost).toBeCloseTo(42.25, 4);
@@ -412,7 +414,7 @@ describe('seed:clear (e2e)', () => {
     ).toBe('Operator mission');
     expect(
       await prisma.usageBucket.findUnique({
-        where: { day: chicagoDay(today) },
+        where: { day: usageDay },
       }),
     ).toBeTruthy();
   });

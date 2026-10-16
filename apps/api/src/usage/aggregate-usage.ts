@@ -1,16 +1,25 @@
-import { chicagoWallTime } from '../memory/chicago-day';
 import { monthStartUtc } from './period-window';
-
-/** Operator-facing calendar. Memory and Approvals use the same zone. */
-export const USAGE_DISPLAY_TZ = 'America/Chicago';
+import { zoneWallTime } from './zone-time';
+import {
+  rawLineFromProvider,
+  type PricedUsageLine,
+  type RawUsageLine,
+} from './price-usage';
 
 export interface UsageProvider {
   name?: string;
   model?: string;
-  cost?: number;
+  provider?: string;
+  bot?: string;
+  cost?: number | null;
+  priceLabel?: string | null;
+  /** Set only when the provider reported a dollar amount. Missing is not zero. */
+  costUsd?: number | null;
+  local?: boolean;
   tokensIn?: number;
   tokensOut?: number;
   agents?: string[];
+  demo?: boolean;
 }
 
 export interface UsagePoint {
@@ -29,9 +38,12 @@ export interface UsageDayTotal {
 export interface AggregatedUsage {
   period: string;
   totalCost: number;
+  /** Set when every line is unpriced. The number is then not a guess. */
+  priceLabel?: string | null;
   tokensIn: number;
   tokensOut: number;
   providers: UsageProvider[];
+  groups?: PricedUsageLine[];
 }
 
 export interface AggregateResult {
@@ -41,6 +53,7 @@ export interface AggregateResult {
   daysCovered: number;
   daysExpected: number;
   windowStart: number;
+  rawLines: RawUsageLine[];
 }
 
 export function calendarDay(input: Date, timeZone: string): string {
@@ -89,30 +102,58 @@ export function providerList(value: UsagePoint['providers']): UsageProvider[] {
   return [];
 }
 
+function optionalSum(
+  a: number | null | undefined,
+  b: number | null | undefined,
+): number | undefined {
+  if (a == null && b == null) return undefined;
+  return round4(num(a) + num(b));
+}
+
 export function mergeProviders(groups: UsageProvider[][]): UsageProvider[] {
   const byKey = new Map<string, UsageProvider>();
   for (const group of groups) {
     for (const raw of group) {
       const model = raw.model || raw.name || 'model';
-      const prev = byKey.get(model) ?? {
+      const bot = raw.bot || raw.agents?.[0] || '';
+      const key = `${bot}\n${model}`;
+      const prev = byKey.get(key) ?? {
         name: raw.name,
         model: raw.model ?? model,
-        cost: 0,
+        provider: raw.provider,
+        bot: raw.bot,
         tokensIn: 0,
         tokensOut: 0,
         agents: [] as string[],
+        local: raw.local === true,
+        demo: raw.demo === true,
       };
-      prev.cost = round4(num(prev.cost) + num(raw.cost));
+      prev.cost = optionalSum(prev.cost, raw.cost);
+      prev.costUsd = optionalSum(
+        prev.costUsd == null ? undefined : prev.costUsd,
+        raw.costUsd == null ? undefined : raw.costUsd,
+      );
       prev.tokensIn = Math.round(num(prev.tokensIn) + num(raw.tokensIn));
       prev.tokensOut = Math.round(num(prev.tokensOut) + num(raw.tokensOut));
-      const agents = new Set([...(prev.agents ?? []), ...(raw.agents ?? [])]);
+      const agents = new Set([
+        ...(prev.agents ?? []),
+        ...(raw.agents ?? []),
+        ...(raw.bot ? [raw.bot] : []),
+      ]);
       prev.agents = [...agents];
       if (!prev.name && raw.name) prev.name = raw.name;
-      byKey.set(model, prev);
+      if (!prev.provider && raw.provider) prev.provider = raw.provider;
+      if (!prev.bot && raw.bot) prev.bot = raw.bot;
+      if (raw.local) prev.local = true;
+      prev.demo = prev.demo === true && raw.demo === true;
+      if (!prev.demo) delete prev.demo;
+      byKey.set(key, prev);
     }
   }
-  return [...byKey.values()].sort((a, b) =>
-    (a.model || '').localeCompare(b.model || ''),
+  return [...byKey.values()].sort(
+    (a, b) =>
+      (a.model || '').localeCompare(b.model || '') ||
+      (a.bot || '').localeCompare(b.bot || ''),
   );
 }
 
@@ -137,10 +178,7 @@ function expectedDays(period: string, now: Date, timeZone: string): string[] {
 }
 
 function startOfDay(day: string, timeZone: string): number {
-  if (timeZone === 'UTC' || timeZone === 'Etc/UTC') {
-    return Date.parse(`${day}T00:00:00.000Z`);
-  }
-  return chicagoWallTime(day, 0, 0).getTime();
+  return zoneWallTime(day, 0, 0, timeZone).getTime();
 }
 
 function blank(nowMs: number): AggregateResult {
@@ -151,6 +189,7 @@ function blank(nowMs: number): AggregateResult {
     daysCovered: 0,
     daysExpected: 0,
     windowStart: nowMs,
+    rawLines: [],
   };
 }
 
@@ -161,6 +200,7 @@ function blank(nowMs: number): AggregateResult {
  * the same day buckets as the other windows. There is no hourly series.
  * `7d` is the last 7 calendar days through today. `month` is that
  * timezone's calendar month to date. A day with no point is absent, not zero.
+ * Usage passes the API process zone. Memory stays on America/Chicago.
  */
 export function aggregateUsage(
   points: UsagePoint[],
@@ -168,8 +208,9 @@ export function aggregateUsage(
   nowMs: number,
   timeZone: string,
 ): AggregateResult {
-  if (period !== '24h' && period !== '7d' && period !== 'month')
+  if (period !== '24h' && period !== '7d' && period !== 'month') {
     return blank(nowMs);
+  }
   const now = new Date(nowMs);
   const calendar = expectedDays(period, now, timeZone);
   const windowStart =
@@ -193,6 +234,7 @@ export function aggregateUsage(
       daysCovered: 0,
       daysExpected,
       windowStart,
+      rawLines: [],
     };
   }
 
@@ -224,6 +266,14 @@ export function aggregateUsage(
     }
   }
 
+  const rawLines: RawUsageLine[] = [];
+  for (const point of included) {
+    const day = calendarDay(new Date(point.at), timeZone);
+    for (const provider of providerList(point.providers)) {
+      rawLines.push(rawLineFromProvider(day, provider));
+    }
+  }
+
   const ordered = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   const days = ordered.map(([day, row]) => ({
     day,
@@ -248,5 +298,6 @@ export function aggregateUsage(
     daysCovered,
     daysExpected,
     windowStart,
+    rawLines,
   };
 }

@@ -11,6 +11,7 @@ import { wireText } from '../wire-text';
 import { PrismaService } from '../prisma/prisma.service';
 import { SETTING_ID } from '../team/mission';
 import { usageBucketsFromPayload } from '../usage/usage-points';
+import { usageTimeZone } from '../usage/zone-time';
 
 /**
  * SnapshotsService — applies state snapshots pushed by the OpenClaw bridge.
@@ -122,8 +123,9 @@ export class SnapshotsService {
   async applyUsage(
     payload: Record<string, unknown>,
     now: Date = new Date(),
+    timeZone: string = usageTimeZone(),
   ): Promise<void> {
-    const buckets = usageBucketsFromPayload(payload, now);
+    const buckets = usageBucketsFromPayload(payload, now, timeZone);
     for (const bucket of buckets) {
       await this.prisma.usageBucket.upsert({
         where: { day: bucket.day },
@@ -275,6 +277,7 @@ type ModelWrite = {
   label: string | null;
   agentId: string | null;
   agentName: string | null;
+  local: boolean;
 };
 
 /**
@@ -318,6 +321,7 @@ function modelRow(item: unknown, withAgent: boolean): ModelWrite | null {
   const provider = clip(rec.provider, 80);
   const model = clip(rec.model, 200);
   if (!provider || !model) return null;
+  const local = rec.local === true || provider.toLowerCase() === 'ollama';
   if (!withAgent) {
     return {
       provider,
@@ -325,6 +329,7 @@ function modelRow(item: unknown, withAgent: boolean): ModelWrite | null {
       label: null,
       agentId: null,
       agentName: null,
+      local,
     };
   }
   const name = clip(rec.name ?? rec.agentName ?? '', 200);
@@ -336,6 +341,7 @@ function modelRow(item: unknown, withAgent: boolean): ModelWrite | null {
     label: name || null,
     agentId,
     agentName: name || null,
+    local,
   };
 }
 

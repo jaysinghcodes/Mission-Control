@@ -52,7 +52,7 @@ See [API.md](API.md#46-runs).
 
 ### 4.7 Models and spend
 
-The bridge posts `models.snapshot` from `~/.openclaw/openclaw.json`. System lists the provider and model for each agent. See [API.md](API.md#47-models-and-spend).
+The bridge posts `models.snapshot` from `~/.openclaw/openclaw.json`. System lists the provider and model for each agent. Usage prices session tokens from `config/prices.json`. A reported `costUsd` wins. See [API.md](API.md#47-models-and-spend).
 
 ### 4.8 Memory
 

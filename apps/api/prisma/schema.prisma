@@ -200,6 +200,7 @@ model MemoryEntry {
 /// One provider and model from `models.snapshot`.
 /// The bridge replaces every row. This table is not a live balance.
 /// `agentId` and `agentName` name the OpenClaw agent when the config has one.
+/// `local` is true for Ollama and any provider the config marks local.
 model ModelConfig {
   id        String   @id @default(cuid())
   provider  String
@@ -207,6 +208,7 @@ model ModelConfig {
   label     String?
   agentId   String?
   agentName String?
+  local     Boolean  @default(false)
   createdAt DateTime @default(now())
 }
 

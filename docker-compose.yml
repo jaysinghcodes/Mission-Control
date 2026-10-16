@@ -77,6 +77,8 @@ services:
       OPENCLAW_GATEWAY_HOST: ${OPENCLAW_GATEWAY_HOST:-127.0.0.1}
       OPENCLAW_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-18789}
       OPENCLAW_LOG_DIR: ${OPENCLAW_LOG_DIR:-/tmp/openclaw}
+      # Usage days follow this clock. Unset stays UTC.
+      TZ: ${TZ:-UTC}
     volumes:
       # ${DOCS_ROOT} here is the HOST path from the project .env (compose
       # interpolation), not the container path set just above. `:-` keeps
@@ -84,6 +86,8 @@ services:
       - ${DOCS_ROOT:-./data/docs}:/data/docs
       # Host log directory. The same path is OPENCLAW_LOG_DIR inside the container.
       - ${OPENCLAW_LOG_DIR:-/tmp/openclaw}:${OPENCLAW_LOG_DIR:-/tmp/openclaw}
+      # Price table. prices.local.json on the host overrides a model without a rebuild.
+      - ./config:/app/config:ro
     ports:
       # Host port overridable (item 6); the api still listens on 3000 inside.
       - "127.0.0.1:${MC_API_PORT:-3000}:3000"

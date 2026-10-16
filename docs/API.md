@@ -92,7 +92,7 @@ Other repo commands: `npm run build`, `npm test`, `npm run test:e2e` (needs a mi
 
 ## 3. What each screen shows
 
-The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then Calendar, Memory, Docs, Team, System. Overview is not a route. `/#/` redirects to Tasks.
+The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then Calendar, Memory, Docs, Team, Usage, System. Overview is not a route. `/#/` redirects to Tasks.
 
 | Page | Route | What it shows | Fed by |
 | --- | --- | --- | --- |
@@ -106,7 +106,8 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 | Memory | `/#/memory` | Memory notes grouped by day (America/Chicago) | `memory.snapshot` |
 | Docs | `/#/docs` | Markdown files from `DOCS_ROOT` (default `data/docs`), read only in the browser | files on disk |
 | Team | `/#/team` | Mission, people, and devices. Not an org chart. People use the same live placement as Office | `agents.snapshot`, `/mission`, `/devices`, `/tickets`, `/runs` |
-| System | `/#/system` | Health, uptime, usage and cost (Today, 7d, month), sessions, activity. Panels: `/#/system/logs`, `/#/system/sessions`, `/#/system/settings`, `/#/system/tools`, `/#/system/connection`. `/#/health` and `/#/usage` redirect here | `/health`, `/system`, `/usage`, `/sessions` |
+| Usage | `/#/usage` | Cost so far, broken down by day, bot, and model | `usage.snapshot`, `GET /usage`, `config/prices.json` |
+| System | `/#/system` | Health, uptime, provider and model per agent, versions, a spend summary, sessions, activity. Panels: `/#/system/logs`, `/#/system/sessions`, `/#/system/settings`, `/#/system/tools`, `/#/system/connection`. `/#/health` redirects here | `/health`, `/system`, `/usage`, `/sessions` |
 | Connect | `/#/connect` | Setup and remote tunnel guide | |
 
 Office, Agents, and Team read one derived placement. Precedence, first match wins:
@@ -162,7 +163,7 @@ Snapshot types write tables. **Warning:** sessions and calendar replace a whole 
 | `agents.snapshot` | `{ agents: [{ id?, name, role?, color?, status?: "working" or "idle", parent?: name, emoji?, personalityTags?, currentTask?, tasksCompleted?, totalCost?, recentActivity?, channel? }] }` | Creates, updates, or removes `snapshot` rows only. Default and registered rows stay. A registered id in the payload changes status fields only. `id`, when sent, is a lowercase slug. Otherwise the slug comes from the name |
 | `sessions.snapshot` | `{ sessions: [{ name, agent, model?, ctx?: 0 to 100, lastActivity?, hot? }] }` | Replaces every Session row |
 | `calendar.snapshot` | `{ jobs: [{ name, schedule?, day?: 0 Mon to 6 Sun or null, time?: "HH:MM" or null, color?, enabled? }] }` | Replaces every CronJob row |
-| `usage.snapshot` | `{ points: [{ at: ISO timestamp, totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }] }` | Upserts one America/Chicago day per point. Days not in the payload stay. A period total with no `at` is ignored |
+| `usage.snapshot` | `{ points: [{ at: ISO timestamp, totalCost?, tokensIn?, tokensOut?, providers?: [{ bot?, provider?, model?, tokensIn?, tokensOut?, costUsd?, local? }] }] }` | Upserts one server timezone day per point. Days not in the payload stay. A period total with no `at` is ignored. `costUsd` is set only when the provider reported it |
 | `approvals.snapshot` | `{ approvals: [{ kind, tag, desc, status?, meta? }] }` | Deletes pending approvals, keeps decided ones, inserts these. `kind` is exec, pair, msg, sess or pr. A `pr` approval needs `meta: { repo, number, branch? }` to merge on approve |
 | `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term" or "daily" or "other", source?, ref? }] }` | Upserts by `id`; removes bridge sourced rows for the agents present that are not in the payload. An empty storable list is a no op and does not wipe the table |
 | `models.snapshot` | `{ agents: [{ id?, name?, provider, model }], models?: [{ provider, model }], openclawVersion? }` | Replaces every model row. Stores `openclawVersion` on the settings row when that string is non empty. A payload with neither array is ignored |
@@ -249,8 +250,8 @@ That returns HTTP 200 and `"status":"running"`.
 
 ### 4.7 Models and spend
 
-* `GET /models` returns `{ models: [{ id, provider, model, label, agentId, agentName, createdAt }] }` from the latest `models.snapshot`. The bridge reads `~/.openclaw/openclaw.json`, or `OPENCLAW_CONFIG_PATH` when that is set. When that file has no agent model, the fallback is `openclaw models list`. `POST /models` with `{ provider, model, label? }` and `DELETE /models/:id` still require the write token. They do not call a provider. The next `models.snapshot` replaces the table. System shows one provider and model per agent. With no rows the sentence is exactly `No providers found yet. Run the bridge to detect them.`
-* Spend shown on System comes only from `usage.snapshot` daily points. `GET /usage?period=24h|7d|month` sums them. `period=24h` is Today, the calendar day in America/Chicago, taken from those buckets. There is no hourly storage. The 7 day and month windows use the same calendar. A short range returns `note` (for example `Showing 3 days of data so far`) and does not fill the gap with zero. `period=30d` returns `usage: null`. The bridge posts points, not 7 day or month totals. On first connect it backfills up to 30 days when session timestamps exist. Otherwise it records the days it has synced. The API keeps a point only when its Chicago day is within the last 30 days through today, and it drops a timestamp after now. `npm run seed:demo` writes 30 days and stamps today at seed time, so a fresh System page shows all three windows. The amounts depend on the date. If the bridge cannot read sessions, it posts no usage snapshot.
+* `GET /models` returns `{ models: [{ id, provider, model, label, agentId, agentName, local, createdAt }] }` from the latest `models.snapshot`. The bridge reads `~/.openclaw/openclaw.json`, or `OPENCLAW_CONFIG_PATH` when that is set. When that file has no agent model, the fallback is `openclaw models list`. `local` is true for Ollama and for any provider the config marks local. `POST /models` with `{ provider, model, label? }` and `DELETE /models/:id` still require the write token. They do not call a provider. The next `models.snapshot` replaces the table. System shows one provider and model per agent. With no rows the sentence is exactly `No providers found yet. Run the bridge to detect them.`
+* Spend on Usage and the System summary comes from `usage.snapshot` daily points. `GET /usage?period=24h|7d|month` prices them. `period=24h` is Today, the calendar day in the API process timezone, taken from those buckets. There is no hourly storage. The 7 day and month windows use the same calendar. Compose sets `TZ` from the shell, or UTC when that is unset. A short range returns `note` (for example `Showing 3 days of data so far`) and does not fill the gap with zero. `period=30d` returns `usage: null`. The bridge posts points, not 7 day or month totals. On first connect it backfills up to 30 days when session timestamps exist. Otherwise it records the days it has synced. The API keeps a point only when its server day is within the last 30 days through today, and it drops a timestamp after now. Cost is input and output tokens times `config/prices.json` (USD per one million tokens). `config/prices.local.json` is gitignored and merged on top at each read, so an edit changes totals without a rebuild. A provider `costUsd` wins when it is present, including zero. Ollama and any provider marked local cost $0. A model with no price shows its tokens and exactly `Price not set`. The Usage page breaks the window down by day, bot, and model. `npm run seed:demo` writes 30 days and stamps today at seed time, with no OpenClaw. If the bridge cannot read sessions, it posts no usage snapshot. This build does not read a live provider balance.
 * Per agent cost on profiles comes from `totalCost` in `agents.snapshot`.
 
 ### 4.8 Memory
@@ -261,7 +262,7 @@ Read only routes: `GET /memory?day=YYYY-MM-DD&kind=&q=&limit=&offset=` and `GET 
 
 `GET /health`, `/system`, `/agents`, `/agents/:id` (id or name), `/sessions`, `/calendar`, `/activity?limit=`, `/logs`, `/search?q=`, `/approvals?status=pending|decided|all`, `/mission`, `/devices`, `/docs`, `/custom-tools`. `GET /health` includes `version` (the `version` field in `apps/api/package.json`), `gitSha`, and `openclawVersion` (null until `models.snapshot` reports one). `GET /system` includes `gateway` with `host`, `port`, `up`, and `latencyMs` from a TCP connect. Writes: `PUT /mission` with `{ mission }`, `POST /approvals/:id/decide` with `{ action: "approve" or "reject" }` (only on your operator's say so; a `pr` approve merges on GitHub). Custom tools also have their own create and update routes under `/custom-tools`. Devices have no write route.
 
-These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/sessions`, `/calendar`, `/logs`, `/search?q=a`, `/approvals?status=pending`, `/mission`, `/devices`, `/docs`, `/projects`, `/tickets`, `/runs`, `/models`, `/memory`, `/custom-tools`.
+These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/sessions`, `/calendar`, `/logs`, `/search?q=a`, `/approvals?status=pending`, `/mission`, `/devices`, `/docs`, `/projects`, `/tickets`, `/runs`, `/models`, `/memory`, `/usage`, `/custom-tools`.
 
 ### 4.10 Register, heartbeat, and delete
 
@@ -361,7 +362,7 @@ That prints `204`.
 ## 6. Not implemented yet (do not rely on these)
 
 * Sessions, cron jobs, usage, and memory still have no REST write except `POST /events`. Agents do: `POST /agents/register`, `POST /agents/:id/heartbeat`, and `DELETE /agents/:id` (section 4.10). A snapshot cannot delete a registered or default bot.
-* Nothing in this repo fetches a provider account balance. Provider prices are not in this build. `models.snapshot` is the provider and model list.
+* Nothing in this repo fetches a provider account balance. Prices live in `config/prices.json`, with `config/prices.local.json` merged on top. `models.snapshot` is the provider and model list, including which providers are local.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
 * Devices have no write route; only `seed:demo` fills them.

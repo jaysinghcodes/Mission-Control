@@ -162,6 +162,7 @@ Schema changes stay human reviewed. On boot the API runs `prisma migrate deploy`
 | `/#/pipeline` | The same tickets as Build, QA, Ship, Deploy |
 | `/#/calendar` | Cron jobs for the week |
 | `/#/memory` | Memory notes |
+| `/#/usage` | Cost so far, by day, bot, and model |
 | `/#/docs` | Markdown library from `DOCS_ROOT` |
 | `/#/team` | Mission, people, devices |
 | `/#/system` | Health, provider and model per agent, versions, spend, links to the panels below |
@@ -172,7 +173,7 @@ Schema changes stay human reviewed. On boot the API runs `prisma migrate deploy`
 | `/#/system/tools` | Experimental custom tools |
 | `/#/connect` | Setup sheet (no sidebar) |
 
-These paths are redirects, not pages: `/tickets` to `/tasks`, `/backlog` to `/tasks?view=backlog`, `/factory` and `/activity` to `/office`, `/health` and `/usage` to `/system`, `/logs` to `/system/logs`, `/sessions` to `/system/sessions`, `/settings` to `/system/settings`. The URL table above lists only routes that render a screen.
+These paths are redirects, not pages: `/tickets` to `/tasks`, `/backlog` to `/tasks?view=backlog`, `/factory` and `/activity` to `/office`, `/health` to `/system`, `/logs` to `/system/logs`, `/sessions` to `/system/sessions`, `/settings` to `/system/settings`. The URL table above lists only routes that render a screen.
 
 ---
 
@@ -187,7 +188,7 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/API.md](
 * Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, `memory.snapshot`, and `models.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
 * `memory.snapshot` upserts notes by id and drops bridge sourced rows for the agents in the payload when those ids are missing. An empty `entries` list is a no op. It does not wipe Memory. Demo rows stay.
 * `agents.snapshot` creates, updates, or removes snapshot rows only. Default and registered bots stay. `POST /agents/register` upserts one bot (201 when new, 200 when the id exists). `POST /agents/:id/heartbeat` returns 204 and sets `lastSeenAt`. An optional JSON body may set `currentTask` and `status` (`working` or `idle`). No body leaves those fields unchanged. `status` `idle`, JSON null, or a blank `currentTask` clears `currentTask` and sets status to idle. `DELETE /agents/:id` returns 204 for a registered bot and 409 for a default or a snapshot row. An open Agents, Office, or Team page refetches within 2 seconds. Details: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
-* `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers? }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` sums those points. `period=24h` is Today, the calendar day in America/Chicago, taken from the daily buckets. There is no hourly storage. The 7 day and month windows use that same calendar. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. `npm run seed:demo` writes 30 days, and today's row is stamped at seed time. The dollar amounts depend on the date. `period=30d` is not a window and returns `usage: null`. A point more than 30 days before today, or a point after now, is not stored. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced.
+* `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers?: [{ bot?, provider?, model?, tokensIn?, tokensOut?, costUsd?, local? }] }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` prices those points. `period=24h` is Today, the calendar day in the API process timezone, taken from the daily buckets. There is no hourly storage. The 7 day and month windows use that same calendar. Memory and calendar stay on America/Chicago. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. Cost is tokens times `config/prices.json` (USD per one million tokens). `config/prices.local.json` is gitignored and merged on top at each read, so an edit changes totals without a rebuild. A provider `costUsd` wins when it is present, including 0. Ollama and any provider marked local are $0.00. A model with no price shows its tokens and the exact label `Price not set`. `npm run seed:demo` writes 30 days of tokens and stores no dollars. `period=30d` is not a window and returns `usage: null`. A point more than 30 days before today, or a point after now, is not stored. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced. Live provider balances are not read.
 * `GET /models` returns `{ models }` from the latest `models.snapshot`. The bridge reads `~/.openclaw/openclaw.json` (`OPENCLAW_CONFIG_PATH` overrides that path). When that file has no agent model, it falls back to `openclaw models list`. Each row is the provider and model for one agent. An empty list is the System sentence "No providers found yet. Run the bridge to detect them." `POST /models` and `DELETE /models/:id` still use the write token. They do not call a provider. The next snapshot replaces the table. `GET /health` adds `version` from `apps/api/package.json`, `gitSha`, and `openclawVersion`. `GET /system` includes `gateway.up` from a TCP connect to the configured gateway.
 * `run.*` events are activity and a socket broadcast. They do not insert tickets or runs. Office refetches tickets, runs, and activity when those events arrive, then places each bot from the shared live state (an active ticket in build, qa, or review, then an active run, then heartbeat). A done ticket does not seat its bot. Deploy seats a bot only for an active run on a done ticket when no higher precedence ticket applies. A register or delete also refetches activity. Role text is not a seat.
 * The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` (201) and `PATCH /runs/:id` (200). Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. An unknown `ticketId` is 404 and does not write the row. The bridge retries that 404 once without `ticketId` so the run is still recorded. Those routes require `x-ingest-token` when `INGEST_TOKEN` is set. A missing run name is 400 and the message names `name`. A name longer than 200 characters, or an agent longer than 100, is 400 and the message names that field. Optional `status` on create defaults to `queued`. Accepted values are `queued`, `running`, `done`, `failed`, and `needs_approval`. A bad `status` is 400 and the message names `status`. Any other field the route does not accept is 400. A PATCH that changes nothing returns 200 with the same run and writes no activity event. An unknown run id is 404. Success bodies have no `error` key.
@@ -325,7 +326,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 * Memory notes, from seeded rows. Docs do not use the bridge. The seed writes sample markdown under `data/docs`.
 * Team mission, from `GET /mission`. People come from the seeded roster and show a Sample tag until a real bot is registered. Devices come from the seed. There is no device write route.
 * Custom tools, one seeded tool on `/#/system/tools`.
-* Office, Calendar, Approvals, and System spend for Today, the last 7 days, and the month, summed from 30 seeded days. The amounts depend on the date.
+* Office, Calendar, Approvals, and Usage for Today, the last 7 days, and the month. The seed writes 30 days of tokens. Dollars are computed on read from `config/prices.json`.
 
 Sessions and gateway logs stay empty until a real bridge posts them.
 
@@ -334,7 +335,7 @@ Sessions and gateway logs stay empty until a real bridge posts them.
 What this tree already does:
 
 * ✅ Tasks, Agents, Approvals, Projects, Office, Pipeline
-* ✅ Calendar, Memory, Docs, Team (mission, people, devices), System
+* ✅ Calendar, Memory, Docs, Usage, Team (mission, people, devices), System
 * ✅ System panels for logs, sessions, settings, connection, and custom tools
 * ✅ `POST /events` intake, including `memory.snapshot` and `usage.snapshot` daily points (Today, 7 day, and month are summed on read)
 * ✅ Idempotent `seed:demo` and `seed:clear`. A fresh setup does not load sample data.
@@ -344,7 +345,8 @@ Still open:
 
 * Devices have no write route.
 * `GET /usage?period=30d` stays empty. That query is not a window.
-* Provider prices are not in this build.
+* Usage days follow the API process timezone until Launch 8. Memory and calendar stay on America/Chicago.
+* Live provider balances are not in this build.
 
 ## Security notes
 
