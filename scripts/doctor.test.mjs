@@ -25,6 +25,8 @@ import {
   runDoctor,
   gatewayLine,
   gatewayTarget,
+  gatewayUsesBridge,
+  probeGatewayTarget,
   loginState,
   tokenState,
 } from './doctor.mjs'
@@ -361,10 +363,15 @@ test('OpenClaw staying unreachable does not fail the command', () => {
   assert.doesNotMatch(result.lines[10], /^fail /)
 })
 
-test('gateway host defaults to host.docker.internal under Compose and 127.0.0.1 outside it', () => {
+test('gateway status comes from the bridge under Compose and from a direct probe otherwise', async () => {
+  assert.equal(gatewayUsesBridge({}), false)
+  assert.equal(gatewayUsesBridge({ MC_DOCTOR_DOCKER: '0' }), false)
+  assert.equal(gatewayUsesBridge({ MC_DOCTOR_DOCKER: '1' }), true)
+  assert.equal(gatewayUsesBridge({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_PORT: '19001' }), true)
+  assert.equal(gatewayUsesBridge({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_HOST: 'gateway.internal' }), false)
+  assert.equal(gatewayUsesBridge({ OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }), false)
   assert.deepEqual(gatewayTarget({}), { host: '127.0.0.1', port: 18789 })
-  assert.deepEqual(gatewayTarget({ MC_DOCTOR_DOCKER: '0' }), { host: '127.0.0.1', port: 18789 })
-  assert.deepEqual(gatewayTarget({ MC_DOCTOR_DOCKER: '1' }), { host: 'host.docker.internal', port: 18789 })
+  assert.deepEqual(gatewayTarget({ MC_DOCTOR_DOCKER: '1' }), { host: '127.0.0.1', port: 18789 })
   assert.deepEqual(
     gatewayTarget({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }),
     { host: 'gateway.internal', port: 19001 },
@@ -375,10 +382,6 @@ test('gateway host defaults to host.docker.internal under Compose and 127.0.0.1 
   )
   assert.deepEqual(
     gatewayTarget({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_HOST: 'not a host', OPENCLAW_GATEWAY_PORT: '0' }),
-    { host: 'host.docker.internal', port: 18789 },
-  )
-  assert.deepEqual(
-    gatewayTarget({ OPENCLAW_GATEWAY_HOST: 'not a host', OPENCLAW_GATEWAY_PORT: '70000' }),
     { host: '127.0.0.1', port: 18789 },
   )
   assert.equal(
@@ -387,7 +390,23 @@ test('gateway host defaults to host.docker.internal under Compose and 127.0.0.1 
   )
   assert.equal(
     gatewayLine({ MC_DOCTOR_DOCKER: '1' }),
-    'info gateway: Under Compose the gateway probe uses host.docker.internal port 18789. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.',
+    'info gateway: Gateway status is unknown. Gateway status comes from the bridge. Run the bridge to check it.',
+  )
+  assert.equal(
+    gatewayLine({ MC_DOCTOR_DOCKER: '1' }, { state: 'up', host: '127.0.0.1', port: 18789, version: 'OpenClaw 1' }),
+    'info gateway: The bridge reported the gateway up at 127.0.0.1 port 18789. Version OpenClaw 1.',
+  )
+  assert.equal(
+    gatewayLine({ MC_DOCTOR_DOCKER: '1' }, { state: 'down', host: '127.0.0.1', port: 19001 }),
+    'info gateway: The bridge reported the gateway down at 127.0.0.1 port 19001.',
+  )
+  assert.equal(
+    gatewayLine({ OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }, { state: 'down' }),
+    'info gateway: The gateway probe at gateway.internal port 19001 is down.',
+  )
+  assert.equal(
+    gatewayLine({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }, { state: 'up' }),
+    'info gateway: The gateway probe at gateway.internal port 19001 is up.',
   )
   const compose = report(facts({
     env: {
@@ -400,8 +419,40 @@ test('gateway host defaults to host.docker.internal under Compose and 127.0.0.1 
     },
   }))
   assert.equal(compose.code, 0)
-  assert.match(compose.lines[10], /host\.docker\.internal port 18789/)
+  assert.match(compose.lines[10], /Gateway status is unknown/)
+  assert.match(compose.lines[10], /Gateway status comes from the bridge\. Run the bridge to check it\./)
+  assert.doesNotMatch(compose.lines[10], /^fail /)
+  const reported = report(facts({
+    env: {
+      HOST: '127.0.0.1',
+      INGEST_TOKEN: 'change-me',
+      PORT: '3000',
+      MC_DOCTOR_DOCKER: '1',
+      DASHBOARD_PASSWORD_HASH: 'scrypt:1',
+      SESSION_SECRET: 'ab',
+    },
+    gateway: { state: 'down', host: '127.0.0.1', port: 18789 },
+  }))
+  assert.equal(reported.code, 0)
+  assert.match(reported.lines[10], /The bridge reported the gateway down at 127\.0\.0\.1 port 18789/)
   assert.equal(hasDashPunctuation(compose.lines.join('\n')), false)
+  assert.equal(hasDashPunctuation(reported.lines.join('\n')), false)
+
+  const stub = net.createServer((socket) => socket.end())
+  await new Promise((resolve) => stub.listen(0, '127.0.0.1', resolve))
+  const port = stub.address().port
+  try {
+    const up = await probeGatewayTarget({ host: '127.0.0.1', port })
+    assert.equal(up.state, 'up')
+    const closed = net.createServer()
+    await new Promise((resolve) => closed.listen(0, '127.0.0.1', resolve))
+    const closedPort = closed.address().port
+    await new Promise((resolve) => closed.close(resolve))
+    const down = await probeGatewayTarget({ host: '127.0.0.1', port: closedPort })
+    assert.equal(down.state, 'down')
+  } finally {
+    await new Promise((resolve) => stub.close(resolve))
+  }
   assert.equal(
     effectiveEnv({ OPENCLAW_GATEWAY_HOST: 'gateway.internal' }, { OPENCLAW_GATEWAY_HOST: '10.0.0.4' }).OPENCLAW_GATEWAY_HOST,
     '10.0.0.4',
@@ -410,6 +461,53 @@ test('gateway host defaults to host.docker.internal under Compose and 127.0.0.1 
     effectiveEnv({ OPENCLAW_GATEWAY_HOST: 'gateway.internal' }, { OPENCLAW_GATEWAY_HOST: '  ' }).OPENCLAW_GATEWAY_HOST,
     'gateway.internal',
   )
+})
+
+test('docker doctor reads gateway state from /system and an override probes directly', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-gw-'))
+  const gateway = net.createServer((socket) => socket.end())
+  await new Promise((resolve) => gateway.listen(0, '127.0.0.1', resolve))
+  const gatewayPort = gateway.address().port
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    if (req.url === '/system') {
+      res.end(JSON.stringify({
+        gateway: { state: 'down', host: '127.0.0.1', port: 18789, up: false },
+      }))
+      return
+    }
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  const envFile = [
+    'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
+    'PORT=3000',
+    `MC_API_PORT=${port}`,
+    'HOST=127.0.0.1',
+    'INGEST_TOKEN=abc123',
+    'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
+    'SESSION_SECRET=001122',
+    '',
+  ].join('\n')
+  try {
+    writeFileSync(path.join(dir, '.env'), envFile)
+    const fromReport = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
+    assert.equal(fromReport.code, 0, fromReport.lines.join('\n'))
+    assert.match(fromReport.lines[10], /The bridge reported the gateway down at 127\.0\.0\.1 port 18789/)
+    const direct = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      OPENCLAW_GATEWAY_HOST: '127.0.0.1',
+      OPENCLAW_GATEWAY_PORT: String(gatewayPort),
+    })
+    assert.equal(direct.code, 0, direct.lines.join('\n'))
+    assert.match(direct.lines[10], new RegExp(`The gateway probe at 127\\.0\\.0\\.1 port ${gatewayPort} is up`))
+    for (const line of [...fromReport.lines, ...direct.lines]) assert.equal(hasDashPunctuation(line), false, line)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    await new Promise((resolve) => gateway.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('bridge sync age uses the limit and treats an equal age as recent', () => {

@@ -29,6 +29,8 @@
         "HEALTH_TICK_MS",
         "OPENCLAW_GATEWAY_HOST",
         "OPENCLAW_GATEWAY_PORT",
+        "MC_COMPOSE",
+        "GATEWAY_STATUS_MAX_AGE_MS",
         "OPENCLAW_LOG_DIR",
         "OPENCLAW_CONFIG_PATH",
         "GIT_SHA",

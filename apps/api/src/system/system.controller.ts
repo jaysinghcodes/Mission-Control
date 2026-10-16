@@ -1,19 +1,31 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Optional } from '@nestjs/common';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
+import { PrismaService } from '../prisma/prisma.service';
 import { probeGateway } from './gateway-probe';
+import {
+  configuredGatewayPort,
+  gatewayMaxAgeMs,
+  gatewayStatusFromProbe,
+  gatewayStatusFromReport,
+  usesBridgeReport,
+  type GatewayReport,
+  type GatewayStatus,
+} from './gateway-status';
 
 /**
- * SystemController. OS metrics for the machine that runs this API, plus a
- * TCP probe of the configured OpenClaw gateway.
+ * SystemController. OS metrics for the machine that runs this API, plus
+ * the OpenClaw gateway status.
  *
- * CPU, memory, disk, and the gateway result are measured on this request.
- * The gateway target is OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT.
- * Outside Compose those default to 127.0.0.1 and 18789. Compose sets the
- * host default to host.docker.internal.
+ * CPU, memory, and disk are measured on this request. Native installs probe
+ * OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT (defaults 127.0.0.1 and
+ * 18789). Under Compose, with the host blank, status comes from the latest
+ * gateway.snapshot. An explicit host still probes that address.
  */
 @Controller('system')
 export class SystemController {
+  constructor(@Optional() private readonly prisma?: PrismaService) {}
+
   @Get()
   async system() {
     const cores = os.cpus().length;
@@ -38,7 +50,7 @@ export class SystemController {
       // df unavailable. Leave zeros so the UI shows measured zeros.
     }
 
-    const gateway = await probeGateway();
+    const gateway = await this.gatewayStatus();
 
     return {
       cpu: {
@@ -65,5 +77,43 @@ export class SystemController {
       apiUptimeSeconds: Math.round(process.uptime()),
       ts: Date.now(),
     };
+  }
+
+  private async gatewayStatus(): Promise<GatewayStatus> {
+    if (!usesBridgeReport(process.env)) {
+      const probe = await probeGateway();
+      return gatewayStatusFromProbe(probe, Date.now());
+    }
+    return gatewayStatusFromReport(
+      await this.latestGatewayReport(),
+      Date.now(),
+      gatewayMaxAgeMs(process.env),
+      configuredGatewayPort(process.env),
+    );
+  }
+
+  private async latestGatewayReport(): Promise<GatewayReport | null> {
+    if (!this.prisma) return null;
+    try {
+      const row = await this.prisma.activityEvent.findFirst({
+        where: { type: 'gateway.snapshot' },
+        orderBy: { ts: 'desc' },
+        select: { payload: true },
+      });
+      const payload = row?.payload;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return null;
+      }
+      return {
+        up: payload.up,
+        host: payload.host,
+        port: payload.port,
+        checkedAt: payload.checkedAt,
+        latencyMs: payload.latencyMs,
+        version: payload.version,
+      };
+    } catch {
+      return null;
+    }
   }
 }

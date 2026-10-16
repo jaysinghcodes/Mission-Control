@@ -563,7 +563,7 @@ export async function gather(root, processEnv = process.env) {
     databaseFacts(root, env),
     openclawDetail(),
   ])
-  return {
+  const facts = {
     nodeVersion: process.version,
     envExists,
     env,
@@ -572,6 +572,8 @@ export async function gather(root, processEnv = process.env) {
     openclaw,
     bridge: bridgeFacts(root, env, processEnv),
   }
+  facts.gateway = await gatewayReading(facts.env, facts.ports, root)
+  return facts
 }
 
 function portLine(ports, docker = false) {
@@ -645,8 +647,8 @@ function loginLine(env) {
 }
 
 const NATIVE_GATEWAY_HOST = '127.0.0.1'
-const COMPOSE_GATEWAY_HOST = 'host.docker.internal'
 const DEFAULT_GATEWAY_PORT = 18789
+const GATEWAY_UNKNOWN_HINT = 'Gateway status comes from the bridge. Run the bridge to check it.'
 
 function isGatewayHost(value) {
   if (!value || value.length > 253) return false
@@ -663,25 +665,105 @@ function gatewayPort(raw) {
 }
 
 /**
- * Same host rules as apps/api/src/system/gateway-probe.ts, plus the Compose
- * default. Compose injects host.docker.internal when OPENCLAW_GATEWAY_HOST
- * is unset. Native installs keep 127.0.0.1. An explicit host wins in both.
+ * Compose with a blank host reads the bridge report. An explicit host, and
+ * every native install, probes that address. The port is the configured
+ * port on either path. Defaults match apps/api/src/system/gateway-status.ts.
  */
+export function gatewayUsesBridge(env) {
+  const compose = env.MC_DOCTOR_DOCKER === '1' || env.MC_COMPOSE === '1'
+  if (!compose) return false
+  const hostRaw = typeof env.OPENCLAW_GATEWAY_HOST === 'string' ? env.OPENCLAW_GATEWAY_HOST.trim() : ''
+  return !isGatewayHost(hostRaw)
+}
+
 export function gatewayTarget(env) {
   const hostRaw = typeof env.OPENCLAW_GATEWAY_HOST === 'string' ? env.OPENCLAW_GATEWAY_HOST.trim() : ''
-  const fallback = env.MC_DOCTOR_DOCKER === '1' ? COMPOSE_GATEWAY_HOST : NATIVE_GATEWAY_HOST
   return {
-    host: isGatewayHost(hostRaw) ? hostRaw : fallback,
+    host: isGatewayHost(hostRaw) ? hostRaw : NATIVE_GATEWAY_HOST,
     port: gatewayPort(env.OPENCLAW_GATEWAY_PORT),
   }
 }
 
-export function gatewayLine(env) {
+export function gatewayLine(env, reading) {
+  if (gatewayUsesBridge(env)) {
+    const state = reading && reading.state
+    if (state === 'up') {
+      const version = reading.version ? ` Version ${reading.version}.` : ''
+      return `info gateway: The bridge reported the gateway up at ${reading.host} port ${reading.port}.${version}`
+    }
+    if (state === 'down') {
+      return `info gateway: The bridge reported the gateway down at ${reading.host} port ${reading.port}.`
+    }
+    return `info gateway: Gateway status is unknown. ${GATEWAY_UNKNOWN_HINT}`
+  }
   const target = gatewayTarget(env)
-  const lead = env.MC_DOCTOR_DOCKER === '1' && target.host === COMPOSE_GATEWAY_HOST
-    ? 'Under Compose the gateway probe uses host.docker.internal'
-    : `The gateway probe uses ${target.host}`
-  return `info gateway: ${lead} port ${target.port}. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.`
+  if (reading && (reading.state === 'up' || reading.state === 'down')) {
+    return `info gateway: The gateway probe at ${target.host} port ${target.port} is ${reading.state}.`
+  }
+  return `info gateway: The gateway probe uses ${target.host} port ${target.port}. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.`
+}
+
+export function probeGatewayTarget(target, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (up) => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve({ state: up ? 'up' : 'down', host: target.host, port: target.port })
+    }
+    const socket = net.connect({ host: target.host, port: target.port })
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+  })
+}
+
+function parseGatewayBody(text) {
+  try {
+    const body = JSON.parse(text)
+    const gw = body && body.gateway
+    if (!gw || (gw.state !== 'up' && gw.state !== 'down' && gw.state !== 'unknown')) return null
+    return {
+      state: gw.state,
+      host: typeof gw.host === 'string' ? gw.host : NATIVE_GATEWAY_HOST,
+      port: Number.isInteger(gw.port) ? gw.port : DEFAULT_GATEWAY_PORT,
+      version: typeof gw.version === 'string' ? gw.version : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+const DOCKER_SYSTEM_JS =
+  'fetch("http://127.0.0.1:3000/system").then(async (res) => { const text = await res.text(); process.stdout.write(text); process.exit(res.ok ? 0 : 1); }).catch(() => process.exit(1))'
+
+function dockerLoopbackSystem(root) {
+  try {
+    const result = spawnSync('docker', ['compose', 'exec', '-T', 'api', 'node', '-e', DOCKER_SYSTEM_JS], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 8000,
+    })
+    return { status: result.status === 0 ? 200 : 0, text: result.stdout || '' }
+  } catch {
+    return { status: 0, text: '' }
+  }
+}
+
+async function gatewayReading(env, ports, root) {
+  const target = gatewayTarget(env)
+  if (!gatewayUsesBridge(env)) return probeGatewayTarget(target)
+  const unknown = { state: 'unknown', host: NATIVE_GATEWAY_HOST, port: target.port }
+  const healthUrl = ports?.health?.url
+  if (!healthUrl) return unknown
+  const systemUrl = healthUrl.replace(/\/health$/, '/system')
+  let res = await httpGet(systemUrl)
+  if (res.status === 401 && env.MC_DOCTOR_DOCKER === '1' && root) {
+    res = dockerLoopbackSystem(root)
+  }
+  return parseGatewayBody(res.text) ?? unknown
 }
 
 function bridgeLine(bridge) {
@@ -733,7 +815,7 @@ export function report(facts) {
     healthLine(facts.ports),
     `info openclaw: ${facts.openclaw}`,
     bridgeLine(facts.bridge),
-    gatewayLine(facts.env),
+    gatewayLine(facts.env, facts.gateway),
   ]
   const code = lines.some((line) => line.startsWith('fail ')) ? 1 : 0
   return { lines, code }

@@ -82,12 +82,15 @@ services:
       # means ./data/docs) and the api read the same files. A missing folder is
       # an empty Docs page, not a crash.
       DOCS_ROOT: /data/docs
-      # Gateway probe. Inside this container, 127.0.0.1 is the api itself.
-      # The default host is host.docker.internal so a gateway on the machine
-      # is reachable. extra_hosts below maps that name for Linux. A value
-      # set in the shell or in .env still wins. The port default is 18789.
-      OPENCLAW_GATEWAY_HOST: ${OPENCLAW_GATEWAY_HOST:-host.docker.internal}
-      OPENCLAW_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-18789}
+      # Compose marker. A blank gateway host means status comes from the
+      # bridge, which runs on the host and checks 127.0.0.1. Set the host
+      # to probe that address from this container instead.
+      MC_COMPOSE: "1"
+      OPENCLAW_GATEWAY_HOST: ${OPENCLAW_GATEWAY_HOST:-}
+      OPENCLAW_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-}
+      # A bridge report older than this many milliseconds is Unknown.
+      # Blank, 0, or an invalid number uses 600000 (10 minutes).
+      GATEWAY_STATUS_MAX_AGE_MS: ${GATEWAY_STATUS_MAX_AGE_MS:-600000}
       OPENCLAW_LOG_DIR: ${OPENCLAW_LOG_DIR:-/tmp/openclaw}
       # Server timezone when Settings has not saved one. Unset stays UTC.
       TZ: ${TZ:-UTC}

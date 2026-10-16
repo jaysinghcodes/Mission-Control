@@ -61,6 +61,9 @@ export class IngestController {
         HttpStatus.BAD_REQUEST,
       );
     }
+    if (type === 'gateway.snapshot') {
+      this.assertGatewayPayload(payload);
+    }
 
     // Persist for history (Activity page loads recent events on mount).
     await this.prisma.activityEvent.create({
@@ -114,6 +117,25 @@ export class IngestController {
   private isKnownType(type: string): type is ActivityEventType {
     return KNOWN_TYPES.includes(type as ActivityEventType);
   }
+
+  /** Reject a gateway check that is not a real up or down result. */
+  private assertGatewayPayload(payload: Record<string, unknown>): void {
+    if (typeof payload.up !== 'boolean') {
+      throw new HttpException(
+        'gateway.snapshot requires up to be true or false',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (
+      typeof payload.checkedAt !== 'number' ||
+      !Number.isFinite(payload.checkedAt)
+    ) {
+      throw new HttpException(
+        'gateway.snapshot requires checkedAt to be a number',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
 }
 
 /** Single source of truth for accepted event names (mirrors the gateway union). */
@@ -140,5 +162,6 @@ const KNOWN_TYPES: ActivityEventType[] = [
   'approvals.snapshot',
   'memory.snapshot',
   'models.snapshot',
+  'gateway.snapshot',
   'agent.status',
 ];

@@ -9,7 +9,7 @@ import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import { providerLabel } from '../lib/provider-label'
-import { gatewayLine } from '../lib/gateway-status'
+import { gatewayLine, systemHeadline, systemSummaryLead } from '../lib/gateway-status'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
 import Logs from './Logs'
@@ -40,6 +40,7 @@ interface GatewayResp {
   port: number
   up: boolean
   latencyMs: number | null
+  state?: 'up' | 'down' | 'unknown'
 }
 interface SystemResp {
   cpu: { pct: number }
@@ -204,8 +205,9 @@ export default function System() {
   const periodSpend = selected?.totalCost
   const periodName = PERIODS[period].label.toLowerCase()
   const summary = health.data
-    ? `${health.data.status === 'ok' ? 'All systems normal' : 'Degraded'}${typeof periodSpend === 'number' ? ` · ${money(periodSpend)} spent ${periodName}` : any ? '' : ' · no spend reported'}`
+    ? `${systemSummaryLead(health.data.status === 'ok', sys.data?.gateway)}${typeof periodSpend === 'number' ? ` · ${money(periodSpend)} spent ${periodName}` : any ? '' : ' · no spend reported'}`
     : 'Checking health…'
+  const headline = systemHeadline(health.data ? health.data.status === 'ok' : null, sys.data?.gateway)
   const bridge = ingestFact(health.data?.lastIngestAt)
 
   const issue = (activity.data?.events ?? [])
@@ -242,12 +244,12 @@ export default function System() {
       <PageHeader title="System" summary={summary} />
 
       <SoftCard className="flex flex-wrap items-center gap-6 px-6 py-5">
-        <span className="grid h-11 w-11 place-items-center rounded-full bg-mc-greenbg text-lg text-mc-greentext">
-          {health.data?.status === 'ok' ? '✓' : '…'}
+        <span className={`grid h-11 w-11 place-items-center rounded-full text-lg ${headline === "Everything's running" ? 'bg-mc-greenbg text-mc-greentext' : 'bg-mc-inner text-mc-faint'}`}>
+          {headline === "Everything's running" ? '✓' : '…'}
         </span>
         <div className="min-w-[180px]">
-          <div className="text-[19px] font-bold tracking-tight">
-            {health.data ? (health.data.status === 'ok' ? "Everything's running" : 'The API is unhappy') : 'Checking…'}
+          <div className="text-[19px] font-bold tracking-tight" data-testid="system-headline">
+            {headline}
           </div>
           <div className="text-[12.5px] text-mc-sub">
             {health.data ? `Database ${health.data.database}` : 'Waiting for /health'}

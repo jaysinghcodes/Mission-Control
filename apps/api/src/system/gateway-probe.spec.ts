@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'net';
+import { PrismaService } from '../prisma/prisma.service';
 import { gatewayTarget, probeGateway } from './gateway-probe';
 import { SystemController } from './system.controller';
 
@@ -18,12 +19,15 @@ function close(server: Server): Promise<void> {
 describe('gateway probe', () => {
   const savedHost = process.env.OPENCLAW_GATEWAY_HOST;
   const savedPort = process.env.OPENCLAW_GATEWAY_PORT;
+  const savedCompose = process.env.MC_COMPOSE;
 
   afterEach(() => {
     if (savedHost === undefined) delete process.env.OPENCLAW_GATEWAY_HOST;
     else process.env.OPENCLAW_GATEWAY_HOST = savedHost;
     if (savedPort === undefined) delete process.env.OPENCLAW_GATEWAY_PORT;
     else process.env.OPENCLAW_GATEWAY_PORT = savedPort;
+    if (savedCompose === undefined) delete process.env.MC_COMPOSE;
+    else process.env.MC_COMPOSE = savedCompose;
   });
 
   it('defaults to 127.0.0.1 port 18789', () => {
@@ -55,6 +59,7 @@ describe('gateway probe', () => {
       socket.end();
     });
     const port = await listen(server);
+    delete process.env.MC_COMPOSE;
     process.env.OPENCLAW_GATEWAY_HOST = '127.0.0.1';
     process.env.OPENCLAW_GATEWAY_PORT = String(port);
     try {
@@ -62,6 +67,8 @@ describe('gateway probe', () => {
       expect(body.gateway.host).toBe('127.0.0.1');
       expect(body.gateway.port).toBe(port);
       expect(body.gateway.up).toBe(true);
+      expect(body.gateway.state).toBe('up');
+      expect(body.gateway.source).toBe('probe');
       expect(typeof body.gateway.latencyMs).toBe('number');
     } finally {
       await close(server);
@@ -79,5 +86,67 @@ describe('gateway probe', () => {
     expect(result.latencyMs).toBeNull();
     expect(result.host).toBe('127.0.0.1');
     expect(result.port).toBe(port);
+  });
+
+  it('under Compose uses the bridge report and does not probe the container', async () => {
+    process.env.MC_COMPOSE = '1';
+    delete process.env.OPENCLAW_GATEWAY_HOST;
+    const checkedAt = Date.now();
+    const findFirst = jest.fn().mockResolvedValue({
+      payload: {
+        up: true,
+        host: '127.0.0.1',
+        port: 18789,
+        checkedAt,
+        latencyMs: 2,
+        version: 'OpenClaw 1',
+      },
+    });
+    const body = await new SystemController({
+      activityEvent: { findFirst },
+    } as unknown as PrismaService).system();
+    expect(findFirst).toHaveBeenCalled();
+    expect(body.gateway).toMatchObject({
+      state: 'up',
+      source: 'bridge',
+      host: '127.0.0.1',
+      port: 18789,
+      version: 'OpenClaw 1',
+    });
+  });
+
+  it('under Compose with no report is Unknown, not Down', async () => {
+    process.env.MC_COMPOSE = '1';
+    delete process.env.OPENCLAW_GATEWAY_HOST;
+    const body = await new SystemController({
+      activityEvent: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as unknown as PrismaService).system();
+    expect(body.gateway.state).toBe('unknown');
+    expect(body.gateway.up).toBe(false);
+    expect(body.gateway.source).toBe('bridge');
+  });
+
+  it('an explicit host under Compose probes that host and ignores the report', async () => {
+    const server = createServer((socket) => {
+      socket.end();
+    });
+    const port = await listen(server);
+    process.env.MC_COMPOSE = '1';
+    process.env.OPENCLAW_GATEWAY_HOST = '127.0.0.1';
+    process.env.OPENCLAW_GATEWAY_PORT = String(port);
+    const findFirst = jest.fn().mockResolvedValue({
+      payload: { up: false, host: '127.0.0.1', port: 1, checkedAt: Date.now() },
+    });
+    try {
+      const body = await new SystemController({
+        activityEvent: { findFirst },
+      } as unknown as PrismaService).system();
+      expect(findFirst).not.toHaveBeenCalled();
+      expect(body.gateway.state).toBe('up');
+      expect(body.gateway.source).toBe('probe');
+      expect(body.gateway.port).toBe(port);
+    } finally {
+      await close(server);
+    }
   });
 });

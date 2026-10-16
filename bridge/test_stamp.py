@@ -1,11 +1,14 @@
 """A successful sync records a unix timestamp. A dry run does not."""
 import importlib.util
+import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 BRIDGE = Path(__file__).resolve().parent / "mc-bridge-sync.py"
@@ -59,27 +62,52 @@ class StampTest(unittest.TestCase):
             stub.write_text("#!/bin/sh\necho 'stub openclaw' >&2\nexit 1\n", encoding="utf-8")
             stub.chmod(0o755)
             env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-            real = subprocess.run(
-                [sys.executable, str(BRIDGE)],
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(real.returncode, 0, real.stderr)
-            self.assertFalse(stamp.exists())
 
-            empty = Path(tmp) / "empty-openclaw"
-            empty.mkdir()
-            missed = subprocess.run(
-                [sys.executable, str(BRIDGE), "--from-dir", str(empty)],
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(missed.returncode, 0, missed.stderr)
-            self.assertFalse(stamp.exists())
+            class Handler(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    length = int(self.headers.get("Content-Length", "0"))
+                    self.server.bodies.append(self.rfile.read(length))
+                    self.server.token = self.headers.get("x-ingest-token")
+                    self.send_response(202)
+                    self.end_headers()
+
+                def log_message(self, fmt, *args):
+                    return
+
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            httpd.bodies = []
+            httpd.token = None
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            env["MC_API_URL"] = f"http://127.0.0.1:{httpd.server_address[1]}"
+            try:
+                real = subprocess.run(
+                    [sys.executable, str(BRIDGE)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(real.returncode, 0, real.stderr)
+                self.assertFalse(stamp.exists())
+                self.assertTrue(httpd.bodies)
+                posted = json.loads(httpd.bodies[-1].decode())
+                self.assertEqual(posted["type"], "gateway.snapshot")
+                self.assertEqual(httpd.token, "stamp-test-token")
+
+                empty = Path(tmp) / "empty-openclaw"
+                empty.mkdir()
+                missed = subprocess.run(
+                    [sys.executable, str(BRIDGE), "--from-dir", str(empty)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(missed.returncode, 0, missed.stderr)
+                self.assertFalse(stamp.exists())
+            finally:
+                httpd.shutdown()
 
 
 if __name__ == "__main__":
