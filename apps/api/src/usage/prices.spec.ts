@@ -74,6 +74,44 @@ describe('mergePriceTables', () => {
     expect(tokenCost(0, 1_000_000, next.models['openai/gpt-4.1'])).toBe(1);
   });
 
+  it('treats null, blank, and true in the override as missing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mc-prices-'));
+    writeFileSync(
+      join(dir, 'prices.json'),
+      JSON.stringify({
+        models: { 'openai/gpt-4.1': { input: 2, output: 8 } },
+      }),
+    );
+    for (const bad of [null, '', true]) {
+      writeFileSync(
+        join(dir, 'prices.local.json'),
+        JSON.stringify({
+          models: { 'openai/gpt-4.1': { output: bad } },
+        }),
+      );
+      expect(loadPriceTable(dir).models['openai/gpt-4.1']).toEqual({
+        input: 2,
+        output: 8,
+      });
+    }
+    writeFileSync(
+      join(dir, 'prices.local.json'),
+      JSON.stringify({
+        models: {
+          'openai/gpt-4.1': { input: 1, output: null },
+          'custom/not-priced': { input: null, output: true },
+          'custom/blank': { input: '', output: '' },
+        },
+      }),
+    );
+    const table = loadPriceTable(dir);
+    expect(table.models['openai/gpt-4.1']).toEqual({ input: 1, output: 8 });
+    expect(lookupPrice(table, 'custom/not-priced', 'custom')).toBeNull();
+    expect(lookupPrice(table, 'custom/blank', 'custom')).toBeNull();
+    expect(table.models['custom/not-priced']?.input ?? null).not.toBe(0);
+    expect(table.models['custom/blank']?.output ?? null).not.toBe(0);
+  });
+
   it('ignores a missing override file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mc-prices-'));
     writeFileSync(

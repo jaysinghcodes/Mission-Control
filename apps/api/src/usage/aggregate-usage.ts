@@ -110,13 +110,24 @@ function optionalSum(
   return round4(num(a) + num(b));
 }
 
+function hasReportedCost(raw: UsageProvider): boolean {
+  return typeof raw.costUsd === 'number' && Number.isFinite(raw.costUsd);
+}
+
+/**
+ * Same day, bot, and model collapse only when every run reported a cost
+ * or none of them did. A reported costUsd covers that run alone. Tokens
+ * with no costUsd stay on their own row so the price table can price them.
+ * The read path prices each row, then sums.
+ */
 export function mergeProviders(groups: UsageProvider[][]): UsageProvider[] {
   const byKey = new Map<string, UsageProvider>();
   for (const group of groups) {
     for (const raw of group) {
       const model = raw.model || raw.name || 'model';
       const bot = raw.bot || raw.agents?.[0] || '';
-      const key = `${bot}\n${model}`;
+      const reported = hasReportedCost(raw) ? 'reported' : 'open';
+      const key = `${bot}\n${model}\n${reported}`;
       const prev = byKey.get(key) ?? {
         name: raw.name,
         model: raw.model ?? model,

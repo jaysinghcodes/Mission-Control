@@ -123,6 +123,40 @@ class UsagePriceLinesTest(unittest.TestCase):
             ],
         )
 
+    def test_reported_cost_does_not_hide_tokens_without_a_cost(self):
+        payload, _state = self.points([
+            {
+                "name": "run-a",
+                "agent": "Speedy",
+                "model": "deepseek/deepseek-chat",
+                "_updatedMs": NOW,
+                "_cost": None,
+                "_in": 1_000_000,
+                "_out": 1_000_000,
+            },
+            {
+                "name": "run-b",
+                "agent": "Speedy",
+                "model": "deepseek/deepseek-chat",
+                "_updatedMs": NOW,
+                "_cost": 0.5,
+                "_in": 1_000_000,
+                "_out": 0,
+            },
+        ])
+        rows = payload["points"][0]["providers"]
+        self.assertEqual(len(rows), 2)
+        open_line = next(row for row in rows if "costUsd" not in row)
+        reported = next(row for row in rows if row.get("costUsd") == 0.5)
+        self.assertEqual(open_line["bot"], "Speedy")
+        self.assertEqual(open_line["model"], "deepseek/deepseek-chat")
+        self.assertEqual(open_line["tokensIn"], 1_000_000)
+        self.assertEqual(open_line["tokensOut"], 1_000_000)
+        self.assertEqual(reported["bot"], "Speedy")
+        self.assertEqual(reported["model"], "deepseek/deepseek-chat")
+        self.assertEqual(reported["tokensIn"], 1_000_000)
+        self.assertEqual(reported["tokensOut"], 0)
+
     def test_config_local_flag(self):
         names = self.mod.local_provider_names({
             "models": {

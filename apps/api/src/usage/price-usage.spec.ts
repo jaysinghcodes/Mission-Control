@@ -7,6 +7,7 @@ import {
   type RawUsageLine,
 } from './price-usage';
 import { parsePriceTable } from './prices';
+import { usageBucketsFromPayload } from './usage-points';
 
 const TABLE = parsePriceTable({
   models: {
@@ -106,6 +107,30 @@ describe('priceRawLine', () => {
     expect(priced.priceLabel).toBe('Price not set');
     expect(priced.tokensIn).toBe(1234);
     expect(priced.tokensOut).toBe(56);
+  });
+
+  it('does not turn null, blank, or true into a zero price', () => {
+    const table = parsePriceTable({
+      models: {
+        'custom/not-priced': { input: null, output: true },
+        'custom/blank': { input: '', output: '' },
+      },
+    });
+    for (const model of ['custom/not-priced', 'custom/blank']) {
+      const priced = priceRawLine(
+        line({
+          provider: 'custom',
+          model,
+          tokensIn: 1_000_000,
+          tokensOut: 1_000_000,
+        }),
+        table,
+        new Set(),
+      );
+      expect(priced.cost).toBeNull();
+      expect(priced.priceLabel).toBe('Price not set');
+      expect(priced.tokensIn).toBe(1_000_000);
+    }
   });
 });
 
@@ -211,5 +236,82 @@ describe('applyUsagePrices', () => {
     expect(mystery?.priceLabel).toBe('Price not set');
     expect(mystery?.tokensIn).toBe(80);
     expect(mystery?.cost).toBeNull();
+  });
+
+  it('prices each run, then adds a reported cost to the table price', () => {
+    const now = new Date('2026-10-16T18:00:00.000Z');
+    const buckets = usageBucketsFromPayload(
+      {
+        points: [
+          {
+            at: '2026-10-16T15:00:00.000Z',
+            tokensIn: 1_000_000,
+            tokensOut: 1_000_000,
+            providers: [
+              {
+                bot: 'Speedy',
+                provider: 'deepseek',
+                model: 'deepseek/deepseek-chat',
+                tokensIn: 1_000_000,
+                tokensOut: 1_000_000,
+              },
+            ],
+          },
+          {
+            at: '2026-10-16T16:00:00.000Z',
+            totalCost: 0.5,
+            tokensIn: 1_000_000,
+            tokensOut: 0,
+            providers: [
+              {
+                bot: 'Speedy',
+                provider: 'deepseek',
+                model: 'deepseek/deepseek-chat',
+                tokensIn: 1_000_000,
+                tokensOut: 0,
+                costUsd: 0.5,
+              },
+            ],
+          },
+        ],
+      },
+      now,
+      'UTC',
+    );
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0].providers).toHaveLength(2);
+    const agg = aggregateUsage(
+      buckets.map((bucket) => ({
+        at: bucket.at,
+        totalCost: bucket.totalCost,
+        tokensIn: bucket.tokensIn,
+        tokensOut: bucket.tokensOut,
+        providers: bucket.providers,
+      })),
+      '24h',
+      now.getTime(),
+      'UTC',
+    );
+    const priced = applyUsagePrices(
+      agg,
+      parsePriceTable({
+        models: {
+          'deepseek/deepseek-chat': { input: 0.27, output: 1.1 },
+        },
+      }),
+      new Set(),
+    );
+    expect(priced.usage?.totalCost).toBe(1.87);
+    expect(priced.usage?.groups).toEqual([
+      expect.objectContaining({
+        day: '2026-10-16',
+        bot: 'Speedy',
+        model: 'deepseek/deepseek-chat',
+        tokensIn: 2_000_000,
+        tokensOut: 1_000_000,
+        cost: 1.87,
+        priceLabel: null,
+      }),
+    ]);
   });
 });

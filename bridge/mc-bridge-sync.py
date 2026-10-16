@@ -1006,6 +1006,11 @@ def _split_model(model: str) -> Tuple[str, str]:
     return text, text
 
 
+def _line_has_cost(row: Dict[str, Any]) -> bool:
+    value = row.get("costUsd")
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _add_usage_line(
     providers: List[Dict[str, Any]],
     bot: str,
@@ -1015,14 +1020,25 @@ def _add_usage_line(
     tout: float,
     local_names: Set[str],
 ) -> None:
+    """Add one run.
+
+    Rows merge only when both reported a cost or neither did. A costUsd
+    covers that run alone. Tokens with no cost stay on their own row so the
+    API can price them from the table and then add the reported cost.
+    """
     if cost is None and tin == 0 and tout == 0:
         return
     if cost == 0 and tin == 0 and tout == 0:
         return
     provider, full_model = _split_model(model)
     local = provider.lower() in local_names
+    incoming_has_cost = cost is not None
     for row in providers:
-        if row.get("model") == full_model and row.get("bot") == bot:
+        if (
+            row.get("model") == full_model
+            and row.get("bot") == bot
+            and _line_has_cost(row) == incoming_has_cost
+        ):
             row["tokensIn"] = int(row.get("tokensIn") or 0) + int(tin)
             row["tokensOut"] = int(row.get("tokensOut") or 0) + int(tout)
             if cost is not None:

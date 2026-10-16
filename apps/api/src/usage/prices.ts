@@ -32,9 +32,13 @@ export function pricesDir(): string {
   return join(process.cwd(), 'config');
 }
 
+/**
+ * A price is a JSON number. null, an empty string, and true are missing,
+ * not zero. Number(null) is 0, so those values must not be coerced.
+ */
 function finite(value: unknown): number | null {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return value;
 }
 
 export function parsePriceTable(raw: unknown): PriceTable {
