@@ -4,8 +4,8 @@ import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { ensureBundledPeers } from './bundled-proxy';
 import { isLoopbackAddress } from './client-address';
 import {
-  LOGIN_LIMIT_MESSAGE,
   loginBlock,
+  loginLimitMessage,
   recordLoginFailure,
   recordLoginSuccess,
   resetLoginLimits,
@@ -58,7 +58,7 @@ export class AuthController {
         res.setHeader('Retry-After', String(block.retryAfter));
         res.status(429).json({
           statusCode: 429,
-          message: LOGIN_LIMIT_MESSAGE,
+          message: loginLimitMessage(),
         });
         return;
       }

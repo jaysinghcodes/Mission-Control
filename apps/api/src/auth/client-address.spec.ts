@@ -1,7 +1,9 @@
 import {
   clientAddress,
+  isIpAddress,
   isLoopbackAddress,
   isTrustedProxyPeer,
+  requestIsLoopback,
 } from './client-address';
 
 describe('client address', () => {
@@ -15,6 +17,33 @@ describe('client address', () => {
     expect(isLoopbackAddress('::')).toBe(false);
     expect(isLoopbackAddress('10.0.0.8')).toBe(false);
     expect(isLoopbackAddress('172.18.0.3')).toBe(false);
+  });
+
+  it('judges loopback from the socket and never from a forwarded header', () => {
+    expect(isIpAddress('127.0.0.1')).toBe(true);
+    expect(isIpAddress('not-an-ip')).toBe(false);
+    expect(
+      requestIsLoopback({
+        remoteAddress: '10.0.0.8',
+        forwardedFor: '127.0.0.1',
+        realIp: '127.0.0.1',
+        trustedProxies: '10.0.0.8',
+      }),
+    ).toBe(false);
+    expect(
+      clientAddress({
+        remoteAddress: '10.0.0.8',
+        forwardedFor: '127.0.0.1',
+        trustedProxies: '10.0.0.8',
+      }),
+    ).toBe('127.0.0.1');
+    expect(
+      requestIsLoopback({
+        remoteAddress: '127.0.0.1',
+        forwardedFor: '203.0.113.9',
+        trustedProxies: '127.0.0.1',
+      }),
+    ).toBe(true);
   });
 
   it('uses the socket address and ignores X-Forwarded-For by default', () => {

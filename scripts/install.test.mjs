@@ -121,7 +121,7 @@ const SCHEDULE_ENV_KEYS = [
 
 function runInstall(dir, env, args = []) {
   const merged = { ...process.env }
-  for (const key of ['MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', ...SCHEDULE_ENV_KEYS]) {
+  for (const key of ['MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT', ...SCHEDULE_ENV_KEYS]) {
     if (!Object.prototype.hasOwnProperty.call(env, key)) delete merged[key]
   }
   Object.assign(merged, env)
@@ -701,6 +701,7 @@ test('Run A: shell ports with no .env wait on that API port and print that web U
       MC_WEB_PORT: '5880',
       MC_API_PORT: '3880',
       MC_DB_PORT: '55880',
+      MC_REMOTE_PORT: '4011',
     })
     const text = outputOf(result)
     const written = readFileSync(path.join(fx.repo, '.env'), 'utf8')
@@ -709,10 +710,12 @@ test('Run A: shell ports with no .env wait on that API port and print that web U
     assert.doesNotMatch(text, /port 3000/)
     assert.match(text, /pass ports: Port 3880 is already running\./)
     assert.match(text, /Open http:\/\/localhost:5880\/#\/tasks/)
+    assert.match(text, /Tunnel port 4011\./)
     assert.doesNotMatch(text, /localhost:5173/)
     assert.match(written, /^MC_API_PORT=3880$/m)
     assert.match(written, /^MC_WEB_PORT=5880$/m)
     assert.match(written, /^MC_DB_PORT=55880$/m)
+    assert.match(written, /^MC_REMOTE_PORT=4011$/m)
     assert.match(text, /Wrote host port values from the environment into \.env\./)
     assert.equal(/\bfail /.test(text), false, text)
   } finally {
@@ -896,9 +899,11 @@ test('default ports wait on 3000 and print localhost:5173', async () => {
     assert.match(text, /Waiting for the API health check on port 3000\./)
     assert.match(text, /pass ports: Port 3000 is already running\./)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
+    assert.match(text, /Tunnel port 3011\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL above\./)
     assert.doesNotMatch(written, /^MC_API_PORT=/m)
     assert.doesNotMatch(written, /^MC_WEB_PORT=/m)
     assert.doesNotMatch(written, /^MC_DB_PORT=/m)
+    assert.doesNotMatch(written, /^MC_REMOTE_PORT=/m)
     assert.equal(/\bfail /.test(text), false, text)
   } finally {
     health?.child.kill()

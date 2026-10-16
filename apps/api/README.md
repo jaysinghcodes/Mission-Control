@@ -38,8 +38,9 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `LOGIN_FAIL_LIMIT` | `5` | Wrong passwords per client IP before a wait. Loopback is exempt. Ingest is exempt |
 | `LOGIN_WINDOW_SECONDS` | `60` | Failure window and the first wait, in seconds |
 | `LOGIN_BACKOFF_MAX_SECONDS` | `900` | Longest wait, in seconds. Later lockouts double until this cap |
-| `TRUSTED_PROXY` | empty | Extra peers allowed to supply `X-Forwarded-For`. Leave empty for Compose. Do not set the Docker bridge |
-| `BUNDLED_PROXY` | `web` when `MC_COMPOSE=1`, otherwise empty | Hostname or IP of the bundled nginx. Compose sets the web service name. The API resolves it and trusts forwarded client headers only from that peer |
+| `TRUSTED_PROXY` | empty | Extra peers allowed to supply `X-Forwarded-For` for the login bucket. Leave empty for Compose. Do not set the Docker bridge. This does not grant loopback |
+| `BUNDLED_PROXY` | `web` when `MC_COMPOSE=1`, otherwise empty | Hostname or IP of the bundled nginx. Compose sets the web service name. The API resolves it and trusts forwarded client headers, and `X-MC-Remote`, only from that peer |
+| `MC_REMOTE_PORT` | `3011` | Host port for the tunnel listener. Compose publishes it. The API does not read it. SSH uses `MC_WEB_PORT` |
 | `SOCKET_TOKEN` | empty | Retired. The web bundle does not receive a socket token |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |

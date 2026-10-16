@@ -15,6 +15,22 @@ export const DEFAULT_LOGIN_BACKOFF_MAX_SECONDS = 15 * 60;
 export const LOGIN_LIMIT_MESSAGE =
   'Too many tries. Try again in a minute. npm run login:reset clears the lock.';
 
+/** Same wait, with the command that works inside the api container. */
+export const LOGIN_LIMIT_MESSAGE_COMPOSE =
+  'Too many tries. Try again in a minute. docker compose exec api npm run login:reset clears the lock.';
+
+/**
+ * Compose is MC_COMPOSE=1, set by docker-compose.yml. The sentence is
+ * chosen when the request is handled, not baked into one string.
+ */
+export function loginLimitMessage(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env.MC_COMPOSE === '1'
+    ? LOGIN_LIMIT_MESSAGE_COMPOSE
+    : LOGIN_LIMIT_MESSAGE;
+}
+
 export interface LoginLimitConfig {
   limit: number;
   windowSeconds: number;

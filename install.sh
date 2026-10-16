@@ -140,6 +140,10 @@ web_port() {
   resolved_port MC_WEB_PORT "5173"
 }
 
+remote_port() {
+  resolved_port MC_REMOTE_PORT "3011"
+}
+
 api_port() {
   port_or "$(env_value PORT)" "3000"
 }
@@ -202,7 +206,7 @@ apply_shell_ports() {
   local file key value tmp2 line saw wrote
   file="$1"
   wrote=0
-  for key in MC_DB_PORT MC_API_PORT MC_WEB_PORT; do
+  for key in MC_DB_PORT MC_API_PORT MC_WEB_PORT MC_REMOTE_PORT; do
     value="${!key-}"
     if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt 1 ]] || [[ "$value" -gt 65535 ]]; then
       continue
@@ -1349,6 +1353,7 @@ finish() {
   fi
   url="http://localhost:$(web_port)/#/tasks"
   echo "Open ${url}"
+  echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL above."
   echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
   echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
   exit "$doctor_code"

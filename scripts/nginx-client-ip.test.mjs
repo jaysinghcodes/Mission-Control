@@ -26,18 +26,42 @@ function locationBlock(src, name) {
   return match[1]
 }
 
+function serverBlocks(src) {
+  return [...src.matchAll(/server \{([\s\S]*?)\n\}/g)].map((match) => match[1])
+}
+
 test('nginx config sets the client address from the peer and drops client copies', () => {
   const nginx = readFileSync(templatePath, 'utf8')
   const docker = readFileSync(dockerfilePath, 'utf8')
   assert.match(docker, /NGINX_ENVSUBST_FILTER=\^\$\$/)
+  assert.match(docker, /EXPOSE 3011/)
   assert.doesNotMatch(nginx, /\$proxy_add_x_forwarded_for/)
-  assert.doesNotMatch(nginx, /\$http_x_forwarded_for/)
   assert.doesNotMatch(nginx, /\$http_x_real_ip/)
   assert.doesNotMatch(nginx, /\$http_x_forwarded_proto/)
-  for (const block of [locationBlock(nginx, '/api/'), locationBlock(nginx, '/socket\\.io/')]) {
+  const servers = serverBlocks(nginx)
+  assert.equal(servers.length, 2)
+  const local = servers.find((block) => block.includes('listen 5173;'))
+  const remote = servers.find((block) => block.includes('listen 3011;'))
+  assert.ok(local, 'missing local listener')
+  assert.ok(remote, 'missing tunnel listener')
+  assert.doesNotMatch(local, /\$http_x_forwarded_for/)
+  assert.doesNotMatch(local, /\$http_cf_connecting_ip/)
+  for (const block of [locationBlock(local, '/api/'), locationBlock(local, '/socket\\.io/')]) {
+    assert.match(block, /proxy_set_header X-MC-Remote "";/)
+    assert.match(block, /proxy_set_header CF-Connecting-IP "";/)
     assert.match(block, /proxy_set_header X-Real-IP \$remote_addr;/)
     assert.match(block, /proxy_set_header X-Forwarded-For \$remote_addr;/)
     assert.match(block, /proxy_set_header X-Forwarded-Proto \$scheme;/)
+  }
+  assert.match(remote, /\$http_cf_connecting_ip/)
+  assert.match(remote, /\$http_x_forwarded_for/)
+  for (const block of [locationBlock(remote, '/api/'), locationBlock(remote, '/socket\\.io/')]) {
+    assert.match(block, /proxy_set_header X-MC-Remote 1;/)
+    assert.match(block, /proxy_set_header CF-Connecting-IP \$http_cf_connecting_ip;/)
+    assert.match(block, /proxy_set_header X-Forwarded-For \$http_x_forwarded_for;/)
+    assert.match(block, /proxy_set_header X-Real-IP \$remote_addr;/)
+    assert.match(block, /proxy_set_header X-Forwarded-Proto \$scheme;/)
+    assert.doesNotMatch(block, /proxy_set_header X-Forwarded-For \$remote_addr;/)
   }
 })
 
@@ -52,6 +76,8 @@ test('a spoofed client header through nginx is replaced with the peer address', 
       forwardedFor: req.headers['x-forwarded-for'],
       realIp: req.headers['x-real-ip'],
       proto: req.headers['x-forwarded-proto'],
+      remote: req.headers['x-mc-remote'],
+      connecting: req.headers['cf-connecting-ip'],
     })
     res.writeHead(200)
     res.end('ok')
@@ -66,9 +92,11 @@ test('a spoofed client header through nginx is replaced with the peer address', 
     mkdirSync(path.join(dir, name))
   }
   const nginxPort = await freePort()
+  const remotePort = await freePort()
   const template = readFileSync(templatePath, 'utf8')
     .replace('listen 5173;', `listen 127.0.0.1:${nginxPort};`)
-    .replace('root /usr/share/nginx/html;', `root ${path.join(dir, 'html')};`)
+    .replace('listen 3011;', `listen 127.0.0.1:${remotePort};`)
+    .replaceAll('root /usr/share/nginx/html;', `root ${path.join(dir, 'html')};`)
     .replaceAll('http://api:3000', `http://127.0.0.1:${upstreamPort}`)
   writeFileSync(path.join(dir, 'server.conf'), template)
   const conf = path.join(dir, 'nginx.conf')
@@ -111,6 +139,8 @@ test('a spoofed client header through nginx is replaced with the peer address', 
       'x-forwarded-for': `${SPOOF}, 10.1.2.3`,
       'x-real-ip': SPOOF_REAL,
       'x-forwarded-proto': 'https',
+      'x-mc-remote': '0',
+      'cf-connecting-ip': '198.51.100.20',
     }
     const api = await get(`http://127.0.0.1:${nginxPort}/api/health`, headers)
     const socket = await get(`http://127.0.0.1:${nginxPort}/socket.io/?EIO=4`, headers)
@@ -121,11 +151,27 @@ test('a spoofed client header through nginx is replaced with the peer address', 
       assert.equal(hop.forwardedFor, '127.0.0.1', `${hop.url} kept a spoofed chain`)
       assert.equal(hop.realIp, '127.0.0.1', `${hop.url} kept a spoofed X-Real-IP`)
       assert.equal(hop.proto, 'http')
+      assert.equal(hop.remote, undefined, `${hop.url} kept a spoofed tunnel tag`)
+      assert.equal(hop.connecting, undefined, `${hop.url} kept CF-Connecting-IP`)
       assert.equal(String(hop.forwardedFor).includes(SPOOF), false)
       assert.equal(String(hop.realIp).includes(SPOOF_REAL), false)
     }
     assert.equal(seen[0].url, '/health')
     assert.match(seen[1].url, /^\/socket\.io\//)
+
+    seen.length = 0
+    const tunnelApi = await get(`http://127.0.0.1:${remotePort}/api/health`, headers)
+    const tunnelSocket = await get(`http://127.0.0.1:${remotePort}/socket.io/?EIO=4`, headers)
+    assert.equal(tunnelApi, 200, logs)
+    assert.equal(tunnelSocket, 200, logs)
+    assert.equal(seen.length, 2, logs)
+    for (const hop of seen) {
+      assert.equal(hop.remote, '1', `${hop.url} did not force the tunnel tag`)
+      assert.equal(hop.connecting, '198.51.100.20')
+      assert.equal(hop.forwardedFor, `${SPOOF}, 10.1.2.3`)
+      assert.equal(hop.realIp, '127.0.0.1')
+      assert.equal(hop.proto, 'http')
+    }
   } finally {
     child.kill('SIGTERM')
     await new Promise((resolve) => {

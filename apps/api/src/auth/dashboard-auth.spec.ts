@@ -4,6 +4,7 @@ import { networkInterfaces, tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
+import type { NextFunction, Request, Response } from 'express';
 import request from 'supertest';
 import { AppModule } from '../app.module';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
@@ -12,6 +13,7 @@ import { isIngestWrite, skipsSession } from './route-class';
 import { resetBundledPeerCache } from './bundled-proxy';
 import {
   LOGIN_LIMIT_MESSAGE,
+  loginLimitMessage,
   resetLoginLimits,
   setLoginClock,
 } from './login-limit';
@@ -20,9 +22,8 @@ import { listRegisteredRoutes, probePath } from './write-routes';
 
 /**
  * Off loopback, every dashboard read and write is 401 without a session.
- * Supertest connects from 127.0.0.1, so TRUSTED_PROXY names that peer and
- * X-Forwarded-For supplies the client. A second check uses a real non
- * loopback interface when this machine has one, with the header unset.
+ * Supertest connects from 127.0.0.1. x-test-peer replaces that socket
+ * address inside this file only. A forwarded header does not.
  */
 const TOKEN = 'route-coverage-token';
 const PASSWORD = 'dashboard-login-test-password';
@@ -38,7 +39,9 @@ describe('dashboard session', () => {
     process.env.NODE_ENV = 'test';
     process.env.DASHBOARD_PASSWORD_HASH = hashPassword(PASSWORD);
     process.env.SESSION_SECRET = 'dashboard-session-secret';
-    process.env.TRUSTED_PROXY = '127.0.0.1';
+    delete process.env.TRUSTED_PROXY;
+    delete process.env.BUNDLED_PROXY;
+    delete process.env.MC_COMPOSE;
     process.env.LOGIN_FAIL_LIMIT = '5';
     process.env.LOGIN_WINDOW_SECONDS = '60';
     process.env.LOGIN_BACKOFF_MAX_SECONDS = '900';
@@ -49,6 +52,16 @@ describe('dashboard session', () => {
       imports: [AppModule],
     }).compile();
     app = moduleRef.createNestApplication();
+    app.use((req: Request, _res: Response, next: NextFunction) => {
+      const peer = req.header('x-test-peer');
+      if (peer) {
+        Object.defineProperty(req.socket, 'remoteAddress', {
+          configurable: true,
+          value: peer,
+        });
+      }
+      next();
+    });
     await app.init();
   }, 30000);
 
@@ -64,7 +77,7 @@ describe('dashboard session', () => {
       'get' | 'post' | 'put' | 'patch' | 'delete';
     const req = request(app.getHttpServer())
       [verb](path)
-      .set('x-forwarded-for', REMOTE);
+      .set('x-test-peer', REMOTE);
     if (verb !== 'get') req.send({});
     return req;
   }
@@ -97,7 +110,7 @@ describe('dashboard session', () => {
     expect(open.status).toBe(401);
     const allowed = await request(app.getHttpServer())
       .post('/events')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .set('x-ingest-token', TOKEN)
       .send({ type: 'health.tick', payload: {} });
     expect(allowed.status).not.toBe(401);
@@ -113,26 +126,26 @@ describe('dashboard session', () => {
       .get('/sessions')
       .set('x-forwarded-for', REMOTE);
     expect(spoofed.status).not.toBe(401);
-    process.env.TRUSTED_PROXY = '127.0.0.1';
+    delete process.env.TRUSTED_PROXY;
   });
 
   it('logs in with the password, then reads /sessions, and logout closes it', async () => {
     const wrong = await request(app.getHttpServer())
       .post('/auth/login')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .send({ password: 'nope' });
     expect(wrong.status).toBe(401);
     expect(wrong.body).toEqual({ statusCode: 401, message: 'unauthorized' });
 
     const status = await request(app.getHttpServer())
       .get('/auth/session')
-      .set('x-forwarded-for', REMOTE);
+      .set('x-test-peer', REMOTE);
     expect(status.status).toBe(200);
     expect(status.body).toEqual({ authenticated: false, loginRequired: true });
 
     const login = await request(app.getHttpServer())
       .post('/auth/login')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .send({ password: PASSWORD });
     expect(login.status).toBe(204);
     const line = headerLine(login.headers['set-cookie']);
@@ -144,7 +157,7 @@ describe('dashboard session', () => {
     const cookie = line.split(';')[0];
     const read = await request(app.getHttpServer())
       .get('/sessions')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .set('Cookie', cookie);
     expect(read.status).not.toBe(401);
 
@@ -156,7 +169,7 @@ describe('dashboard session', () => {
 
     const logout = await request(app.getHttpServer())
       .post('/auth/logout')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .set('Cookie', cookie);
     expect(logout.status).toBe(204);
     const cleared = headerLine(logout.headers['set-cookie']);
@@ -164,7 +177,7 @@ describe('dashboard session', () => {
 
     const copied = await request(app.getHttpServer())
       .get('/sessions')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .set('Cookie', cookie);
     expect(copied.status).toBe(401);
     expect(copied.body).toEqual({ statusCode: 401, message: 'unauthorized' });
@@ -186,7 +199,7 @@ describe('dashboard session', () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as { message?: string };
     expect(body.message).toBe('unauthorized');
-    process.env.TRUSTED_PROXY = '127.0.0.1';
+    delete process.env.TRUSTED_PROXY;
   });
 
   it('does not revoke when a remote logout has no session, and disconnects sockets when it does', async () => {
@@ -197,24 +210,24 @@ describe('dashboard session', () => {
 
     const anonymous = await request(app.getHttpServer())
       .post('/auth/logout')
-      .set('x-forwarded-for', REMOTE);
+      .set('x-test-peer', REMOTE);
     expect(anonymous.status).toBe(204);
     expect(spy).not.toHaveBeenCalled();
     const still = await request(app.getHttpServer())
       .get('/sessions')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .set('Cookie', cookie);
     expect(still.status).not.toBe(401);
 
     const logout = await request(app.getHttpServer())
       .post('/auth/logout')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .set('Cookie', cookie);
     expect(logout.status).toBe(204);
     expect(spy).toHaveBeenCalled();
     const copied = await request(app.getHttpServer())
       .get('/sessions')
-      .set('x-forwarded-for', REMOTE)
+      .set('x-test-peer', REMOTE)
       .set('Cookie', cookie);
     expect(copied.status).toBe(401);
     expect(freshProcessAccepts(cookie)).toBe(false);
@@ -245,13 +258,13 @@ describe('dashboard session', () => {
       for (let i = 0; i < 5; i += 1) {
         const wrong = await request(app.getHttpServer())
           .post('/auth/login')
-          .set('x-forwarded-for', ip)
+          .set('x-test-peer', ip)
           .send({ password: 'nope' });
         expect(wrong.status).toBe(401);
       }
       const blocked = await request(app.getHttpServer())
         .post('/auth/login')
-        .set('x-forwarded-for', ip)
+        .set('x-test-peer', ip)
         .send({ password: PASSWORD });
       expect(blocked.status).toBe(429);
       expect(blocked.headers['retry-after']).toBe('60');
@@ -261,7 +274,7 @@ describe('dashboard session', () => {
       });
       const during = await request(app.getHttpServer())
         .post('/events')
-        .set('x-forwarded-for', ip)
+        .set('x-test-peer', ip)
         .set('x-ingest-token', TOKEN)
         .send({ type: 'health.tick', payload: {} });
       expect(during.status).not.toBe(401);
@@ -270,7 +283,7 @@ describe('dashboard session', () => {
       now += 60_000;
       const ok = await request(app.getHttpServer())
         .post('/auth/login')
-        .set('x-forwarded-for', ip)
+        .set('x-test-peer', ip)
         .send({ password: PASSWORD });
       expect(ok.status).toBe(204);
     } finally {
@@ -282,9 +295,10 @@ describe('dashboard session', () => {
     const savedProxy = process.env.TRUSTED_PROXY;
     const savedBundled = process.env.BUNDLED_PROXY;
     delete process.env.TRUSTED_PROXY;
-    process.env.BUNDLED_PROXY = '127.0.0.1';
+    process.env.BUNDLED_PROXY = '172.18.0.4';
     resetBundledPeerCache();
     resetLoginLimits();
+    const nginx = '172.18.0.4';
     const remote = '203.0.113.77';
     const host = '172.18.0.1';
     const other = '198.51.100.77';
@@ -300,6 +314,7 @@ describe('dashboard session', () => {
       for (let i = 0; i < 5; i += 1) {
         const wrong = await request(app.getHttpServer())
           .post('/auth/login')
+          .set('x-test-peer', nginx)
           .set('x-forwarded-for', remote)
           .set('x-real-ip', '198.51.100.4')
           .send({ password: 'nope' });
@@ -307,6 +322,7 @@ describe('dashboard session', () => {
       }
       const blocked = await request(app.getHttpServer())
         .post('/auth/login')
+        .set('x-test-peer', nginx)
         .set('x-forwarded-for', remote)
         .send({ password: PASSWORD });
       expect(blocked.status).toBe(429);
@@ -318,6 +334,7 @@ describe('dashboard session', () => {
 
       const owner = await request(app.getHttpServer())
         .post('/auth/login')
+        .set('x-test-peer', nginx)
         .set('x-forwarded-for', host)
         .set('x-real-ip', remote)
         .send({ password: PASSWORD });
@@ -325,6 +342,7 @@ describe('dashboard session', () => {
 
       const second = await request(app.getHttpServer())
         .post('/auth/login')
+        .set('x-test-peer', nginx)
         .set('x-real-ip', other)
         .send({ password: 'nope' });
       expect(second.status).toBe(401);
@@ -332,6 +350,7 @@ describe('dashboard session', () => {
 
       const ingest = await request(app.getHttpServer())
         .post('/events')
+        .set('x-test-peer', nginx)
         .set('x-forwarded-for', remote)
         .set('x-ingest-token', TOKEN)
         .send({ type: 'health.tick', payload: {} });
@@ -339,11 +358,17 @@ describe('dashboard session', () => {
 
       const reset = await request(app.getHttpServer())
         .post('/auth/login-reset')
-        .set('x-forwarded-for', remote)
+        .set('x-test-peer', nginx)
+        .set('x-forwarded-for', '127.0.0.1')
         .set('x-real-ip', '127.0.0.1');
-      expect(reset.status).toBe(204);
+      expect(reset.status).toBe(401);
+      const cleared = await request(app.getHttpServer()).post(
+        '/auth/login-reset',
+      );
+      expect(cleared.status).toBe(204);
       const again = await request(app.getHttpServer())
         .post('/auth/login')
+        .set('x-test-peer', nginx)
         .set('x-forwarded-for', remote)
         .send({ password: PASSWORD });
       expect(again.status).toBe(204);
@@ -354,6 +379,176 @@ describe('dashboard session', () => {
       else process.env.TRUSTED_PROXY = savedProxy;
       if (savedBundled === undefined) delete process.env.BUNDLED_PROXY;
       else process.env.BUNDLED_PROXY = savedBundled;
+    }
+  });
+
+  it('does not open sessions when a trusted proxy forwards 127.0.0.1', async () => {
+    const savedProxy = process.env.TRUSTED_PROXY;
+    const savedBundled = process.env.BUNDLED_PROXY;
+    process.env.TRUSTED_PROXY = '10.0.0.8';
+    delete process.env.BUNDLED_PROXY;
+    resetBundledPeerCache();
+    resetLoginLimits();
+    try {
+      const sessions = await request(app.getHttpServer())
+        .get('/sessions')
+        .set('x-test-peer', '10.0.0.8')
+        .set('x-forwarded-for', '127.0.0.1')
+        .set('x-real-ip', '127.0.0.1');
+      expect(sessions.status).toBe(401);
+      expect(sessions.body).toEqual({
+        statusCode: 401,
+        message: 'unauthorized',
+      });
+      const status = await request(app.getHttpServer())
+        .get('/auth/session')
+        .set('x-test-peer', '10.0.0.8')
+        .set('x-forwarded-for', '127.0.0.1');
+      expect(status.body).toEqual({
+        authenticated: false,
+        loginRequired: true,
+      });
+      for (let i = 0; i < 5; i += 1) {
+        const wrong = await request(app.getHttpServer())
+          .post('/auth/login')
+          .set('x-test-peer', '10.0.0.8')
+          .set('x-forwarded-for', '127.0.0.1')
+          .send({ password: 'nope' });
+        expect(wrong.status).toBe(401);
+      }
+      const blocked = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-test-peer', '10.0.0.8')
+        .set('x-forwarded-for', '127.0.0.1')
+        .send({ password: PASSWORD });
+      expect(blocked.status).toBe(429);
+      const loopback = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-forwarded-for', '127.0.0.1')
+        .send({ password: 'nope' });
+      expect(loopback.status).toBe(401);
+      expect(loopback.headers['retry-after']).toBeUndefined();
+    } finally {
+      resetLoginLimits();
+      resetBundledPeerCache();
+      if (savedProxy === undefined) delete process.env.TRUSTED_PROXY;
+      else process.env.TRUSTED_PROXY = savedProxy;
+      if (savedBundled === undefined) delete process.env.BUNDLED_PROXY;
+      else process.env.BUNDLED_PROXY = savedBundled;
+    }
+  });
+
+  it('keeps tunnel clients off the owner bucket and names the compose reset', async () => {
+    const savedProxy = process.env.TRUSTED_PROXY;
+    const savedBundled = process.env.BUNDLED_PROXY;
+    const savedCompose = process.env.MC_COMPOSE;
+    delete process.env.TRUSTED_PROXY;
+    process.env.BUNDLED_PROXY = '172.18.0.4';
+    process.env.MC_COMPOSE = '1';
+    resetBundledPeerCache();
+    resetLoginLimits();
+    const nginx = '172.18.0.4';
+    const host = '172.18.0.1';
+    const first = '203.0.113.10';
+    const second = '198.51.100.8';
+    const tunnel = (headers: Record<string, string>, password: string) =>
+      request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-test-peer', nginx)
+        .set('x-mc-remote', '1')
+        .set(headers)
+        .send({ password });
+    try {
+      for (let i = 0; i < 5; i += 1) {
+        const wrong = await tunnel(
+          { 'cf-connecting-ip': first, 'x-forwarded-for': host },
+          'nope',
+        );
+        expect(wrong.status).toBe(401);
+      }
+      const blocked = await tunnel({ 'cf-connecting-ip': first }, PASSWORD);
+      expect(blocked.status).toBe(429);
+      expect(blocked.body).toEqual({
+        statusCode: 429,
+        message: loginLimitMessage(),
+      });
+      expect(loginLimitMessage()).toContain(
+        'docker compose exec api npm run login:reset',
+      );
+
+      const owner = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-test-peer', nginx)
+        .set('x-forwarded-for', host)
+        .send({ password: PASSWORD });
+      expect(owner.status).toBe(204);
+
+      const other = await tunnel({ 'cf-connecting-ip': second }, 'nope');
+      expect(other.status).toBe(401);
+      expect(other.headers['retry-after']).toBeUndefined();
+
+      const tailscale = await tunnel(
+        { 'x-forwarded-for': '198.51.100.40, 100.64.0.1' },
+        'nope',
+      );
+      expect(tailscale.status).toBe(401);
+      expect(tailscale.headers['retry-after']).toBeUndefined();
+
+      for (let i = 0; i < 5; i += 1) {
+        const wrong = await tunnel({}, 'nope');
+        expect(wrong.status).toBe(401);
+      }
+      const shared = await tunnel({ 'x-forwarded-for': 'not-an-ip' }, PASSWORD);
+      expect(shared.status).toBe(429);
+
+      for (let i = 0; i < 5; i += 1) {
+        const wrong = await tunnel({ 'cf-connecting-ip': host }, 'nope');
+        expect(wrong.status).toBe(401);
+      }
+      const ownerAgain = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-test-peer', nginx)
+        .set('x-forwarded-for', host)
+        .send({ password: PASSWORD });
+      expect(ownerAgain.status).toBe(204);
+
+      const spoofedSessions = await request(app.getHttpServer())
+        .get('/sessions')
+        .set('x-test-peer', '203.0.113.40')
+        .set('x-mc-remote', '1')
+        .set('cf-connecting-ip', first)
+        .set('x-forwarded-for', '127.0.0.1');
+      expect(spoofedSessions.status).toBe(401);
+
+      const localSpoof = await request(app.getHttpServer())
+        .get('/sessions')
+        .set('x-test-peer', nginx)
+        .set('x-forwarded-for', '127.0.0.1')
+        .set('x-mc-remote', '0');
+      expect(localSpoof.status).toBe(401);
+
+      const tunnelSpoof = await request(app.getHttpServer())
+        .get('/sessions')
+        .set('x-test-peer', nginx)
+        .set('x-mc-remote', '1')
+        .set('x-forwarded-for', '127.0.0.1');
+      expect(tunnelSpoof.status).toBe(401);
+
+      const cleared = await request(app.getHttpServer()).post(
+        '/auth/login-reset',
+      );
+      expect(cleared.status).toBe(204);
+      const after = await tunnel({ 'cf-connecting-ip': first }, PASSWORD);
+      expect(after.status).toBe(204);
+    } finally {
+      resetLoginLimits();
+      resetBundledPeerCache();
+      if (savedProxy === undefined) delete process.env.TRUSTED_PROXY;
+      else process.env.TRUSTED_PROXY = savedProxy;
+      if (savedBundled === undefined) delete process.env.BUNDLED_PROXY;
+      else process.env.BUNDLED_PROXY = savedBundled;
+      if (savedCompose === undefined) delete process.env.MC_COMPOSE;
+      else process.env.MC_COMPOSE = savedCompose;
     }
   });
 
@@ -417,34 +612,34 @@ describe('dashboard session', () => {
       const second = await loginCookie(app);
       const changed = await request(app.getHttpServer())
         .post('/auth/password')
-        .set('x-forwarded-for', REMOTE)
+        .set('x-test-peer', REMOTE)
         .set('Cookie', first)
         .send({ currentPassword: PASSWORD, newPassword: next });
       expect(changed.status).toBe(204);
       for (const cookie of [first, second]) {
         const dead = await request(app.getHttpServer())
           .get('/sessions')
-          .set('x-forwarded-for', REMOTE)
+          .set('x-test-peer', REMOTE)
           .set('Cookie', cookie);
         expect(dead.status).toBe(401);
         expect(freshProcessAccepts(cookie)).toBe(false);
       }
       const oldPassword = await request(app.getHttpServer())
         .post('/auth/login')
-        .set('x-forwarded-for', REMOTE)
+        .set('x-test-peer', REMOTE)
         .send({ password: PASSWORD });
       expect(oldPassword.status).toBe(401);
       const cookie = await loginCookie(app, next);
       expect(freshProcessAccepts(cookie)).toBe(true);
       const wrongCurrent = await request(app.getHttpServer())
         .post('/auth/password')
-        .set('x-forwarded-for', REMOTE)
+        .set('x-test-peer', REMOTE)
         .set('Cookie', cookie)
         .send({ currentPassword: PASSWORD, newPassword: 'another-password' });
       expect(wrongCurrent.status).toBe(401);
       const still = await request(app.getHttpServer())
         .get('/sessions')
-        .set('x-forwarded-for', REMOTE)
+        .set('x-test-peer', REMOTE)
         .set('Cookie', cookie);
       expect(still.status).not.toBe(401);
     } finally {
@@ -459,7 +654,7 @@ async function loginCookie(
 ): Promise<string> {
   const login = await request(app.getHttpServer())
     .post('/auth/login')
-    .set('x-forwarded-for', REMOTE)
+    .set('x-test-peer', REMOTE)
     .send({ password });
   expect(login.status).toBe(204);
   return headerLine(login.headers['set-cookie']).split(';')[0] ?? '';

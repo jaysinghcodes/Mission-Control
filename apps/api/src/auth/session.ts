@@ -3,8 +3,10 @@ import type { Request, Response } from 'express';
 import { currentBundledPeers } from './bundled-proxy';
 import {
   clientAddress,
+  isIpAddress,
+  isLoopbackAddress,
   isTrustedProxyPeer,
-  requestIsLoopback,
+  normalizeIp,
 } from './client-address';
 import { configuredSessionSecret, passwordMatches } from './password';
 import { currentSessionVersion, effectivePasswordHash } from './session-state';
@@ -41,20 +43,37 @@ export interface LoopbackRequest {
     cookie?: string | string[];
     'x-forwarded-for'?: string | string[];
     'x-real-ip'?: string | string[];
+    'x-mc-remote'?: string | string[];
+    'cf-connecting-ip'?: string | string[];
   };
 }
+
+/** One bucket for every tunnel request that names no client. */
+export const SHARED_REMOTE_BUCKET = 'remote';
+
+/**
+ * nginx on MC_REMOTE_PORT sets this to 1 and the local listener clears it.
+ * The API honors it only from the bundled proxy.
+ */
+export const REMOTE_LISTENER_HEADER = 'x-mc-remote';
 
 export function requestLoopback(
   req: LoopbackRequest,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return requestIsLoopback({
-    remoteAddress: req.socket?.remoteAddress,
-    forwardedFor: req.headers['x-forwarded-for'],
-    realIp: req.headers['x-real-ip'],
-    trustedProxies: trustedProxyList(env),
-    bundledPeers: currentBundledPeers(env),
-  });
+  if (trustedRemoteListener(req, env)) return false;
+  return isLoopbackAddress(req.socket?.remoteAddress);
+}
+
+/** True when bundled nginx marked this request as the tunnel listener. */
+export function trustedRemoteListener(
+  req: LoopbackRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (headerFirst(req.headers[REMOTE_LISTENER_HEADER]) !== '1') return false;
+  const peer = normalizeIp(req.socket?.remoteAddress);
+  if (!peer) return false;
+  return currentBundledPeers(env).some((item) => normalizeIp(item) === peer);
 }
 
 export function sessionStatus(
@@ -172,9 +191,10 @@ export function verifySession(
 }
 
 export function peerAddress(
-  req: Pick<Request, 'socket' | 'headers'>,
+  req: LoopbackRequest,
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
+  if (trustedRemoteListener(req, env)) return remoteLimitKey(req);
   return clientAddress({
     remoteAddress: req.socket?.remoteAddress,
     forwardedFor: req.headers['x-forwarded-for'],
@@ -182,6 +202,33 @@ export function peerAddress(
     trustedProxies: trustedProxyList(env),
     bundledPeers: currentBundledPeers(env),
   });
+}
+
+/**
+ * Tunnel bucket. CF-Connecting-IP wins. Otherwise the first
+ * X-Forwarded-For hop. Otherwise one shared remote bucket.
+ * The prefix keeps that bucket off the owner key.
+ */
+function remoteLimitKey(req: LoopbackRequest): string {
+  const cf = firstIp(req.headers['cf-connecting-ip']);
+  if (cf) return `remote:${cf}`;
+  const forwarded = firstIp(req.headers['x-forwarded-for']);
+  if (forwarded) return `remote:${forwarded}`;
+  return SHARED_REMOTE_BUCKET;
+}
+
+function headerFirst(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function firstIp(value: string | string[] | undefined): string | null {
+  const raw = Array.isArray(value) ? value.join(',') : value;
+  if (typeof raw !== 'string') return null;
+  const first = raw.split(',')[0];
+  const ip = normalizeIp(first);
+  if (!ip || !isIpAddress(ip)) return null;
+  return ip;
 }
 
 function readCookie(

@@ -28,7 +28,7 @@ Request shapes are in [API.md](API.md#4-how-you-report-into-mission-control).
 
 ### 4.1 Auth
 
-A missing or wrong `x-ingest-token` on agent ingest is HTTP 401 with `{"statusCode":401,"message":"unauthorized"}`. The same body is a dashboard call that is not from loopback and has no session cookie. Logout bumps a session version, so a copied cookie is 401 after logout and after a restart. Too many wrong dashboard passwords from one client IP return 429. The host and a remote client do not share that count. `npm run login:reset` clears the lock. Under Compose, `docker compose exec api npm run login:reset` runs it in the api container. Loopback is not limited. Ingest is not limited. The 401 line is in [API.md](API.md#41-auth).
+A missing or wrong `x-ingest-token` on agent ingest is HTTP 401 with `{"statusCode":401,"message":"unauthorized"}`. The same body is a dashboard call that is not from loopback and has no session cookie. Logout bumps a session version, so a copied cookie is 401 after logout and after a restart. Too many wrong dashboard passwords from one client IP return 429. The owner on the local web port and a tunnel client on port 3011 do not share that count. `npm run login:reset` clears the lock. Under Compose, `docker compose exec api npm run login:reset` runs it in the api container, and the sign in message names that command. Loopback is the socket address only. Ingest is not limited. The 401 line is in [API.md](API.md#41-auth). SSH uses the local web port. Cloudflare Tunnel and Tailscale Serve use `MC_REMOTE_PORT` (default 3011).
 
 ### 4.2 Events: `POST /events`
 
