@@ -20,10 +20,7 @@ const README_COMMANDS = [
 ]
 
 const COMPOSE_COMMANDS = [
-  'git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control',
-  'cd mission-control',
-  'cp .env.example .env',
-  'docker compose up -d --build',
+  'curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash',
 ]
 
 test('the install block is the README command list', () => {
@@ -31,10 +28,12 @@ test('the install block is the README command list', () => {
   assert.deepEqual(readInstallCommands(markdown), README_COMMANDS)
 })
 
-test('the default install block is docker compose on one port', () => {
+test('the default install block is the install.sh one liner', () => {
   const markdown = readFileSync(path.join(root, 'README.md'), 'utf8')
   assert.deepEqual(readComposeInstallCommands(markdown), COMPOSE_COMMANDS)
+  assert.match(COMPOSE_COMMANDS[0], /install\.sh/)
   assert.equal(COMPOSE_COMMANDS.includes('npm run dev'), false)
+  assert.match(markdown, /bash install\.sh/)
   assert.match(markdown, /http:\/\/localhost:5173\/#\/tasks/)
   assert.match(markdown, /Leave `VITE_API_URL` unset/)
 })

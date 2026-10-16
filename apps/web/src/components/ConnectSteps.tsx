@@ -80,15 +80,15 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'Node.js 20.17+ (or 22.9+). The root `packageManager` is `npm@11.17.0`, which requires `^20.17 || >=22.9`, and git.',
-      'Docker with the Compose plugin. This is the default way to run Postgres, the API, and the web UI. The browser uses one port.',
+      'Docker with the Compose plugin, git, curl, and bash. One command installs Mission Control. The browser uses one port.',
+      'No Docker? The installer says so and uses Node.js 22 (22.9 or newer) and Postgres 16. The advanced path still accepts Node.js 20.17 or newer.',
       // OpenClaw is optional. Tickets work without it, and seed:demo fills sample data.
       'Optional: your OpenClaw instance running. It is the live data source (step 6). Without it, the tickets loop works and `npm run seed:demo` fills sample data.',
     ],
     commands: [
       {
         label: 'Check the tools',
-        cmd: 'node -v\ngit --version\ndocker compose version',
+        cmd: 'git --version\ndocker compose version\ncurl --version',
       },
     ],
     confirmable: true,
@@ -99,11 +99,15 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'Clone the repo (replace `<repo-url>` with the URL you were given), then install dependencies.',
-      // `npm ci` (exact lockfile) mirrors ONBOARDING.md step 2.
-      'Confirm `npm ci` finished without errors.',
+      'One command writes random tokens, starts the stack, runs doctor, and prints the URL.',
+      'A second run keeps the existing `.env`. It does not replace tokens or any other value.',
     ],
-    commands: [{ label: 'Clone + install', cmd: 'git clone <repo-url> mission-control && cd mission-control\nnpm ci' }],
+    commands: [
+      {
+        label: 'Clone and install',
+        cmd: 'git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control && cd mission-control && bash install.sh',
+      },
+    ],
     confirmable: true,
   },
   {
@@ -112,8 +116,8 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'Docker Compose reads exactly one env file: the **root** `.env` (next to `docker-compose.yml`). `apps/api/.env.example` is only a template for non-Docker runs. Copy the root template:',
-      'Then go through every variable with the human who owns the real values. Never invent one (see the secrets note below).',
+      'If you ran the installer, the root `.env` already exists. Leave it. The tokens are already in that file.',
+      'Docker Compose reads exactly one env file: the **root** `.env` (next to `docker-compose.yml`). Copy the template only when `.env` is missing and you are not using `bash install.sh`. Never invent a secret (see the note below).',
     ],
     commands: [{ label: 'Copy the env template', cmd: 'cp .env.example .env' }],
     secrets: true,
@@ -124,11 +128,11 @@ export const STEP_DATA: ConnectStep[] = [
       },
       {
         name: 'INGEST_TOKEN',
-        desc: 'Shared secret for every API write, including POST /events. The dashboard does not put this value in browser code or local storage. The dev server and nginx attach it for you. You MAY generate one with `openssl rand -hex 24`. If it is blank and the API is on loopback, writes stay open and the API logs a warning. If it is blank and the API binds anywhere else, the API refuses to start. Compose fills a blank value with `dev-ingest-token`.',
+        desc: 'Shared secret for every API write, including POST /events. The dashboard does not put this value in browser code or local storage. The dev server and nginx attach it for you. `bash install.sh` writes a random value when `.env` is created and does not replace it later. You MAY generate one with `openssl rand -hex 24`. If it is blank and the API is on loopback, writes stay open and the API logs a warning. If it is blank and the API binds anywhere else, the API refuses to start. A manual blank value still makes Compose use `dev-ingest-token`. The installer does not leave the token blank.',
       },
       {
         name: 'SOCKET_TOKEN',
-        desc: 'Optional. Guards the dashboard’s live socket when the api runs in production. Blank becomes `dev-socket-token` (the stack is loopback-only). If you set a real value, set it **before the first `docker compose build`**. It is baked into the web bundle.',
+        desc: 'Guards the live socket when the API runs in production. `bash install.sh` writes a random value. A blank value becomes `dev-socket-token` only when Compose starts without that installer. If you set a real value yourself, set it **before the first `docker compose build`**. It is baked into the web bundle.',
       },
       {
         name: 'WEB_ORIGIN',
@@ -147,12 +151,12 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'One command starts Postgres, the API, and the web UI. The browser uses port 5173 only. Leave `VITE_API_URL` unset. nginx proxies `/api` and `/socket.io` to the API.',
+      '`bash install.sh` already starts Postgres, the API, and the web UI. The browser uses port 5173 only. Leave `VITE_API_URL` unset. nginx proxies `/api` and `/socket.io` to the API.',
       'The API loads the root `.env` and runs `prisma migrate deploy` before it listens. `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`.',
-      'No Docker? Postgres is still required. The advanced path is in the README: export the root `.env`, `npx prisma generate`, then `npm run dev`. The API migrates on boot. No OpenClaw? `npm run seed:demo` fills sample data.',
+      'No Docker? The installer says so and uses Node.js 22 and Postgres 16. The advanced path is also in the README. No OpenClaw? `npm run seed:demo` fills sample data.',
     ],
     commands: [
-      { label: 'Build + start', cmd: 'docker compose up -d --build' },
+      { label: 'Build and start', cmd: 'docker compose up -d --build' },
       { label: 'Service status', cmd: 'docker compose ps' },
     ],
     confirmable: true,
@@ -180,7 +184,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       'Optional. Skip without OpenClaw. The bridge ships in this repo: `bridge/mc-bridge-sync.py` (Python 3, stdlib only) reads OpenClaw via the `openclaw` CLI and POSTs agents, sessions, calendar, usage, and approvals snapshots plus `run.*` events to `http://127.0.0.1:3000/events`.',
       'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events. Every other write route checks that same header. Set it explicitly. The bridge refuses a blank token.',
-      'Try `--dry-run` first, then a real sync, then schedule it every ~5 min (system cron or an OpenClaw cron job, see `bridge/README.md`). A 401 means the bridge and api disagree on the token (blank `INGEST_TOKEN` means compose uses `dev-ingest-token`).',
+      'Try `--dry-run` first, then a real sync, then schedule it every 5 min (system cron or an OpenClaw cron job, see `bridge/README.md`). A 401 means the bridge and the API disagree on the token. Read `INGEST_TOKEN` from the root `.env`. The installer stores it there and does not print it.',
       'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). Mission Control’s starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these. They cap OpenClaw fan-out.',
     ],
     commands: [

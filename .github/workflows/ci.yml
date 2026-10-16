@@ -88,3 +88,34 @@ jobs:
 
       - name: Run the README install and prove the app
         run: node scripts/fresh-clone.mjs
+
+  install-sh:
+    name: install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - name: Check out a clean tree
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Bash syntax
+        run: bash -n install.sh
+
+      - name: Install shellcheck
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run install.sh with a docker stub
+        run: node --test scripts/install.test.mjs

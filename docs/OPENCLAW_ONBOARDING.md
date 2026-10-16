@@ -25,33 +25,34 @@ Every event is stored in the `ActivityEvent` table and broadcast live over Socke
 
 ## 2. Install and run
 
-Docker Compose is the default. The browser uses one port. OpenClaw is optional. The dashboard runs with no bridge and no OpenClaw CLI.
+Docker Compose is the default. One command writes random tokens, starts the stack, runs doctor, and prints the URL. The browser uses one port. OpenClaw is optional. The dashboard runs with no bridge and no OpenClaw CLI.
 
-Prerequisites: git, Docker, and the Docker Compose plugin. Python 3 only if you will run the bridge.
+Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. Python 3 only if you will run the bridge. When Docker is missing, the installer says so and uses Node.js 22 and Postgres 16.
 
 ```bash
-git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
-cd mission-control
-cp .env.example .env
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
 ```
 
-Then open http://localhost:5173/#/tasks
+From a checkout you already have, run `bash install.sh` in the repo root. That is the same installer.
+
+Then open the URL it prints. The default is http://localhost:5173/#/tasks
+
+`bash install.sh` creates `.env` only when that file is missing. It writes `INGEST_TOKEN` and `SOCKET_TOKEN` as two different random values. It never writes `change-me`. A second run keeps every value already in `.env`. The script does not print the token values. It prints that they live in `.env`.
 
 The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service. nginx proxies `/api` and `/socket.io`, so the page stays on port 5173. Leave `VITE_API_URL` unset.
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. That log line is the process text in `apps/api/src/main.ts`. Compose sets `HOST=0.0.0.0` inside the container.
 
-`npm run doctor` checks the setup from the repo root. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
+The installer runs doctor from the repo root. `npm run doctor` is that same check. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
 
 `npm run seed:demo` fills sample agents, tickets, projects, and usage. It is idempotent and only touches demo rows. It does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. Registered bots and rows you created through the API stay. A fresh setup does not load sample data.
 
 Edit `.env` before you expose the machine. Rules for you:
 
 * **Never invent secrets.** Ask your operator for any real key.
-* `INGEST_TOKEN`: the template value is `change-me`. Replace it with a random value (`openssl rand -hex 24` is fine) and tell your operator. Every write route checks it when it is set, including `POST /events`. The bridge refuses to run if this is blank. The web UI does not receive the value. Vite and nginx attach it.
+* `INGEST_TOKEN`: `bash install.sh` writes a random value when `.env` is missing. The template value is `change-me` on the advanced path. Replace that placeholder if you copied the template by hand (`openssl rand -hex 24` is fine) and tell your operator. Every write route checks it when it is set, including `POST /events`. The bridge refuses to run if this is blank. The web UI does not receive the value. Vite and nginx attach it.
 * `OPERATOR_NAME`: display only. It becomes the default assignee for new tickets and runs.
-* `SOCKET_TOKEN`: optional on the local stack. If set, it must be set before the first build because it is baked into the web bundle.
+* `SOCKET_TOKEN`: `bash install.sh` writes a random value when `.env` is missing. If you set one yourself, set it before the first build because it is baked into the web bundle.
 * `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
 * `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them. Spend on System comes from `usage.snapshot`, not a live provider call.
 * Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
@@ -136,7 +137,7 @@ When `INGEST_TOKEN` is unset and the API is bound to a loopback address (`127.0.
 
 When `INGEST_TOKEN` is unset and the API binds to any other address, the process refuses to start. The message tells you to set `INGEST_TOKEN`. Example from that message: `INGEST_TOKEN=$(openssl rand -hex 24)`.
 
-Compose sets `HOST=0.0.0.0` inside the api container, so a token is required there. If `INGEST_TOKEN` is blank in `.env`, compose gives the api and the web proxy `dev-ingest-token`. Nginx attaches that value on `/api` writes. The browser bundle does not contain the token.
+Compose sets `HOST=0.0.0.0` inside the api container, so a token is required there. `bash install.sh` writes a random `INGEST_TOKEN` before Compose starts, so a fresh install does not use the blank token fallback. If `INGEST_TOKEN` is blank in `.env`, compose gives the api and the web proxy `dev-ingest-token`. Nginx attaches that value on `/api` writes. The browser bundle does not contain the token.
 
 `npm run dev` does the same through the Vite proxy: the page calls same origin `/api/...`, and Vite adds `x-ingest-token` from the environment. Do not put the token in client code, a `VITE_` variable, or local storage.
 

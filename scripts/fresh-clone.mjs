@@ -36,7 +36,7 @@ function bashCommands(section) {
     .filter((line) => line.length > 0 && !line.startsWith('#'))
 }
 
-/** The first bash block. That is `docker compose up -d --build`. */
+/** The first bash block. That is the install.sh one liner. */
 export function readComposeInstallCommands(markdown) {
   const section = installSection(markdown)
   const beforeAdvanced = section.split(new RegExp(`^${ADVANCED_HEADING}\\s*$`, 'm'))[0]
