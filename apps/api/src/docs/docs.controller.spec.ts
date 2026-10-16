@@ -61,7 +61,7 @@ describe('Docs API', () => {
     expect(first).toEqual(
       expect.objectContaining({
         type: 'Spec',
-        author: 'Atlas',
+        author: 'atlas',
       }),
     );
     expect(typeof first.preview).toBe('string');
@@ -84,7 +84,7 @@ describe('Docs API', () => {
       (doc: { slug: string }) => doc.slug === 'notes/Café checklist.md',
     )!;
     expect(cafe.title).toBe('Café checklist');
-    expect(cafe.author).toBe('Echo');
+    expect(cafe.author).toBe('echo');
   });
 
   it('searches by part of a title and filters by type', async () => {

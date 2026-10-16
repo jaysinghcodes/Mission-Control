@@ -4,7 +4,7 @@ import { useApi } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import type { Agent, AgentsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, SearchInput, Face, AgentName, StatusChip, Kicker, EmptyState, Banner } from '../components/shell'
-import { findByLabel, type NamingState } from '../lib/crew'
+import { resolveSticker } from '../lib/crew'
 import { useNaming } from '../lib/naming'
 import { API_URL } from '../lib/apiBase'
 import { formatZoneClock, formatZoneDayHeading, formatZoneSaved } from '../lib/zone-day'
@@ -198,8 +198,8 @@ export default function Memory() {
                 </button>
                 {group.entries.map((row) => {
                   const on = current?.id === row.id
-                  const who = faceFor(row.agent, agents, naming)
-                  const cap = naming.present(who)
+                  const who = faceFor(row.agent, agents)
+                  const cap = naming.present(who.agent)
                   return (
                     <button
                       key={row.id}
@@ -207,7 +207,7 @@ export default function Memory() {
                       onClick={() => setSelected(row.id)}
                       className={`flex w-full gap-3 rounded-[10px] px-3 py-3 text-left ${on ? 'bg-mc-sel' : ''}`}
                     >
-                      <Face agent={who} agents={agents} px={34} />
+                      <Face agent={who.agent} agents={who.agents} px={34} />
                       <span className="min-w-0 flex-1">
                         <span className="flex justify-between gap-2">
                           <span className="truncate text-[14px] font-semibold">{row.title}</span>
@@ -246,15 +246,15 @@ function MemoryReader({
   agents: Agent[]
 }) {
   const naming = useNaming()
-  const who = faceFor(entry.agent, agents, naming)
-  const cap = naming.present(who)
+  const who = faceFor(entry.agent, agents)
+  const cap = naming.present(who.agent)
   return (
     <>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Face agent={who} agents={agents} px={44} />
+          <Face agent={who.agent} agents={who.agents} px={44} />
           <div>
-            <AgentName agent={who} size="md" />
+            <AgentName agent={who.agent} size="md" />
             <div className="text-[12.5px] text-mc-sub">Saved {formatZoneSaved(entry.createdAt)}</div>
           </div>
         </div>
@@ -272,22 +272,24 @@ function MemoryReader({
   )
 }
 
-function faceFor(name: string, roster: Agent[], state: NamingState): Agent {
-  const hit = findByLabel(roster, name, state)
-  if (hit) return hit
+function faceFor(name: string, roster: Agent[]) {
+  const sticker = resolveSticker(roster, name)
+  if (sticker.matched) return { agent: sticker.agent, agents: sticker.agents }
   return {
-    id: name,
-    name,
-    color: '#58A6FF',
-    role: null,
-    status: 'idle',
-    parentId: null,
-    emoji: null,
-    personalityTags: null,
-    currentTask: null,
-    tasksCompleted: 0,
-    totalCost: 0,
-    recentActivity: null,
-    channel: null,
+    agent: {
+      id: sticker.agent.id,
+      name: sticker.agent.name,
+      color: sticker.agent.color,
+      role: null,
+      status: 'idle' as const,
+      parentId: null,
+      emoji: null,
+      personalityTags: null,
+      currentTask: null,
+      tasksCompleted: 0,
+      totalCost: 0,
+      recentActivity: null,
+      channel: null,
+    },
   }
 }

@@ -2,7 +2,7 @@ import { createContext, useContext, type ReactNode } from 'react'
 import { apiSend, useApi } from '../hooks/useApi'
 import {
   assignSeatsInOrder,
-  findByLabel,
+  findById,
   orderByPosition,
   presentAgent,
   type CrewSeat,
@@ -100,7 +100,7 @@ export function useNaming() {
   return {
     ...value,
     present: (agent: NamedAgent): Presented => presentAgent(agent, value),
-    find: <T extends NamedAgent>(agents: readonly T[], label: string | null | undefined) => findByLabel(agents, label, value),
+    find: <T extends NamedAgent>(agents: readonly T[], id: string | null | undefined) => findById(agents, id),
     order: <T extends { id: string; position?: number | null }>(agents: readonly T[]) => orderByPosition(agents),
     assign: assignSeatsInOrder,
   }

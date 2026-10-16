@@ -3,7 +3,7 @@ import { useLiveActivity } from '../hooks/useLiveActivity'
 import { Card, Chip, PillButton, SectionLabel } from '../components/ui'
 import { AgentAvatar } from '../components/AgentAvatar'
 import { activityRailLine } from '../lib/activity-rail'
-import { findByLabel, presentAgent, type NamingState } from '../lib/crew'
+import { presentAgent, resolveSticker, type NamingState } from '../lib/crew'
 import { useNaming } from '../lib/naming'
 
 /**
@@ -17,28 +17,21 @@ interface EventApi { type: string; payload: { name?: string; agent?: string; tit
 interface ActivityResp { events: EventApi[] }
 
 /**
- * Who the row is about. Bridge run events put the agent id on `agent` and
- * the job title on `name`. Prefer the agent so the sticker matches Team.
+ * Sticker for a stream row. The id must be an agent id. A roster hit uses
+ * the live list (so a numbered child stays a numbered child) and that
+ * agent's status. Anything else is a one-off sticker hashed from the
+ * label, not folded into the roster, which would burn a seat.
  */
-function eventSubject(payload: { name?: string; agent?: string; title?: string } | null | undefined): string | null {
-  const agent = payload?.agent?.trim()
-  if (agent) return agent
-  const title = payload?.title?.trim()
-  return title || null
-}
-
-/** Sticker for a stream row. A roster hit uses the live list (so a numbered
- *  child stays a numbered child). Anything else is a one-off sticker hashed
- *  from the label — not folded into the roster, which would burn a seat. */
-function streamFace(label: string | null, roster: readonly Agent[], state: NamingState): {
-  agent: Agent | { id: string; name: string; status: string }
+function streamFace(id: string | null, roster: readonly Agent[], state: NamingState): {
+  agent: Agent | { id: string; name: string; role: null; status: 'idle'; color: string }
   agents?: readonly Agent[]
   text: string
 } {
-  const fallback = label?.trim() || 'openclaw'
-  const hit = findByLabel(roster, fallback, state)
-  if (hit) return { agent: hit, agents: roster, text: presentAgent(hit, state).name }
-  return { agent: { id: fallback, name: fallback, status: 'idle' }, text: fallback }
+  const sticker = resolveSticker(roster, id || 'openclaw')
+  const text = sticker.matched
+    ? presentAgent(sticker.agent, state).name
+    : sticker.agent.name
+  return { agent: sticker.agent, agents: sticker.agents, text }
 }
 
 export default function Activity() {
@@ -52,7 +45,7 @@ export default function Activity() {
     ...(history.data?.events ?? []).map((e) => {
       const line = activityRailLine(e, roster)
       if (!line) return null
-      const face = streamFace(line.actor?.name ?? eventSubject(e.payload), roster, naming)
+      const face = streamFace(line.actor?.id ?? e.payload?.agent ?? null, roster, naming)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
@@ -64,7 +57,7 @@ export default function Activity() {
     ...events.map((e, i) => {
       const line = activityRailLine(e, roster)
       if (!line) return null
-      const face = streamFace(line.actor?.name ?? null, roster, naming)
+      const face = streamFace(line.actor?.id ?? null, roster, naming)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,

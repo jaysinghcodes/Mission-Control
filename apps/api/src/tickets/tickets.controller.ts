@@ -19,6 +19,7 @@ import {
   ticketMoved,
   ticketUpdated,
 } from '../activity/activity-text';
+import { loadAgentNames, resolveIngestAgent } from '../agents/agent-ref';
 import {
   CREATE_STATUSES,
   DEFAULT_CREATE_STATUS,
@@ -196,7 +197,7 @@ export class TicketsController {
     // advisory lock (see allocateKeyAndCreate). Concurrent creates queue on
     // that lock, so each one sees the previous one's committed MC-N.
     const ticket = await this.allocateKeyAndCreate(input);
-    const created = this.activityPayload(
+    const created = await this.activityPayload(
       ticket,
       ticketCreated(ticket.key ?? 'Ticket'),
     );
@@ -382,7 +383,7 @@ export class TicketsController {
     const label = data.status
       ? ticketMoved(key, ticket.status)
       : ticketUpdated(key);
-    const moved = this.activityPayload(ticket, label);
+    const moved = await this.activityPayload(ticket, label);
     await this.persist('run.progress', moved);
     this.gateway.broadcast('run.progress', moved);
     return { ticket, ts: Date.now() };
@@ -520,15 +521,23 @@ export class TicketsController {
     return value; // narrowed by the checks above
   }
 
-  /** Activity names the assignee so Office does not label the row system. */
-  private activityPayload(
+  /**
+   * Activity names the assignee so Office does not label the row system.
+   * The stored assignee is unchanged. The event carries an id when the
+   * name matches exactly one agent, otherwise the original string.
+   */
+  private async activityPayload(
     ticket: { key: string | null; assignee: string | null },
     name: string,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
+    const roster = await loadAgentNames(this.prisma);
+    const agent = ticket.assignee
+      ? (resolveIngestAgent(ticket.assignee, roster) ?? ticket.assignee)
+      : '';
     return {
       name,
       ...(ticket.key ? { ticket: ticket.key } : {}),
-      ...(ticket.assignee ? { agent: ticket.assignee } : {}),
+      ...(agent ? { agent } : {}),
     };
   }
 

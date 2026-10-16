@@ -229,25 +229,46 @@ test('a heartbeat currentTask is the subtitle only when no ticket or run supplie
   assert.equal(blank.working, false)
 })
 
-test('activity names the assignee and never the word system', () => {
-  const roster = [{ id: 'live_quill', name: 'Live Quill', role: 'writer' }]
-  const tickets = [{ id: 't', key: 'MC-200', title: 'Live notes', assignee: 'Live Quill', status: 'qa' }]
-  const fromAgent = live.activityActor({ agent: 'system', ticket: 'MC-200', name: 'ticket MC-200 → qa' }, roster, tickets)
+test('activity names the assignee by id and never the word system', () => {
+  const roster = [
+    { id: 'live_quill', name: 'Live Quill', role: 'writer' },
+    { id: 'forge', name: 'Forge', role: 'engineer' },
+    { id: 'rogue', name: 'Forge', role: 'helper' },
+  ]
+  const tickets = [{ id: 't', key: 'MC-200', title: 'Live notes', assignee: 'live_quill', status: 'qa' }]
+  const fromAgent = live.activityActor({ agent: 'system', ticket: 'MC-200', name: 'ticket MC-200 moved to qa' }, roster, tickets)
+  assert.equal(fromAgent.id, 'live_quill')
   assert.equal(fromAgent.name, 'Live Quill')
   const fromTicket = live.activityActor({ ticket: 'MC-200', name: 'ticket MC-200' }, roster, tickets)
-  assert.equal(fromTicket.name, 'Live Quill')
+  assert.equal(fromTicket.id, 'live_quill')
+  const byDisplayName = live.activityActor(
+    { agent: 'system', ticket: 'MC-200' },
+    roster,
+    [{ id: 't', key: 'MC-200', assignee: 'Live Quill', status: 'qa' }],
+  )
+  assert.equal(byDisplayName.id, 'Live Quill')
+  assert.notEqual(byDisplayName.id, 'live_quill')
   const missing = live.activityActor({ agent: 'system', name: 'health' }, roster, tickets)
   assert.equal(missing, null)
-  const runNamed = live.activityActor({ id: 'r1', name: 'Write' }, roster, tickets, [{ id: 'r1', agent: 'Live Quill' }])
+  const runNamed = live.activityActor({ id: 'r1', name: 'Write' }, roster, tickets, [{ id: 'r1', agent: 'live_quill' }])
   assert.equal(runNamed.id, 'live_quill')
+  const runDisplay = live.activityActor({ id: 'r1', name: 'Write' }, roster, tickets, [{ id: 'r1', agent: 'Live Quill' }])
+  assert.equal(runDisplay.id, 'Live Quill')
   const fromRosterId = live.activityActor(
-    { id: 'live_quill', action: 'register' },
+    { id: 'live_quill', action: 'register', agent: 'Live Quill' },
     roster,
     tickets,
     [{ id: 'live_quill', agent: 'Someone Else' }],
   )
   assert.equal(fromRosterId.name, 'Live Quill')
   assert.equal(fromRosterId.id, 'live_quill')
+  const rogue = live.activityActor({ id: 'rogue', agent: 'Forge', action: 'register' }, roster, [])
+  assert.equal(rogue.id, 'rogue')
+  assert.notEqual(rogue.id, 'forge')
+  const onlyName = live.activityActor({ agent: 'Forge' }, roster, [])
+  assert.equal(onlyName.id, 'Forge')
+  assert.notEqual(onlyName.id, 'forge')
+  assert.notEqual(onlyName.id, 'rogue')
 })
 
 test('Agents, Team, and Office all read deriveLiveWork', async () => {

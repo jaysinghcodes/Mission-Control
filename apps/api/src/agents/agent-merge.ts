@@ -220,12 +220,7 @@ export function planRegister(
   input: RegisterInput,
   now: Date,
 ): RegisterPlan {
-  const nameOwner = existing.find(
-    (row) => row.name === input.name && row.id !== input.id,
-  );
-  if (nameOwner) {
-    return { ok: false, status: 409, message: 'name already exists' };
-  }
+  // Display names are not unique. A second bot named Forge keeps its own id.
   const current = existing.find((row) => row.id === input.id) ?? null;
   if (!current) {
     const position =

@@ -12,6 +12,7 @@ import {
 } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { SnapshotsService } from '../snapshots/snapshots.service';
+import { loadAgentNames, stampActivityAgent } from '../agents/agent-ref';
 
 /**
  * IngestController — external event intake for the live feed.
@@ -65,20 +66,23 @@ export class IngestController {
       this.assertGatewayPayload(payload);
     }
 
+    const roster = await loadAgentNames(this.prisma);
+    const stamped = stampActivityAgent(payload, roster, type);
+
     // Persist for history (Activity page loads recent events on mount).
     await this.prisma.activityEvent.create({
       data: {
         type,
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- Prisma Json rejects Record<string, unknown> and accepts object
-        payload: payload as object,
+        payload: stamped as object,
         source: 'openclaw',
       },
     });
 
     // Snapshot events sync tables instead of just broadcasting.
-    await this.applySnapshot(type, payload);
+    await this.applySnapshot(type, stamped);
 
-    this.gateway.broadcast(type, { ...payload, source: 'openclaw' });
+    this.gateway.broadcast(type, { ...stamped, source: 'openclaw' });
     return { accepted: true, type, ts: Date.now() };
   }
 

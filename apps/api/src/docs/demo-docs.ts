@@ -8,14 +8,16 @@ import {
   writeFile,
 } from 'fs/promises';
 import path from 'path';
+import { demoAgentId } from '../seed/demo-assignees';
 
 /**
  * Sample docs for `npm run seed:demo` (ticket 6).
  *
  * Fixed relative paths, so a second run inserts nothing and does not
- * overwrite a file you already edited. Authors are the seeded cool names
- * (Atlas, Speedy, Quill, …) so the Docs cards resolve Name · Function
- * and the existing robots. The set includes a formatted spec (headings,
+ * overwrite a file you already edited, except an author line that is still
+ * a crew display name. Authors are agent ids (atlas, speedy, quill, …)
+ * so the card sticker matches that bot. A display name does not. The set
+ * includes a formatted spec (headings,
  * a code block, links), a deliberately broken note, and a filename with
  * both a space and a non-ASCII character.
  */
@@ -41,7 +43,27 @@ const ROSTER = [
   'Scout',
 ] as const;
 
-export const DEMO_DOC_AUTHORS: readonly string[] = ROSTER;
+export const DEMO_DOC_AUTHORS: readonly string[] = ROSTER.map((name) =>
+  demoAgentId(name),
+);
+
+function authorLine(contents: string): string | null {
+  return /^author: (.+)$/m.exec(contents)?.[1] ?? null;
+}
+
+/** Previous seeds stored the cool name. Swapping that one line is still the sample file. */
+function legacyAuthorCopy(contents: string): string | null {
+  const id = authorLine(contents);
+  if (!id) return null;
+  const name = ROSTER.find((row) => demoAgentId(row) === id);
+  if (!name) return null;
+  return contents.replace(/^author: .+$/m, `author: ${name}`);
+}
+
+function isSampleBytes(current: string, contents: string): boolean {
+  if (current === contents) return true;
+  return current === legacyAuthorCopy(contents);
+}
 
 export const DEMO_DOCS: DemoDocFile[] = [
   {
@@ -49,7 +71,7 @@ export const DEMO_DOCS: DemoDocFile[] = [
     contents: `---
 title: Ticket 13 · App-wide redesign
 type: Spec
-author: Atlas
+author: atlas
 updated: 2026-10-06T14:12:00.000Z
 ---
 
@@ -79,7 +101,7 @@ Read the [setup guide](#/connect) before changing tokens, and the [Mission Contr
     contents: `---
 title: Morning Brief · today
 type: Brief
-author: Speedy
+author: speedy
 updated: 2026-10-06T13:40:00.000Z
 ---
 
@@ -97,7 +119,7 @@ Nothing else is blocked. Quill has the release note in draft.
     contents: `---
 title: Release notes
 type: Note
-author: Quill
+author: quill
 state: Draft
 updated: 2026-10-06T12:15:00.000Z
 ---
@@ -115,7 +137,7 @@ Draft notes for the next cut. Not published.
     contents: `---
 title: Security review: deploy script
 type: Spec
-author: Aegis
+author: aegis
 state: In review
 updated: 2026-10-05T21:03:00.000Z
 ---
@@ -130,7 +152,7 @@ The preview script does not run unattended. An approval has to land first.
     contents: `---
 title: Projects
 type: Spec
-author: Atlas
+author: atlas
 updated: 2026-10-05T16:20:00.000Z
 ---
 
@@ -144,7 +166,7 @@ A ticket sits in one project or in none. Archive hides the project and keeps the
     contents: `---
 title: Broken on purpose
 type: Note
-author: Sentinel
+author: sentinel
 updated: 2026-10-05T14:05:00.000Z
 ---
 
@@ -176,7 +198,7 @@ function oops() {
     contents: `---
 title: Café checklist
 type: Note
-author: Echo
+author: echo
 updated: 2026-10-03T15:00:00.000Z
 ---
 
@@ -194,7 +216,7 @@ This file is named with a space and an é so the library has to open both.
     contents: `---
 title: Bridge setup guide
 type: Note
-author: Bolt
+author: bolt
 updated: 2026-10-01T16:00:00.000Z
 ---
 
@@ -213,7 +235,9 @@ export interface DemoDocWriteResult {
 /**
  * Create any sample file that is not already there.
  * An existing file is left alone, even when its bytes differ, so a re-seed
- * does not undo an edit. Running twice writes 0.
+ * does not undo an edit. The one exception is an author line that is still
+ * the crew display name: that line becomes the agent id when the rest of
+ * the file still matches the sample. Running twice writes 0.
  */
 export async function writeDemoDocs(root: string): Promise<DemoDocWriteResult> {
   const existing = await stat(root).catch(() => null);
@@ -233,6 +257,11 @@ export async function writeDemoDocs(root: string): Promise<DemoDocWriteResult> {
       },
     );
     if (current != null) {
+      if (current !== doc.contents && isSampleBytes(current, doc.contents)) {
+        await writeFile(dest, doc.contents, 'utf8');
+        written += 1;
+        continue;
+      }
       skipped += 1;
       continue;
     }
@@ -272,7 +301,7 @@ export async function clearDemoDocs(root: string): Promise<DemoDocClearResult> {
       },
     );
     if (current == null) continue;
-    if (current !== doc.contents) {
+    if (!isSampleBytes(current, doc.contents)) {
       kept += 1;
       continue;
     }

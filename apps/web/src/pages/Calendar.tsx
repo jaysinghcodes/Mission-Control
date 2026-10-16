@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useApi, apiSend } from '../hooks/useApi'
 import { PageHeader, Segmented, SoftCard, Face, StatusChip, Btn, EmptyState } from '../components/shell'
+import { resolveSticker, type ResolvedSticker } from '../lib/crew'
 import { useNaming } from '../lib/naming'
 import type { Agent, AgentsResp } from '../types'
 import { zoneDay } from '../lib/zone-day'
@@ -25,8 +26,9 @@ import {
 } from '../lib/calendar-days'
 
 /**
- * Calendar. Week of scheduled cron jobs. An owner is an agent named on
- * matching activity, or an agent whose current task names the job.
+ * Calendar. Week of scheduled cron jobs. An owner sticker matches the
+ * agent id on activity. A display name does not. When no activity names
+ * an id, an agent whose current task names the job still owns it.
  * Day and month are the same jobs, not a second data source.
  *
  * Columns are dates in the timezone saved in Settings. The week starts on
@@ -63,17 +65,18 @@ export default function Calendar() {
   const agents = agentsQ.data?.agents ?? []
   const events = activityQ.data?.events ?? []
 
-  function ownerAgent(jobName: string): Agent | null {
+  function ownerSticker(jobName: string): ResolvedSticker<Agent> | null {
     const needle = jobName.trim().toLowerCase()
     if (!needle) return null
     for (const event of events) {
       if (!activityHaystack(event.payload).toLowerCase().includes(needle)) continue
       const who = event.payload?.agent?.trim()
       if (!who) continue
-      const hit = naming.find(agents, who)
-      if (hit) return hit
+      return resolveSticker(agents, who)
     }
-    return agents.find((agent) => (agent.currentTask ?? '').toLowerCase().includes(needle)) ?? null
+    const byTask = agents.find((agent) => (agent.currentTask ?? '').toLowerCase().includes(needle))
+    if (byTask) return { agent: byTask, agents, matched: true }
+    return null
   }
 
   const [view, setView] = useState(1)
@@ -117,8 +120,8 @@ export default function Calendar() {
     .slice(0, 3)
 
   const open = jobs.find((j) => j.id === openId) ?? null
-  const openOwner = open ? ownerAgent(open.name) : null
-  const openOwnerName = openOwner ? naming.present(openOwner).name : null
+  const openOwner = open ? ownerSticker(open.name) : null
+  const openOwnerName = openOwner ? naming.present(openOwner.agent).name : null
   const history = open
     ? events.filter((e) => activityHaystack(e.payload).toLowerCase().includes(open.name.toLowerCase())).slice(0, 4)
     : []
@@ -141,10 +144,11 @@ export default function Calendar() {
   }
 
   async function runNow(job: Job) {
-    const who = ownerAgent(job.name)
+    const who = ownerSticker(job.name)
     // Create is 201. 400 names the bad field. 404 is an unknown ticket.
     // A 200 body with an error key is a failure, same as any non 2xx.
-    const res = await apiSend<{ run?: { id: string } }>('POST', '/runs', who ? { name: job.name, agent: who.name } : { name: job.name })
+    // The run agent is the id. A display name does not seat the bot.
+    const res = await apiSend<{ run?: { id: string } }>('POST', '/runs', who?.matched ? { name: job.name, agent: who.agent.id } : { name: job.name })
     if (res.ok && res.status === 201 && res.data?.run?.id) {
       setRan('Queued on the pipeline')
       return
@@ -192,8 +196,7 @@ export default function Calendar() {
             <DayList
               dayKey={selectedKey}
               jobs={todayJobs}
-              agents={agents}
-              ownerOfJob={ownerAgent}
+              ownerOfJob={ownerSticker}
               failed={failed}
               onOpen={setOpenId}
             />
@@ -219,10 +222,10 @@ export default function Calendar() {
                   <div className="px-2 py-2 text-right text-[10.5px] font-medium text-mc-sub">all-day</div>
                   <div className="col-span-7 border-l border-mc-sep px-1 py-1">
                     {allday.map((j) => {
-                      const who = ownerAgent(j.name)
+                      const who = ownerSticker(j.name)
                       return (
                         <button key={j.id} type="button" onClick={() => setOpenId(j.id)} className="mb-1 flex w-full items-center gap-2 rounded-md bg-mc-tealbg px-2 py-1 text-left">
-                          {who && <Face agent={who} agents={agents} px={18} />}
+                          {who && <Face agent={who.agent} agents={who.agents} px={18} />}
                           <span className="truncate text-[11.5px] font-semibold text-mc-tealtext">{j.name} · {j.schedule ?? 'repeating'}</span>
                         </button>
                       )
@@ -236,7 +239,7 @@ export default function Calendar() {
                   {days.map((d) => (
                     <div key={d.key} className="min-h-10 border-l border-mc-sep p-1">
                       {overnight.filter((j) => occurs(j, d)).map((j) => (
-                        <JobBlock key={j.id} job={j} who={ownerAgent(j.name)} agents={agents} past={false} failed={failed(j)} onOpen={() => setOpenId(j.id)} />
+                        <JobBlock key={j.id} job={j} who={ownerSticker(j.name)} past={false} failed={failed(j)} onOpen={() => setOpenId(j.id)} />
                       ))}
                     </div>
                   ))}
@@ -257,7 +260,7 @@ export default function Calendar() {
                         const past = d.key === todayKey && (t.h < clockNow.hour || (t.h === clockNow.hour && t.m <= clockNow.minute))
                         return (
                           <div key={j.id} className="absolute inset-x-1" style={{ top, height: HOUR_H - 4 }}>
-                            <JobBlock job={j} who={ownerAgent(j.name)} agents={agents} past={past} failed={failed(j) && d.key === todayKey} onOpen={() => setOpenId(j.id)} />
+                            <JobBlock job={j} who={ownerSticker(j.name)} past={past} failed={failed(j) && d.key === todayKey} onOpen={() => setOpenId(j.id)} />
                           </div>
                         )
                       })}
@@ -283,8 +286,8 @@ export default function Calendar() {
             <div className="rounded-[14px] bg-mc-inner">
               {todayJobs.length === 0 && <p className="px-4 py-6 text-[13px] text-mc-sub">Nothing scheduled this day.</p>}
               {todayJobs.map((j, i) => {
-                const who = ownerAgent(j.name)
-                const cap = who ? naming.present(who) : null
+                const who = ownerSticker(j.name)
+                const cap = who ? naming.present(who.agent) : null
                 const t = parseTime(j.time)
                 const past = selectedKey === todayKey && t != null && (t.h < clockNow.hour || (t.h === clockNow.hour && t.m <= clockNow.minute))
                 const bad = failed(j) && selectedKey === todayKey
@@ -292,7 +295,7 @@ export default function Calendar() {
                 const label = bad ? 'Timed out' : past ? 'Done' : 'Up next'
                 return (
                   <button key={j.id} type="button" onClick={() => setOpenId(j.id)} className={`flex w-full items-center gap-3 px-3 py-3 text-left ${i > 0 ? 'border-t border-mc-sep' : ''}`}>
-                    {who && <Face agent={who} agents={agents} px={36} />}
+                    {who && <Face agent={who.agent} agents={who.agents} px={36} />}
                     <span className="min-w-0 flex-1">
                       <span className="block text-[13.5px] font-semibold">{j.name}</span>
                       <span className="block text-[12px] text-mc-sub">{t ? clock(t.h, t.m) : (j.schedule ?? 'All day')}{cap ? ` · ${cap.name} · ${cap.role}` : ''}</span>
@@ -307,14 +310,14 @@ export default function Calendar() {
             <div className="rounded-[14px] bg-mc-inner">
               {upcoming.length === 0 && <p className="px-4 py-6 text-[13px] text-mc-sub">No later runs this fortnight.</p>}
               {upcoming.map(({ job, at }, i) => {
-                const who = ownerAgent(job.name)
-                const cap = who ? naming.present(who) : null
+                const who = ownerSticker(job.name)
+                const cap = who ? naming.present(who.agent) : null
                 const when = at.dayKey === todayKey
                   ? `Today · ${clock(at.hour, at.minute)}`
                   : `${formatWeekdayShort(at.dayKey)} · ${clock(at.hour, at.minute)}`
                 return (
                   <button key={job.id} type="button" onClick={() => setOpenId(job.id)} className={`flex w-full items-center gap-3 px-3 py-3 text-left ${i > 0 ? 'border-t border-mc-sep' : ''}`}>
-                    {who && <Face agent={who} agents={agents} px={32} />}
+                    {who && <Face agent={who.agent} agents={who.agents} px={32} />}
                     <span className="min-w-0">
                       <span className="block text-[13.5px] font-semibold">{job.name}</span>
                       <span className="block text-[12px] text-mc-sub">{when}{cap ? ` · ${cap.name} · ${cap.role}` : ''}</span>
@@ -356,14 +359,12 @@ export default function Calendar() {
 function JobBlock({
   job,
   who,
-  agents,
   past,
   failed,
   onOpen,
 }: {
   job: Job
-  who: Agent | null
-  agents: Agent[]
+  who: ResolvedSticker<Agent> | null
   past: boolean
   failed: boolean
   onOpen: () => void
@@ -375,7 +376,7 @@ function JobBlock({
     <button type="button" title={job.name} onClick={onOpen} className={`flex h-full w-full flex-col justify-between overflow-hidden rounded-md px-1.5 py-0.5 text-left ${bg} ${past ? 'opacity-70' : ''} ${failed ? 'border border-dashed border-mc-orange' : ''}`}>
       <span className="line-clamp-2 text-[11px] font-semibold leading-[13px]">{job.name}</span>
       <span className="flex items-center gap-1">
-        {who && <Face agent={who} agents={agents} px={14} />}
+        {who && <Face agent={who.agent} agents={who.agents} px={14} />}
         <span className="truncate text-[10px]">{failed ? 'Timed out' : t ? clock(t.h, t.m) : ''}</span>
       </span>
     </button>
@@ -385,15 +386,13 @@ function JobBlock({
 function DayList({
   dayKey,
   jobs,
-  agents,
   ownerOfJob,
   failed,
   onOpen,
 }: {
   dayKey: string
   jobs: Job[]
-  agents: Agent[]
-  ownerOfJob: (name: string) => Agent | null
+  ownerOfJob: (name: string) => ResolvedSticker<Agent> | null
   failed: (job: Job) => boolean
   onOpen: (id: string) => void
 }) {
@@ -405,11 +404,11 @@ function DayList({
       <div className="mt-3 space-y-2">
         {jobs.map((j) => {
           const who = ownerOfJob(j.name)
-          const cap = who ? naming.present(who) : null
+          const cap = who ? naming.present(who.agent) : null
           const t = parseTime(j.time)
           return (
             <button key={j.id} type="button" onClick={() => onOpen(j.id)} className="flex w-full items-center gap-3 rounded-xl bg-mc-inner px-3 py-3 text-left">
-              {who && <Face agent={who} agents={agents} px={36} />}
+              {who && <Face agent={who.agent} agents={who.agents} px={36} />}
               <span>
                 <span className="block text-[14px] font-semibold">{j.name}</span>
                 <span className="block text-[12px] text-mc-sub">{t ? clock(t.h, t.m) : (j.schedule ?? 'All day')}{cap ? ` · ${cap.name}` : ''}{failed(j) ? ' · Timed out' : ''}</span>

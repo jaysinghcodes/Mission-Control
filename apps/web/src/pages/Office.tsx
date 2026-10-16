@@ -9,6 +9,7 @@ import { useNaming } from '../lib/naming'
 import type { Agent, AgentsResp } from '../types'
 import { activityNeedsYou, agentNeedsYou, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
 import { activityRailLine } from '../lib/activity-rail'
+import { resolveSticker } from '../lib/crew'
 import { pluralize } from '../lib/pluralize'
 import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
@@ -389,15 +390,15 @@ export default function Office() {
           <div className="rounded-[14px] bg-mc-inner">
             {events.length === 0 && <p className="px-4 py-6 text-[12.5px] text-mc-sub">No activity yet. Seed or the bridge fills this list.</p>}
             {events.map(({ event: e, index, actor, text }) => {
-              const hit = actor ? agents.find((a) => a.id === actor.id) : undefined
-              const who = hit ?? (actor ? { id: actor.id, name: actor.name, role: actor.role, status: 'idle' } : null)
+              const sticker = actor ? resolveSticker(agents, actor.id) : null
+              const who = sticker?.agent ?? null
               const shown = who ? naming.present(who) : null
               const waiting = activityNeedsYou(e.payload, pending)
               const failed = /fail/i.test(text)
               const age = activityAge(e.ts, Date.now())
               const row = (
                 <>
-                  {who ? <Face agent={who} agents={agents} px={36} /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-mc-fill" aria-hidden />}
+                  {who ? <Face agent={who} agents={sticker?.agents} px={36} /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-mc-fill" aria-hidden />}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
                       {who ? <AgentName agent={who} /> : <span className="text-[12px] font-semibold">{text}</span>}
@@ -408,6 +409,10 @@ export default function Office() {
                 </>
               )
               const cls = 'flex w-full gap-2 border-b border-mc-sep px-3 py-3 text-left last:border-0'
+              if (!sticker?.matched) {
+                return <div key={`${e.ts}-${index}`} data-activity-agent={shown?.name ?? ''} className={cls}>{row}</div>
+              }
+              const hit = agents.find((agent) => agent.id === sticker.agent.id)
               if (!hit) {
                 return <div key={`${e.ts}-${index}`} data-activity-agent={shown?.name ?? ''} className={cls}>{row}</div>
               }

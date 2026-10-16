@@ -41,8 +41,8 @@ describe('writeDemoDocs', () => {
       path.join(root, ...unicode!.relative.split('/')),
       'utf8',
     );
-    expect(onDisk).toContain('author: Echo');
-    expect(DEMO_DOC_AUTHORS).toContain('Echo');
+    expect(onDisk).toContain('author: echo');
+    expect(DEMO_DOC_AUTHORS).toContain('echo');
 
     for (const doc of DEMO_DOCS) {
       const author = /^author: (.+)$/m.exec(doc.contents)?.[1];
@@ -67,6 +67,23 @@ describe('writeDemoDocs', () => {
     )) {
       expect(isSafeLink(href)).toBe(true);
     }
+  });
+
+  it('rewrites a sample author that is still the crew display name', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'mc-docs-seed-author-'));
+    await writeDemoDocs(root);
+    const target = path.join(root, 'notes', 'Café checklist.md');
+    const current = await readFile(target, 'utf8');
+    await writeFile(
+      target,
+      current.replace('author: echo', 'author: Echo'),
+      'utf8',
+    );
+    const again = await writeDemoDocs(root);
+    expect(again.written).toBe(1);
+    expect(await readFile(target, 'utf8')).toContain('author: echo');
+    const third = await writeDemoDocs(root);
+    expect(third.written).toBe(0);
   });
 
   it('does not overwrite a file that is already there', async () => {

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
-import type { Agent, AgentsResp } from '../types'
+import type { AgentsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, SearchInput, Face, StatusChip, EmptyState, Banner } from '../components/shell'
+import { resolveSticker } from '../lib/crew'
 import { useNaming } from '../lib/naming'
 import { API_URL } from '../lib/apiBase'
 import { pluralize } from '../lib/pluralize'
@@ -94,10 +95,8 @@ export default function Docs() {
     }
   }, [openId])
 
-  function author(name: string): Agent | { id: string; name: string; role: string | null; status: string } {
-    const found = naming.find(agents, name)
-    if (found) return found
-    return { id: name, name, role: null, status: 'idle' }
+  function author(name: string) {
+    return resolveSticker(agents, name)
   }
 
   const summary = !data
@@ -163,7 +162,7 @@ export default function Docs() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {visible.map((doc) => {
             const who = author(doc.author)
-            const cap = naming.present({ id: who.id, name: who.name, role: who.role, color: 'color' in who ? who.color : null })
+            const cap = naming.present(who.agent)
             const tone = toneFor(doc.type)
             return (
               <button key={doc.id} type="button" onClick={() => setOpenId(doc.id)} className="mc-card px-4 py-4 text-left">
@@ -186,7 +185,7 @@ export default function Docs() {
                 <div className="mt-2 text-[15px] font-semibold">{doc.title}</div>
                 <div className="mt-2 text-[12px]">
                   <div className="flex min-w-0 items-center gap-2">
-                    <Face agent={who} agents={agents} px={24} />
+                    <Face agent={who.agent} agents={who.agents} px={24} />
                     <div className="flex min-w-0 flex-1 items-baseline gap-1">
                       <span className="shrink-0 font-semibold text-mc-text">{cap.name}</span>
                       <span className="min-w-0 truncate font-normal text-mc-sub">· {cap.role}</span>

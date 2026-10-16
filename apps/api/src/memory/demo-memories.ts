@@ -5,10 +5,11 @@
  * time in the timezone passed in (the server timezone by default), and every
  * instant is at or before that moment: a busy day is yesterday, and the
  * 11:58 PM note sits on an earlier day.
- * Agents are the seeded cool names (Forge, Aegis, …) so the existing robots
- * and "Name · Function" captions resolve.
+ * The agent field is the agent id (forge, aegis, …) so the sticker matches
+ * that bot. A display name does not. The note text still uses the cool name.
  */
 
+import { demoAgentId } from '../seed/demo-assignees';
 import {
   serverTimeZone,
   shiftZoneDay,
@@ -45,6 +46,10 @@ const ROSTER = [
   'Scout',
 ] as const;
 
+function demoAgent(name: (typeof ROSTER)[number]): string {
+  return demoAgentId(name);
+}
+
 const LONG_NOTE = [
   'Forge keeps this note so the next session does not have to reconstruct the week from chat.',
   'The board columns are To-Do, Build, QA, Review, and Done. A ticket sits in one project or in none. Archive hides the project and leaves the tickets where they are.',
@@ -68,12 +73,12 @@ function bulkDay(day: string, timeZone: string): DemoMemory[] {
   const start = zoneWallTime(day, 8, 0, timeZone).getTime();
   return Array.from({ length: 52 }, (_, i) => {
     const n = String(i + 1).padStart(2, '0');
-    const agent = ROSTER[i % ROSTER.length];
+    const name = ROSTER[i % ROSTER.length];
     return {
       id: `demo-memory-bulk-${n}`,
       title: `Day note ${n}`,
-      body: `${agent} saved note ${n} on a busy day. It is short so the list can hold more than fifty and still scroll.`,
-      agent,
+      body: `${name} saved note ${n} on a busy day. It is short so the list can hold more than fifty and still scroll.`,
+      agent: demoAgent(name),
       createdAt: new Date(start + i * 8 * 60_000).toISOString(),
       kind: 'daily' as const,
       source: 'demo' as const,
@@ -100,7 +105,7 @@ export function buildDemoMemories(
       id: 'demo-memory-long',
       title: 'Long note on the build',
       body: LONG_NOTE,
-      agent: 'Forge',
+      agent: demoAgent('Forge'),
       createdAt: new Date(now.getTime() - 90 * 60_000).toISOString(),
       kind: 'long-term',
       source: 'demo',
@@ -110,7 +115,7 @@ export function buildDemoMemories(
       id: 'demo-memory-aegis',
       title: 'Preview deploys wait',
       body: 'Aegis will not run the preview deploy until the approval on DEMO-4 is decided. The script stays gated.',
-      agent: 'Aegis',
+      agent: demoAgent('Aegis'),
       createdAt: zoneWallTime(yesterday, 15, 15, timeZone).toISOString(),
       kind: 'daily',
       source: 'demo',
@@ -120,7 +125,7 @@ export function buildDemoMemories(
       id: 'demo-memory-quill',
       title: 'Release note draft',
       body: 'Quill started the release note for the next cut. It names the project filter and the memory page, and it is still a draft.',
-      agent: 'Quill',
+      agent: demoAgent('Quill'),
       createdAt: zoneWallTime(yesterday, 8, 40, timeZone).toISOString(),
       kind: 'daily',
       source: 'demo',
@@ -130,7 +135,7 @@ export function buildDemoMemories(
       id: 'demo-memory-echo',
       title: 'Calendar patterns',
       body: 'Echo wrote down that the week grid starts on Monday and that an all-day job has no clock time.',
-      agent: 'Echo',
+      agent: demoAgent('Echo'),
       createdAt: zoneWallTime(fourAgo, 11, 0, timeZone).toISOString(),
       kind: 'daily',
       source: 'demo',
@@ -140,7 +145,7 @@ export function buildDemoMemories(
       id: 'demo-memory-sentinel',
       title: 'Regression pass notes',
       body: 'Sentinel checked the ticket board after a reload. The columns matched the database, including an empty Review column.',
-      agent: 'Sentinel',
+      agent: demoAgent('Sentinel'),
       createdAt: zoneWallTime(twoAgo, 16, 30, timeZone).toISOString(),
       kind: 'daily',
       source: 'demo',
@@ -150,7 +155,7 @@ export function buildDemoMemories(
       id: 'demo-memory-midnight',
       title: 'Handoff before midnight',
       body: 'Speedy closed the day at 11:58 PM. This note belongs on that day, not the next morning.',
-      agent: 'Speedy',
+      agent: demoAgent('Speedy'),
       createdAt: zoneWallTime(threeAgo, 23, 58, timeZone).toISOString(),
       kind: 'daily',
       source: 'demo',

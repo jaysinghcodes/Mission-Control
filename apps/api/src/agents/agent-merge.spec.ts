@@ -71,6 +71,30 @@ describe('agent merge', () => {
     expect(again.ok && !again.created).toBe(true);
   });
 
+  it('a new id may use a display name another bot already has', () => {
+    const crew = row({
+      id: 'forge',
+      name: 'Forge',
+      source: 'default',
+      role: 'engineer',
+      status: 'working',
+      color: '#9bd434',
+    });
+    const plan = planRegister(
+      [crew],
+      { id: 'rogue_forge', name: 'Forge', role: 'helper' },
+      now,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.created).toBe(true);
+    expect(plan.row.id).toBe('rogue_forge');
+    expect(plan.row.name).toBe('Forge');
+    expect(plan.row.role).toBe('helper');
+    expect(plan.row.color).toBe('#58A6FF');
+    expect(plan.row.status).toBe('idle');
+  });
+
   it('criterion 2: registering a default id keeps position and visual', () => {
     const forge = row({
       id: 'forge',

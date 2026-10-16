@@ -9,6 +9,7 @@ import {
 } from '../agents/agent-merge';
 import { wireText } from '../wire-text';
 import { PrismaService } from '../prisma/prisma.service';
+import { loadAgentNames, resolveIngestAgent } from '../agents/agent-ref';
 import { SETTING_ID } from '../team/mission';
 import { TimezoneService } from '../time/timezone.service';
 import { usageBucketsFromPayload } from '../usage/usage-points';
@@ -80,20 +81,22 @@ export class SnapshotsService {
     const sessions = Array.isArray(payload.sessions)
       ? (payload.sessions as Record<string, unknown>[])
       : [];
+    const roster = await loadAgentNames(this.prisma);
     await this.prisma.$transaction([
       this.prisma.session.deleteMany({}),
-      ...sessions.map((s) =>
-        this.prisma.session.create({
+      ...sessions.map((s) => {
+        const raw = wireText(s.agent ?? 'main');
+        return this.prisma.session.create({
           data: {
             name: wireText(s.name ?? 'session'),
-            agent: wireText(s.agent ?? 'main'),
+            agent: resolveIngestAgent(raw, roster) ?? raw,
             model: s.model ? wireText(s.model) : null,
             ctx: Number(s.ctx ?? 0),
             lastActivity: s.lastActivity ? wireText(s.lastActivity) : null,
             hot: Boolean(s.hot ?? false),
           },
-        }),
-      ),
+        });
+      }),
     ]);
   }
 
@@ -202,8 +205,18 @@ export class SnapshotsService {
     // No storable rows means there is nobody to replace. Deleting here
     // would be a delete-all of every bridge note.
     if (rows.length === 0) return;
+    const roster = await loadAgentNames(this.prisma);
+    const agentKeys = new Set<string>();
+    for (const row of rows) {
+      agentKeys.add(row.agent);
+      const resolved = resolveIngestAgent(row.agent, roster);
+      if (resolved && resolved !== row.agent) {
+        agentKeys.add(resolved);
+        row.agent = resolved;
+      }
+    }
     const ids = rows.map((row) => row.id);
-    const agents = [...new Set(rows.map((row) => row.agent))];
+    const agents = [...agentKeys];
     await this.prisma.$transaction(async (tx) => {
       // Replace bridge rows only, and only for agents named in this
       // payload. Legacy source=openclaw is the same writer from before

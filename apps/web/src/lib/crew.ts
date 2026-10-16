@@ -76,19 +76,44 @@ export function findById<T extends { id: string }>(
   return agents.find((agent) => agent.id.trim() === key)
 }
 
-/** Id, stored name, or the crew name for a mapped id. Not a role keyword. */
-export function findByLabel<T extends NamedAgent>(
-  agents: readonly T[],
-  label: string | null | undefined,
-  state: NamingState,
-): T | undefined {
-  const key = (label ?? '').trim().toLowerCase()
-  if (!key) return undefined
-  return agents.find((agent) => {
-    if (agent.id.trim().toLowerCase() === key) return true
-    if ((agent.name ?? '').trim().toLowerCase() === key) return true
-    return presentAgent(agent, state).name.toLowerCase() === key
-  })
+/** Stand-in when the string is not an agent id. Idle, and not a crew color. */
+export interface GenericSticker {
+  id: string
+  name: string
+  role: null
+  status: 'idle'
+  color: string
+}
+
+export interface ResolvedSticker<T> {
+  agent: T | GenericSticker
+  /** Set only for a roster hit, so a name is not folded into the crew seats. */
+  agents?: readonly T[]
+  matched: boolean
+}
+
+/**
+ * Stickers, colors, and status dots use this lookup on every surface.
+ * The string must be an agent id. A display name does not match, including
+ * a registered bot named Forge. Office seating uses the same id rule.
+ */
+export function resolveSticker<T extends { id: string }>(
+  roster: readonly T[],
+  id: string | null | undefined,
+): ResolvedSticker<T> {
+  const label = (id ?? '').trim()
+  if (!label) {
+    return {
+      agent: { id: 'agent', name: 'agent', role: null, status: 'idle', color: FALLBACK_COLOR },
+      matched: false,
+    }
+  }
+  const hit = findById(roster, label)
+  if (hit) return { agent: hit, agents: roster, matched: true }
+  return {
+    agent: { id: label, name: label, role: null, status: 'idle', color: FALLBACK_COLOR },
+    matched: false,
+  }
 }
 
 /** Team order is the position the API stored, then id. */
