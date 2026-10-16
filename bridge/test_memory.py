@@ -172,7 +172,7 @@ class MemoryDryRunTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
         self.assertTrue(events)
-        self.assertFalse(any(event["type"] == "memory.snapshot" for event in events))
+        self.assertFalse(any(event.get("type") == "memory.snapshot" for event in events))
 
     def test_dir_with_no_workspaces_does_not_post(self):
         with tempfile.TemporaryDirectory() as tmp:
