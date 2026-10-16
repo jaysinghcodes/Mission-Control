@@ -23,6 +23,7 @@ import {
   readHealthIdentity,
   report,
   runDoctor,
+  loginState,
   tokenState,
 } from './doctor.mjs'
 
@@ -56,6 +57,20 @@ test('supported Node ranges are 20.17+ and 22.9+', () => {
   assert.equal(nodeSupported('v24.0.0'), false)
 })
 
+test('login is open on loopback and required when Compose or a public bind has no password', () => {
+  assert.equal(loginState({ HOST: '127.0.0.1' }).kind, 'loopback-open')
+  assert.equal(loginState({ HOST: '127.0.0.1', DASHBOARD_PASSWORD_HASH: 'scrypt:1', SESSION_SECRET: 'ab' }).kind, 'set')
+  assert.equal(loginState({ HOST: '0.0.0.0' }).kind, 'exposed')
+  assert.equal(loginState({ HOST: '127.0.0.1', MC_DOCTOR_DOCKER: '1' }).ok, false)
+  assert.equal(
+    loginState({ HOST: '127.0.0.1', MC_DOCTOR_DOCKER: '1', DASHBOARD_PASSWORD_HASH: 'scrypt:1', SESSION_SECRET: 'ab' }).kind,
+    'set',
+  )
+  const exposed = report(facts({ env: { HOST: '0.0.0.0', INGEST_TOKEN: 'change-me', PORT: '3000' } }))
+  assert.equal(exposed.code, 1)
+  assert.match(exposed.lines[6], /^fail login:/)
+})
+
 test('token rules match loopback, production, and off loopback', () => {
   assert.equal(tokenState({ HOST: '127.0.0.1', INGEST_TOKEN: 'change-me' }).ok, true)
   assert.equal(tokenState({ HOST: '127.0.0.1' }).kind, 'loopback-open')
@@ -68,17 +83,18 @@ test('token rules match loopback, production, and off loopback', () => {
 test('a healthy report exits 0 and keeps OpenClaw informational', () => {
   const result = report(facts())
   assert.equal(result.code, 0)
-  assert.equal(result.lines.length, 9)
+  assert.equal(result.lines.length, 10)
   assert.ok(result.lines.every((line) => !hasDashPunctuation(line)))
   assert.match(result.lines[0], /^pass node:/)
   assert.match(result.lines[1], /^pass ports: Port 3000 is already running\.$/)
-  assert.match(result.lines[6], /^pass health: The health check says the database is up\.$/)
+  assert.match(result.lines[7], /^pass health: The health check says the database is up\.$/)
   assert.match(result.lines[2], /^pass env:/)
   assert.match(result.lines[3], /^pass database:/)
   assert.match(result.lines[4], /^pass migrations:/)
   assert.match(result.lines[5], /^pass token:/)
-  assert.match(result.lines[7], /^info openclaw: OpenClaw is optional/)
-  assert.match(result.lines[8], /^info bridge: No OpenClaw sync timestamp was found/)
+  assert.match(result.lines[6], /^pass login: HOST is loopback, so the dashboard stays open without a password\.$/)
+  assert.match(result.lines[8], /^info openclaw: OpenClaw is optional/)
+  assert.match(result.lines[9], /^info bridge: No OpenClaw sync timestamp was found/)
 })
 
 test('each required failure names the next command and exits non zero', () => {
@@ -156,10 +172,10 @@ test('each required failure names the next command and exits non zero', () => {
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false, item.name)
     if (item.name === 'ports') {
       assert.equal(
-        result.lines[6],
+        result.lines[7],
         'info health: Skipped because the API port is used by another program.',
       )
-      assert.doesNotMatch(result.lines[6], /npm run dev/)
+      assert.doesNotMatch(result.lines[7], /npm run dev/)
     }
   }
 })
@@ -216,10 +232,10 @@ test('a foreign 404 fails with the port message', async () => {
     assert.equal(result.lines[1], otherProgram(port))
     assert.match(result.lines[3], /^pass database:/)
     assert.equal(
-      result.lines[6],
+      result.lines[7],
       'info health: Skipped because the API port is used by another program.',
     )
-    assert.doesNotMatch(result.lines[6], /npm run dev/)
+    assert.doesNotMatch(result.lines[7], /npm run dev/)
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
   } finally {
     await close(server)
@@ -248,7 +264,7 @@ test('a foreign 500 fails with the port message whether the database is up or do
       assert.equal(result.code, 1)
       assert.doesNotMatch(result.lines[1], /already running/)
       assert.equal(
-        result.lines[6],
+        result.lines[7],
         'info health: Skipped because the API port is used by another program.',
       )
       assert.doesNotMatch(result.lines.join('\n'), /npm run dev/)
@@ -272,10 +288,10 @@ test('a raw TCP listener with no HTTP fails with the port message', async () => 
     assert.equal(result.code, 1)
     assert.equal(result.lines[1], otherProgram(port))
     assert.equal(
-      result.lines[6],
+      result.lines[7],
       'info health: Skipped because the API port is used by another program.',
     )
-    assert.doesNotMatch(result.lines[6], /npm run dev/)
+    assert.doesNotMatch(result.lines[7], /npm run dev/)
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
   } finally {
     await close(server)
@@ -300,7 +316,7 @@ test('API up and database down passes the port and fails the database', async ()
     assert.equal(result.lines[1], `pass ports: Port ${port} is already running.`)
     assert.match(result.lines[3], /^fail database:/)
     assert.match(result.lines[3], /docker compose up -d db/)
-    assert.equal(result.lines[6], 'fail health: The health check says the database is down.')
+    assert.equal(result.lines[7], 'fail health: The health check says the database is down.')
     assert.doesNotMatch(result.lines.join('\n'), /another program/)
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
   } finally {
@@ -325,7 +341,7 @@ test('a healthy API passes every required check', async () => {
     assert.equal(result.code, 0)
     assert.equal(result.lines[1], `pass ports: Port ${port} is already running.`)
     assert.match(result.lines[3], /^pass database:/)
-    assert.equal(result.lines[6], 'pass health: The health check says the database is up.')
+    assert.equal(result.lines[7], 'pass health: The health check says the database is up.')
     assert.ok(result.lines.every((line) => !hasDashPunctuation(line)))
   } finally {
     await close(server)
@@ -335,9 +351,9 @@ test('a healthy API passes every required check', async () => {
 test('OpenClaw staying unreachable does not fail the command', () => {
   const result = report(facts())
   assert.equal(result.code, 0)
-  assert.match(result.lines[7], /^info openclaw:/)
-  assert.doesNotMatch(result.lines[7], /^fail /)
-  assert.match(result.lines[8], /^info bridge:/)
+  assert.match(result.lines[8], /^info openclaw:/)
+  assert.doesNotMatch(result.lines[8], /^fail /)
+  assert.match(result.lines[9], /^info bridge:/)
 })
 
 test('bridge sync age uses the limit and treats an equal age as recent', () => {
@@ -359,6 +375,27 @@ test('MC port environment wins over .env and a blank shell value does not', () =
   assert.equal(over.MC_WEB_PORT, '5880')
   assert.equal(over.MC_DB_PORT, '55880')
   assert.equal(effectiveEnv(file, { MC_API_PORT: '  ' }).MC_API_PORT, '3881')
+  assert.equal(
+    effectiveEnv(
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:file', SESSION_SECRET: 'file-secret' },
+      { DASHBOARD_PASSWORD_HASH: '', SESSION_SECRET: '   ' },
+    ).DASHBOARD_PASSWORD_HASH,
+    'scrypt:file',
+  )
+  assert.equal(
+    effectiveEnv(
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:file', SESSION_SECRET: 'file-secret' },
+      { DASHBOARD_PASSWORD_HASH: '', SESSION_SECRET: '   ' },
+    ).SESSION_SECRET,
+    'file-secret',
+  )
+  assert.equal(
+    effectiveEnv(
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:file', SESSION_SECRET: 'file-secret' },
+      { DASHBOARD_PASSWORD_HASH: 'scrypt:proc', SESSION_SECRET: 'proc-secret' },
+    ).SESSION_SECRET,
+    'proc-secret',
+  )
   assert.equal(
     effectiveEnv({ MC_BRIDGE_STALE_SECONDS: '90' }, { MC_BRIDGE_STALE_SECONDS: '  ' }).MC_BRIDGE_STALE_SECONDS,
     '90',
@@ -387,7 +424,7 @@ test('docker doctor uses the shell MC_API_PORT when .env names a different port'
   try {
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', 'MC_API_PORT=3000', 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control', ''].join('\n'),
+      ['PORT=3000', 'MC_API_PORT=3000', 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control', ''].join('\n'),
     )
     const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1', MC_API_PORT: String(port) })
     assert.equal(result.code, 0, result.lines.join('\n'))
@@ -423,6 +460,8 @@ test('docker doctor reports host database checks as info and checks the custom A
         `MC_API_PORT=${port}`,
         'HOST=127.0.0.1',
         'INGEST_TOKEN=abc123',
+        'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
+        'SESSION_SECRET=001122',
         '',
       ].join('\n'),
     )
@@ -432,7 +471,7 @@ test('docker doctor reports host database checks as info and checks the custom A
     assert.match(result.lines[1], new RegExp(`^pass ports: Port ${port} is already running\\.$`))
     assert.match(result.lines[3], /^info database: /)
     assert.match(result.lines[4], /^info migrations: /)
-    assert.equal(result.lines[6], 'pass health: The health check says the database is up.')
+    assert.equal(result.lines[7], 'pass health: The health check says the database is up.')
     assert.equal(result.lines.some((line) => /Port 3000/.test(line)), false)
     for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
@@ -469,7 +508,7 @@ test('bridge sync: a stale timestamp fails doctor', async () => {
     writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 5000}\n`)
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
+      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
     )
     const result = await runDoctor(dir, {
       MC_DOCTOR_DOCKER: '1',
@@ -481,7 +520,7 @@ test('bridge sync: a stale timestamp fails doctor', async () => {
     assert.deepEqual(fails, [
       'fail bridge: The last OpenClaw sync is older than 600 seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.',
     ])
-    assert.match(result.lines[7], /^info openclaw:/)
+    assert.match(result.lines[8], /^info openclaw:/)
     for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
     await new Promise((resolve) => server.close(resolve))
@@ -501,11 +540,11 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
   try {
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'MC_BRIDGE_STALE_SECONDS=30', ''].join('\n'),
+      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=30', ''].join('\n'),
     )
     const missing = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
     assert.equal(missing.code, 0, missing.lines.join('\n'))
-    assert.match(missing.lines[8], /^info bridge: No OpenClaw sync timestamp was found/)
+    assert.match(missing.lines[9], /^info bridge: No OpenClaw sync timestamp was found/)
 
     writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 5}\n`)
     const fresh = await runDoctor(dir, {
@@ -514,7 +553,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
       MC_BRIDGE_STALE_SECONDS: '30',
     })
     assert.equal(fresh.code, 0, fresh.lines.join('\n'))
-    assert.match(fresh.lines[8], /^pass bridge: The last OpenClaw sync is recent\./)
+    assert.match(fresh.lines[9], /^pass bridge: The last OpenClaw sync is recent\./)
 
     writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 120}\n`)
     const stale = await runDoctor(dir, {
@@ -524,7 +563,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
       ...isolatedSchedule(dir, true),
     })
     assert.equal(stale.code, 1, stale.lines.join('\n'))
-    assert.match(stale.lines[8], /^fail bridge: The last OpenClaw sync is older than 30 seconds\./)
+    assert.match(stale.lines[9], /^fail bridge: The last OpenClaw sync is older than 30 seconds\./)
 
     const unscheduled = await runDoctor(dir, {
       MC_DOCTOR_DOCKER: '1',
@@ -533,7 +572,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
       ...isolatedSchedule(dir, false),
     })
     assert.equal(unscheduled.code, 0, unscheduled.lines.join('\n'))
-    assert.match(unscheduled.lines[8], /^info bridge: The last OpenClaw sync is older than 30 seconds\. No bridge schedule is installed\./)
+    assert.match(unscheduled.lines[9], /^info bridge: The last OpenClaw sync is older than 30 seconds\. No bridge schedule is installed\./)
     for (const line of stale.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
     await new Promise((resolve) => server.close(resolve))

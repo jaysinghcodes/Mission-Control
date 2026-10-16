@@ -565,10 +565,14 @@ describe('Agents register (e2e)', () => {
   it('criterion 6: token rules match the shared write check on all three routes', async () => {
     const savedToken = process.env.INGEST_TOKEN;
     const savedEnv = process.env.NODE_ENV;
-    const routes: { method: 'post' | 'delete'; path: string }[] = [
-      { method: 'post', path: '/agents/register' },
-      { method: 'post', path: '/agents/e2e_auth/heartbeat' },
-      { method: 'delete', path: '/agents/e2e_auth' },
+    const routes: {
+      method: 'post' | 'delete';
+      path: string;
+      ingest: boolean;
+    }[] = [
+      { method: 'post', path: '/agents/register', ingest: true },
+      { method: 'post', path: '/agents/e2e_auth/heartbeat', ingest: true },
+      { method: 'delete', path: '/agents/e2e_auth', ingest: false },
     ];
     try {
       process.env.INGEST_TOKEN = 'e2e-agents-token';
@@ -577,21 +581,25 @@ describe('Agents register (e2e)', () => {
         const denied = await request(app.getHttpServer())
           [route.method](route.path)
           .send({});
-        expect(denied.status).toBe(401);
-        expect(denied.body).toEqual({
-          statusCode: 401,
-          message: 'unauthorized',
-        });
-        const wrong = await request(app.getHttpServer())
-          [route.method](route.path)
-          .set('x-ingest-token', 'nope')
-          .send({});
-        expect(wrong.status).toBe(401);
-        const allowed = await request(app.getHttpServer())
-          [route.method](route.path)
-          .set('x-ingest-token', 'e2e-agents-token')
-          .send({});
-        expect(allowed.status).not.toBe(401);
+        if (route.ingest) {
+          expect(denied.status).toBe(401);
+          expect(denied.body).toEqual({
+            statusCode: 401,
+            message: 'unauthorized',
+          });
+          const wrong = await request(app.getHttpServer())
+            [route.method](route.path)
+            .set('x-ingest-token', 'nope')
+            .send({});
+          expect(wrong.status).toBe(401);
+          const allowed = await request(app.getHttpServer())
+            [route.method](route.path)
+            .set('x-ingest-token', 'e2e-agents-token')
+            .send({});
+          expect(allowed.status).not.toBe(401);
+        } else {
+          expect(denied.status).not.toBe(401);
+        }
       }
 
       delete process.env.INGEST_TOKEN;
@@ -606,11 +614,15 @@ describe('Agents register (e2e)', () => {
         const closed = await request(app.getHttpServer())
           [route.method](route.path)
           .send({});
-        expect(closed.status).toBe(401);
-        expect(closed.body).toEqual({
-          statusCode: 401,
-          message: 'unauthorized',
-        });
+        if (route.ingest) {
+          expect(closed.status).toBe(401);
+          expect(closed.body).toEqual({
+            statusCode: 401,
+            message: 'unauthorized',
+          });
+        } else {
+          expect(closed.status).not.toBe(401);
+        }
       }
     } finally {
       if (savedToken === undefined) delete process.env.INGEST_TOKEN;

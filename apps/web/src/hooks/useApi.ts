@@ -69,7 +69,7 @@ export function useApi<T>(path: string, opts: { pollMs?: number } = {}): {
     // Only the latest, still-mounted request may write state.
     const current = () => mounted.current && mine === generation.current
     try {
-      const res = await fetch(`${API}${pathRef.current}`, { signal: ctrl.signal })
+      const res = await fetch(`${API}${pathRef.current}`, { signal: ctrl.signal, credentials: 'include' })
       // Parse defensively: proxies/502 pages are often not JSON at all.
       let json: unknown = null
       try {
@@ -209,10 +209,11 @@ function errorMessage(body: unknown, status: number): string {
 export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<ApiResult<T>> {
   let res: Response
   try {
-    // Same origin `/api`. The dev proxy or nginx adds x-ingest-token.
-    // This bundle does not contain the token and does not store it.
+    // Same origin /api. The browser sends the session cookie.
+    // This bundle does not contain a write token or a socket token.
     res = await fetch(writeUrl(path), {
       method,
+      credentials: 'include',
       headers: { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     })

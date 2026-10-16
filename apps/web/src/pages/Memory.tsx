@@ -114,7 +114,7 @@ export default function Memory() {
     let live = true
     void (async () => {
       try {
-        const res = await fetch(`${API_URL}/memory/${encodeURIComponent(selected)}`, { signal: ctrl.signal })
+        const res = await fetch(`${API_URL}/memory/${encodeURIComponent(selected)}`, { signal: ctrl.signal, credentials: 'include' })
         if (!res.ok) return
         const json = (await res.json()) as { entry?: MemoryDetail }
         if (live && json.entry) setDetail(json.entry)

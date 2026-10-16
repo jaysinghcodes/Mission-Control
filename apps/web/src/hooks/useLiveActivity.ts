@@ -53,13 +53,7 @@ export function useLiveActivity(maxEvents = 50): { events: ActivityEvent[]; conn
       transports: ['websocket'] as ('websocket')[],
       // Item 5: do NOT dial in the constructor. See the deferred connect below.
       autoConnect: false,
-      // Production socket guard: the api gateway requires SOCKET_TOKEN in the
-      // handshake when NODE_ENV=production (docker compose). Compose bakes the
-      // same token into this bundle via VITE_SOCKET_TOKEN; local dev builds omit
-      // it and the dev-mode api does not enforce the guard.
-      auth: import.meta.env.VITE_SOCKET_TOKEN
-        ? { token: import.meta.env.VITE_SOCKET_TOKEN }
-        : undefined,
+      withCredentials: true,
     };
     const explicit = socketUrl();
     const socket: Socket = explicit ? io(explicit, socketOptions) : io(socketOptions);

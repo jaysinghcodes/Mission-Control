@@ -5,6 +5,8 @@ import {
   NestModule,
   RequestMethod,
 } from '@nestjs/common';
+import { AuthController } from './auth/auth.controller';
+import { SessionAuthMiddleware } from './auth/session-auth.middleware';
 import { WriteAuthMiddleware } from './auth/write-auth.middleware';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -69,6 +71,7 @@ import { PrismaService } from './prisma/prisma.service';
     DevicesController,
     SettingsController,
     CustomToolsController,
+    AuthController,
   ],
   providers: [
     AppService,
@@ -84,7 +87,11 @@ import { PrismaService } from './prisma/prisma.service';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Every route, so a new write handler cannot skip the token check.
+    // Session first, then ingest token. A new controller is covered by both.
+    consumer.apply(SessionAuthMiddleware).forRoutes({
+      path: '{*path}',
+      method: RequestMethod.ALL,
+    });
     consumer.apply(WriteAuthMiddleware).forRoutes({
       path: '{*path}',
       method: RequestMethod.ALL,

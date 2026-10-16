@@ -6,7 +6,7 @@ You are the OpenClaw agent. Your operator pasted this file so the Mission Contro
 
 From this repository, run `bash install.sh`. If you are not in a checkout, use the curl command in the README section Install and run. That command runs the same script.
 
-The script is Docker first. If Docker is missing, it says so and uses Node.js 22 and Postgres 16. It writes two different random tokens to `.env` and sets that file to mode 600, only when `.env` is missing. A plain second run leaves `.env` unchanged. It resolves ports from the shell, then `.env`, then the defaults, and writes `DATABASE_URL` with that `MC_DB_PORT` on a new file. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. It runs doctor and prints the dashboard URL. Use that URL. Do not choose another one.
+The script is Docker first. If Docker is missing, it says so and uses Node.js 22 and Postgres 16. It writes a random ingest token, a dashboard password hash, and a session secret to `.env` and sets that file to mode 600, only when `.env` is missing. The password is printed once. A plain second run leaves `.env` unchanged. It fills a missing password hash or session secret without changing other keys. It resolves ports from the shell, then `.env`, then the defaults, and writes `DATABASE_URL` with that `MC_DB_PORT` on a new file. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. It runs doctor and prints the dashboard URL. Use that URL. Do not choose another one.
 
 When the `openclaw` command is on PATH, the same command installs the bridge schedule. It does not start the OpenClaw gateway. Remove the schedule later with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer skips that step and still finishes. `npm run seed:demo` fills sample data and does not need OpenClaw. `npm run doctor` is the same check the installer runs at the end.
 
@@ -16,7 +16,7 @@ Usage prices session tokens from `config/prices.json`. Copy a model into `config
 
 ## Report the URL
 
-Tell your operator the URL the installer printed. Say that `INGEST_TOKEN` and `SOCKET_TOKEN` live in `.env`. If doctor prints a failing line, include that line. A missing OpenClaw command is an info line. When a schedule is installed, a sync older than `MC_BRIDGE_STALE_SECONDS` fails doctor.
+Tell your operator the URL the installer printed. Say that `INGEST_TOKEN` lives in `.env` and that the dashboard password was printed once. Do not print the token or the password hash. If doctor prints a failing line, include that line. A missing OpenClaw command is an info line. When a schedule is installed, a sync older than `MC_BRIDGE_STALE_SECONDS` fails doctor. On Compose the dashboard asks for that password, because the API sees the Docker network and not loopback.
 
 ## Register and heartbeat
 

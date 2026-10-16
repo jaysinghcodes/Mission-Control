@@ -7,6 +7,9 @@
  * that age stays an info line. Run from the repo root: npm run doctor
  *
  * Token rules match apps/api/src/auth/write-token.ts.
+ * Login rules match apps/api/src/auth/password.ts. Compose (MC_DOCTOR_DOCKER=1)
+ * counts as exposed even when .env HOST is loopback, because the container
+ * peer is the Docker bridge.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -79,6 +82,19 @@ export function tokenState(env) {
   return { ok: true, kind: token ? 'set' : 'loopback-open', host }
 }
 
+/**
+ * A password is required when HOST is not loopback, and when Compose is in
+ * use. The published port is not loopback inside the api container.
+ */
+export function loginState(env) {
+  const hash = configuredValue(env, 'DASHBOARD_PASSWORD_HASH')
+  const secret = configuredValue(env, 'SESSION_SECRET')
+  const exposed = env.MC_DOCTOR_DOCKER === '1' || !isLoopbackHost(bindHost(env))
+  if (hash && secret) return { ok: true, kind: 'set', exposed }
+  if (exposed) return { ok: false, kind: 'exposed', exposed }
+  return { ok: true, kind: 'loopback-open', exposed }
+}
+
 export function loadEnvFile(file) {
   const out = {}
   if (!existsSync(file)) return out
@@ -113,15 +129,20 @@ const MC_BLANK_FALLTHROUGH = [
   'MC_BRIDGE_UNIT_NAME',
   'MC_BRIDGE_LAUNCHD_LABEL',
   'MC_BRIDGE_CRON_MARK',
+  'DASHBOARD_PASSWORD_HASH',
+  'SESSION_SECRET',
 ]
 
 /**
  * File values fill in first. A set process value wins, including a blank,
- * except MC_*_PORT: a blank there falls through to the file, then the default.
+ * except the keys in MC_BLANK_FALLTHROUGH. A blank there falls through to
+ * the file. That includes the dashboard hash and session secret, so a
+ * parent shell that sourced an empty template does not hide the values
+ * bash install.sh just wrote.
  */
 export function effectiveEnv(fileEnv, processEnv = process.env) {
   const env = { ...fileEnv }
-  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', ...MC_BLANK_FALLTHROUGH]) {
+  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET', 'TRUSTED_PROXY', ...MC_BLANK_FALLTHROUGH]) {
     if (processEnv[key] === undefined) continue
     if (MC_BLANK_FALLTHROUGH.includes(key) && String(processEnv[key]).trim() === '') continue
     env[key] = processEnv[key]
@@ -476,23 +497,47 @@ async function databaseFacts(root, env) {
   }
 }
 
-export async function inspectApiPort(port, host = '127.0.0.1') {
+const DOCKER_HEALTH_JS =
+  'fetch("http://127.0.0.1:3000/health").then(async (res) => { const text = await res.text(); process.stdout.write(text); process.exit(res.ok ? 0 : 1); }).catch(() => process.exit(1))'
+
+function dockerLoopbackHealth(root) {
+  try {
+    const result = spawnSync('docker', ['compose', 'exec', '-T', 'api', 'node', '-e', DOCKER_HEALTH_JS], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 8000,
+    })
+    return readHealthIdentity({
+      status: result.status === 0 ? 200 : 503,
+      text: result.stdout || '',
+    })
+  } catch {
+    return { ours: false, db: null }
+  }
+}
+
+export async function inspectApiPort(port, host = '127.0.0.1', options = {}) {
   const url = `http://${host}:${port}/health`
   const free = await listenFree(port, host)
   if (free) return { state: 'free', url, db: null }
-  const identity = readHealthIdentity(await httpGet(url))
+  const res = await httpGet(url)
+  const identity = readHealthIdentity(res)
   if (identity.ours) return { state: 'ours', url, db: identity.db }
+  if (res.status === 401 && options.docker && options.root) {
+    const inside = dockerLoopbackHealth(options.root)
+    if (inside.ours) return { state: 'ours', url, db: inside.db }
+  }
   return { state: 'other', url, db: null }
 }
 
-async function portFacts(env) {
+async function portFacts(env, root) {
   const port = apiListenPort(env)
   const host = probeHost(bindHost(env))
   const bind = host === 'localhost' ? '127.0.0.1' : host
   if (port == null) {
     return { badPort: true, api: null, apiState: 'busy', health: null }
   }
-  const seen = await inspectApiPort(port, bind)
+  const seen = await inspectApiPort(port, bind, { docker: dockerRequested(env), root })
   return {
     badPort: false,
     api: port,
@@ -512,7 +557,7 @@ export async function gather(root, processEnv = process.env) {
   const docker = await usingDocker(root, loaded)
   const env = { ...loaded, MC_DOCTOR_DOCKER: docker ? '1' : '0' }
   const [ports, database, openclaw] = await Promise.all([
-    portFacts(env),
+    portFacts(env, root),
     databaseFacts(root, env),
     openclawDetail(),
   ])
@@ -578,12 +623,23 @@ function tokenLine(env) {
     return `fail token: HOST is ${state.host}, which is not loopback, and INGEST_TOKEN is not set. The API refuses to start. Set INGEST_TOKEN in .env. Generate one with: ${FIX_TOKEN}`
   }
   if (state.kind === 'production') {
-    return `fail token: NODE_ENV is production and INGEST_TOKEN is not set. Every write returns 401. Set INGEST_TOKEN in .env. Generate one with: ${FIX_TOKEN}`
+    return `fail token: NODE_ENV is production and INGEST_TOKEN is not set. Ingest routes return 401. Set INGEST_TOKEN in .env. Generate one with: ${FIX_TOKEN}`
   }
   if (state.kind === 'loopback-open') {
-    return 'pass token: Token configuration is valid. HOST is loopback and INGEST_TOKEN is not set, so writes stay open outside production.'
+    return 'pass token: Token configuration is valid. HOST is loopback and INGEST_TOKEN is not set, so ingest stays open outside production.'
   }
   return `pass token: Token configuration is valid for ${state.host}.`
+}
+
+function loginLine(env) {
+  const state = loginState(env)
+  if (state.kind === 'exposed') {
+    return 'fail login: The dashboard is reachable beyond this machine and DASHBOARD_PASSWORD_HASH or SESSION_SECRET is not set. Run bash install.sh, or set both in .env.'
+  }
+  if (state.kind === 'loopback-open') {
+    return 'pass login: HOST is loopback, so the dashboard stays open without a password.'
+  }
+  return 'pass login: A dashboard password is configured.'
 }
 
 function bridgeLine(bridge) {
@@ -631,6 +687,7 @@ export function report(facts) {
     databaseLine(facts.database),
     migrationsLine(facts.database),
     tokenLine(facts.env),
+    loginLine(facts.env),
     healthLine(facts.ports),
     `info openclaw: ${facts.openclaw}`,
     bridgeLine(facts.bridge),

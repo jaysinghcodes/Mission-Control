@@ -6,11 +6,11 @@
 # Linux uses a systemd user timer, or cron when that timer is not available.
 # macOS uses launchd. The schedule PATH includes the openclaw directory and the python3 directory.
 # Remove it with: bash install.sh --uninstall-schedule. That also removes the sync timestamp.
-# A second run keeps tokens and secrets already in .env.
-# A plain second run leaves .env unchanged.
+# A plain second run leaves .env unchanged when the dashboard hash and session secret are already set.
 # A new shell MC_DB_PORT updates a stock DATABASE_URL and that port line.
 # A custom DATABASE_URL is left as is.
-# Token values are not printed.
+# A missing dashboard password hash or session secret is filled. Other keys stay.
+# The ingest token is not printed. A new dashboard password is printed once.
 
 set -euo pipefail
 
@@ -391,12 +391,133 @@ apply_shell_schedule() {
   return 0
 }
 
+dashboard_secrets_from_node() {
+  node -e 'const crypto = require("crypto"); const password = crypto.randomBytes(18).toString("base64url"); const salt = crypto.randomBytes(16); const key = crypto.scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 }); const hash = ["scrypt", "16384", "8", "1", salt.toString("hex"), key.toString("hex")].join(":"); const secret = crypto.randomBytes(32).toString("hex"); process.stdout.write(password + "\n" + hash + "\n" + secret + "\n");'
+}
+
+dashboard_secrets_from_python() {
+  python3 -c 'import hashlib, secrets
+password = secrets.token_urlsafe(18)
+salt = secrets.token_bytes(16)
+key = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
+print(password)
+print("scrypt:16384:8:1:%s:%s" % (salt.hex(), key.hex()))
+print(secrets.token_hex(32))'
+}
+
+accept_dashboard_secrets() {
+  local raw password hash secret
+  raw="$1"
+  password="$(printf '%s\n' "$raw" | sed -n '1p')"
+  hash="$(printf '%s\n' "$raw" | sed -n '2p')"
+  secret="$(printf '%s\n' "$raw" | sed -n '3p')"
+  if [[ ! "$hash" =~ ^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$ ]]; then
+    return 1
+  fi
+  if [[ ! "$secret" =~ ^[0-9a-f]{64}$ ]]; then
+    return 1
+  fi
+  if [[ -z "$password" || "$password" == *$'\n'* ]]; then
+    return 1
+  fi
+  MC_NEW_PASSWORD="$password"
+  MC_NEW_HASH="$hash"
+  MC_NEW_SECRET="$secret"
+}
+
+generate_dashboard_secrets() {
+  local raw
+  raw=""
+  if command -v node >/dev/null 2>&1; then
+    raw="$(dashboard_secrets_from_node 2>/dev/null || true)"
+    if accept_dashboard_secrets "$raw"; then
+      return 0
+    fi
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    raw="$(dashboard_secrets_from_python 2>/dev/null || true)"
+    if accept_dashboard_secrets "$raw"; then
+      return 0
+    fi
+  fi
+  echo "Could not generate a dashboard password. Install Node.js or Python 3, then run bash install.sh again." >&2
+  return 1
+}
+
+write_env_assignments() {
+  local src dest ingest hash secret saw_ingest saw_hash saw_secret line
+  src="$1"
+  dest="$2"
+  ingest="$3"
+  hash="$4"
+  secret="$5"
+  saw_ingest=0
+  saw_hash=0
+  saw_secret=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      INGEST_TOKEN=*|export\ INGEST_TOKEN=*)
+        if [[ -n "$ingest" ]]; then
+          printf 'INGEST_TOKEN=%s\n' "$ingest"
+          saw_ingest=1
+        else
+          printf '%s\n' "$line"
+          saw_ingest=1
+        fi
+        ;;
+      DASHBOARD_PASSWORD_HASH=*|export\ DASHBOARD_PASSWORD_HASH=*)
+        printf 'DASHBOARD_PASSWORD_HASH=%s\n' "$hash"
+        saw_hash=1
+        ;;
+      SESSION_SECRET=*|export\ SESSION_SECRET=*)
+        printf 'SESSION_SECRET=%s\n' "$secret"
+        saw_secret=1
+        ;;
+      *)
+        printf '%s\n' "$line"
+        ;;
+    esac
+  done < "$src" > "$dest"
+  if [[ -n "$ingest" && "$saw_ingest" -eq 0 ]]; then
+    printf 'INGEST_TOKEN=%s\n' "$ingest" >> "$dest"
+  fi
+  if [[ "$saw_hash" -eq 0 ]]; then
+    printf 'DASHBOARD_PASSWORD_HASH=%s\n' "$hash" >> "$dest"
+  fi
+  if [[ "$saw_secret" -eq 0 ]]; then
+    printf 'SESSION_SECRET=%s\n' "$secret" >> "$dest"
+  fi
+}
+
 ensure_env() {
-  local ingest socket tmp old_umask saw_ingest saw_socket line
-  local got_ingest got_socket mode
+  local ingest tmp old_umask got_ingest got_hash got_secret mode
   if [[ -f .env ]]; then
     mode="$(env_file_mode .env)"
     rerun_env_ports .env
+    got_hash="$(env_value DASHBOARD_PASSWORD_HASH)"
+    got_secret="$(env_value SESSION_SECRET)"
+    if [[ -z "$got_hash" || -z "$got_secret" ]]; then
+      generate_dashboard_secrets || exit 1
+      if [[ -n "$got_hash" ]]; then
+        MC_NEW_HASH="$got_hash"
+        MC_NEW_PASSWORD=""
+      fi
+      if [[ -n "$got_secret" ]]; then
+        MC_NEW_SECRET="$got_secret"
+      fi
+      old_umask="$(umask)"
+      umask 077
+      tmp="$(mktemp "${TMPDIR:-/tmp}/mc-env.XXXXXX")"
+      write_env_assignments .env "$tmp" "" "$MC_NEW_HASH" "$MC_NEW_SECRET"
+      chmod "$mode" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+      mv "$tmp" .env
+      umask "$old_umask"
+      echo "Added the missing dashboard login values to .env."
+      if [[ -n "$MC_NEW_PASSWORD" ]]; then
+        echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+      fi
+      return 0
+    fi
     if [[ "$MC_DB_PORT_UPDATED" -eq 1 || "$MC_DATABASE_URL_UPDATED" -eq 1 ]]; then
       if [[ -n "$mode" ]]; then
         chmod "$mode" .env || true
@@ -412,36 +533,11 @@ ensure_env() {
     exit 1
   fi
   ingest="$(new_token)" || exit 1
-  socket="$(new_token)" || exit 1
-  while [[ "$socket" == "$ingest" ]]; do
-    socket="$(new_token)" || exit 1
-  done
+  generate_dashboard_secrets || exit 1
   old_umask="$(umask)"
   umask 077
   tmp="$(mktemp "${TMPDIR:-/tmp}/mc-env.XXXXXX")"
-  saw_ingest=0
-  saw_socket=0
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      INGEST_TOKEN=*|export\ INGEST_TOKEN=*)
-        printf 'INGEST_TOKEN=%s\n' "$ingest"
-        saw_ingest=1
-        ;;
-      SOCKET_TOKEN=*|export\ SOCKET_TOKEN=*)
-        printf 'SOCKET_TOKEN=%s\n' "$socket"
-        saw_socket=1
-        ;;
-      *)
-        printf '%s\n' "$line"
-        ;;
-    esac
-  done < .env.example > "$tmp"
-  if [[ "$saw_ingest" -eq 0 ]]; then
-    printf 'INGEST_TOKEN=%s\n' "$ingest" >> "$tmp"
-  fi
-  if [[ "$saw_socket" -eq 0 ]]; then
-    printf 'SOCKET_TOKEN=%s\n' "$socket" >> "$tmp"
-  fi
+  write_env_assignments .env.example "$tmp" "$ingest" "$MC_NEW_HASH" "$MC_NEW_SECRET"
   apply_shell_ports "$tmp"
   apply_shell_schedule "$tmp"
   sync_database_url "$tmp" "$(resolved_port_file MC_DB_PORT 5432 "$tmp")" 1
@@ -449,18 +545,20 @@ ensure_env() {
   mv "$tmp" .env
   umask "$old_umask"
   got_ingest="$(env_value INGEST_TOKEN)"
-  got_socket="$(env_value SOCKET_TOKEN)"
-  if [[ "$got_ingest" == "$got_socket" || ! "$got_ingest" =~ ^[0-9a-f]{48}$ || ! "$got_socket" =~ ^[0-9a-f]{48}$ ]]; then
+  got_hash="$(env_value DASHBOARD_PASSWORD_HASH)"
+  got_secret="$(env_value SESSION_SECRET)"
+  if [[ ! "$got_ingest" =~ ^[0-9a-f]{48}$ || "$got_hash" != "$MC_NEW_HASH" || "$got_secret" != "$MC_NEW_SECRET" ]]; then
     rm -f .env
-    echo "Refusing to start because the new .env tokens are not two different random values." >&2
+    echo "Refusing to start because the new .env secrets were not written." >&2
     exit 1
   fi
-  if grep -E '^INGEST_TOKEN=change-me$' .env >/dev/null 2>&1 || grep -E '^SOCKET_TOKEN=$' .env >/dev/null 2>&1; then
+  if grep -E '^INGEST_TOKEN=change-me$' .env >/dev/null 2>&1; then
     rm -f .env
     echo "Refusing to start because the new .env still has a placeholder token." >&2
     exit 1
   fi
-  echo "Wrote INGEST_TOKEN and SOCKET_TOKEN to .env."
+  echo "Wrote INGEST_TOKEN to .env."
+  echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
 }
 
 have_docker() {
@@ -536,11 +634,30 @@ require_postgres_16() {
   esac
 }
 
-health_ok_port() {
+health_probe_host() {
   local port
   port="$1"
-  # Any HTTP 200 on this port is not enough. Only the Mission Control health body counts.
-  node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' "$port" >/dev/null 2>&1
+  # 0 is a healthy Mission Control body. 2 is HTTP 401. Anything else is 1.
+  node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/health").then(async (res) => { if (res.status === 401) process.exit(2); if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' "$port" >/dev/null 2>&1
+}
+
+health_ok_port() {
+  local port code
+  port="$1"
+  code=0
+  health_probe_host "$port" || code=$?
+  if [[ "$code" -eq 0 ]]; then
+    return 0
+  fi
+  # Compose publishes the API through the Docker bridge, so the host request
+  # is not loopback and /health is 401. Probe 127.0.0.1 inside the container.
+  if [[ "$code" -eq 2 && "${USE_DOCKER:-0}" == "1" ]]; then
+    if docker compose exec -T api node -e 'fetch("http://127.0.0.1:3000/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
+  fi
+  return 1
 }
 
 health_ok() {
@@ -1232,7 +1349,7 @@ finish() {
   fi
   url="http://localhost:$(web_port)/#/tasks"
   echo "Open ${url}"
-  echo "INGEST_TOKEN and SOCKET_TOKEN are in .env"
+  echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
   echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
   exit "$doctor_code"
 }

@@ -43,7 +43,7 @@ function assignments(text) {
 function nonTokenLines(text) {
   return String(text)
     .split(/\n/)
-    .filter((line) => !/^(?:export\s+)?(INGEST_TOKEN|SOCKET_TOKEN)=/.test(line))
+    .filter((line) => !/^(?:export\s+)?(INGEST_TOKEN|SOCKET_TOKEN|DASHBOARD_PASSWORD_HASH|SESSION_SECRET)=/.test(line))
 }
 
 function pathWithout(names) {
@@ -302,8 +302,12 @@ function assertReadableDoctor(text) {
 }
 
 function assertNoSecrets(text, tokens) {
-  assert.equal(text.includes(tokens.INGEST_TOKEN), false)
-  assert.equal(text.includes(tokens.SOCKET_TOKEN), false)
+  for (const key of ['INGEST_TOKEN', 'SOCKET_TOKEN', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET']) {
+    const value = tokens[key]
+    if (typeof value === 'string' && value.length > 0) {
+      assert.equal(text.includes(value), false, key)
+    }
+  }
   assert.equal(text.includes('postgres:postgres'), false)
   assert.equal((text.match(/Open http:\/\/localhost:/g) ?? []).length, 1)
 }
@@ -340,17 +344,17 @@ test('a fresh run writes unique random tokens, calls compose, and prints the URL
     const example = assignments(readFileSync(path.join(root, '.env.example'), 'utf8'))
     for (const env of [envA, envB]) {
       assert.match(env.INGEST_TOKEN, /^[0-9a-f]{48}$/)
-      assert.match(env.SOCKET_TOKEN, /^[0-9a-f]{48}$/)
-      assert.notEqual(env.INGEST_TOKEN, env.SOCKET_TOKEN)
+      assert.equal(env.SOCKET_TOKEN ?? '', '')
+      assert.match(env.DASHBOARD_PASSWORD_HASH, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/)
+      assert.match(env.SESSION_SECRET, /^[0-9a-f]{64}$/)
       assert.notEqual(env.INGEST_TOKEN, 'change-me')
       assert.notEqual(env.INGEST_TOKEN, 'dev-ingest-token')
-      assert.notEqual(env.SOCKET_TOKEN, 'dev-socket-token')
-      assert.notEqual(env.SOCKET_TOKEN, '')
     }
     assert.notEqual(envA.INGEST_TOKEN, envB.INGEST_TOKEN)
-    assert.notEqual(envA.SOCKET_TOKEN, envB.SOCKET_TOKEN)
+    assert.notEqual(envA.DASHBOARD_PASSWORD_HASH, envB.DASHBOARD_PASSWORD_HASH)
+    assert.notEqual(envA.SESSION_SECRET, envB.SESSION_SECRET)
     for (const key of Object.keys(example)) {
-      if (key === 'INGEST_TOKEN' || key === 'SOCKET_TOKEN') continue
+      if (key === 'INGEST_TOKEN' || key === 'SOCKET_TOKEN' || key === 'DASHBOARD_PASSWORD_HASH' || key === 'SESSION_SECRET') continue
       assert.equal(envA[key], example[key], key)
     }
     assert.deepEqual(
@@ -359,10 +363,11 @@ test('a fresh run writes unique random tokens, calls compose, and prints the URL
     )
     assert.equal(statSync(path.join(first.repo, '.env')).mode & 0o777, 0o600)
     for (const text of [textA, textB]) {
-      assert.match(text, /Wrote INGEST_TOKEN and SOCKET_TOKEN to \.env\./)
+      assert.match(text, /Wrote INGEST_TOKEN to \.env\./)
+      assert.match(text, /Dashboard password, shown once: /)
       assert.match(text, /Starting the stack with Docker Compose\./)
       assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
-      assert.match(text, /INGEST_TOKEN and SOCKET_TOKEN are in \.env/)
+      assert.match(text, /INGEST_TOKEN is in \.env\. The dashboard password is printed once when it is created\./)
       assert.match(text, /OpenClaw is optional/)
       assertReadableDoctor(text)
       assert.equal(PUNCT.test(text), false)
@@ -403,7 +408,7 @@ test('a rerun keeps existing tokens and every other .env value', () => {
   }
 })
 
-test('an existing .env is not rewritten, even when the token is still change-me', () => {
+test('an existing .env keeps its tokens and gains dashboard secrets without openssl', () => {
   const fx = freshDir()
   try {
     const envPath = path.join(fx.repo, '.env')
@@ -424,15 +429,27 @@ test('an existing .env is not rewritten, even when the token is still change-me'
     )
     const result = runInstall(fx.repo, fx.env)
     const text = outputOf(result)
-    assert.equal(readFileSync(envPath, 'utf8'), custom)
-    assert.match(text, /Keeping the existing \.env/)
+    const env = assignments(readFileSync(envPath, 'utf8'))
+    assert.equal(env.INGEST_TOKEN, 'change-me')
+    assert.equal(env.SOCKET_TOKEN, 'keep-socket')
+    assert.equal(env.OPERATOR_NAME, 'Ada Lovelace')
+    assert.equal(env.CUSTOM_FLAG, 'do-not-touch')
+    assert.equal(env.MC_WEB_PORT, '5273')
+    assert.match(env.DASHBOARD_PASSWORD_HASH, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/)
+    assert.match(env.SESSION_SECRET, /^[0-9a-f]{64}$/)
+    assert.match(text, /Added the missing dashboard login values to \.env\./)
+    assert.match(text, /Dashboard password, shown once: /)
     assert.match(text, /Open http:\/\/localhost:5273\/#\/tasks/)
-    assert.equal(text.includes('change-me'), false)
+    assert.equal(text.includes(env.DASHBOARD_PASSWORD_HASH), false)
+    assert.equal(text.includes(env.SESSION_SECRET), false)
     assert.equal(text.includes('keep-socket'), false)
-    assert.equal(text.includes('secret'), false)
     assert.equal(text.includes('Ada Lovelace'), false)
     assert.equal(text.includes('openssl should not run'), false)
     assertReadableDoctor(text)
+    const before = readFileSync(envPath)
+    const second = runInstall(fx.repo, fx.env)
+    assert.match(outputOf(second), /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.deepEqual(readFileSync(envPath), before)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
   }
@@ -448,7 +465,8 @@ test('missing token keys are appended, and other example lines stay', () => {
     assert.equal(env.PORT, '3000')
     assert.equal(env.HOST, '127.0.0.1')
     assert.match(env.INGEST_TOKEN, /^[0-9a-f]{48}$/)
-    assert.match(env.SOCKET_TOKEN, /^[0-9a-f]{48}$/)
+    assert.match(env.DASHBOARD_PASSWORD_HASH, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/)
+    assert.match(env.SESSION_SECRET, /^[0-9a-f]{64}$/)
     assert.match(text, /# note/)
     assert.equal(outputOf(result).includes(env.INGEST_TOKEN), false)
   } finally {
@@ -473,6 +491,13 @@ test('a compose failure does not print the URL', () => {
 test('docker without Node still prints the URL and a readable doctor line', () => {
   const fx = freshDir()
   try {
+    const python = spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' })
+    assert.equal(python.status, 0, python.stderr)
+    const executable = python.stdout.trim()
+    writeExe(
+      path.join(fx.bin, 'python3'),
+      `#!/bin/sh\nexec ${shellQuote(executable)} "$@"\n`,
+    )
     const result = runInstall(fx.repo, {
       ...fx.env,
       PATH: `${fx.bin}:/usr/bin:/bin`,
@@ -651,6 +676,11 @@ function keptEnv(repo, ports) {
   let text = readFileSync(path.join(repo, '.env.example'), 'utf8')
   text = text.replace(/^INGEST_TOKEN=.*$/m, `INGEST_TOKEN=${'ab'.repeat(24)}`)
   text = text.replace(/^SOCKET_TOKEN=.*$/m, `SOCKET_TOKEN=${'cd'.repeat(24)}`)
+  text = text.replace(
+    /^DASHBOARD_PASSWORD_HASH=.*$/m,
+    'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  )
+  text = text.replace(/^SESSION_SECRET=.*$/m, `SESSION_SECRET=${'ef'.repeat(32)}`)
   for (const [key, value] of Object.entries(ports)) {
     const re = new RegExp(`^#?\\s*${key}=.*$`, 'm')
     text = re.test(text) ? text.replace(re, `${key}=${value}`) : `${text}${key}=${value}\n`
@@ -736,11 +766,13 @@ test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and upda
     assert.equal(firstEnv.MC_DB_PORT, '55432')
     assert.equal(firstEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:55432/mission_control')
     assert.match(firstEnv.INGEST_TOKEN, /^[0-9a-f]{48}$/)
-    assert.match(firstEnv.SOCKET_TOKEN, /^[0-9a-f]{48}$/)
-    assert.notEqual(firstEnv.INGEST_TOKEN, firstEnv.SOCKET_TOKEN)
+    assert.equal(firstEnv.SOCKET_TOKEN ?? '', '')
+    assert.match(firstEnv.DASHBOARD_PASSWORD_HASH, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/)
+    assert.match(firstEnv.SESSION_SECRET, /^[0-9a-f]{64}$/)
     assert.match(firstText, /Set DATABASE_URL to port 55432\./)
     assert.equal(firstText.includes(firstEnv.INGEST_TOKEN), false)
-    assert.equal(firstText.includes(firstEnv.SOCKET_TOKEN), false)
+    assert.equal(firstText.includes(firstEnv.DASHBOARD_PASSWORD_HASH), false)
+    assert.equal(firstText.includes(firstEnv.SESSION_SECRET), false)
     assert.equal(firstText.includes('postgres:postgres'), false)
     assert.equal(PUNCT.test(firstText), false)
 
@@ -763,13 +795,16 @@ test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and upda
     assert.equal(changedEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:55499/mission_control')
     assert.equal(changedEnv.MC_DB_PORT, '55499')
     assert.equal(changedEnv.INGEST_TOKEN, firstEnv.INGEST_TOKEN)
-    assert.equal(changedEnv.SOCKET_TOKEN, firstEnv.SOCKET_TOKEN)
+    assert.equal(changedEnv.SOCKET_TOKEN ?? '', '')
+    assert.equal(changedEnv.DASHBOARD_PASSWORD_HASH, firstEnv.DASHBOARD_PASSWORD_HASH)
+    assert.equal(changedEnv.SESSION_SECRET, firstEnv.SESSION_SECRET)
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
     assert.match(changedText, /Set DATABASE_URL to port 55499\./)
     assert.match(changedText, /Tokens and secrets were not changed\./)
     assert.doesNotMatch(changedText, /DATABASE_URL is custom/)
     assert.equal(changedText.includes(firstEnv.INGEST_TOKEN), false)
-    assert.equal(changedText.includes(firstEnv.SOCKET_TOKEN), false)
+    assert.equal(changedText.includes(firstEnv.DASHBOARD_PASSWORD_HASH), false)
+    assert.equal(changedText.includes(firstEnv.SESSION_SECRET), false)
     assert.equal(changedText.includes('postgres:postgres'), false)
     for (const key of Object.keys(firstEnv)) {
       if (key === 'DATABASE_URL' || key === 'MC_DB_PORT') continue
@@ -792,6 +827,8 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
     const external = [
       `INGEST_TOKEN=${'ab'.repeat(24)}`,
       `SOCKET_TOKEN=${'cd'.repeat(24)}`,
+      'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      `SESSION_SECRET=${'ef'.repeat(32)}`,
       'MC_DB_PORT=55494',
       'DATABASE_URL=postgresql://app:pw@db.example.internal:6543/otherdb?sslmode=require',
       'PORT=3000',
@@ -821,6 +858,8 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
     const portless = [
       `INGEST_TOKEN=${'ab'.repeat(24)}`,
       `SOCKET_TOKEN=${'cd'.repeat(24)}`,
+      'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      `SESSION_SECRET=${'ef'.repeat(32)}`,
       'MC_DB_PORT=55494',
       'DATABASE_URL=postgresql://app:pw@localhost/otherdb',
       'PORT=3000',
@@ -1274,6 +1313,8 @@ test('bridge schedule: shell interval and register win over .env', () => {
     const custom = [
       'INGEST_TOKEN=abababababababababababababababababababababababab',
       'SOCKET_TOKEN=cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd',
+      'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'SESSION_SECRET=efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef',
       'MC_BRIDGE_INTERVAL_SECONDS=300',
       'MC_BRIDGE_REGISTER=1',
       'PORT=3000',

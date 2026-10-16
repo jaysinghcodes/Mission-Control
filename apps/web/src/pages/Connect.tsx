@@ -58,7 +58,7 @@ async function probeApi(): Promise<{ ok: boolean; detail: string }> {
   let detail = 'Could not reach the API on this port.'
   for (const base of [...new Set(bases)]) {
     try {
-      const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000), credentials: 'include' })
       let h: { service?: string; status?: string; database?: string } | null = null
       try {
         h = (await res.json()) as { service?: string; status?: string; database?: string }

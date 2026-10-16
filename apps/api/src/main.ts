@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { bindHost, evaluateWriteBind } from './auth/write-token';
+import { evaluateDashboardBind } from './auth/password';
 import { bootApi } from './boot';
 import { webOrigins } from './cors-origins';
 
@@ -30,6 +31,15 @@ async function bootstrap() {
     console.log(decision.message);
   }
 
+  const dashboard = evaluateDashboardBind();
+  if (dashboard.action === 'refuse') {
+    console.error(dashboard.message);
+    process.exit(1);
+  }
+  if (dashboard.action === 'warn') {
+    console.warn(dashboard.message);
+  }
+
   // Default JSON limit is 100kb. A memory.snapshot carries full note bodies
   // (MEMORY.md can be long), so the parser is raised to 2mb. The bridge
   // still skips a single file over 1MB.
@@ -45,6 +55,7 @@ async function bootstrap() {
   // They serve different transports; both are locked to the WEB_ORIGIN list, never wildcard.
   app.enableCors({
     origin: webOrigins(),
+    credentials: true,
   });
 
   await app.listen(process.env.PORT ?? 3000, host);

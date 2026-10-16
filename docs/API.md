@@ -19,7 +19,7 @@ It is a turbo monorepo:
 Data reaches Mission Control two ways:
 
 1. **Snapshot and event intake:** `POST /events` with a shared token. This is how OpenClaw state (agents, sessions, cron, usage, approvals, memory) gets in. The bundled bridge does this for you.
-2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. When `INGEST_TOKEN` is set, those writes use the same `x-ingest-token` header as `POST /events`.
+2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. Run writes use the same `x-ingest-token` header as `POST /events`. Ticket, project, and model writes are dashboard routes: open on loopback, session cookie off loopback.
 
 Every event is stored in the `ActivityEvent` table and broadcast live over Socket.IO to open dashboards.
 
@@ -37,7 +37,7 @@ From a checkout you already have, run `bash install.sh` in the repo root. That i
 
 Then open the URL it prints. The default is http://localhost:5173/#/tasks
 
-`bash install.sh` creates `.env` only when that file is missing. It writes `INGEST_TOKEN` and `SOCKET_TOKEN` as two different random values. It never writes `change-me`. A second run keeps tokens, secrets, and the other values already in `.env`. The script does not print the token values. It prints that they live in `.env`. `DATABASE_URL` on a new file uses the resolved `MC_DB_PORT`. A plain second run leaves `.env` unchanged. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still `localhost` or `127.0.0.1` on the previous port. A custom URL is left as is. Tokens and secrets are not rotated.
+`bash install.sh` creates `.env` only when that file is missing. It writes `INGEST_TOKEN` as a random value, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. The password is printed once. The file stores only the hash. A second run keeps every value already in `.env` when the hash and the session secret are set. If either is missing, that run fills only the missing one. The script does not print the ingest token or the session secret. `DATABASE_URL` on a new file uses the resolved `MC_DB_PORT`. A plain second run leaves `.env` unchanged. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still `localhost` or `127.0.0.1` on the previous port. A custom URL is left as is. Tokens and secrets are not rotated.
 
 The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the API container does not use the host port. nginx proxies `/api` and `/socket.io`, so the page stays on port 5173. Leave `VITE_API_URL` unset. `npm run seed:demo` on the host uses the `DATABASE_URL` in `.env`.
 
@@ -52,9 +52,11 @@ When `openclaw` is on PATH, `bash install.sh` installs the bridge schedule. Linu
 Edit `.env` before you expose the machine. Rules for you:
 
 * **Never invent secrets.** Ask your operator for any real key.
-* `INGEST_TOKEN`: `bash install.sh` writes a random value when `.env` is missing. The template value is `change-me` on the advanced path. Replace that placeholder if you copied the template by hand (`openssl rand -hex 24` is fine) and tell your operator. Every write route checks it when it is set, including `POST /events`. The bridge refuses to run if this is blank. The web UI does not receive the value. Vite and nginx attach it.
+* `INGEST_TOKEN`: `bash install.sh` writes a random value when `.env` is missing. The template value is `change-me` on the advanced path. Replace that placeholder if you copied the template by hand (`openssl rand -hex 24` is fine) and tell your operator. Agent ingest checks it when it is set: `POST /events`, register, heartbeat, and run writes. The bridge refuses to run if this is blank. The web bundle does not contain the value. Vite and nginx do not attach it.
+* `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`: `bash install.sh` writes both when they are missing. The password is printed once and stored as scrypt. Blank on loopback leaves the dashboard open. Blank when `HOST` is not loopback, including Compose, refuses to start.
+* `TRUSTED_PROXY`: optional comma separated proxy addresses. Leave it unset. The API decides loopback from the socket address. `X-Forwarded-For` is ignored unless the peer is in this list. Do not set it to the Docker bridge.
 * `OPERATOR_NAME`: display only. It becomes the default assignee for new tickets and runs.
-* `SOCKET_TOKEN`: `bash install.sh` writes a random value when `.env` is missing. If you set one yourself, set it before the first build because it is baked into the web bundle.
+* `SOCKET_TOKEN`: retired. Dashboard login replaced the socket token that issue 36 baked into the web bundle. Leave it blank. The installer does not generate it, and the web image does not receive it.
 * `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
 * `OPENCLAW_GATEWAY_HOST` and `OPENCLAW_GATEWAY_PORT` are the gateway probe. Defaults are `127.0.0.1` and `18789`. `OPENCLAW_LOG_DIR` is the gateway log directory. The default is `/tmp/openclaw`. `GIT_SHA` is the commit shown by `GET /health` when set. A checkout uses git when it is unset. Spend on System comes from `usage.snapshot`.
 * Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` in the shell or in `.env`. The shell wins, then `.env`, then the defaults. A new `.env` keeps the shell values. A plain second run leaves `.env` unchanged. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL is `localhost` or `127.0.0.1` on the previous port, and it updates the `MC_DB_PORT` line. A custom URL is left as is. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
@@ -74,7 +76,7 @@ set -a; . ./.env; set +a
 npm run dev
 ```
 
-The `set -a` export is still required on this path so Vite and Turbo see `INGEST_TOKEN`. The API also loads the root `.env` itself. `apps/api/.env` wins over the root file when both set a key. A variable that is already set wins over either file.
+The `set -a` export is still required on this path so Vite and Turbo see the file. The dev proxy does not attach a token. The API also loads the root `.env` itself. `apps/api/.env` wins over the root file when both set a key. A variable that is already set wins over either file.
 
 On npm 11.17.0, `npm ci` skips the Prisma install scripts. Run `(cd apps/api && npx prisma generate)` before `npm test` or `npm run build` if you have not, or those commands fail to find `.prisma/client`. The API also runs `prisma migrate deploy` on boot.
 
@@ -128,23 +130,33 @@ API base URL: `http://127.0.0.1:3000` unless your operator moved it. All bodies 
 
 ### 4.1 Auth
 
-Every mutating route (`POST`, `PUT`, `PATCH`, `DELETE`) uses one check. When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>`. That includes `POST /events` and the REST writes (tickets, projects, runs, models, mission, approvals, custom tools, `PUT /settings`, and `POST /agents/register`, `POST /agents/:id/heartbeat`, `DELETE /agents/:id`). `GET` and the other reads do not require the header.
+There are two checks. Dashboard login replaced the old rule that every write used `x-ingest-token` (issue 36).
 
-A missing or wrong token is HTTP 401 and this JSON body:
+**Dashboard.** Reads and writes, including `GET /sessions`, `GET /health`, tickets, projects, settings, and `DELETE /agents/:id`, require the `mc_session` cookie when the caller is not loopback. Loopback stays open with no cookie. `POST /auth/login`, `POST /auth/logout`, and `GET /auth/session` are always open so a browser can sign in.
+
+Loopback is the real socket address (`127.0.0.1`, `::1`, or `127.0.0.0/8`, including IPv4 mapped IPv6). A missing socket address is not loopback. `X-Forwarded-For` is ignored unless the peer address is listed in `TRUSTED_PROXY` (comma separated IPs or IPv4 CIDRs). When that proxy is trusted, the client is the rightmost hop that is not itself trusted. Do not trust the leftmost hop. A client can spoof it.
+
+`POST /auth/login` with JSON `{ "password": "..." }` returns 204 and sets an HttpOnly `mc_session` cookie, or 401 with the body below. `GET /auth/session` returns 200 `{ "authenticated": true or false, "loginRequired": true or false }`. On loopback, `loginRequired` is false and `authenticated` is true. `POST /auth/logout` returns 204 and clears the cookie.
+
+`bash install.sh` stores the password as `DASHBOARD_PASSWORD_HASH` (`scrypt:N:r:p:saltHex:keyHex`) and stores `SESSION_SECRET`. It prints the password once. A second run does not replace an existing hash or secret. With no hash, loopback stays open and the process logs one warning. With no hash, or no session secret, on any other bind, the process refuses to start.
+
+**Compose and Docker.** The api container sets `HOST=0.0.0.0`. The browser talks to nginx on the published web port. nginx talks to `api:3000` on the Docker network. The API sees the web container bridge address, not `127.0.0.1`, so login is required even for a browser on the host. A host curl to the published API port is also not loopback. Leave `TRUSTED_PROXY` unset. Do not set it to the Docker bridge to skip login. The installer probes `GET /health` inside the api container, where `127.0.0.1` is loopback.
+
+`npm run dev` stays frictionless. `HOST` is `127.0.0.1` and the Vite proxy connects from `127.0.0.1`, so the dashboard does not ask for a password.
+
+**Agent ingest.** When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>` on `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, and `PATCH /runs/:id`. A session cookie does not replace that header. Dashboard routes do not check it.
+
+A missing or wrong ingest token, and a missing dashboard session off loopback, are both HTTP 401 and this JSON body:
 
 ```json
 {"statusCode":401,"message":"unauthorized"}
 ```
 
-A checked call without the header, and a checked call with a wrong token, both returned that body. A call with the matching token was not 401.
-
-When `INGEST_TOKEN` is unset and the API is bound to a loopback address (`127.0.0.1`, `localhost`, or `::1`), writes are allowed and the process logs one warning that writes are unauthenticated, for any `NODE_ENV` other than `production`. The bundled web UI keeps working. With `NODE_ENV=production` and no `INGEST_TOKEN`, the process still starts on loopback, logs one line that shows how to set `INGEST_TOKEN`, and every write returns 401, including `POST /events`.
+When `INGEST_TOKEN` is unset and the API is bound to a loopback address, ingest is allowed and the process logs one warning, for any `NODE_ENV` other than `production`. With `NODE_ENV=production` and no `INGEST_TOKEN`, the process still starts on loopback and ingest returns 401. Dashboard loopback routes stay open.
 
 When `INGEST_TOKEN` is unset and the API binds to any other address, the process refuses to start. The message tells you to set `INGEST_TOKEN`. Example from that message: `INGEST_TOKEN=$(openssl rand -hex 24)`.
 
-Compose sets `HOST=0.0.0.0` inside the api container, so a token is required there. `bash install.sh` writes a random `INGEST_TOKEN` before Compose starts, so a fresh install does not use the blank token fallback. If `INGEST_TOKEN` is blank in `.env`, compose gives the api and the web proxy `dev-ingest-token`. Nginx attaches that value on `/api` writes. The browser bundle does not contain the token.
-
-`npm run dev` does the same through the Vite proxy: the page calls same origin `/api/...`, and Vite adds `x-ingest-token` from the environment. Do not put the token in client code, a `VITE_` variable, or local storage.
+Compose does not invent a token. A blank `INGEST_TOKEN` stays blank. The web bundle contains no ingest token and no socket token. Vite and nginx do not attach `x-ingest-token`. The browser sends the session cookie.
 
 OpenClaw stays optional. The bridge still posts `POST /events` with `x-ingest-token`. `npm run seed:demo` writes through Prisma, not HTTP, so it does not send the header.
 
@@ -201,7 +213,7 @@ Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merg
 | `POST /tickets` | `{ title, status?, priority?, assignee?, tags?: string[], projectId? }` | 201. `title` required. `status` only `backlog` (default) or `todo`. `priority` defaults `med` (high, med, low). Key auto assigned as `MC-150`, `MC-151`... |
 | `PATCH /tickets/:id` | `{ status?, assignee?, priority?, projectId? }` | `:id` is the ticket id, not the key. Status must be one of `backlog`, `todo`, `build`, `qa`, `review`, `done` (`inprogress` is a legacy alias of `build`). `projectId: null` unassigns |
 
-Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Send `x-ingest-token` on both calls when `INGEST_TOKEN` is set (see section 4.1 and the checklist). A checked create with `{"title":"Onboarding check","status":"todo"}` and that header returned 201, and PATCH `{"status":"done"}` with the same header returned 200 with status `done`.
+Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Ticket writes are dashboard routes (section 4.1): open on loopback, session cookie off loopback. A checked create with `{"title":"Onboarding check","status":"todo"}` on loopback returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
 
 ### 4.5 Projects
 
@@ -252,7 +264,7 @@ That returns HTTP 200 and `"status":"running"`.
 
 ### 4.7 Models and spend
 
-* `GET /models` returns `{ models: [{ id, provider, model, label, agentId, agentName, local, createdAt }] }` from the latest `models.snapshot`. The bridge reads `~/.openclaw/openclaw.json`, or `OPENCLAW_CONFIG_PATH` when that is set. When that file has no agent model, the fallback is `openclaw models list`. `local` is true for Ollama and for any provider the config marks local. `POST /models` with `{ provider, model, label? }` and `DELETE /models/:id` still require the write token. They do not call a provider. The next `models.snapshot` replaces the table. System shows one provider and model per agent. With no rows the sentence is exactly `No providers found yet. Run the bridge to detect them.`
+* `GET /models` returns `{ models: [{ id, provider, model, label, agentId, agentName, local, createdAt }] }` from the latest `models.snapshot`. The bridge reads `~/.openclaw/openclaw.json`, or `OPENCLAW_CONFIG_PATH` when that is set. When that file has no agent model, the fallback is `openclaw models list`. `local` is true for Ollama and for any provider the config marks local. `POST /models` with `{ provider, model, label? }` and `DELETE /models/:id` are dashboard writes: open on loopback, session cookie off loopback. They do not call a provider. The next `models.snapshot` replaces the table. System shows one provider and model per agent. With no rows the sentence is exactly `No providers found yet. Run the bridge to detect them.`
 * Spend on Usage and the System summary comes from `usage.snapshot` daily points. `GET /usage?period=24h|7d|month` prices them. `period=24h` is Today, the calendar day in the timezone saved in Settings, taken from those buckets. When none is saved, that is `TZ` when that name is in `config/timezones.json`, otherwise the host zone. A legacy name such as `Asia/Calcutta` is stored as its current name. There is no hourly storage. The 7 day and month windows use the same calendar. Compose sets `TZ` from the shell, or UTC when that is unset. A saved timezone wins over `TZ`. A short range returns `note` (for example `Showing 3 days of data so far`) and does not fill the gap with zero. `period=30d` returns `usage: null`. The bridge posts points, not 7 day or month totals. On first connect it backfills up to 30 days when session timestamps exist. Otherwise it records the days it has synced. The API keeps a point only when its calendar day is within the last `USAGE_RETENTION_DAYS` days through today (default 30), and it drops a timestamp after now. Cost is input and output tokens times `config/prices.json` (USD per one million tokens). `config/prices.local.json` is gitignored and merged on top at each read, so an edit changes totals without a rebuild. A provider `costUsd` wins when it is present, including zero. Ollama and any provider marked local cost $0. A model with no price shows its tokens and exactly `Price not set`. The Usage page breaks the window down by day, bot, and model. `npm run seed:demo` writes 30 days and stamps today at seed time, with no OpenClaw. If the bridge cannot read sessions, it posts no usage snapshot. This build does not read a live provider balance.
 * Per agent cost on profiles comes from `totalCost` in `agents.snapshot`.
 
@@ -266,9 +278,9 @@ Read only routes: `GET /memory?day=YYYY-MM-DD&kind=&q=&limit=&offset=` and `GET 
 
 `GET /settings` returns `{ namingMode, crewMap, seats, timezone, serverTimeZone, timezoneSaved, setupDone, offlineAfterMs, ts }`. `namingMode` is `crew`, `own`, or null until the first choice is saved. `crewMap` maps an agent id to a seat id. `seats` always lists `config/crew.json` (id, name, role, desk, color). The screen applies a seat only when `namingMode` is `crew` and the map names that agent id. A missing map entry, or a seat id the file does not contain, keeps the stored name, role, and color, and the desk label stays empty. `timezone` is the zone usage and memory use. `serverTimeZone` is `TZ` when that name is in `config/timezones.json`, otherwise the host zone. `timezoneSaved` is false until a zone is stored. `setupDone` is false until the first open is finished or skipped. `offlineAfterMs` is `OFFLINE_AFTER_MS` (default 600000).
 
-`PUT /settings` is a write, so section 4.1 applies. Send any mix of `{ namingMode, crewMap, timezone, setupDone }`. An empty object is 400. Unknown fields are 400 (`unknown field <name>`). When a name field is present, `namingMode` is `crew` or `own`. Omit `crewMap`, or send null, and the stored map is empty. `own` also stores an empty map. Each value must be a seat id from the crew file. The same seat cannot be used twice. At most 200 agents. A bad mode, an unknown seat, or a duplicate seat is 400. `timezone` is an IANA name, or null to return to the server timezone. A name the runtime does not know is 400. `setupDone` is true or false. The row is the same settings row as the mission. Saving one field does not clear the others. `npm run seed:demo` does not set `namingMode`, `timezone`, or `setupDone`.
+`PUT /settings` is a dashboard write, so section 4.1 applies. On loopback it is open. Off loopback it needs the session cookie. Send any mix of `{ namingMode, crewMap, timezone, setupDone }`. An empty object is 400. Unknown fields are 400 (`unknown field <name>`). When a name field is present, `namingMode` is `crew` or `own`. Omit `crewMap`, or send null, and the stored map is empty. `own` also stores an empty map. Each value must be a seat id from the crew file. The same seat cannot be used twice. At most 200 agents. A bad mode, an unknown seat, or a duplicate seat is 400. `timezone` is an IANA name, or null to return to the server timezone. A name the runtime does not know is 400. `setupDone` is true or false. The row is the same settings row as the mission. Saving one field does not clear the others. `npm run seed:demo` does not set `namingMode`, `timezone`, or `setupDone`.
 
-These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/sessions`, `/calendar`, `/logs`, `/search?q=a`, `/approvals?status=pending`, `/mission`, `/devices`, `/docs`, `/projects`, `/tickets`, `/runs`, `/models`, `/memory`, `/usage`, `/custom-tools`.
+These reads returned 200 on a loopback API: `/health`, `/system`, `/agents`, `/sessions`, `/calendar`, `/logs`, `/search?q=a`, `/approvals?status=pending`, `/mission`, `/devices`, `/docs`, `/projects`, `/tickets`, `/runs`, `/models`, `/memory`, `/usage`, `/custom-tools`. Off loopback, including Compose, the same reads return 401 until the session cookie is set.
 
 ### 4.10 Register, heartbeat, and delete
 
@@ -278,7 +290,7 @@ A bot adds or updates itself with `POST /agents/register`. The body is `{ "id", 
 
 `DELETE /agents/:id` removes a registered bot and returns 204. A default row returns 409 `default agents cannot be deleted`. A snapshot row returns 409 `snapshot agents cannot be deleted`. A missing id returns 404 `agent not found`.
 
-All three are writes. When `INGEST_TOKEN` is set, send `x-ingest-token`. With no token, outside production, on loopback, they stay open. With `NODE_ENV=production` and no token, they return 401 `unauthorized`.
+Register and heartbeat are ingest writes. When `INGEST_TOKEN` is set, send `x-ingest-token`. With no token, outside production, on loopback, they stay open. With `NODE_ENV=production` and no token, they return 401 `unauthorized`. `DELETE /agents/:id` is a dashboard write. It does not use `x-ingest-token`. On loopback it is open. Off loopback, including Compose, send the session cookie from `POST /auth/login`.
 
 Register, heartbeat, and delete each broadcast `agents.snapshot`. An open Agents, Office, or Team page refetches the roster when that event arrives, so the list updates within 2 seconds without a reload.
 
@@ -350,8 +362,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:3000/agents/
 That prints `204` and clears `currentTask`. `GET /agents/forge_helper` then shows `"status":"idle"` and `"currentTask":null`. A blank string is not a 400.
 
 ```bash
-curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper" \
-  -H "x-ingest-token: $MC_TOKEN"
+curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper"
 ```
 
 That prints `204`.
@@ -372,7 +383,7 @@ That prints `204`.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
 * Devices have no write route; only `seed:demo` fills them.
-* Do not publish port 3000 on a non loopback address without `INGEST_TOKEN`. The API refuses that start. With the token set, a write that omits `x-ingest-token` is 401.
+* Do not publish port 3000 on a non loopback address without `INGEST_TOKEN` and a dashboard password. The API refuses that start. With the ingest token set, an ingest call that omits `x-ingest-token` is 401. A dashboard call off loopback without a session cookie is also 401.
 
 ## 7. First read checklist
 
@@ -382,7 +393,7 @@ The operator paste is [PASTE_IN.md](PASTE_IN.md). It runs the installer, reports
    ```bash
    curl -s http://127.0.0.1:3000/health
    ```
-   Expect JSON with `"status":"ok"`. A checked call returned 200. If it fails, check `docker compose ps` and `docker compose logs api`, or on the non Docker path confirm Postgres is up and `.env` was exported.
+   On the native path this is loopback and a checked call returned 200 with `"status":"ok"`. On Compose the host curl is not loopback, so expect 401 until you have a session cookie. The installer checks health inside the api container. If it fails, check `docker compose ps` and `docker compose logs api`, or on the non Docker path confirm Postgres is up and `.env` was exported.
 2. **Confirm your token.** Read `INGEST_TOKEN` from the repo root `.env`; do not print it. Export it as `MC_TOKEN` for the next steps.
 3. **Register yourself.** Preferred: run the bridge once, which posts the full roster from `openclaw agents list --json`.
    ```bash
@@ -404,16 +415,14 @@ The operator paste is [PASTE_IN.md](PASTE_IN.md). It runs the installer, reports
    curl -s 'http://127.0.0.1:3000/activity?limit=5'
    ```
    Your event should be first. A checked call returned 200, and the first row was `run.completed` with name `onboarding check`. Ask your operator to open http://localhost:5173/#/office and look for that name in the activity list. The floor seats will not move because of this event.
-6. **File a test ticket and move it.** The same header as `POST /events` is required when `INGEST_TOKEN` is set. Without it the create is 401 `unauthorized`.
+6. **File a test ticket and move it.** Ticket routes are dashboard writes. On loopback they do not use `x-ingest-token`. Off loopback, including Compose, send the session cookie.
    ```bash
    curl -sS -X POST http://127.0.0.1:3000/tickets \
      -H 'content-type: application/json' \
-     -H "x-ingest-token: $MC_TOKEN" \
      -d '{"title":"Onboarding check","status":"todo","assignee":"YOUR_NAME"}'
    curl -sS -X PATCH http://127.0.0.1:3000/tickets/<id from above> \
      -H 'content-type: application/json' \
-     -H "x-ingest-token: $MC_TOKEN" \
      -d '{"status":"done"}'
    ```
-   Confirm it lands in Done on http://localhost:5173/#/tasks. A checked create returned 201 and the following PATCH returned status `done`. A create with no `x-ingest-token` returned 401 `{"statusCode":401,"message":"unauthorized"}`.
+   Confirm it lands in Done on http://localhost:5173/#/tasks. A checked loopback create returned 201 and the following PATCH returned status `done`.
 7. **Schedule the bridge** every 5 minutes, then tell your operator what you set up.

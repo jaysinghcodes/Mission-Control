@@ -3,8 +3,10 @@ import { timingSafeEqual } from 'crypto';
 /**
  * Shared write token.
  *
- * INGEST_TOKEN is the one secret for every mutating route, including
- * POST /events. Callers send it as x-ingest-token. Reads do not use it.
+ * INGEST_TOKEN guards agent ingest only: POST /events, register, heartbeat,
+ * and run writes. Callers send it as x-ingest-token. Dashboard reads and
+ * writes use the session cookie instead. This supersedes the old rule that
+ * every mutating route required the header.
  *
  * A blank or whitespace-only value counts as unset so a fresh clone that
  * clears the placeholder still gets the loopback path.
@@ -61,11 +63,11 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 export const WRITE_AUTH_WARNING =
-  'WARNING: INGEST_TOKEN is not set. Write routes are unauthenticated while the API listens on loopback only. Set INGEST_TOKEN before you expose this API.';
+  'WARNING: INGEST_TOKEN is not set. Ingest routes are unauthenticated while the API listens on loopback only. Set INGEST_TOKEN before you expose this API.';
 
 /** One plain startup line when production has no token and still listens on loopback. */
 export const PRODUCTION_NO_TOKEN_LINE =
-  'INGEST_TOKEN is not set. NODE_ENV is production, so every write route returns 401 until you set INGEST_TOKEN. Example: INGEST_TOKEN=$(openssl rand -hex 24)';
+  'INGEST_TOKEN is not set. NODE_ENV is production, so ingest routes return 401 until you set INGEST_TOKEN. Example: INGEST_TOKEN=$(openssl rand -hex 24)';
 
 export function refuseMessage(host: string): string {
   return (
@@ -84,8 +86,9 @@ export type WriteBindDecision =
  * What main.ts should do before it listens.
  *
  * No token off loopback refuses to start. No token on loopback warns and
- * stays open, except NODE_ENV=production, which still starts and logs how
- * to set the token. Writes then fail closed.
+ * leaves ingest open, except NODE_ENV=production, which still starts and
+ * logs how to set the token. Ingest writes then fail closed. Dashboard
+ * routes use the session cookie instead of this token.
  */
 export function evaluateWriteBind(
   env: NodeJS.ProcessEnv = process.env,
