@@ -2,15 +2,15 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * The curl examples in section 4.10 are what Sentinel runs as written.
+ * The curl examples in section 4.10 of docs/API.md are what Sentinel runs as written.
  * Dash punctuation here means em dash and en dash.
  */
 describe('register docs', () => {
-  const onboarding = readFileSync(
-    join(__dirname, '../../../../docs/OPENCLAW_ONBOARDING.md'),
+  const apiDoc = readFileSync(
+    join(__dirname, '../../../../docs/API.md'),
     'utf8',
   );
-  const section = onboarding.split('### 4.10')[1]?.split('\n## 5.')[0] ?? '';
+  const section = apiDoc.split('### 4.10')[1]?.split('\n## 5.')[0] ?? '';
 
   it('has curl examples for register, heartbeat, and delete with no dash punctuation', () => {
     expect(section.length).toBeGreaterThan(0);
@@ -44,7 +44,7 @@ describe('register docs', () => {
   });
 
   it('documents optional run status and curls that create queued, create running, and patch', () => {
-    const section = onboarding.split('### 4.6')[1]?.split('\n### 4.7')[0] ?? '';
+    const section = apiDoc.split('### 4.6')[1]?.split('\n### 4.7')[0] ?? '';
     expect(section.length).toBeGreaterThan(0);
     expect(section).not.toMatch(/[\u2012\u2013\u2014\u2015]/);
     expect(section).not.toContain('create does not accept');
@@ -57,6 +57,6 @@ describe('register docs', () => {
     expect(section).toContain(`'{"name":"Onboarding run","status":"running"}'`);
     expect(section).toContain(`'{"name":"Queued onboarding run"}'`);
     expect(section).toContain('PATCH "http://127.0.0.1:3000/runs/$RUN_ID"');
-    expect(onboarding).not.toMatch(/[\u2012\u2013\u2014\u2015]/);
+    expect(apiDoc).not.toMatch(/[\u2012\u2013\u2014\u2015]/);
   });
 });

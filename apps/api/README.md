@@ -1,6 +1,6 @@
 # Mission Control API (`apps/api`)
 
-NestJS 11 backend for [Mission Control](../../README.md). REST for tickets, runs, agents, projects, calendar, approvals, sessions, usage, memory, docs, logs, search, and health. Socket.IO for the live feed. `POST /events` is the OpenClaw door. See [docs/OPENCLAW_ONBOARDING.md](../../docs/OPENCLAW_ONBOARDING.md) and [bridge/README.md](../../bridge/README.md).
+NestJS 11 backend for [Mission Control](../../README.md). REST for tickets, runs, agents, projects, calendar, approvals, sessions, usage, memory, docs, logs, search, and health. Socket.IO for the live feed. `POST /events` is the OpenClaw door. See [docs/OPENCLAW_ONBOARDING.md](../../docs/OPENCLAW_ONBOARDING.md), [docs/API.md](../../docs/API.md) (the 401 line is in section 4.1), and [bridge/README.md](../../bridge/README.md).
 
 Postgres through Prisma 7. Models are listed in [`prisma/schema.prisma`](prisma/schema.prisma): Agent, Run, Project, Ticket, Session, CronJob, UsageBucket, ActivityEvent, Approval, MemoryEntry, ModelConfig, Setting, Device, CustomTool.
 

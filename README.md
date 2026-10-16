@@ -6,7 +6,7 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 
 OpenClaw is optional. `npm run seed:demo` fills the sample roster so you can click through the UI. `npm run seed:clear` removes only those sample rows. `npm run doctor` checks the local setup. A missing OpenClaw bridge does not fail that command.
 
-**OpenClaw agents start here:** [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). That file is meant to be pasted to an agent. It has the base URL placeholder, the `x-ingest-token` header, and the exact requests this API accepts. Every write route uses that header when `INGEST_TOKEN` is set.
+**OpenClaw agents start here:** paste [docs/PASTE_IN.md](docs/PASTE_IN.md) and say yes. That file runs the installer, reports the URL, then registers and sends a heartbeat. The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). The API, including the 401 line, is [docs/API.md](docs/API.md). Every write route uses the `x-ingest-token` header when `INGEST_TOKEN` is set.
 
 The web app uses hash routes. A page looks like `http://localhost:5173/#/tasks`. A path with no hash, such as `/tasks`, is not a client route.
 
@@ -38,7 +38,7 @@ The sample Office is the floor after `npm run seed:demo`. Each bot sits in the r
 
 Docker Compose is the default. One command writes random tokens, starts Postgres, the API, and the web UI, runs doctor, and prints the URL. The browser uses one port.
 
-Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 22 and Postgres 16 instead.
+Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 22 and Postgres 16 instead. OpenClaw can run this for you. Paste `docs/PASTE_IN.md` and say yes.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
@@ -178,7 +178,7 @@ These paths are redirects, not pages: `/tickets` to `/tasks`, `/backlog` to `/ta
 
 ## How OpenClaw reports in
 
-Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). Short version, matching the code:
+Full request bodies, field tables, and the heartbeat rules are in [docs/API.md](docs/API.md). The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md). Short version, matching the code:
 
 * Endpoint: `POST /events` on the API (port 3000).
 * Header: `x-ingest-token: <INGEST_TOKEN>` where `<INGEST_TOKEN>` equals `INGEST_TOKEN` in the root `.env`. The same header is required on every `POST`, `PUT`, `PATCH`, and `DELETE` when that variable is set, not only on `POST /events`.
@@ -186,12 +186,12 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/OPENCLAW
 * Success is `202` with `{ "accepted": true, "type", "ts" }`.
 * Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
 * `memory.snapshot` upserts notes by id and drops bridge sourced rows for the agents in the payload when those ids are missing. An empty `entries` list is a no op. It does not wipe Memory. Demo rows stay.
-* `agents.snapshot` creates, updates, or removes snapshot rows only. Default and registered bots stay. `POST /agents/register` upserts one bot (201 when new, 200 when the id exists). `POST /agents/:id/heartbeat` returns 204 and sets `lastSeenAt`. An optional JSON body may set `currentTask` and `status` (`working` or `idle`). No body leaves those fields unchanged. `status` `idle`, JSON null, or a blank `currentTask` clears `currentTask` and sets status to idle. `DELETE /agents/:id` returns 204 for a registered bot and 409 for a default or a snapshot row. An open Agents, Office, or Team page refetches within 2 seconds. Details: [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md) section 4.10.
+* `agents.snapshot` creates, updates, or removes snapshot rows only. Default and registered bots stay. `POST /agents/register` upserts one bot (201 when new, 200 when the id exists). `POST /agents/:id/heartbeat` returns 204 and sets `lastSeenAt`. An optional JSON body may set `currentTask` and `status` (`working` or `idle`). No body leaves those fields unchanged. `status` `idle`, JSON null, or a blank `currentTask` clears `currentTask` and sets status to idle. `DELETE /agents/:id` returns 204 for a registered bot and 409 for a default or a snapshot row. An open Agents, Office, or Team page refetches within 2 seconds. Details: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
 * `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers? }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` sums those points. `period=24h` is Today, the calendar day in America/Chicago, taken from the daily buckets. There is no hourly storage. The 7 day and month windows use that same calendar. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. `npm run seed:demo` writes 30 days, and today's row is stamped at seed time. The dollar amounts depend on the date. `period=30d` is not a window and returns `usage: null`. A point more than 30 days before today, or a point after now, is not stored. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced.
 * `GET /models` is a stored list. The bridge does not read it. The API does not call DeepSeek or Z.ai. The comment that used to say otherwise in `apps/api/src/models/models.controller.ts` was wrong and has been corrected.
 * `run.*` events are activity and a socket broadcast. They do not insert tickets or runs. Office refetches tickets, runs, and activity when those events arrive, then places each bot from the shared live state (an active ticket in build, qa, or review, then an active run, then heartbeat). A done ticket does not seat its bot. Deploy seats a bot only for an active run on a done ticket when no higher precedence ticket applies. A register or delete also refetches activity. Role text is not a seat.
 * The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` (201) and `PATCH /runs/:id` (200). Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. An unknown `ticketId` is 404 and does not write the row. The bridge retries that 404 once without `ticketId` so the run is still recorded. Those routes require `x-ingest-token` when `INGEST_TOKEN` is set. A missing run name is 400 and the message names `name`. A name longer than 200 characters, or an agent longer than 100, is 400 and the message names that field. Optional `status` on create defaults to `queued`. Accepted values are `queued`, `running`, `done`, `failed`, and `needs_approval`. A bad `status` is 400 and the message names `status`. Any other field the route does not accept is 400. A PATCH that changes nothing returns 200 with the same run and writes no activity event. An unknown run id is 404. Success bodies have no `error` key.
-* The office floor has no endpoint. It reads agents, tickets, runs, approvals, and activity. Agents, Team, and Office share that placement. The rules are in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md) section 3.
+* The office floor has no endpoint. It reads agents, tickets, runs, approvals, and activity. Agents, Team, and Office share that placement. The rules are in [docs/API.md](docs/API.md#3-what-each-screen-shows). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#3-what-each-screen-shows).
 * The server broadcasts its own `health.tick` on the socket about every 30 seconds. A client can also POST `health.tick`. The System bridge chip follows the newest activity row with source `openclaw`.
 
 Register, heartbeat, and delete use the same header. `$MC_TOKEN` is `INGEST_TOKEN` from the root `.env`. A new id returns 201. The same id again returns 200 and does not add a second row. Registering a default id, such as `forge`, claims that bot in place: same seat, no Sample tag.
@@ -364,7 +364,9 @@ Read this before you open a port.
 apps/web/                  React dashboard
 apps/api/                  NestJS API, Prisma schema, seed script
 bridge/                    Optional OpenClaw sync
-docs/OPENCLAW_ONBOARDING.md   Paste this to an OpenClaw agent
+docs/PASTE_IN.md              Paste this into OpenClaw. The operator only says yes
+docs/OPENCLAW_ONBOARDING.md   Short guide. Old headings still resolve here
+docs/API.md                   API reference, including the 401 line
 docs/screenshots/          Live screenshots embedded above
 wireframes/                Static wireframe art, not the running UI
 LOG.md                     Change log

@@ -117,4 +117,12 @@ test('compose, nginx, and the install docs have no dash punctuation or arrows', 
   const onboarding = read('docs/OPENCLAW_ONBOARDING.md')
   const section = onboarding.split(/^## 2\. Install and run\s*$/m)[1]?.split(/^## 3\./m)[0] ?? ''
   assert.equal(dash.test(section), false, 'onboarding install section')
+  for (const rel of [
+    'docs/OPENCLAW_ONBOARDING.md',
+    'docs/PASTE_IN.md',
+    'docs/API.md',
+    'ONBOARDING.md',
+  ]) {
+    assert.equal(dash.test(read(rel)), false, rel)
+  }
 })
