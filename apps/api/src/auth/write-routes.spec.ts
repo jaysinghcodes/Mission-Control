@@ -123,7 +123,9 @@ describe('write route coverage', () => {
     const read = await request(app.getHttpServer()).get('/');
     expect(read.status).toBe(200);
 
-    const dashboard = await request(app.getHttpServer()).post('/tickets').send({});
+    const dashboard = await request(app.getHttpServer())
+      .post('/tickets')
+      .send({});
     expect(dashboard.status).toBe(400);
   });
 
