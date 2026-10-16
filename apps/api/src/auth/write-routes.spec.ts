@@ -123,10 +123,8 @@ describe('write route coverage', () => {
     const read = await request(app.getHttpServer()).get('/');
     expect(read.status).toBe(200);
 
-    const dashboard = await request(app.getHttpServer())
-      .post('/tickets')
-      .send({ title: 'loopback' });
-    expect(dashboard.status).not.toBe(401);
+    const dashboard = await request(app.getHttpServer()).post('/tickets').send({});
+    expect(dashboard.status).toBe(400);
   });
 
   it('allows a write when INGEST_TOKEN is unset', async () => {
