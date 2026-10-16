@@ -7,6 +7,7 @@ import { ProviderStatus, type DetectedModel } from '../components/ProviderStatus
 import { TimezoneSelect } from '../components/TimezoneSelect'
 import { Btn } from '../components/shell'
 import { useNaming } from '../lib/naming'
+import { useSession } from '../lib/session'
 import { pluralize } from '../lib/pluralize'
 import type { AgentsResp } from '../types'
 
@@ -51,9 +52,12 @@ export default function Settings() {
     else setZoneSaved(true)
   }
 
+  const session = useSession()
   const logout = () => {
-    localStorage.removeItem('mc-connected')
-    nav('/connect')
+    const required = session.info.loginRequired
+    void session.end().then(() => {
+      if (!required) nav('/connect')
+    })
   }
 
   return (
@@ -127,18 +131,20 @@ export default function Settings() {
       </Card>
 
       <Card className="mt-4 px-5 py-4">
+        <div data-settings-logout="true" data-logout="settings">
         <SectionLabel>Session</SectionLabel>
         <div className="mt-3 flex items-center justify-between">
           <div>
             <div className="text-[13.5px] font-medium">Log out</div>
-            <div className="text-[11.5px] text-mc-sub">Disconnect this browser and return to the setup gate.</div>
+            <div className="text-[11.5px] text-mc-sub">Disconnect this browser. A remote session returns to the sign in form.</div>
           </div>
           <PillButton label="Log out" onClick={logout} />
+        </div>
         </div>
       </Card>
 
       <p className="mt-6 text-[12px] text-mc-faint">
-        Mission Control binds to loopback only. The SSH tunnel is the sanctioned way in. Setup guide lives on the Connect page.
+        A browser on this machine stays open when the API sees a loopback address. Docker Compose asks for the password the installer printed, because the API sees the Docker network, not loopback. Setup lives on the Connect page.
       </p>
     </div>
   )

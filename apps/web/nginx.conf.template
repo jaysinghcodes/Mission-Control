@@ -4,17 +4,17 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Same origin API. The browser calls /api/... and nginx attaches the
-    # write token. The static bundle does not contain INGEST_TOKEN.
-    # The prefix is stripped: /api/health is the API's /health.
+    # Same origin API. The browser calls /api/... with its session cookie.
+    # This proxy does not attach a write token. The prefix is stripped:
+    # /api/health is the API's /health.
     location /api/ {
         proxy_pass http://api:3000/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header x-ingest-token "${INGEST_TOKEN}";
     }
 
     # Same origin live feed. Socket.IO uses this path on the page origin.
+    # The browser sends the session cookie. This proxy does not add a token.
     location /socket.io/ {
         proxy_pass http://api:3000;
         proxy_http_version 1.1;

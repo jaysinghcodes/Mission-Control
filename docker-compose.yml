@@ -1,11 +1,15 @@
 # Mission Control. Postgres, API, and web UI.
 # Usage: bash install.sh
-# That writes random tokens, runs docker compose up -d --build, runs doctor,
-# and prints the URL. A second run keeps .env.
+# That writes a random ingest token and a dashboard password hash, runs
+# docker compose up -d --build, runs doctor, and prints the URL.
+# The password is printed once. A second run keeps .env.
 # Then open http://localhost:5173/#/tasks
 # The browser uses that one port. nginx proxies /api and /socket.io.
 # No OpenClaw? `npm run seed:demo` (from the host) fills sample data.
-# Loopback first: published ports bind 127.0.0.1 only.
+# Published ports bind 127.0.0.1 only. Inside the api container HOST is
+# 0.0.0.0, and the peer is the Docker bridge address of the web container,
+# not 127.0.0.1. That is why Compose asks for the dashboard password.
+# Leave TRUSTED_PROXY unset. Do not point it at the Docker bridge.
 #
 # Host ports are overridable. 5432, 3000, and 5173 are often taken:
 #   MC_DB_PORT=55432 MC_API_PORT=3200 MC_WEB_PORT=5273 docker compose up -d --build
@@ -56,12 +60,18 @@ services:
       # api's own built-in default (apps/api/src/cors-origins.ts). An explicit
       # WEB_ORIGIN (comma-separated) still wins.
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:${MC_WEB_PORT:-5173},http://127.0.0.1:${MC_WEB_PORT:-5173}}
-      # bash install.sh writes a random value. This fallback is not the installed path.
-      INGEST_TOKEN: ${INGEST_TOKEN:-dev-ingest-token}
-      # Socket handshake guard (gateway requires SOCKET_TOKEN when NODE_ENV=production).
-      # Default matches the token baked into the web bundle (see web build args below),
-      # so a fresh clone's dashboard socket works out of the box.
-      SOCKET_TOKEN: ${SOCKET_TOKEN:-dev-socket-token}
+      # bash install.sh writes a random value. A blank value stays blank.
+      # There is no dev token fallback. Ingest without a token returns 401
+      # in production, including this container.
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      # Dashboard login. The installer stores a scrypt hash and a session
+      # secret. Blank values stay blank, and this container then refuses to
+      # start because HOST is 0.0.0.0.
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      # Leave this empty. The API decides loopback from the socket address.
+      # Trusting the Docker bridge would let a browser skip the password.
+      TRUSTED_PROXY: ${TRUSTED_PROXY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Display only. Default assignee for new tickets and runs. Blank means Operator.
       OPERATOR_NAME: ${OPERATOR_NAME:-}
@@ -103,10 +113,6 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        # Baked into the static bundle at build time. Must match the api's
-        # SOCKET_TOKEN (same root .env value) or the socket guard rejects the
-        # dashboard in production.
-        VITE_SOCKET_TOKEN: ${SOCKET_TOKEN:-dev-socket-token}
         # Display only operator name (account chip). Blank stays Operator.
         # Same root .env value the api gets.
         VITE_OPERATOR_NAME: ${OPERATOR_NAME:-}
@@ -119,11 +125,6 @@ services:
     restart: unless-stopped
     depends_on:
       - api
-    environment:
-      # Same value the api uses, including the blank token fallback.
-      # nginx attaches it on /api writes. It is not baked into the JS bundle.
-      # bash install.sh writes a random value, so a fresh install does not use the fallback.
-      INGEST_TOKEN: ${INGEST_TOKEN:-dev-ingest-token}
     ports:
       # Host port overridable (item 6); nginx still listens on 5173 inside.
       - "127.0.0.1:${MC_WEB_PORT:-5173}:5173"

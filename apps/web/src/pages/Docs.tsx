@@ -76,7 +76,7 @@ export default function Docs() {
     setDetailError(false)
     void (async () => {
       try {
-        const res = await fetch(`${API_URL}/docs/${encodeURIComponent(openId)}`, { signal: ctrl.signal })
+        const res = await fetch(`${API_URL}/docs/${encodeURIComponent(openId)}`, { signal: ctrl.signal, credentials: 'include' })
         if (!res.ok) {
           if (live) setDetailError(true)
           return

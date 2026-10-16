@@ -26,8 +26,7 @@ Vite inlines `VITE_*` at build time. For `npm run dev`, export the root `.env` o
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `VITE_API_URL` | blank (same origin `/api`) | Reads and the socket. Blank uses this page. nginx and the Vite dev server proxy `/api` and `/socket.io`. Writes use same origin `/api`, where Vite or nginx attaches `x-ingest-token`. Do not set a `VITE_` copy of `INGEST_TOKEN`. |
-| `VITE_SOCKET_TOKEN` | empty | Must match `SOCKET_TOKEN` when the API runs with `NODE_ENV=production` |
+| `VITE_API_URL` | blank (same origin `/api`) | Reads and the socket. Blank uses this page. nginx and the Vite dev server proxy `/api` and `/socket.io`. The browser sends the session cookie. Do not set a `VITE_` copy of `INGEST_TOKEN` or a socket token. |
 | `VITE_OPERATOR_NAME` | blank | Display only. Account chip. Blank stays Operator |
 | `VITE_DISCORD_GUILD_ID` | blank | Optional. Turns a bare channel id into a link. Blank means no link |
 

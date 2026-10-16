@@ -12,7 +12,7 @@ Without OpenClaw, `npm run seed:demo` fills sample data and the task board still
 
 The web app uses hash routes. Open `http://localhost:5173/#/tasks`. `/` redirects there. A URL with no `#` is not a client route.
 
-Docker Compose is the default. The browser uses one port. The API loads the root `.env` and runs `prisma migrate deploy` on boot. The one command is `bash install.sh` from the repo root, or the curl one liner in the README. It writes random `INGEST_TOKEN` and `SOCKET_TOKEN` values into `.env` when that file is missing, starts the stack, runs doctor, and prints the URL. It does not print the token. A second run keeps `.env` as it is. If Docker is missing, the script says so and uses Node.js 22 and Postgres 16. Do not invent a second install.
+Docker Compose is the default. The browser uses one port. The API loads the root `.env` and runs `prisma migrate deploy` on boot. The one command is `bash install.sh` from the repo root, or the curl one liner in the README. It writes a random `INGEST_TOKEN`, a dashboard password hash, and a session secret into `.env` when that file is missing, starts the stack, runs doctor, and prints the URL. It prints the dashboard password once and does not print the ingest token. A second run keeps `.env`, and fills a missing password hash or session secret. If Docker is missing, the script says so and uses Node.js 22 and Postgres 16. Do not invent a second install.
 
 Guide the operator one step at a time.
 
@@ -63,8 +63,8 @@ cp .env.example .env
 Walk each variable. Ask the operator for real values. Do not invent one.
 
 * `DATABASE_URL`: leave the template unless their Postgres user or password differs.
-* `INGEST_TOKEN`: shared secret for every API write, including `POST /events`. Send it as `x-ingest-token`. `bash install.sh` writes a random value when it creates `.env`. You may generate one with `openssl rand -hex 24` and show it once. The template placeholder is not a production secret. Replace it before anyone else can reach the port. The bridge reads this same variable and exits if it is blank. The web UI does not put the value in the browser. If it is unset and `HOST` is not loopback, the API refuses to start. A second run of the installer does not replace a token that is already in `.env`.
-* `SOCKET_TOKEN`: `bash install.sh` writes a random value when it creates `.env`. Optional for `npm run dev`. Required when `NODE_ENV=production` (the Compose API sets that). If they set one, set `VITE_SOCKET_TOKEN` to the same value before a production web build. A blank value is fine for the dev server verified here. A blank value still becomes `dev-socket-token` only when Compose starts without the installer.
+* `INGEST_TOKEN`: shared secret for agent ingest, including `POST /events`. Send it as `x-ingest-token`. `bash install.sh` writes a random value when it creates `.env`. You may generate one with `openssl rand -hex 24` and show it once. The template placeholder is not a production secret. Replace it before anyone else can reach the port. The bridge reads this same variable and exits if it is blank. The web bundle does not contain the value. If it is unset and `HOST` is not loopback, the API refuses to start. A second run of the installer does not replace a token that is already in `.env`.
+* `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`: the dashboard password, stored hashed, and the cookie secret. `bash install.sh` writes both when they are missing and prints the password once. Loopback `npm run dev` stays open when the hash is blank. Compose requires both, because the API sees the Docker network and not loopback. `SOCKET_TOKEN` is retired. Do not bake a socket token into the web bundle.
 * `WEB_ORIGIN`: leave commented unless they need another origin. The API default is `http://localhost:5173` and `http://127.0.0.1:5173`.
 * `OPERATOR_NAME`: display only, not a secret. Blank means the chip says Operator. For `npm run dev`, set `VITE_OPERATOR_NAME` to the same string if the browser should show the name.
 * `GITHUB_TOKEN`: optional. Ask only if they want pull request merge from Approvals.
@@ -90,7 +90,7 @@ set -a; . ./.env; set +a
 npm run dev
 ```
 
-`npm run dev` runs the API on port 3000 and Vite on port 5173. The dev server proxies `/api` and `/socket.io`. Leave that process running. The board starts empty. The export is required so Vite sees `INGEST_TOKEN`. The API also loads `.env` on its own.
+`npm run dev` runs the API on port 3000 and Vite on port 5173. The dev server proxies `/api` and `/socket.io`. Leave that process running. The board starts empty. The export is required so Vite sees the file. The dev proxy does not attach a token. The API also loads `.env` on its own.
 
 `npm run seed:demo` fills sample agents, tickets, and the rest of the sample set. `npm run seed:clear` removes only that sample data. Registered bots, snapshot rows, and tickets created through the API stay. Both commands are safe to run again. Both refuse `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`.
 

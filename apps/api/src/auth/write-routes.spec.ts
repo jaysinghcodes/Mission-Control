@@ -7,13 +7,13 @@ import {
   probePath,
   type RegisteredWriteRoute,
 } from './write-routes';
+import { isAuthRoute, isIngestWrite } from './route-class';
 
 /**
- * Route coverage for the shared write check.
+ * Route coverage for ingest auth and for dashboard writes on loopback.
  *
- * The list comes from controllers Nest actually registered. Each mutating
- * route must 401 without the token and must get past the check with it.
- * A handler added later shows up here without a hand maintained allow list.
+ * Ingest routes still 401 without x-ingest-token. Dashboard writes on
+ * loopback do not. Off loopback coverage lives in dashboard-auth.spec.ts.
  */
 const TOKEN = 'route-coverage-token';
 
@@ -82,32 +82,51 @@ describe('write route coverage', () => {
     expect(reads).toEqual([]);
   });
 
-  it('returns 401 JSON without the token and passes the check with it', async () => {
+  it('returns 401 for ingest without the token and lets dashboard writes through on loopback', async () => {
     const routes = listRegisteredWriteRoutes(app);
     expect(routes.length).toBeGreaterThanOrEqual(REQUIRED.length);
     for (const route of routes) {
+      const ingest = isIngestWrite(route.method, route.path);
       const denied = await hit(route);
-      expect(denied.status).toBe(401);
-      expect(denied.body).toEqual({
-        statusCode: 401,
-        message: 'unauthorized',
-      });
-
-      const allowed = await hit(route, TOKEN);
-      expect(allowed.status).not.toBe(401);
+      if (ingest) {
+        expect(denied.status).toBe(401);
+        expect(denied.body).toEqual({
+          statusCode: 401,
+          message: 'unauthorized',
+        });
+        const allowed = await hit(route, TOKEN);
+        expect(allowed.status).not.toBe(401);
+      } else if (isAuthRoute(route.method, route.path)) {
+        // Login checks the password. An empty body is a failed login.
+        // Logout only clears the cookie.
+        if (route.method === 'POST' && route.path === '/auth/logout') {
+          expect(denied.status).not.toBe(401);
+        }
+      } else {
+        expect([route.method, route.path, denied.status]).not.toEqual([
+          route.method,
+          route.path,
+          401,
+        ]);
+      }
     }
   });
 
-  it('rejects a wrong token and still serves reads with no token', async () => {
+  it('rejects a wrong ingest token and still serves loopback reads', async () => {
     const wrong = await request(app.getHttpServer())
-      .post('/tickets')
+      .post('/events')
       .set('x-ingest-token', 'not-the-token')
-      .send({ title: 'nope' });
+      .send({ type: 'health.tick', payload: {} });
     expect(wrong.status).toBe(401);
     expect(wrong.body).toEqual({ statusCode: 401, message: 'unauthorized' });
 
     const read = await request(app.getHttpServer()).get('/');
     expect(read.status).toBe(200);
+
+    const dashboard = await request(app.getHttpServer())
+      .post('/tickets')
+      .send({});
+    expect(dashboard.status).toBe(400);
   });
 
   it('allows a write when INGEST_TOKEN is unset', async () => {

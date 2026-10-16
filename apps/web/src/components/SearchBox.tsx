@@ -56,7 +56,7 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
     setLoading(true)
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`${API}/search?q=${encodeURIComponent(query)}`)
+        const res = await fetch(`${API}/search?q=${encodeURIComponent(query)}`, { credentials: 'include' })
         if (res.ok) {
           const body = (await res.json()) as SearchResp
           setResults(body.results)

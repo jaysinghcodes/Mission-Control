@@ -6,6 +6,7 @@ import { OPERATOR_NAME } from '../config'
 import { API_URL, apiLabel } from '../lib/apiBase'
 import { isMissionControlHealth, reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
 import { useNaming } from '../lib/naming'
+import { useSession } from '../lib/session'
 import FirstRun from '../pages/FirstRun'
 
 /**
@@ -82,6 +83,7 @@ export default function AppLayout() {
   const { connected, events } = useLiveActivity()
   const { pathname } = useLocation()
   const nav = useNavigate()
+  const session = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
   const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -183,7 +185,7 @@ export default function AppLayout() {
       const t0 = performance.now()
       let ok = false
       try {
-        const res = await fetch(`${API_URL}/health`, { signal: ctrl.signal, cache: 'no-store' })
+        const res = await fetch(`${API_URL}/health`, { signal: ctrl.signal, cache: 'no-store', credentials: 'include' })
         if (cancelled) return
         let body: unknown = null
         try {
@@ -368,10 +370,13 @@ export default function AppLayout() {
                 </button>
                 <button
                   type="button"
+                  data-logout="menu"
                   onClick={() => {
                     setMenuOpen(false)
-                    localStorage.removeItem('mc-connected')
-                    nav('/connect')
+                    const required = session.info.loginRequired
+                    void session.end().then(() => {
+                      if (!required) nav('/connect')
+                    })
                   }}
                   className="w-full rounded-lg px-2 py-1.5 text-left text-[13px] text-mc-text hover:bg-mc-hover"
                 >

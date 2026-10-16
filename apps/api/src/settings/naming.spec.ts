@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { Request, Response } from 'express';
 import { WriteAuthMiddleware } from '../auth/write-auth.middleware';
+import { SessionAuthMiddleware } from '../auth/session-auth.middleware';
 import { SettingsController } from './settings.controller';
 import type { PrismaService } from '../prisma/prisma.service';
 import { parseCrew, readCrew, readNamingBody, readStoredMode } from './naming';
@@ -271,7 +272,7 @@ describe('SettingsController', () => {
     expect(kyiv.timezone).toBe('Europe/Kyiv');
   });
 
-  it('PUT /settings is a write and production without a token is 401', () => {
+  it('PUT /settings is a dashboard write and is open on loopback', () => {
     // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
     const put = SettingsController.prototype.put;
     expect(Reflect.getMetadata(METHOD_METADATA, put)).toBe(RequestMethod.PUT);
@@ -279,9 +280,8 @@ describe('SettingsController', () => {
 
     const saved = { ...process.env };
     const middleware = new WriteAuthMiddleware();
-    const hit = (token?: string) => {
-      const headers: Record<string, string> = {};
-      if (token !== undefined) headers['x-ingest-token'] = token;
+    const session = new SessionAuthMiddleware();
+    const hit = (remoteAddress: string) => {
       let called = false;
       const response: HitResponse = {
         statusCode: 200,
@@ -295,33 +295,39 @@ describe('SettingsController', () => {
           return this;
         },
       };
+      const req = {
+        method: 'PUT',
+        url: '/settings',
+        originalUrl: '/settings',
+        headers: {},
+        socket: { remoteAddress },
+      };
       middleware.use(
-        { method: 'PUT', headers } as Request,
+        req as unknown as Request,
         response as unknown as Response,
         () => {
-          called = true;
+          session.use(
+            req as unknown as Request,
+            response as unknown as Response,
+            () => {
+              called = true;
+            },
+          );
         },
       );
       return { called, response };
     };
 
     process.env.INGEST_TOKEN = 'secret';
-    process.env.NODE_ENV = 'test';
-    expect(hit().response.statusCode).toBe(401);
-    expect(hit('secret').called).toBe(true);
-
-    delete process.env.INGEST_TOKEN;
     process.env.NODE_ENV = 'production';
-    const closed = hit();
-    expect(closed.called).toBe(false);
-    expect(closed.response.statusCode).toBe(401);
-    expect(closed.response.body).toEqual({
+    expect(hit('127.0.0.1').called).toBe(true);
+    const remote = hit('10.2.3.4');
+    expect(remote.called).toBe(false);
+    expect(remote.response.statusCode).toBe(401);
+    expect(remote.response.body).toEqual({
       statusCode: 401,
       message: 'unauthorized',
     });
-
-    process.env.NODE_ENV = 'test';
-    expect(hit().called).toBe(true);
     process.env = saved;
   });
 });

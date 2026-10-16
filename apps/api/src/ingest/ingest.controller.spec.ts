@@ -1,4 +1,4 @@
-import { responseJson } from '../../test/lint-helpers';
+import { bodyMessage, responseJson } from '../../test/lint-helpers';
 
 interface AgentSnap {
   id: string;
@@ -92,14 +92,12 @@ describe('IngestController (POST /events)', () => {
     expect(res.body).toEqual({ statusCode: 401, message: 'unauthorized' });
   });
 
-  it('fails closed in production without a token on POST /tickets', async () => {
+  it('leaves a production loopback dashboard write open without an ingest token', async () => {
     delete process.env.INGEST_TOKEN;
     process.env.NODE_ENV = 'production';
-    const res = await request(app.getHttpServer())
-      .post('/tickets')
-      .send({ title: 'closed' });
-    expect(res.status).toBe(401);
-    expect(res.body).toEqual({ statusCode: 401, message: 'unauthorized' });
+    const res = await request(app.getHttpServer()).post('/tickets').send({});
+    expect(res.status).toBe(400);
+    expect(bodyMessage(res)).toBe('title is required');
   });
 
   it('accepts a valid token in production', async () => {

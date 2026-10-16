@@ -44,9 +44,9 @@ const HEARTBEAT_FIELD_SET = new Set<string>(['currentTask', 'status']);
 
 /**
  * AgentsController. The roster is the seeded defaults, OpenClaw snapshot
- * rows, and bots that register themselves. GET stays open. Register,
- * heartbeat, and delete are writes, so the shared token middleware covers
- * them.
+ * rows, and bots that register themselves. Register and heartbeat use
+ * x-ingest-token. Delete is a dashboard write and uses the session cookie
+ * off loopback.
  */
 @Controller('agents')
 export class AgentsController {

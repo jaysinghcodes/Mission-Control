@@ -521,13 +521,13 @@ describe('AgentsController register, heartbeat, delete', () => {
 
     const saved = { ...process.env };
     const middleware = new WriteAuthMiddleware();
-    const hit = (method: string, token?: string) => {
+    const hit = (method: string, url: string, token?: string) => {
       const headers: Record<string, string> = {};
       if (token !== undefined) headers['x-ingest-token'] = token;
       let called = false;
       const response = new CapturedResponse();
       middleware.use(
-        { method, headers } as Request,
+        { method, url, originalUrl: url, headers } as Request,
         response as unknown as Response,
         () => {
           called = true;
@@ -538,30 +538,30 @@ describe('AgentsController register, heartbeat, delete', () => {
 
     process.env.INGEST_TOKEN = 'secret';
     process.env.NODE_ENV = 'test';
-    for (const method of ['POST', 'DELETE']) {
-      const denied = hit(method);
+    for (const url of ['/agents/register', '/agents/bot/heartbeat']) {
+      const denied = hit('POST', url);
       expect(denied.called).toBe(false);
       expect(denied.response.statusCode).toBe(401);
       expect(denied.response.body).toEqual({
         statusCode: 401,
         message: 'unauthorized',
       });
-      const wrong = hit(method, 'nope');
+      const wrong = hit('POST', url, 'nope');
       expect(wrong.response.statusCode).toBe(401);
-      const allowed = hit(method, 'secret');
+      const allowed = hit('POST', url, 'secret');
       expect(allowed.called).toBe(true);
     }
+    expect(hit('DELETE', '/agents/bot').called).toBe(true);
 
     delete process.env.INGEST_TOKEN;
     process.env.NODE_ENV = 'test';
-    expect(hit('POST').called).toBe(true);
-    expect(hit('DELETE').called).toBe(true);
+    expect(hit('POST', '/agents/register').called).toBe(true);
 
     process.env.NODE_ENV = 'production';
-    const closed = hit('POST');
+    const closed = hit('POST', '/agents/register');
     expect(closed.called).toBe(false);
     expect(closed.response.statusCode).toBe(401);
-    expect(hit('DELETE').response.statusCode).toBe(401);
+    expect(hit('DELETE', '/agents/bot').called).toBe(true);
 
     process.env = { ...saved };
   });

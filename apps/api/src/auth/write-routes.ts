@@ -3,7 +3,8 @@ import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import type { INestApplication } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 
-const WRITE_METHODS = new Set<number>([
+const HTTP_METHODS = new Set<number>([
+  RequestMethod.GET,
   RequestMethod.POST,
   RequestMethod.PUT,
   RequestMethod.PATCH,
@@ -12,6 +13,7 @@ const WRITE_METHODS = new Set<number>([
 ]);
 
 const METHOD_NAME: Record<number, string> = {
+  [RequestMethod.GET]: 'GET',
   [RequestMethod.POST]: 'POST',
   [RequestMethod.PUT]: 'PUT',
   [RequestMethod.PATCH]: 'PATCH',
@@ -32,6 +34,22 @@ export interface RegisteredWriteRoute {
 export function listRegisteredWriteRoutes(
   app: INestApplication,
 ): RegisteredWriteRoute[] {
+  return listRegisteredRoutes(app, WRITE_METHODS);
+}
+
+const WRITE_METHODS = new Set<number>([
+  RequestMethod.POST,
+  RequestMethod.PUT,
+  RequestMethod.PATCH,
+  RequestMethod.DELETE,
+  RequestMethod.ALL,
+]);
+
+/** Every GET, POST, PUT, PATCH, and DELETE Nest registered. */
+export function listRegisteredRoutes(
+  app: INestApplication,
+  methods: Set<number> = HTTP_METHODS,
+): RegisteredWriteRoute[] {
   const modules = app.get(ModulesContainer);
   const seen = new Set<string>();
   const routes: RegisteredWriteRoute[] = [];
@@ -50,7 +68,7 @@ export function listRegisteredWriteRoutes(
         const pathMeta = Reflect.getMetadata(PATH_METADATA, handler) as
           string | string[] | undefined;
         if (methodMeta === undefined || pathMeta === undefined) continue;
-        if (!WRITE_METHODS.has(methodMeta)) continue;
+        if (!methods.has(methodMeta)) continue;
         const paths = Array.isArray(pathMeta) ? pathMeta : [pathMeta];
         for (const path of paths) {
           const full = joinRoute(controllerPath, path);

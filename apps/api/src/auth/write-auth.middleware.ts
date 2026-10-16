@@ -1,24 +1,26 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import { isIngestWrite } from './route-class';
 import { configuredWriteToken, tokensMatch } from './write-token';
 
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
 /**
- * One check for every mutating route.
+ * Agent ingest only: register, heartbeat, runs, and POST /events.
  *
- * Registered for the whole app in AppModule. A new POST, PUT, PATCH, or
- * DELETE cannot skip it. GET, HEAD, and OPTIONS pass through.
+ * Dashboard reads and writes use the session cookie instead. This check
+ * still runs for every route so a new ingest handler is covered when its
+ * path is listed in route-class.ts. Other methods pass through.
  *
- * When INGEST_TOKEN is unset and NODE_ENV is production, every write is
+ * When INGEST_TOKEN is unset and NODE_ENV is production, ingest writes are
  * 401, including on loopback. Any other NODE_ENV with no token continues.
- * main.ts has already refused to start if that process is bound off loopback.
+ * main.ts has already refused to start if that process is bound off loopback
+ * without INGEST_TOKEN.
  */
 @Injectable()
 export class WriteAuthMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     const method = (req.method || '').toUpperCase();
-    if (!WRITE_METHODS.has(method)) {
+    const url = req.originalUrl || req.url;
+    if (!isIngestWrite(method, url)) {
       next();
       return;
     }
