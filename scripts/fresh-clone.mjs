@@ -561,6 +561,71 @@ async function stopInstall(cloneDir, mode, env) {
   }
 }
 
+function assertDisposableTemp(target) {
+  const resolved = path.resolve(target)
+  const temp = path.resolve(tmpdir())
+  if (resolved === temp || !resolved.startsWith(`${temp}${path.sep}`)) {
+    throw new Error(`Refusing to remove ${resolved} outside the temp directory.`)
+  }
+  return resolved
+}
+
+/**
+ * Delete the install checkout. Docker may have left a root-owned bind such as
+ * data/docs. A normal rm then throws EACCES. Try sudo, then a local image
+ * running as root. A cleanup miss is logged and does not throw.
+ */
+export async function removeInstallWork(workParent, env = process.env, exec = runShell) {
+  const resolved = assertDisposableTemp(workParent)
+  try {
+    rmSync(resolved, { recursive: true, force: true })
+    return true
+  } catch (err) {
+    console.error(
+      `Could not remove ${resolved} as this user: ${err instanceof Error ? err.message : err}`,
+    )
+  }
+  const quoted = shellQuote(resolved)
+  const attempts = [
+    `sudo -n rm -rf ${quoted}`,
+    `id="$(docker image ls -q 2>/dev/null | head -n 1)"
+if [ -z "$id" ]; then
+  exit 1
+fi
+docker run --rm -v ${quoted}:/work --entrypoint /bin/rm "$id" -rf /work`,
+  ]
+  for (const script of attempts) {
+    const result = await exec(script, { env, inherit: true })
+    if (result.code === 0 && !existsSync(resolved)) return true
+  }
+  console.error(`Cleanup left ${resolved} in place. The install result is unchanged.`)
+  return false
+}
+
+/**
+ * Stop the stack and delete the checkout. Cleanup failures are logged.
+ * installError is thrown after cleanup, so a late rm cannot hide it and
+ * cannot fail a run that already passed.
+ */
+export async function finishFreshInstall({
+  workParent,
+  cloneDir,
+  mode,
+  env,
+  keep = false,
+  installError = null,
+  stop = stopInstall,
+  remove = removeInstallWork,
+}) {
+  try {
+    await stop(cloneDir, mode, env)
+    if (!keep) await remove(workParent, env)
+  } catch (err) {
+    console.error(`Cleanup failed: ${err instanceof Error ? err.message : err}`)
+  }
+  if (installError) throw installError
+}
+
 /**
  * Prove bash install.sh on a clean clone of this checkout.
  * mode compose uses Docker. mode native hides docker so install.sh takes the
@@ -574,6 +639,7 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
   const cloneDir = path.join(workParent, 'mission-control')
   const logPath = path.join(workParent, 'install.log')
   let env = ipv4First({ ...process.env })
+  let installError = null
   try {
     const cloned = await runShell(`git clone --local ${shellQuote(source)} ${shellQuote(cloneDir)}`, {
       inherit: true,
@@ -623,10 +689,10 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
     }
     await runInherit('node', ['scripts/bridge-fixture.mjs'], { cwd: cloneDir, env: bridgeEnv })
     console.log(`Fresh ${mode} install passed.`)
-  } finally {
-    await stopInstall(cloneDir, mode, env)
-    if (!keep) rmSync(workParent, { recursive: true, force: true })
+  } catch (err) {
+    installError = err
   }
+  await finishFreshInstall({ workParent, cloneDir, mode, env, keep, installError })
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href

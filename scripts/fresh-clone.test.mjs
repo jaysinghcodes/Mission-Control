@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { buildInstallScript, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, runShell } from './fresh-clone.mjs'
+import { buildInstallScript, finishFreshInstall, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -143,6 +143,94 @@ test('the fresh install fixture dry run maps devices, nodes, approvals, and the 
   assert.equal(approvals[0].tag, 'FreshInstall')
   assert.equal(gateway.host, '127.0.0.1')
   assert.equal(typeof gateway.up, 'boolean')
+})
+
+test('cleanup removes a user owned checkout and does not hide an install failure', async () => {
+  const owned = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
+  mkdirSync(path.join(owned, 'data', 'docs'), { recursive: true })
+  let privileged = false
+  const removed = await removeInstallWork(owned, process.env, async () => {
+    privileged = true
+    return { code: 0, stdout: '', stderr: '' }
+  })
+  assert.equal(removed, true)
+  assert.equal(privileged, false)
+  assert.equal(existsSync(owned), false)
+
+  const blockedParent = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
+  const blocked = path.join(blockedParent, 'data')
+  mkdirSync(path.join(blocked, 'docs'), { recursive: true })
+  chmodSync(blocked, 0o000)
+  try {
+    const calls = []
+    const left = await removeInstallWork(blockedParent, process.env, async (script) => {
+      calls.push(script)
+      if (script.startsWith('sudo -n rm -rf ')) {
+        chmodSync(blocked, 0o755)
+        rmSync(blockedParent, { recursive: true, force: true })
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      return { code: 1, stdout: '', stderr: 'unused' }
+    })
+    assert.equal(left, true)
+    assert.equal(calls.length, 1)
+    assert.match(calls[0], /^sudo -n rm -rf /)
+    assert.equal(existsSync(blockedParent), false)
+
+    const stuck = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
+    const stuckDir = path.join(stuck, 'data')
+    mkdirSync(path.join(stuckDir, 'docs'), { recursive: true })
+    chmodSync(stuckDir, 0o000)
+    const attempts = []
+    try {
+      const missed = await removeInstallWork(stuck, process.env, async (script) => {
+        attempts.push(script)
+        return { code: 1, stdout: '', stderr: 'denied' }
+      })
+      assert.equal(missed, false)
+      assert.equal(attempts.length, 2)
+      assert.match(attempts[1], /docker run --rm/)
+      assert.equal(existsSync(stuck), true)
+    } finally {
+      chmodSync(stuckDir, 0o755)
+      rmSync(stuck, { recursive: true, force: true })
+    }
+
+    await finishFreshInstall({
+      workParent: stuck,
+      cloneDir: stuck,
+      mode: 'native',
+      env: process.env,
+      keep: false,
+      installError: null,
+      stop: async () => {},
+      remove: async () => {
+        throw new Error('cleanup exploded')
+      },
+    })
+    await assert.rejects(
+      () =>
+        finishFreshInstall({
+          workParent: stuck,
+          cloneDir: stuck,
+          mode: 'native',
+          env: process.env,
+          keep: true,
+          installError: new Error('bash install.sh failed (exit 1).'),
+          stop: async () => {
+            throw new Error('compose down failed')
+          },
+          remove: async () => {
+            throw new Error('cleanup exploded')
+          },
+        }),
+      /bash install\.sh failed \(exit 1\)\./,
+    )
+    await assert.rejects(() => removeInstallWork(tmpdir(), process.env, async () => ({ code: 0, stdout: '', stderr: '' })), /Refusing to remove/)
+  } finally {
+    if (existsSync(blocked)) chmodSync(blocked, 0o755)
+    if (existsSync(blockedParent)) rmSync(blockedParent, { recursive: true, force: true })
+  }
 })
 
 test('a README without npm run dev is rejected', () => {

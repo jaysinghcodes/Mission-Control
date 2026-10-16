@@ -101,6 +101,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and prints the URL. The password is shown once.',
       'CI runs this installer with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker.',
+      'Before Compose starts, the installer creates `data/docs` as the user running the script. That user can delete the checkout. `npm run seed:demo` on the host writes sample docs as that same user.',
       'A second run keeps the existing `.env`. It fills a missing dashboard password or session secret and does not replace other values.',
       'When the openclaw command is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that timer is not available. macOS uses launchd. Remove it with `bash install.sh --uninstall-schedule`.',
     ],

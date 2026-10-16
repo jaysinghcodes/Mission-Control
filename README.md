@@ -64,6 +64,8 @@ nginx on the web port proxies `/api` and `/socket.io` to the API. The page and t
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
 
+Before Compose starts, `bash install.sh` creates the host docs directory as the user running the installer. The path is `DOCS_ROOT` from the shell, then `.env`, then `data/docs`. That user can delete the checkout, including `data/docs`. `npm run seed:demo` on the host writes sample markdown as that same user. The api container runs as root, so a seed command started inside that container writes root-owned files in `data/docs`. Session files stay in the named volume `mc-auth`.
+
 The API image includes the default config: `config/crew.json`, `config/prices.json`, and `config/timezones.json`. A plain `docker run` of that image serves `GET /settings` without a config mount. Compose mounts `./config` over `/app/config`, and that mount overrides the files in the image.
 
 The script ends by running doctor (`node scripts/doctor.mjs`). On the Docker path it first waits up to 90 seconds for the API health check on `MC_API_PORT` (default 3000). Doctor then checks that host port. The database and migration lines are info, because Compose runs Postgres and the API container applies migrations. A Docker install does not need `npm ci` for those checks. A missing OpenClaw command is an info line. A missing sync timestamp is an info line. A timestamp older than `MC_BRIDGE_STALE_SECONDS` fails doctor. If doctor prints a failing line, the script still prints the URL and then exits non zero.

@@ -11,6 +11,7 @@
 # A custom DATABASE_URL is left as is.
 # A missing dashboard password hash or session secret is filled. Other keys stay.
 # The ingest token is not printed. A new dashboard password is printed once.
+# Before Compose starts, the host docs directory is created as this user.
 
 set -euo pipefail
 
@@ -570,8 +571,86 @@ have_docker() {
   docker compose version >/dev/null 2>&1
 }
 
+# Compose ${VAR:-default}: a set shell value wins, and an empty shell value
+# uses the default. An unset shell value uses .env, then the default.
+compose_host_path() {
+  local key default shell_set value
+  key="$1"
+  default="$2"
+  shell_set=0
+  value=""
+  if [[ "$key" == "DOCS_ROOT" ]]; then
+    if [[ -n "${DOCS_ROOT+x}" ]]; then
+      shell_set=1
+      value="${DOCS_ROOT}"
+    fi
+  elif [[ "$key" == "OPENCLAW_LOG_DIR" ]]; then
+    if [[ -n "${OPENCLAW_LOG_DIR+x}" ]]; then
+      shell_set=1
+      value="${OPENCLAW_LOG_DIR}"
+    fi
+  else
+    echo "Unknown Compose bind ${key}." >&2
+    exit 1
+  fi
+  if [[ "$shell_set" -eq 0 && -f .env ]]; then
+    value="$(env_value "$key")"
+  fi
+  if [[ -z "$value" ]]; then
+    value="$default"
+  fi
+  printf '%s' "$value"
+}
+
+dir_uid() {
+  if stat -c '%u' "$1" >/dev/null 2>&1; then
+    stat -c '%u' "$1"
+    return
+  fi
+  stat -f '%u' "$1"
+}
+
+# Docker creates a missing bind-mount directory as root. A folder inside this
+# checkout would then stay owned by root, and the operator could not delete it.
+# Create repo-local binds as this user before `docker compose up`.
+ensure_repo_bind() {
+  local key default dir root uid
+  key="$1"
+  default="$2"
+  dir="$(compose_host_path "$key" "$default")"
+  root="$(pwd)"
+  case "$dir" in
+    /*) ;;
+    *) dir="${root}/${dir#./}" ;;
+  esac
+  case "$dir" in
+    "$root"/*) ;;
+    *) return 0 ;;
+  esac
+  if [[ -d "$dir" ]]; then
+    uid="$(dir_uid "$dir")"
+    if [[ "$uid" != "$(id -u)" && "$(id -u)" != "0" ]]; then
+      echo "Directory ${dir} is owned by uid ${uid}. Remove it as that user, then run bash install.sh again." >&2
+    fi
+    return 0
+  fi
+  if [[ -e "$dir" ]]; then
+    echo "Path ${dir} exists and is not a directory." >&2
+    exit 1
+  fi
+  if ! mkdir -p "$dir"; then
+    echo "Could not create ${dir}. Create that directory as your user, then run bash install.sh again." >&2
+    exit 1
+  fi
+  if [[ "$key" == "DOCS_ROOT" ]]; then
+    echo "Created ${dir} for the Compose docs bind."
+  fi
+}
+
 start_docker() {
   echo "Starting the stack with Docker Compose."
+  ensure_repo_bind DOCS_ROOT "data/docs"
+  ensure_repo_bind OPENCLAW_LOG_DIR "/tmp/openclaw"
   # The API image has no .git. Pass the commit so /health can show it.
   if [[ -z "${GIT_SHA:-}" ]] && command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     GIT_SHA="$(git rev-parse HEAD)"
