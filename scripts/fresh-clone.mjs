@@ -234,12 +234,12 @@ async function assertProductionWriteRejected(cloneDir, env) {
     const tickets = await fetch('http://127.0.0.1:3001/tickets', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 'production loopback' }),
+      body: JSON.stringify({}),
     })
     const ticketBody = await tickets.json().catch(() => null)
-    if (tickets.status !== 201 || ticketBody?.ticket?.title !== 'production loopback') {
+    if (tickets.status !== 400 || ticketBody?.message !== 'title is required') {
       throw new Error(
-        `Expected 201 for a production loopback dashboard write, got ${tickets.status} ${JSON.stringify(ticketBody)}`,
+        `Expected 400 title is required for a production loopback dashboard write, got ${tickets.status} ${JSON.stringify(ticketBody)}`,
       )
     }
     const events = await fetch('http://127.0.0.1:3001/events', {
@@ -267,10 +267,13 @@ async function assertDevRejectsMissingHeader(env) {
   const tickets = await fetch('http://127.0.0.1:3000/tickets', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title: 'direct dashboard write' }),
+    body: JSON.stringify({}),
   })
-  if (tickets.status === 401) {
-    throw new Error('A loopback dashboard write must stay open when the caller is this machine.')
+  const ticketBody = await tickets.json().catch(() => null)
+  if (tickets.status !== 400 || ticketBody?.message !== 'title is required') {
+    throw new Error(
+      `A loopback dashboard write must stay open when the caller is this machine. Got ${tickets.status} ${JSON.stringify(ticketBody)}`,
+    )
   }
   const events = await fetch('http://127.0.0.1:3000/events', {
     method: 'POST',
