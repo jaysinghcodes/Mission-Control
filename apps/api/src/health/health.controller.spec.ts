@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { HealthController } from './health.controller';
+import { buildInfo, resetBuildInfoCache } from '../build-info';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -16,9 +17,11 @@ describe('HealthController', () => {
   let prisma: {
     dbReady: boolean;
     activityEvent: { findFirst: jest.Mock };
+    setting: { findUnique: jest.Mock };
   };
 
   beforeEach(() => {
+    resetBuildInfoCache();
     gateway = { clientCount: 3 };
     prisma = {
       dbReady: true,
@@ -27,6 +30,11 @@ describe('HealthController', () => {
           Promise.resolve({
             ts: new Date('2026-10-05T12:00:00.000Z'),
           }),
+        ),
+      },
+      setting: {
+        findUnique: jest.fn(() =>
+          Promise.resolve({ openclawVersion: '2026.10.15' }),
         ),
       },
     };
@@ -47,6 +55,9 @@ describe('HealthController', () => {
     expect(res.uptimeSeconds).toEqual(expect.any(Number));
     expect(res.ts).toEqual(expect.any(Number));
     expect(res.lastIngestAt).toBe('2026-10-05T12:00:00.000Z');
+    expect(res.version).toBe(buildInfo().version);
+    expect(res.gitSha).toBe(buildInfo().gitSha);
+    expect(res.openclawVersion).toBe('2026.10.15');
     expect(prisma.activityEvent.findFirst).toHaveBeenCalledWith({
       where: { source: 'openclaw' },
       orderBy: { ts: 'desc' },
@@ -68,9 +79,13 @@ describe('HealthController', () => {
         status: 'degraded',
         database: 'unavailable',
         lastIngestAt: null,
+        openclawVersion: null,
+        version: buildInfo().version,
+        gitSha: buildInfo().gitSha,
       });
     }
     expect(prisma.activityEvent.findFirst).not.toHaveBeenCalled();
+    expect(prisma.setting.findUnique).not.toHaveBeenCalled();
   });
 
   it('returns 503 JSON when the database query throws', async () => {

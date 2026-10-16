@@ -48,6 +48,10 @@ test('compose yaml lists db, api, and web on loopback', () => {
     assert.match(spec, /^127\.0\.0\.1:/)
   }
   assert.equal(compose.services.api.build.dockerfile, 'apps/api/Dockerfile')
+  assert.equal(compose.services.api.build.args.GIT_SHA, '${GIT_SHA:-}')
+  assert.equal(compose.services.api.environment.OPENCLAW_GATEWAY_HOST, '${OPENCLAW_GATEWAY_HOST:-127.0.0.1}')
+  assert.equal(compose.services.api.environment.OPENCLAW_GATEWAY_PORT, '${OPENCLAW_GATEWAY_PORT:-18789}')
+  assert.equal(compose.services.api.environment.OPENCLAW_LOG_DIR, '${OPENCLAW_LOG_DIR:-/tmp/openclaw}')
   assert.equal(compose.services.web.build.dockerfile, 'apps/web/Dockerfile')
 })
 
@@ -67,6 +71,8 @@ test('Dockerfiles copy files that exist and the web API url defaults to blank', 
   const api = read('apps/api/Dockerfile')
   const web = read('apps/web/Dockerfile')
   assert.match(api, /COPY --from=build \/app\/apps\/api\/prisma\.config\.ts/)
+  assert.match(api, /ARG GIT_SHA=/)
+  assert.match(api, /git-sha\.txt/)
   assert.match(api, /CMD \["node", "dist\/main\.js"\]/)
   assert.match(web, /ARG VITE_API_URL=/)
   assert.doesNotMatch(web, /ARG VITE_API_URL=http/)

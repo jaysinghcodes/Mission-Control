@@ -7,6 +7,7 @@ import { agentCaption } from '../data/roster'
 import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
+import { providerLabel } from '../lib/provider-label'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
 import Logs from './Logs'
@@ -22,12 +23,36 @@ import CustomTools from './CustomTools'
  * "Showing 3 days of data so far") and only the days that were collected.
  */
 
-interface HealthResp { status: string; database: string; uptimeSeconds: number; lastIngestAt?: string | null }
+interface HealthResp {
+  status: string
+  database: string
+  uptimeSeconds: number
+  lastIngestAt?: string | null
+  version?: string | null
+  gitSha?: string | null
+  openclawVersion?: string | null
+}
+interface GatewayResp {
+  host: string
+  port: number
+  up: boolean
+  latencyMs: number | null
+}
 interface SystemResp {
   cpu: { pct: number }
   memory: { pct: number }
   os: { hostname: string; platform: string }
+  gateway?: GatewayResp
 }
+interface ModelRow {
+  id: string
+  provider: string
+  model: string
+  label?: string | null
+  agentId?: string | null
+  agentName?: string | null
+}
+interface ModelsResp { models?: ModelRow[] }
 interface Provider {
   name?: string
   model?: string
@@ -77,6 +102,26 @@ function money(n: number | undefined): string {
   if (typeof n !== 'number' || !Number.isFinite(n)) return 'No data'
   if (n === 0) return '$0'
   return `$${n.toFixed(2)}`
+}
+
+function shown(value: string | null | undefined): string {
+  const text = (value ?? '').trim()
+  return text || 'Not reported'
+}
+
+function agentModelName(row: ModelRow): string {
+  const name = (row.agentName || row.label || row.agentId || '').trim()
+  return name || 'Not assigned'
+}
+
+function gatewayLine(gw: GatewayResp | undefined): { value: string; ok: boolean } {
+  if (!gw) return { value: 'Waiting', ok: false }
+  const where = `${gw.host}:${gw.port}`
+  if (gw.up) {
+    const latency = gw.latencyMs != null ? `, ${gw.latencyMs} ms` : ''
+    return { value: `Up at ${where}${latency}`, ok: true }
+  }
+  return { value: `Down at ${where}`, ok: false }
 }
 
 function tokens(n: number | undefined): string {
@@ -135,6 +180,7 @@ export default function System() {
   const week = useApi<UsageResp>('/usage?period=7d', { pollMs: 30000 })
   const month = useApi<UsageResp>('/usage?period=month', { pollMs: 30000 })
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const modelsQ = useApi<ModelsResp>('/models', { pollMs: 30000 })
   const sessions = useApi<{ sessions: { agent: string; model: string | null }[] }>('/sessions', { pollMs: 30000 })
   const activity = useApi<{ events: EventApi[] }>('/activity?limit=30', { pollMs: 20000 })
   const api = useApiStatus()
@@ -149,6 +195,8 @@ export default function System() {
   const selectedDays = responses[period]?.days ?? []
   const any = snaps.some(Boolean)
   const roster = rosterQ.data?.agents ?? []
+  const modelRows = modelsQ.data ? (modelsQ.data.models ?? []) : null
+  const gateway = gatewayLine(sys.data?.gateway)
 
   const models = useMemo(() => {
     const names = new Set<string>()
@@ -214,6 +262,47 @@ export default function System() {
           <Fact label={`Host · ${host}`} value={cpu} />
         </div>
       </SoftCard>
+
+      <SoftCard className="mt-4 px-6 py-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Fact label="App version" value={shown(health.data?.version)} />
+          <Fact label="Git" value={shown(health.data?.gitSha)} wrap />
+          <Fact label="OpenClaw" value={shown(health.data?.openclawVersion)} wrap />
+          <Fact label="Gateway" value={gateway.value} ok={gateway.ok} wrap />
+        </div>
+      </SoftCard>
+
+      <div className="mb-3 mt-8"><Kicker>Providers</Kicker></div>
+      {modelRows === null && (
+        <EmptyState title="Waiting for the API" body="Provider and model rows load from the bridge snapshot." />
+      )}
+      {modelRows && modelRows.length === 0 && (
+        <SoftCard className="px-6 py-10">
+          <p className="text-[15px] font-semibold">No providers found yet. Run the bridge to detect them.</p>
+        </SoftCard>
+      )}
+      {modelRows && modelRows.length > 0 && (
+        <SoftCard className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="text-[11.5px] text-mc-sub">
+                <th className="whitespace-nowrap px-4 py-2 font-semibold">Agent</th>
+                <th className="whitespace-nowrap px-4 py-2 font-semibold">Provider</th>
+                <th className="whitespace-nowrap px-4 py-2 font-semibold">Model</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modelRows.map((row) => (
+                <tr key={row.id} className="border-t border-mc-sep" data-provider={row.provider}>
+                  <td className="px-4 py-3 text-[14.5px] font-semibold">{agentModelName(row)}</td>
+                  <td className="px-4 py-3 text-[14px]">{providerLabel(row.provider)}</td>
+                  <td className="px-4 py-3 font-mono text-[13px]">{row.model}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </SoftCard>
+      )}
 
       <SoftCard className="mt-4 px-6 py-4">
         <label className="flex items-center justify-between gap-4 text-[14px] font-semibold">
@@ -402,14 +491,14 @@ export default function System() {
   )
 }
 
-function Fact({ label, value, ok = true }: { label: string; value: string; ok?: boolean }) {
+function Fact({ label, value, ok = true, wrap = false }: { label: string; value: string; ok?: boolean; wrap?: boolean }) {
   return (
     <div className="min-w-[140px]">
       <div className="flex items-center gap-1.5 text-[12px] font-semibold text-mc-sub">
         <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-mc-green' : 'bg-mc-gray'}`} />
         {label}
       </div>
-      <div className="mt-0.5 whitespace-nowrap text-[13px]">{value}</div>
+      <div className={`mt-0.5 text-[13px] ${wrap ? 'break-all' : 'whitespace-nowrap'}`}>{value}</div>
     </div>
   )
 }

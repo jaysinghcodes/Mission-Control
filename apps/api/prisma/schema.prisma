@@ -197,13 +197,16 @@ model MemoryEntry {
   @@index([kind])
 }
 
-/// User-configured models for usage tracking — added from the Usage page (+).
-/// The bridge reads these and fetches a live balance/usage for each provider.
+/// One provider and model from `models.snapshot`.
+/// The bridge replaces every row. This table is not a live balance.
+/// `agentId` and `agentName` name the OpenClaw agent when the config has one.
 model ModelConfig {
   id        String   @id @default(cuid())
-  provider  String // deepseek | zai | other
-  model     String // model id, e.g. deepseek-v4-flash / glm-5.2
-  label     String? // friendly name shown in the UI
+  provider  String
+  model     String
+  label     String?
+  agentId   String?
+  agentName String?
   createdAt DateTime @default(now())
 }
 
@@ -213,9 +216,11 @@ model ModelConfig {
 /// Length is enforced in the controller (400), not with a CHECK, so a
 /// too-long value cannot surface as 500.
 model Setting {
-  id        String   @id
-  mission   String   @default("")
-  updatedAt DateTime @updatedAt
+  id               String   @id
+  mission          String   @default("")
+  /// Reported by models.snapshot. Null until the bridge has read a version.
+  openclawVersion  String?
+  updatedAt        DateTime @updatedAt
 }
 
 /// A machine listed on the Team page. `npm run seed:demo` writes three

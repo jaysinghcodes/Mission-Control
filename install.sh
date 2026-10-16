@@ -303,6 +303,11 @@ have_docker() {
 
 start_docker() {
   echo "Starting the stack with Docker Compose."
+  # The API image has no .git. Pass the commit so /health can show it.
+  if [[ -z "${GIT_SHA:-}" ]] && command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    GIT_SHA="$(git rev-parse HEAD)"
+    export GIT_SHA
+  fi
   if ! docker compose up -d --build; then
     echo "Docker Compose did not start the stack." >&2
     exit 1

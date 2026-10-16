@@ -67,7 +67,7 @@ Walk each variable. Ask the operator for real values. Do not invent one.
 * `SOCKET_TOKEN`: `bash install.sh` writes a random value when it creates `.env`. Optional for `npm run dev`. Required when `NODE_ENV=production` (the Compose API sets that). If they set one, set `VITE_SOCKET_TOKEN` to the same value before a production web build. A blank value is fine for the dev server verified here. A blank value still becomes `dev-socket-token` only when Compose starts without the installer.
 * `WEB_ORIGIN`: leave commented unless they need another origin. The API default is `http://localhost:5173` and `http://127.0.0.1:5173`.
 * `OPERATOR_NAME`: display only, not a secret. Blank means the chip says Operator. For `npm run dev`, set `VITE_OPERATOR_NAME` to the same string if the browser should show the name.
-* `GITHUB_TOKEN`: optional. Ask only if they want pull request merge from Approvals. `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them.
+* `GITHUB_TOKEN`: optional. Ask only if they want pull request merge from Approvals.
 
 `.env` is gitignored. Never commit it.
 
@@ -146,6 +146,6 @@ With the bridge:
 
 3. Calendar jobs become the real cron list. `calendar.snapshot` replaces the table.
 4. Agents and the office floor follow `agents.snapshot`, and also `POST /agents/register` and `DELETE /agents/:id`, which broadcast that same event. `run.*` events show up as activity. A ticket move also writes activity, so a local move is not proof the bridge ran.
-5. `/#/system` shows a recent OpenClaw bridge time after any accepted `POST /events`. Sessions stay empty until `sessions.snapshot`. Logs stay empty until `/tmp/openclaw` has a gateway log.
+5. `/#/system` shows a recent OpenClaw bridge time after any accepted `POST /events`. Sessions stay empty until `sessions.snapshot`. Logs stay empty until the log directory has a gateway log. That directory is `OPENCLAW_LOG_DIR`, default `/tmp/openclaw`. Provider rows stay empty until `models.snapshot`. The empty sentence is "No providers found yet. Run the bridge to detect them."
 
 Tell the operator where `.env` lives, that it must not be committed, and that OpenClaw is optional for looking around.

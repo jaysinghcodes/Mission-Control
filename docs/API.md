@@ -56,7 +56,7 @@ Edit `.env` before you expose the machine. Rules for you:
 * `OPERATOR_NAME`: display only. It becomes the default assignee for new tickets and runs.
 * `SOCKET_TOKEN`: `bash install.sh` writes a random value when `.env` is missing. If you set one yourself, set it before the first build because it is baked into the web bundle.
 * `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
-* `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them. Spend on System comes from `usage.snapshot`, not a live provider call.
+* `OPENCLAW_GATEWAY_HOST` and `OPENCLAW_GATEWAY_PORT` are the gateway probe. Defaults are `127.0.0.1` and `18789`. `OPENCLAW_LOG_DIR` is the gateway log directory. The default is `/tmp/openclaw`. `GIT_SHA` is the commit shown by `GET /health` when set. A checkout uses git when it is unset. Spend on System comes from `usage.snapshot`.
 * Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` in the shell or in `.env`. The shell wins. A new `.env` keeps the shell values. An existing `.env` is not rewritten. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
 
 ### Advanced: Node and Postgres
@@ -151,7 +151,7 @@ Body: `{ "type": "<event type>", "payload": { ... } }`. Reply: `202 {"accepted":
 
 Accepted types (exactly these):
 
-`run.started`, `run.queued`, `run.running`, `run.progress`, `run.completed`, `run.done`, `run.failed`, `health.tick`, `hello`, `message.sent`, `message.received`, `session.patch`, `command.new`, `approval.new`, `approval.decided`, `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, `memory.snapshot`.
+`run.started`, `run.queued`, `run.running`, `run.progress`, `run.completed`, `run.done`, `run.failed`, `health.tick`, `hello`, `message.sent`, `message.received`, `session.patch`, `command.new`, `approval.new`, `approval.decided`, `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, `memory.snapshot`, `models.snapshot`.
 
 Non snapshot types are just stored and broadcast. `run.*` payloads are free form; use `{ "name": "...", "agent": "...", "status": "...", "progress": 0, "summary": "..." }`.
 
@@ -165,6 +165,7 @@ Snapshot types write tables. **Warning:** sessions and calendar replace a whole 
 | `usage.snapshot` | `{ points: [{ at: ISO timestamp, totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }] }` | Upserts one America/Chicago day per point. Days not in the payload stay. A period total with no `at` is ignored |
 | `approvals.snapshot` | `{ approvals: [{ kind, tag, desc, status?, meta? }] }` | Deletes pending approvals, keeps decided ones, inserts these. `kind` is exec, pair, msg, sess or pr. A `pr` approval needs `meta: { repo, number, branch? }` to merge on approve |
 | `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term" or "daily" or "other", source?, ref? }] }` | Upserts by `id`; removes bridge sourced rows for the agents present that are not in the payload. An empty storable list is a no op and does not wipe the table |
+| `models.snapshot` | `{ agents: [{ id?, name?, provider, model }], models?: [{ provider, model }], openclawVersion? }` | Replaces every model row. Stores `openclawVersion` on the settings row when that string is non empty. A payload with neither array is ignored |
 
 ### 4.3 The bridge (recommended for snapshots)
 
@@ -178,7 +179,7 @@ python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw
 
 With no `openclaw` binary, `--dry-run` exits 0, skips sessions, agents, and cron, and posts nothing. The same command with `--memory-dir bridge/examples/openclaw-memory` prints one `memory.snapshot` and still does not post.
 
-It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` from the shell, then `.env`, then `http://127.0.0.1` plus the API port (default 3000). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts one `usage.snapshot` of daily points (up to 30 days on first connect when sessions have timestamps). It does not post separate 7 day or month totals. A successful run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). Doctor fails when that timestamp is older than `MC_BRIDGE_STALE_SECONDS` (default 600).
+It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` from the shell, then `.env`, then `http://127.0.0.1` plus the API port (default 3000). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts one `usage.snapshot` of daily points (up to 30 days on first connect when sessions have timestamps). It does not post separate 7 day or month totals. It posts `models.snapshot` from `~/.openclaw/openclaw.json` (or `OPENCLAW_CONFIG_PATH`). When that file has no agent model, it runs `openclaw models list`. A missing file and a missing CLI skip that event. A successful run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). Doctor fails when that timestamp is older than `MC_BRIDGE_STALE_SECONDS` (default 600).
 
 `bash install.sh` installs that schedule when `openclaw` is on PATH. You do not add a cron line by hand. `bash install.sh --uninstall-schedule` removes it. The same script is what the schedule runs:
 
@@ -248,7 +249,7 @@ That returns HTTP 200 and `"status":"running"`.
 
 ### 4.7 Models and spend
 
-* `GET /models`, `POST /models` with `{ provider, model, label? }`, `DELETE /models/:id`. This is a list of models to track. **Nothing reads it yet:** the bridge does not call `GET /models`. The API does not call DeepSeek or Z.ai, so those keys do not produce a live balance.
+* `GET /models` returns `{ models: [{ id, provider, model, label, agentId, agentName, createdAt }] }` from the latest `models.snapshot`. The bridge reads `~/.openclaw/openclaw.json`, or `OPENCLAW_CONFIG_PATH` when that is set. When that file has no agent model, the fallback is `openclaw models list`. `POST /models` with `{ provider, model, label? }` and `DELETE /models/:id` still require the write token. They do not call a provider. The next `models.snapshot` replaces the table. System shows one provider and model per agent. With no rows the sentence is exactly `No providers found yet. Run the bridge to detect them.`
 * Spend shown on System comes only from `usage.snapshot` daily points. `GET /usage?period=24h|7d|month` sums them. `period=24h` is Today, the calendar day in America/Chicago, taken from those buckets. There is no hourly storage. The 7 day and month windows use the same calendar. A short range returns `note` (for example `Showing 3 days of data so far`) and does not fill the gap with zero. `period=30d` returns `usage: null`. The bridge posts points, not 7 day or month totals. On first connect it backfills up to 30 days when session timestamps exist. Otherwise it records the days it has synced. The API keeps a point only when its Chicago day is within the last 30 days through today, and it drops a timestamp after now. `npm run seed:demo` writes 30 days and stamps today at seed time, so a fresh System page shows all three windows. The amounts depend on the date. If the bridge cannot read sessions, it posts no usage snapshot.
 * Per agent cost on profiles comes from `totalCost` in `agents.snapshot`.
 
@@ -258,7 +259,7 @@ Read only routes: `GET /memory?day=YYYY-MM-DD&kind=&q=&limit=&offset=` and `GET 
 
 ### 4.9 Other read routes
 
-`GET /health`, `/system`, `/agents`, `/agents/:id` (id or name), `/sessions`, `/calendar`, `/activity?limit=`, `/logs`, `/search?q=`, `/approvals?status=pending|decided|all`, `/mission`, `/devices`, `/docs`, `/custom-tools`. Writes: `PUT /mission` with `{ mission }`, `POST /approvals/:id/decide` with `{ action: "approve" or "reject" }` (only on your operator's say so; a `pr` approve merges on GitHub). Custom tools also have their own create and update routes under `/custom-tools`. Devices have no write route.
+`GET /health`, `/system`, `/agents`, `/agents/:id` (id or name), `/sessions`, `/calendar`, `/activity?limit=`, `/logs`, `/search?q=`, `/approvals?status=pending|decided|all`, `/mission`, `/devices`, `/docs`, `/custom-tools`. `GET /health` includes `version` (the `version` field in `apps/api/package.json`), `gitSha`, and `openclawVersion` (null until `models.snapshot` reports one). `GET /system` includes `gateway` with `host`, `port`, `up`, and `latencyMs` from a TCP connect. Writes: `PUT /mission` with `{ mission }`, `POST /approvals/:id/decide` with `{ action: "approve" or "reject" }` (only on your operator's say so; a `pr` approve merges on GitHub). Custom tools also have their own create and update routes under `/custom-tools`. Devices have no write route.
 
 These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/sessions`, `/calendar`, `/logs`, `/search?q=a`, `/approvals?status=pending`, `/mission`, `/devices`, `/docs`, `/projects`, `/tickets`, `/runs`, `/models`, `/memory`, `/custom-tools`.
 
@@ -355,12 +356,12 @@ That prints `204`.
 * **Make runs visible.** For a longer job, `POST /runs` with an optional `status`, or create the run queued and `PATCH` it to `running`, then send progress and `done` or `failed`. You can also post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time. The curls in section 4.6 do both.
 * **Ask, do not act, on gated work.** Put anything that needs your operator in an approval (via `approvals.snapshot`) and wait for the decision.
 * **Write daily memory** to `memory/YYYY-MM-DD.md` so Memory shows your day.
-* **Keep the bridge scheduled** so roster, cron, sessions, usage and memory stay current. `bash install.sh` does that when `openclaw` is on PATH. The default interval is `MC_BRIDGE_INTERVAL_SECONDS` (300). `agents.snapshot` updates snapshot rows only. The installed schedule sets `MC_BRIDGE_REGISTER` (default 1), which also calls `POST /agents/register` (section 4.10).
+* **Keep the bridge scheduled** so roster, cron, sessions, usage, memory, and models stay current. `bash install.sh` does that when `openclaw` is on PATH. The default interval is `MC_BRIDGE_INTERVAL_SECONDS` (300). `agents.snapshot` updates snapshot rows only. The installed schedule sets `MC_BRIDGE_REGISTER` (default 1), which also calls `POST /agents/register` (section 4.10).
 
 ## 6. Not implemented yet (do not rely on these)
 
 * Sessions, cron jobs, usage, and memory still have no REST write except `POST /events`. Agents do: `POST /agents/register`, `POST /agents/:id/heartbeat`, and `DELETE /agents/:id` (section 4.10). A snapshot cannot delete a registered or default bot.
-* `/models` is stored but not used by the bridge. Nothing in this repo fetches a live provider balance.
+* Nothing in this repo fetches a provider account balance. Provider prices are not in this build. `models.snapshot` is the provider and model list.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
 * Devices have no write route; only `seed:demo` fills them.

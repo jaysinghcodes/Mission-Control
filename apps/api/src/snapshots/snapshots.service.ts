@@ -9,6 +9,7 @@ import {
 } from '../agents/agent-merge';
 import { wireText } from '../wire-text';
 import { PrismaService } from '../prisma/prisma.service';
+import { SETTING_ID } from '../team/mission';
 import { usageBucketsFromPayload } from '../usage/usage-points';
 
 /**
@@ -231,9 +232,123 @@ export class SnapshotsService {
       }
     });
   }
+
+  /**
+   * Replace provider and model rows from models.snapshot.
+   *
+   * A payload with neither `agents` nor `models` is ignored, so a bad
+   * event cannot wipe the table. An empty list is a real reading and
+   * clears the rows. `openclawVersion`, when it is a non empty string,
+   * is stored on the settings row and does not change the mission text.
+   */
+  async applyModels(payload: Record<string, unknown>): Promise<void> {
+    const rows = modelRowsFromPayload(payload);
+    if (!rows) return;
+    const version = openclawVersionFrom(payload);
+    const stamp = Date.now();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.modelConfig.deleteMany({});
+      if (rows.length > 0) {
+        await tx.modelConfig.createMany({
+          data: rows.map((row, index) => ({
+            ...row,
+            createdAt: new Date(stamp + index),
+          })),
+        });
+      }
+      if (version) {
+        await tx.setting.upsert({
+          where: { id: SETTING_ID },
+          create: { id: SETTING_ID, mission: '', openclawVersion: version },
+          update: { openclawVersion: version },
+        });
+      }
+    });
+  }
 }
 
 const MEMORY_KINDS = new Set(['long-term', 'daily', 'other']);
+
+type ModelWrite = {
+  provider: string;
+  model: string;
+  label: string | null;
+  agentId: string | null;
+  agentName: string | null;
+};
+
+/**
+ * Rows for models.snapshot, or null when the payload is not a snapshot.
+ * Agent rows come first. A catalog row is kept when no agent already
+ * uses that same provider and model.
+ */
+export function modelRowsFromPayload(
+  payload: Record<string, unknown>,
+): ModelWrite[] | null {
+  const hasAgents = Array.isArray(payload.agents);
+  const hasModels = Array.isArray(payload.models);
+  if (!hasAgents && !hasModels) return null;
+  const rows: ModelWrite[] = [];
+  if (hasAgents) {
+    for (const item of payload.agents as unknown[]) {
+      const row = modelRow(item, true);
+      if (row) rows.push(row);
+    }
+  }
+  if (hasModels) {
+    for (const item of payload.models as unknown[]) {
+      const row = modelRow(item, false);
+      if (!row) continue;
+      if (
+        rows.some(
+          (prev) => prev.provider === row.provider && prev.model === row.model,
+        )
+      ) {
+        continue;
+      }
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+function modelRow(item: unknown, withAgent: boolean): ModelWrite | null {
+  if (!item || typeof item !== 'object') return null;
+  const rec = item as Record<string, unknown>;
+  const provider = clip(rec.provider, 80);
+  const model = clip(rec.model, 200);
+  if (!provider || !model) return null;
+  if (!withAgent) {
+    return {
+      provider,
+      model,
+      label: null,
+      agentId: null,
+      agentName: null,
+    };
+  }
+  const name = clip(rec.name ?? rec.agentName ?? '', 200);
+  const idRaw = clip(rec.id ?? rec.agentId ?? '', 64);
+  const agentId = /^[a-z0-9_]{1,64}$/.test(idRaw) ? idRaw : null;
+  return {
+    provider,
+    model,
+    label: name || null,
+    agentId,
+    agentName: name || null,
+  };
+}
+
+function clip(value: unknown, max: number): string {
+  return wireText(value).trim().slice(0, max);
+}
+
+function openclawVersionFrom(payload: Record<string, unknown>): string | null {
+  const version = payload.openclawVersion;
+  if (typeof version !== 'string') return null;
+  const text = version.trim().slice(0, 80);
+  return text || null;
+}
 
 type MemoryWrite = {
   id: string;

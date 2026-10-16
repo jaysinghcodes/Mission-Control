@@ -4,10 +4,8 @@ import { Card, Chip, Progress, SectionLabel } from '../components/ui'
 import { pluralize } from '../lib/pluralize'
 
 /**
- * Health — ONLY live, tangible data. Real OS metrics from GET /system
- * (measured on the OpenClaw host), real API state from GET /health, and the
- * provider balance from /usage. No hardcoded wireframe values (review fix #5).
- * The OS shown is the host's; SSH setup steps adapt to YOUR machine below.
+ * Health. Real OS metrics from GET /system and real API state from GET /health.
+ * Spend lives on System. This page does not read a provider balance.
  */
 
 interface SystemResp {
@@ -19,7 +17,6 @@ interface SystemResp {
   apiUptimeSeconds: number
 }
 interface HealthResp { status: string; uptimeSeconds: number; connectedClients: number; database: string }
-interface UsageResp { usage: { providers: { name?: string; balance?: number; cost?: number; pct?: number; model?: string; detail?: string }[] | Record<string, { name?: string; balance?: number; cost?: number; pct?: number; model?: string; detail?: string }> | null } | null }
 
 const fmtUptime = (s: number): string => `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 
@@ -41,37 +38,17 @@ const SSH_STEPS: Record<string, string> = {
 export default function Health() {
   const sys = useApi<SystemResp>('/system', { pollMs: 10000 })
   const health = useApi<HealthResp>('/health', { pollMs: 10000 })
-  const usage = useApi<UsageResp>('/usage?period=24h', { pollMs: 30000 })
   const [client, setClient] = useState('other')
   useEffect(() => setClient(clientOS()), [])
 
   const s = sys.data
   const h = health.data
-  const providers = Array.isArray(usage.data?.usage?.providers)
-    ? usage.data!.usage!.providers
-    : usage.data?.usage?.providers
-      ? Object.values(usage.data.usage.providers)
-      : []
 
   const metrics = [
     { label: 'CPU', big: s ? `${s.cpu.pct}%` : 'none', pct: s?.cpu.pct ?? 0, color: s && s.cpu.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `load ${s.cpu.load1} · ${pluralize(s.cpu.cores, 'core')}` : 'loading…' },
     { label: 'Memory', big: s ? `${s.memory.pct}%` : 'none', pct: s?.memory.pct ?? 0, color: s && s.memory.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.memory.totalGb - s.memory.freeGb} / ${s.memory.totalGb} GB` : 'loading…' },
     { label: 'Disk', big: s ? `${s.disk.pct}%` : 'none', pct: s?.disk.pct ?? 0, color: s && s.disk.pct > 80 ? 'var(--mc-red)' : 'var(--mc-green)', sub: s ? `${s.disk.usedGb} / ${s.disk.totalGb} GB` : 'loading…' },
   ]
-
-  // Provider balances — one card PER provider (DeepSeek + GLM + any added
-  // models), each with its own live balance. Never just the first one.
-  const providerCards = providers.map((p) => {
-    const unfetchable = p.balance == null && p.cost == null
-    return {
-      name: p.name ?? 'provider',
-      balance: !unfetchable && p.balance != null ? `$${Number(p.balance).toFixed(2)}` : !unfetchable && p.cost != null ? `$${Number(p.cost).toFixed(4)}` : null,
-      unfetchable,
-      pct: typeof p.pct === 'number' ? p.pct : !unfetchable && p.balance != null ? 100 : 0,
-      sub: p.balance != null ? (p.model ?? p.detail ?? p.name) : (p.detail ?? p.model ?? p.name),
-      model: p.model ?? null,
-    }
-  })
 
   return (
     <div className="p-6">
@@ -107,36 +84,7 @@ export default function Health() {
         ))}
       </div>
 
-      {/* Provider balances — one card per provider (DeepSeek + GLM + added models) */}
-      <div className="mt-6">
-        <SectionLabel>Provider Balances</SectionLabel>
-        <div className="flex gap-[10px] mt-3 flex-wrap">
-          {providerCards.length === 0 && (
-            <Card className="w-full px-4 py-4 text-[12px] text-mc-faint">
-              No balance data yet. The bridge syncs every few minutes.
-            </Card>
-          )}
-          {providerCards.map((p) => (
-            <Card key={p.name} className="w-[190px] px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="w-[10px] h-[10px] rounded-full" style={{ backgroundColor: 'var(--mc-blue)' }} />
-                <span className="text-[12.5px] font-semibold capitalize">{p.name}</span>
-              </div>
-              {p.unfetchable ? (
-                <div className="mt-2 rounded-lg bg-mc-orangebg px-2.5 py-1.5 text-[11px] font-semibold text-mc-orangetext inline-block">
-                  Unable to fetch
-                </div>
-              ) : (
-                <div className="mt-2 text-[22px] font-semibold font-mono">{p.balance}</div>
-              )}
-              <Progress pct={p.pct} color="var(--mc-blue)" className="mt-2" />
-              <div className="mt-2 text-[10.5px] text-mc-sub truncate" title={p.sub}>{p.model ?? p.sub}</div>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      {/* Host details — real */}
+      {/* Host details */}
       <Card className="mt-6 px-4 py-4">
         <SectionLabel>Host</SectionLabel>
         <div className="mt-3">

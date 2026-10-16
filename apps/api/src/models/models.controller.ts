@@ -11,10 +11,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * ModelsController: a stored list of provider and model names.
+ * ModelsController: provider and model rows.
  *
- * The bridge does not read GET /models. This API does not call DeepSeek
- * or Z.ai. Spend on System comes from usage.snapshot.
+ * GET /models returns the latest models.snapshot (the bridge replaces the
+ * table). POST and DELETE still accept a row and still require the write
+ * token. They do not call a provider and they do not read a balance.
+ * Spend on System comes from usage.snapshot.
  */
 @Controller('models')
 export class ModelsController {
@@ -22,7 +24,10 @@ export class ModelsController {
 
   @Get()
   async list() {
-    return this.prisma.modelConfig.findMany({ orderBy: { createdAt: 'asc' } });
+    const models = await this.prisma.modelConfig.findMany({
+      orderBy: { createdAt: 'asc' },
+    });
+    return { models };
   }
 
   @Post()

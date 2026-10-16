@@ -1,22 +1,20 @@
 import { Controller, Get } from '@nestjs/common';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
+import { probeGateway } from './gateway-probe';
 
 /**
- * SystemController — REAL OS-level metrics for the Health screen.
+ * SystemController. OS metrics for the machine that runs this API, plus a
+ * TCP probe of the configured OpenClaw gateway.
  *
- * Everything here is measured live from the host that runs OpenClaw:
- *  - CPU: load average / cores (percentage approximation)
- *  - Memory: total vs free (os module)
- *  - Disk: df -kP on / (used/total)
- *  - OS/platform/node/hostname: os + process
- *  - Gateway: TCP probe to 127.0.0.1:18789 (loopback latency, real)
- * No hardcoded values, ever (review fix #5).
+ * CPU, memory, disk, and the gateway result are measured on this request.
+ * The gateway target is OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT.
+ * Those default to 127.0.0.1 and 18789.
  */
 @Controller('system')
 export class SystemController {
   @Get()
-  system() {
+  async system() {
     const cores = os.cpus().length;
     const load = os.loadavg()[0];
     const totalMem = os.totalmem();
@@ -36,8 +34,10 @@ export class SystemController {
         };
       }
     } catch {
-      // df unavailable — leave zeros, UI shows real zeros not fake values
+      // df unavailable. Leave zeros so the UI shows measured zeros.
     }
+
+    const gateway = await probeGateway();
 
     return {
       cpu: {
@@ -59,6 +59,7 @@ export class SystemController {
         hostname: os.hostname(),
         node: process.version,
       },
+      gateway,
       uptimeSeconds: Math.round(os.uptime()),
       apiUptimeSeconds: Math.round(process.uptime()),
       ts: Date.now(),

@@ -103,7 +103,7 @@ What each step is doing:
 | `npx prisma migrate deploy` | Applies `apps/api/prisma/migrations` before CI runs `npm test`. The API also runs this on boot. |
 | `npm run dev` | Turbo starts the API (`nest start --watch`) and the web app (`vite`) together. |
 
-Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template and are not read by the API. Do not commit `.env`.
+Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. Do not commit `.env`. System probes the OpenClaw gateway at `OPENCLAW_GATEWAY_HOST` and `OPENCLAW_GATEWAY_PORT` (default `127.0.0.1` and `18789`). Gateway logs are read from `OPENCLAW_LOG_DIR` (default `/tmp/openclaw`).
 
 `OPERATOR_NAME` is a display name, not a secret. Blank means the account chip says Operator. For `npm run dev`, also set `VITE_OPERATOR_NAME` to the same value if you want the browser bundle to see it. Vite only exposes `VITE_*` variables.
 
@@ -164,7 +164,7 @@ Schema changes stay human reviewed. On boot the API runs `prisma migrate deploy`
 | `/#/memory` | Memory notes |
 | `/#/docs` | Markdown library from `DOCS_ROOT` |
 | `/#/team` | Mission, people, devices |
-| `/#/system` | Health, spend, links to the panels below |
+| `/#/system` | Health, provider and model per agent, versions, spend, links to the panels below |
 | `/#/system/logs` | Gateway log tail, or an empty state |
 | `/#/system/sessions` | Sessions from `sessions.snapshot` |
 | `/#/system/settings` | Connection and log out |
@@ -184,11 +184,11 @@ Full request bodies, field tables, and the heartbeat rules are in [docs/API.md](
 * Header: `x-ingest-token: <INGEST_TOKEN>` where `<INGEST_TOKEN>` equals `INGEST_TOKEN` in the root `.env`. The same header is required on every `POST`, `PUT`, `PATCH`, and `DELETE` when that variable is set, not only on `POST /events`.
 * Body: `{ "type": "<one of KNOWN_TYPES>", "payload": { } }`. The list lives in `apps/api/src/ingest/ingest.controller.ts`.
 * Success is `202` with `{ "accepted": true, "type", "ts" }`.
-* Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, and `memory.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
+* Snapshot types replace or upsert tables: `agents.snapshot`, `sessions.snapshot`, `calendar.snapshot`, `usage.snapshot`, `approvals.snapshot`, `memory.snapshot`, and `models.snapshot`. Handlers are in `apps/api/src/snapshots/snapshots.service.ts`.
 * `memory.snapshot` upserts notes by id and drops bridge sourced rows for the agents in the payload when those ids are missing. An empty `entries` list is a no op. It does not wipe Memory. Demo rows stay.
 * `agents.snapshot` creates, updates, or removes snapshot rows only. Default and registered bots stay. `POST /agents/register` upserts one bot (201 when new, 200 when the id exists). `POST /agents/:id/heartbeat` returns 204 and sets `lastSeenAt`. An optional JSON body may set `currentTask` and `status` (`working` or `idle`). No body leaves those fields unchanged. `status` `idle`, JSON null, or a blank `currentTask` clears `currentTask` and sets status to idle. `DELETE /agents/:id` returns 204 for a registered bot and 409 for a default or a snapshot row. An open Agents, Office, or Team page refetches within 2 seconds. Details: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
 * `usage.snapshot` stores daily points (`points: [{ at, totalCost?, tokensIn?, tokensOut?, providers? }]`). The bridge does not post a separate 7 day or month total. `GET /usage?period=24h|7d|month` sums those points. `period=24h` is Today, the calendar day in America/Chicago, taken from the daily buckets. There is no hourly storage. The 7 day and month windows use that same calendar. A short range includes `note`, for example `Showing 3 days of data so far`, and does not fill missing days with zero. `npm run seed:demo` writes 30 days, and today's row is stamped at seed time. The dollar amounts depend on the date. `period=30d` is not a window and returns `usage: null`. A point more than 30 days before today, or a point after now, is not stored. If OpenClaw sessions have no timestamps, the bridge records only the days it has synced.
-* `GET /models` is a stored list. The bridge does not read it. The API does not call DeepSeek or Z.ai. The comment that used to say otherwise in `apps/api/src/models/models.controller.ts` was wrong and has been corrected.
+* `GET /models` returns `{ models }` from the latest `models.snapshot`. The bridge reads `~/.openclaw/openclaw.json` (`OPENCLAW_CONFIG_PATH` overrides that path). When that file has no agent model, it falls back to `openclaw models list`. Each row is the provider and model for one agent. An empty list is the System sentence "No providers found yet. Run the bridge to detect them." `POST /models` and `DELETE /models/:id` still use the write token. They do not call a provider. The next snapshot replaces the table. `GET /health` adds `version` from `apps/api/package.json`, `gitSha`, and `openclawVersion`. `GET /system` includes `gateway.up` from a TCP connect to the configured gateway.
 * `run.*` events are activity and a socket broadcast. They do not insert tickets or runs. Office refetches tickets, runs, and activity when those events arrive, then places each bot from the shared live state (an active ticket in build, qa, or review, then an active run, then heartbeat). A done ticket does not seat its bot. Deploy seats a bot only for an active run on a done ticket when no higher precedence ticket applies. A register or delete also refetches activity. Role text is not a seat.
 * The board is `POST /tickets` and `PATCH /tickets/:id`. A run row is `POST /runs` (201) and `PATCH /runs/:id` (200). Optional `ticketId` on those run calls stores `Run.ticketId` when the ticket exists. An unknown `ticketId` is 404 and does not write the row. The bridge retries that 404 once without `ticketId` so the run is still recorded. Those routes require `x-ingest-token` when `INGEST_TOKEN` is set. A missing run name is 400 and the message names `name`. A name longer than 200 characters, or an agent longer than 100, is 400 and the message names that field. Optional `status` on create defaults to `queued`. Accepted values are `queued`, `running`, `done`, `failed`, and `needs_approval`. A bad `status` is 400 and the message names `status`. Any other field the route does not accept is 400. A PATCH that changes nothing returns 200 with the same run and writes no activity event. An unknown run id is 404. Success bodies have no `error` key.
 * The office floor has no endpoint. It reads agents, tickets, runs, approvals, and activity. Agents, Team, and Office share that placement. The rules are in [docs/API.md](docs/API.md#3-what-each-screen-shows). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#3-what-each-screen-shows).
@@ -343,8 +343,8 @@ What this tree already does:
 Still open:
 
 * Devices have no write route.
-* `GET /models` is stored and unused by the bridge.
 * `GET /usage?period=30d` stays empty. That query is not a window.
+* Provider prices are not in this build.
 
 ## Security notes
 

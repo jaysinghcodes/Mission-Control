@@ -5,10 +5,11 @@ import { wireText } from '../wire-text';
 /**
  * openclaw-log — shared, crash-proof access to the OpenClaw gateway log.
  *
- * Both LogsController (GET /logs) and SearchController (GET /search → logs
- * group) tail the newest `/tmp/openclaw/openclaw-<date>.log`. Ticket 2: on a
+ * Both LogsController (GET /logs) and SearchController (GET /search, logs
+ * group) tail the newest `openclaw-<date>.log` under the log directory.
+ * That directory is OPENCLAW_LOG_DIR, default `/tmp/openclaw`. Ticket 2: on a
  * machine with NO OpenClaw (fresh clone, docker, demo seed) that directory
- * does not exist — and inside the api container it never does unless mounted.
+ * does not exist, and inside the api container it never does unless mounted.
  * That must render as a clean, explained empty state, never a 500.
  *
  * Contract: every filesystem call is wrapped. Missing dir, empty dir, a file
@@ -20,8 +21,22 @@ import { wireText } from '../wire-text';
  * READ files under a fixed directory — no user input reaches the path.
  */
 
-/** Fixed log location written by the OpenClaw gateway. Not user-controllable. */
-export const OPENCLAW_LOG_DIR = '/tmp/openclaw';
+/** Default directory the OpenClaw gateway writes. Override with OPENCLAW_LOG_DIR. */
+export const DEFAULT_OPENCLAW_LOG_DIR = '/tmp/openclaw';
+
+/**
+ * Log directory for this request. An absolute path in OPENCLAW_LOG_DIR wins.
+ * A relative path, a blank value, or a `..` segment keeps the default.
+ */
+export function openclawLogDir(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env.OPENCLAW_LOG_DIR?.trim() ?? '';
+  if (!raw.startsWith('/')) return DEFAULT_OPENCLAW_LOG_DIR;
+  if (raw.includes('\0') || raw.split('/').includes('..')) {
+    return DEFAULT_OPENCLAW_LOG_DIR;
+  }
+  const trimmed = raw.replace(/\/+$/, '');
+  return trimmed || DEFAULT_OPENCLAW_LOG_DIR;
+}
 
 /** One parsed log line, as rendered by the Logs page + search dropdown. */
 export interface LogLine {
@@ -47,26 +62,27 @@ export interface LogTail {
  * @param maxLines how many trailing lines to keep (caller clamps user input).
  */
 export function tailNewestOpenclawLog(maxLines: number): LogTail {
+  const logDir = openclawLogDir();
   let candidates: string[];
   try {
-    candidates = readdirSync(OPENCLAW_LOG_DIR).filter(
+    candidates = readdirSync(logDir).filter(
       (f) => f.startsWith('openclaw-') && f.endsWith('.log'),
     );
   } catch {
-    // ENOENT (no OpenClaw on this box / inside docker) or EACCES — both are
+    // ENOENT (no OpenClaw on this box / inside docker) or EACCES. Both are
     // "no log source", not a server error.
     return {
       available: false,
       file: null,
       lines: [],
-      reason: `No OpenClaw gateway log found (${OPENCLAW_LOG_DIR} is missing). Connect OpenClaw via bridge/ to see live logs.`,
+      reason: `No OpenClaw gateway log found (${logDir} is missing). Connect OpenClaw via bridge/ to see live logs.`,
     };
   }
 
   // stat each candidate defensively: a rotated-away file must not crash the sort.
   const withMtime = candidates
     .map((f) => {
-      const path = join(OPENCLAW_LOG_DIR, f);
+      const path = join(logDir, f);
       try {
         return { path, mtime: statSync(path).mtimeMs };
       } catch {
@@ -82,7 +98,7 @@ export function tailNewestOpenclawLog(maxLines: number): LogTail {
       available: false,
       file: null,
       lines: [],
-      reason: `No openclaw-*.log files in ${OPENCLAW_LOG_DIR} yet.`,
+      reason: `No openclaw-*.log files in ${logDir} yet.`,
     };
   }
 
