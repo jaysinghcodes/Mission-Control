@@ -94,7 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/
 
 Then open **http://localhost:5173/#/tasks**. Leave `VITE_API_URL` unset. The dev server and nginx proxy `/api` and `/socket.io`, so the browser stays on port 5173.
 
-OpenClaw is optional. The command above does not start the OpenClaw gateway. A fresh setup does not load sample data. `npm run seed:demo` writes the sample bots, tickets, and usage in the sample shots above, and it does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. `npm run doctor` checks the local setup. A missing OpenClaw command does not fail that command.
+OpenClaw is optional. The command above does not start the OpenClaw gateway. A fresh setup does not load sample data. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. After `npm ci`, `npm run seed:demo` writes the sample bots, tickets, and usage in the sample shots above, and it does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. `npm run doctor` checks the local setup. A missing OpenClaw command does not fail that command.
 
 `bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes a random `INGEST_TOKEN`, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. The password is printed once. The file stores only the hash. A second run keeps values already in `.env`. The script does not print the ingest token or the session secret.
 
@@ -108,7 +108,7 @@ Host ports, the env file, doctor, and the bridge schedule are written out in [do
 
 Use this path when Docker is not installed. The fresh clone CI job runs these commands on Node.js 20 and Node.js 22. `bash install.sh` follows this path when Docker is missing.
 
-Prerequisites: git, Node.js 22.14.0 (Node 20.17+ or 22.9+ satisfies the npm 11.17.0 engines range), npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`. Create database `mission_control`, user `postgres`, password `postgres`, if it is not there yet. That password is the local default in `.env.example`, not a production secret. Change it before you expose the machine.
+Prerequisites: git, npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`. The installer accepts Node.js 22.9 or newer on the 22 release for this path. Doctor accepts Node.js 20.17 or newer on the 20 release, and Node.js 22.9 or newer on the 22 release. Create database `mission_control`, user `postgres`, password `postgres`, if it is not there yet. That password is the local default in `.env.example`, not a production secret. Change it before you expose the machine.
 
 ```bash
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
@@ -141,7 +141,7 @@ Then open **http://localhost:5173/#/tasks**. Leave `VITE_API_URL` unset here too
 1. `bash install.sh`, or the advanced commands above, starts Postgres, the API, and the web UI.
 2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar chip says **Connected** when `GET /health` and the socket are up.
 3. The first open asks for a timezone, then a naming choice, then confirms the detected provider. Skip finishes that open. Change them later under System, then Settings.
-4. A fresh setup does not load sample data. Empty states are a valid first run. `npm run seed:demo` fills the sample shots. `npm run seed:clear` removes only those rows.
+4. A fresh setup does not load sample data. Empty states are a valid first run. On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the sample shots. `npm run seed:clear` removes only those rows.
 5. If something fails, run `npm run doctor` from the repo root. The failing line names the next command. Notes are in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Stack
@@ -201,7 +201,7 @@ That prints `204`.
 curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper"
 ```
 
-That prints `204`. A default id returns 409. If register returns 401, run `npm run doctor` and send the token that check is using. Field tables: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
+`204` is the native loopback result. On Compose the same command returns 401, because the API does not see loopback. Delete the agent from the UI, or send a session cookie. A default id returns 409. If register returns 401, run `npm run doctor` and send the token that check is using. Field tables: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
 
 Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. Turn on Show sample bots on System to bring them back. They show the Sample tag. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed. The row is not deleted.
 
@@ -233,7 +233,7 @@ The cases hit on a fresh clone, including 401, login lockout, and a bridge with 
 
 ## What works without OpenClaw
 
-`npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
+On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
 
 Tasks, projects, pipeline, memory, docs, team, custom tools, Office, Calendar, Approvals, and Usage all render from that seed. Sessions and gateway logs stay empty until a real bridge posts them. The list is in [docs/STACK.md](docs/STACK.md#what-works-without-openclaw).
 

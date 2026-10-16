@@ -64,7 +64,7 @@ Six of the tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgre
 
 ## What works without OpenClaw
 
-`npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
+On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
 
 * Tasks and the backlog view, from seeded tickets.
 * Projects, including ticket counts, from seeded projects.

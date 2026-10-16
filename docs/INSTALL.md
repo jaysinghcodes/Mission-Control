@@ -18,7 +18,7 @@ Then open the URL the script prints. The default is **http://localhost:5173/#/ta
 
 Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`, and `MC_REMOTE_PORT` from the environment are written into a new `.env`. `MC_REMOTE_PORT` defaults to 3011. A plain second run leaves `.env` unchanged. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL uses `localhost` or `127.0.0.1` and its port is the previous `MC_DB_PORT`, or 5432 when none was stored. That same run updates the `MC_DB_PORT` line. A custom URL, including another host or a URL with no port, is left as is and the installer says so. Tokens and secrets are not rotated. A shell value still wins for that run.
 
-OpenClaw is optional. The command above does not start the OpenClaw gateway. `npm run seed:demo` writes sample bots, tickets, and usage. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
+OpenClaw is optional. The command above does not start the OpenClaw gateway. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. After `npm ci`, `npm run seed:demo` writes sample bots, tickets, and usage. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
 
 ## Bridge schedule
 

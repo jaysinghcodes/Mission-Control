@@ -1434,7 +1434,11 @@ finish() {
   echo "Open ${url}"
   echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL above."
   echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
-  echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw. Run npm ci in the checkout before npm run seed:demo or npm run seed:clear. Without that install, prisma is not found and the seed command fails."
+  else
+    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
+  fi
   exit "$doctor_code"
 }
 
