@@ -1,21 +1,40 @@
 /**
  * Calendar helpers for whatever zone the caller names.
  * The stored settings timezone wins. When it is empty, the server
- * timezone is `TZ` if that name is valid, otherwise the host zone.
+ * timezone is `TZ` if that name is an IANA zone or UTC, otherwise the host zone.
+ *
+ * `Intl.DateTimeFormat` also accepts offsets and abbreviations such as
+ * `+02:00` and `CST`. Those are not names the bridge can load, so a zone
+ * counts only when it is `UTC` or a member of `Intl.supportedValuesOf('timeZone')`.
  */
+
+let ianaNames: Set<string> | null = null;
+
+function ianaTimeZones(): Set<string> {
+  if (ianaNames) return ianaNames;
+  const intl = Intl as typeof Intl & {
+    supportedValuesOf?: (key: 'timeZone') => string[];
+  };
+  let names: string[] = [];
+  try {
+    if (typeof intl.supportedValuesOf === 'function') {
+      names = intl.supportedValuesOf('timeZone');
+    }
+  } catch {
+    names = [];
+  }
+  ianaNames = new Set(names);
+  ianaNames.add('UTC');
+  return ianaNames;
+}
 
 export function isValidTimeZone(zone: string): boolean {
   const text = zone.trim();
   if (!text || text.length > 80) return false;
-  try {
-    Intl.DateTimeFormat('en-US', { timeZone: text }).format(0);
-    return true;
-  } catch {
-    return false;
-  }
+  return ianaTimeZones().has(text);
 }
 
-/** Process timezone. `TZ=Europe/Berlin` wins over the host zone. */
+/** Process timezone. `TZ=Europe/Berlin` wins when that name is allowed. */
 export function serverTimeZone(): string {
   const fromEnv = (process.env.TZ ?? '').trim();
   if (fromEnv && isValidTimeZone(fromEnv)) return fromEnv;

@@ -2,7 +2,12 @@ import { MemoryController } from '../memory/memory.controller';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TimezoneService } from './timezone.service';
 import { usageBucketsFromPayload } from '../usage/usage-points';
-import { resolveTimeZone, serverTimeZone, zoneDay } from '../usage/zone-time';
+import {
+  isValidTimeZone,
+  resolveTimeZone,
+  serverTimeZone,
+  zoneDay,
+} from '../usage/zone-time';
 
 /**
  * TZ=Europe/Berlin buckets usage and memory on Berlin days.
@@ -73,6 +78,24 @@ describe('TZ=Europe/Berlin', () => {
   it('lets a saved zone override TZ', () => {
     expect(resolveTimeZone('UTC')).toBe('UTC');
     expect(zoneDay(INSTANT, resolveTimeZone('UTC'))).toBe('2026-01-15');
+  });
+
+  it('ignores an offset or abbreviation in TZ and in a saved zone', () => {
+    expect(isValidTimeZone('+02:00')).toBe(false);
+    expect(isValidTimeZone('CST')).toBe(false);
+    expect(isValidTimeZone('UTC')).toBe(true);
+    expect(isValidTimeZone('Europe/Berlin')).toBe(true);
+
+    process.env.TZ = '+02:00';
+    expect(serverTimeZone()).not.toBe('+02:00');
+    expect(isValidTimeZone(serverTimeZone())).toBe(true);
+    expect(resolveTimeZone('+02:00')).toBe(serverTimeZone());
+    expect(resolveTimeZone('CST')).toBe(serverTimeZone());
+
+    process.env.TZ = 'CST';
+    expect(serverTimeZone()).not.toBe('CST');
+    expect(isValidTimeZone(serverTimeZone())).toBe(true);
+    expect(resolveTimeZone('CST')).toBe(serverTimeZone());
   });
 
   it('buckets a usage point on the Berlin day', () => {

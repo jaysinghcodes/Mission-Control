@@ -1,6 +1,7 @@
 """Daily usage points: backfill, two simulated days, no period totals."""
 import datetime
 import importlib.util
+import os
 import unittest
 from pathlib import Path
 
@@ -113,6 +114,37 @@ class UsagePointsTest(unittest.TestCase):
             zone,
         )
         self.assertEqual(list(state["days"]), ["2026-01-16"])
+
+    def test_offset_and_abbreviation_are_not_zones(self):
+        self.assertIsNone(self.mod.iana_zone("+02:00"))
+        self.assertIsNone(self.mod.iana_zone("CST"))
+        self.assertFalse(self.mod.zone_name_allowed("+02:00"))
+        self.assertFalse(self.mod.zone_name_allowed("CST"))
+        self.assertIsNotNone(self.mod.iana_zone("UTC"))
+        self.assertIsNotNone(self.mod.iana_zone("Europe/Berlin"))
+
+    def test_env_fallbacks_ignore_offset_and_abbreviation(self):
+        saved = {key: os.environ.get(key) for key in ("MC_TIMEZONE", "TZ")}
+        try:
+            os.environ["MC_TIMEZONE"] = "CST"
+            os.environ["TZ"] = "+02:00"
+            for candidate in (None, "CST", "+02:00"):
+                zone = self.mod.resolve_tz(candidate)
+                key = getattr(zone, "key", None)
+                if key:
+                    self.assertNotIn(key, ("CST", "+02:00"))
+                    self.assertIsNotNone(self.mod.iana_zone(key))
+                else:
+                    self.assertEqual(
+                        zone.utcoffset(datetime.datetime(2026, 1, 15, 23, 30)),
+                        datetime.timedelta(0),
+                    )
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 if __name__ == "__main__":

@@ -224,6 +224,16 @@ describe('SettingsController', () => {
     );
   });
 
+  it('PUT /settings returns 400 for an offset or an abbreviation', async () => {
+    const controller = new SettingsController({} as PrismaService);
+    await expect(controller.put({ timezone: '+02:00' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(controller.put({ timezone: 'CST' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
   it('PUT /settings is a write and production without a token is 401', () => {
     // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
     const put = SettingsController.prototype.put;

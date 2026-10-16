@@ -82,6 +82,7 @@ export function timeZoneNames(current: string): string[] {
   const intl = Intl as typeof Intl & { supportedValuesOf?: (key: 'timeZone') => string[] }
   const names = typeof intl.supportedValuesOf === 'function' ? intl.supportedValuesOf('timeZone') : []
   const unique = new Set(names)
+  unique.add('UTC')
   if (current) unique.add(current)
   return [...unique].sort((a, b) => a.localeCompare(b))
 }

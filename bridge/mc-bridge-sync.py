@@ -60,6 +60,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -1232,19 +1233,81 @@ def iso_z(dt: datetime.datetime) -> str:
     return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def iana_zone(name: str) -> Optional[datetime.tzinfo]:
-    """IANA zone from the stdlib. None when the name is blank or unknown."""
+# Same allowlist as the API: Intl.supportedValuesOf('timeZone') plus UTC.
+# Offsets and abbreviations (+02:00, CST) format in Node and must still be refused.
+_IANA_NAMES: Optional[Set[str]] = None
+_IANA_LOADED = False
+
+
+def _node_time_zones() -> Optional[Set[str]]:
+    """Names from `Intl.supportedValuesOf('timeZone')`, plus UTC. None when node is missing."""
+    global _IANA_NAMES, _IANA_LOADED
+    if _IANA_LOADED:
+        return _IANA_NAMES
+    _IANA_LOADED = True
+    node = shutil.which("node")
+    if not node:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                node,
+                "-e",
+                "process.stdout.write(Intl.supportedValuesOf('timeZone').join('\\n'))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    names = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+    names.add("UTC")
+    _IANA_NAMES = names
+    return names
+
+
+def zone_name_allowed(name: str) -> bool:
+    """True for UTC and for an IANA name the API would accept."""
     text = (name or "").strip()
-    if not text:
+    if not text or len(text) > 80:
+        return False
+    if text == "UTC":
+        return True
+    names = _node_time_zones()
+    if names is not None:
+        return text in names
+    # Node is not on PATH. Still refuse offsets, abbreviations, and Etc/*.
+    return "/" in text and not text.startswith("Etc/")
+
+
+def iana_zone(name: str) -> Optional[datetime.tzinfo]:
+    """IANA zone from the stdlib. None when the name is blank or not allowed."""
+    text = (name or "").strip()
+    if not zone_name_allowed(text):
         return None
     try:
         from zoneinfo import ZoneInfo
     except ImportError:
-        return None
+        return datetime.timezone.utc if text == "UTC" else None
     try:
         return ZoneInfo(text)
     except Exception:
-        return None
+        return datetime.timezone.utc if text == "UTC" else None
+
+
+def _allowed_local_tz() -> datetime.tzinfo:
+    """Host zone when its name is allowed. Otherwise UTC, never a raw offset."""
+    local = _local_tz()
+    key = getattr(local, "key", None)
+    if isinstance(key, str):
+        found = iana_zone(key)
+        if found is not None:
+            return found
+    return datetime.timezone.utc
 
 
 def resolve_tz(name: Optional[str] = None) -> datetime.tzinfo:
@@ -1252,6 +1315,7 @@ def resolve_tz(name: Optional[str] = None) -> datetime.tzinfo:
     Timezone for daily notes and usage days.
 
     A name from GET /settings wins. Then MC_TIMEZONE, then TZ, then the host zone.
+    Each candidate has to be UTC or an IANA name, the same rule as the API.
     """
     if name:
         found = iana_zone(name)
@@ -1261,7 +1325,7 @@ def resolve_tz(name: Optional[str] = None) -> datetime.tzinfo:
         found = iana_zone(os.environ.get(key, ""))
         if found is not None:
             return found
-    return _local_tz()
+    return _allowed_local_tz()
 
 
 def fetch_api_timezone(api_url: str) -> Optional[str]:
