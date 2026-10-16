@@ -1,10 +1,11 @@
 /**
  * Prove a clean tree can follow the README install block.
  *
- * The bash commands come from the Install and run section. git clone is
- * pointed at this checkout so the job tests the commit under review, not
- * whatever the public default branch happens to be. .env is the example
- * file with no edits. OpenClaw is not started.
+ * Docker Compose is the documented default. This job has no Docker, so it
+ * runs the Advanced: Node and Postgres block. git clone is pointed at this
+ * checkout so the job tests the commit under review, not whatever the public
+ * default branch happens to be. .env is the example file with no edits.
+ * OpenClaw is not started.
  */
 
 import { spawn } from 'node:child_process'
@@ -16,18 +17,42 @@ import { loadEnvFile } from './doctor.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-export function readInstallCommands(markdown) {
+const ADVANCED_HEADING = '### Advanced: Node and Postgres'
+
+function installSection(markdown) {
   const parts = String(markdown).split(/^## Install and run\s*$/m)
   if (parts.length < 2) {
     throw new Error('README is missing the Install and run section.')
   }
-  const section = parts[1].split(/^## /m)[0]
+  return parts[1].split(/^## /m)[0]
+}
+
+function bashCommands(section) {
   const fence = section.match(/```bash\r?\n([\s\S]*?)```/)
   if (!fence) throw new Error('README Install and run section has no bash block.')
   return fence[1]
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('#'))
+}
+
+/** The first bash block. That is `docker compose up -d --build`. */
+export function readComposeInstallCommands(markdown) {
+  const section = installSection(markdown)
+  const beforeAdvanced = section.split(new RegExp(`^${ADVANCED_HEADING}\\s*$`, 'm'))[0]
+  return bashCommands(beforeAdvanced)
+}
+
+/**
+ * CI runs this block. It needs Node and Postgres and does not need Docker.
+ */
+export function readInstallCommands(markdown) {
+  const section = installSection(markdown)
+  const advanced = section.split(new RegExp(`^${ADVANCED_HEADING}\\s*$`, 'm'))
+  if (advanced.length < 2) {
+    throw new Error(`README Install and run section is missing ${ADVANCED_HEADING}.`)
+  }
+  return bashCommands(advanced[1])
 }
 
 function shellQuote(value) {
@@ -193,7 +218,9 @@ function envFromClone(cloneDir) {
 
 async function assertProductionWriteRejected(cloneDir, env) {
   const prodEnv = { ...env, NODE_ENV: 'production', PORT: '3001', HOST: '127.0.0.1' }
-  delete prodEnv.INGEST_TOKEN
+  // A blank value stays blank. The API loads .env but does not replace it,
+  // so this process still has no write token.
+  prodEnv.INGEST_TOKEN = ''
   const logPath = path.join(cloneDir, 'production-api.log')
   const fd = openSync(logPath, 'w')
   const child = spawn('node', ['dist/main.js'], {

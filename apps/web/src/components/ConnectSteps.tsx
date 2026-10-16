@@ -3,11 +3,9 @@ import { Link } from 'react-router-dom'
 import { Chip, PillButton, SectionLabel } from './ui'
 
 /**
- * ConnectSteps — the 8-step onboarding runbook data + card renderers for the
- * /connect page (MC-207). Step titles/order/body copy mirror ONBOARDING.md
- * 1:1 (the doc is the source of truth); steps 5 & 7 carry a live /health probe
- * rendered by the page, everything else is honest guidance the operator
- * confirms themselves — confirmed ≠ verified, never auto-credited.
+ * ConnectSteps: the 8 step onboarding runbook for the /connect page.
+ * Step titles follow ONBOARDING.md. Steps 5 and 7 carry a live /health probe.
+ * The other steps are guidance the operator confirms. Confirmed is not verified.
  */
 
 export type Phase = 'host' | 'verify' | 'here'
@@ -31,17 +29,17 @@ export interface StepVar {
 }
 
 export interface ConnectStep {
-  id: number // 1..8, matches ONBOARDING.md order — do not renumber
-  title: string // exact ONBOARDING.md heading text (minus the "Step N —" prefix)
+  id: number // 1..8, matches ONBOARDING.md order. Do not renumber.
+  title: string // ONBOARDING.md heading text, without a "Step N" prefix
   phase: Phase
   phaseLabel: string
   body: string[] // short lines; `backticks` render as inline code
   commands?: StepCmd[]
-  secrets?: boolean // true → render <SecretsCallout/> (step 3 only)
-  probe?: 'health' // true → page injects a live probe zone (steps 5 & 7)
+  secrets?: boolean // true renders SecretsCallout (step 3 only)
+  probe?: 'health' // page injects a live probe zone (steps 5 and 7)
   vars?: StepVar[]
   links?: StepLink[]
-  confirmable: boolean // static steps get the "Mark done — I did this" chip
+  confirmable: boolean // static steps get the "Mark done. I did this" chip
 }
 
 /** Per-OS tunnel commands (existing record shape, labels kept). */
@@ -83,9 +81,8 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'ON THE HOST',
     body: [
       'Node.js 20.17+ (or 22.9+). The root `packageManager` is `npm@11.17.0`, which requires `^20.17 || >=22.9`, and git.',
-      'Docker with the compose plugin (used for Postgres, and optionally the api + web containers).',
-      // Ticket 3: OpenClaw is the live data source but no longer a hard
-      // prerequisite — tickets work out of the box and seed:demo fills the rest.
+      'Docker with the Compose plugin. This is the default way to run Postgres, the API, and the web UI. The browser uses one port.',
+      // OpenClaw is optional. Tickets work without it, and seed:demo fills sample data.
       'Optional: your OpenClaw instance running. It is the live data source (step 6). Without it, the tickets loop works and `npm run seed:demo` fills sample data.',
     ],
     commands: [
@@ -150,9 +147,9 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'Wait for all three services to be up: db healthy, api, web. The first `--build` compiles the images, so it takes a while.',
-      'Confirm the api is **not** crash-looping: `docker compose logs api` should end with the migrations applied and `mission-control api listening on 0.0.0.0:3000`.',
-      'Prefer no Docker? Postgres is still required. The dev path (export the root `.env`, `npx prisma migrate deploy`, `npm run dev`) is in ONBOARDING.md step 4. No OpenClaw? `npm run seed:demo` fills sample data.',
+      'One command starts Postgres, the API, and the web UI. The browser uses port 5173 only. Leave `VITE_API_URL` unset. nginx proxies `/api` and `/socket.io` to the API.',
+      'The API loads the root `.env` and runs `prisma migrate deploy` before it listens. `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`.',
+      'No Docker? Postgres is still required. The advanced path is in the README: export the root `.env`, `npx prisma generate`, then `npm run dev`. The API migrates on boot. No OpenClaw? `npm run seed:demo` fills sample data.',
     ],
     commands: [
       { label: 'Build + start', cmd: 'docker compose up -d --build' },
@@ -166,9 +163,9 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'verify',
     phaseLabel: 'VERIFY',
     body: [
-      'Open `http://localhost:5173/#/`. The Overview loads and the topbar shows a green “Connected” dot (live socket).',
-      '`/health` shows real uptime, client count, and database state; empty states show actions, never fake numbers.',
-      'Dot stays red on the Docker path? The api is down, or the `SOCKET_TOKEN` baked into the web build doesn’t match the api’s. Set it in `.env` and rebuild with `docker compose up -d --build`.',
+      'Open `http://localhost:5173/#/tasks`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.',
+      'Health on this same origin shows uptime, client count, and database state. Empty states show actions.',
+      'Dot stays red? The API is down, or `SOCKET_TOKEN` in the web build does not match the API. Set it in `.env` and run `docker compose up -d --build` again.',
     ],
     probe: 'health',
     confirmable: false,
@@ -198,8 +195,8 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'here',
     phaseLabel: 'YOU ARE HERE',
     body: [
-      'Run the exact command for the OS you are on, replacing `<your-server-ip>` with your OpenClaw host (public IP or tailnet name).',
-      'Port 5173 is the dashboard. Port 3000 is the API. Vite listens on 127.0.0.1:5173, so this tunnel reaches it. Keep the SSH session open while you browse.',
+      'Run the command for the OS you are on, replacing `<your-server-ip>` with your host.',
+      'The dashboard is one port. After the tunnel, open the web port. The page calls the API on that same origin. Port 3000 is the direct API, for curl and the bridge. Keep the SSH session open while you browse.',
     ],
     probe: 'health',
     confirmable: false,
@@ -209,8 +206,7 @@ export const STEP_DATA: ConnectStep[] = [
     title: 'Smoke test',
     phase: 'here',
     phaseLabel: 'YOU ARE HERE',
-    // Ticket 3: mirror ONBOARDING.md step 8 — say plainly what works with no
-    // OpenClaw vs what needs the step-6 bridge (no overclaiming).
+    // Say what works with no OpenClaw, and what needs the step 6 bridge.
     body: [
       '**No OpenClaw needed:** Tickets. Create one, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.',
       '**No OpenClaw needed:** after `npm run seed:demo`, Calendar / Team / Office / Live Activity show labelled sample data.',
@@ -233,7 +229,7 @@ export function ringClass(state: RingState): string {
   return 'bg-mc-inner text-mc-faint'
 }
 
-/** Render body/desc text: `backtick` → inline mono code, **double-star** → emphasis. */
+/** Render body text. Backticks become inline code. Double stars become emphasis. */
 export function fmt(text: string): ReactNode[] {
   const out: ReactNode[] = []
   let key = 0
@@ -269,7 +265,7 @@ export function CodeBlock({ cmd, label }: { cmd: string; label?: string }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1600)
     } catch {
-      // clipboard unavailable (permissions etc.) — degrade silently
+      // clipboard unavailable. Stay quiet.
     }
   }
   return (
@@ -294,7 +290,7 @@ export function CodeBlock({ cmd, label }: { cmd: string; label?: string }) {
   )
 }
 
-/** Secrets callout — step 3 only. Verbatim guardrail stance + the root-.env vars. */
+/** Secrets callout for step 3. The root .env variables. */
 export function SecretsCallout({ vars }: { vars: StepVar[] }) {
   return (
     <div className="mt-4 rounded-r-lg border-l-2 border-mc-orange bg-mc-inner py-3 pl-4 pr-3">
@@ -349,7 +345,7 @@ export function ConnectStepCard({
 }) {
   return (
     <div className="flex items-start gap-3.5">
-      {/* Number ring — done = ✓, active = current step, pending otherwise */}
+      {/* Number ring. Done shows a check. Active is the current step. */}
       <span
         aria-hidden
         className={`mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full text-[11px] font-bold transition-colors duration-150 ${ringClass(state)}`}
@@ -381,7 +377,7 @@ export function ConnectStepCard({
                   rel="noreferrer"
                   className="inline-flex h-8 items-center rounded-full border border-mc-border bg-mc-card px-4 text-[12.5px] font-semibold text-mc-sub transition-colors duration-150 hover:text-mc-text focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary"
                 >
-                  {l.label} ↗
+                  {l.label}
                 </a>
               ) : (
                 <Link

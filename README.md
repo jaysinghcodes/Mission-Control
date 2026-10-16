@@ -36,13 +36,38 @@ The sample Office is the floor after `npm run seed:demo`. Each bot sits in the r
 
 ## Install and run
 
-This is the quick start. The fresh clone CI job runs these commands.
+Docker Compose is the default. It starts Postgres, the API, and the web UI. The browser uses one port.
+
+Prerequisites: git, Docker, and the Docker Compose plugin.
+
+```bash
+git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
+cd mission-control
+cp .env.example .env
+docker compose up -d --build
+```
+
+Then open **http://localhost:5173/#/tasks**.
+
+OpenClaw is optional. The commands above do not start it. `npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
+
+The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the image does not contain a `.env` file. A variable that is already set wins over the file, including a blank value.
+
+nginx on the web port proxies `/api` and `/socket.io` to the API. The page and the live socket stay on port 5173. Leave `VITE_API_URL` unset. Set it only when the browser should call a different API origin, then rebuild the web image.
+
+`docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
+
+`npm run doctor` checks Node, the API port, `.env`, the database, migrations, the write token, and API health. A missing OpenClaw bridge is an info line. It does not fail the command.
+
+CI does not run Docker. It runs the advanced path below. The compose file, the nginx config, and the Dockerfiles are checked as text.
+
+### Advanced: Node and Postgres
+
+Use this path when Docker is not installed. The fresh clone CI job runs these commands.
 
 Prerequisites that this run used: git, Node.js 22.14.0 (Node 20.17+ or 22.9+ satisfies the npm 11.17.0 engines range), npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`.
 
 Create the database the template expects if it is not there yet: database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret. Change it before you expose the machine.
-
-`docker` was not installed in the environment where these commands were run, so Docker Compose was not part of the verified path. `docker-compose.yml` is still in the repo for a host that has Docker. The steps below are the ones that were executed on a fresh clone.
 
 ```bash
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
@@ -55,13 +80,7 @@ set -a; . ./.env; set +a
 npm run dev
 ```
 
-Then open **http://localhost:5173/#/tasks**.
-
-OpenClaw is optional. The commands above do not start it.
-
-`npm run doctor` checks Node, the API port, `.env`, the database, migrations, the write token, and API health. A missing OpenClaw bridge is an info line. It does not fail the command.
-
-`npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data.
+Then open **http://localhost:5173/#/tasks**. The dev server proxies `/api` and `/socket.io`, so the browser still uses port 5173. Leave `VITE_API_URL` unset here too.
 
 `npm ci` prints an `allow-scripts` warning for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. The following `npx prisma generate` still completed, and migrate deployed 10 migrations.
 
@@ -69,10 +88,10 @@ What each step is doing:
 
 | Command | Why |
 | --- | --- |
-| `cp .env.example .env` | The API does not load `.env` by itself. Compose would, but this path exports the file into the shell. |
-| `set -a; . ./.env; set +a` | Puts `DATABASE_URL`, `INGEST_TOKEN`, `PORT`, `HOST`, and the rest into the environment. `turbo.json` only forwards listed variables into `npm run dev`. |
-| `npx prisma generate` | Builds the Prisma client. Run it from `apps/api`. |
-| `npx prisma migrate deploy` | Applies `apps/api/prisma/migrations`. The API does not migrate on this path. (The API container runs migrate on boot.) |
+| `cp .env.example .env` | Root env file. The API loads it on boot. Compose reads the same file. |
+| `set -a; . ./.env; set +a` | Vite and Turbo only see variables that are already in the environment. The dev proxy needs `INGEST_TOKEN` from this export. |
+| `npx prisma generate` | Builds the Prisma client. Run it from `apps/api`. npm 11 does not do this during `npm ci`. |
+| `npx prisma migrate deploy` | Applies `apps/api/prisma/migrations` before CI runs `npm test`. The API also runs this on boot. |
 | `npm run dev` | Turbo starts the API (`nest start --watch`) and the web app (`vite`) together. |
 
 Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template and are not read by the API. Do not commit `.env`.
@@ -81,21 +100,21 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `D
 
 ### Ports
 
-| Service | Where it listened in this run |
+| Service | Where it listened |
 | --- | --- |
-| Web | `http://127.0.0.1:5173` (Vite `server.host` is `127.0.0.1`, same loopback bind as the API). `http://localhost:5173` also works when localhost resolves to that address. |
-| API | `http://127.0.0.1:3000` (`HOST` from `.env.example`). `GET /health` also answered on `http://localhost:3000`. |
+| Web | `http://127.0.0.1:5173`. This is the UI port. `http://localhost:5173` also works when localhost resolves to that address. |
+| API | Direct clients use `http://127.0.0.1:3000`. The browser does not. It calls `/api` on the web port. |
 | Postgres | `127.0.0.1:5432`, database `mission_control` |
 
-`docker-compose.yml` publishes the same three ports on `127.0.0.1` only (`MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` override the host side). Inside Compose the API binds `0.0.0.0:3000` and the web image serves on `5173`.
+`docker-compose.yml` publishes those ports on `127.0.0.1` only (`MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` override the host side). Inside Compose the API binds `0.0.0.0:3000` and nginx listens on `5173`. Moving `MC_API_PORT` does not change the browser unless you also set `VITE_API_URL`.
 
 ### First run
 
-1. `npm run dev` starts the API and the web app.
+1. `docker compose up -d --build` starts Postgres, the API, and the web UI. `npm run dev` is the advanced path and starts the API and the web app without Docker.
 2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar account chip says **Connected** plus the health latency when `GET /health` succeeds and the Socket.IO feed is up. **API only** means health is up and the socket is still reconnecting. **Offline** means the health probe failed.
 3. If the first health probe fails, the shell sends the browser to `/#/connect`. Later failures do not keep redirecting.
 4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, SSH tunnel, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks.
-5. The setup sheet text still tells you to look for an Overview page and for `/#/health`. Those routes are redirects now: `/#/` goes to Tasks, `/#/health` goes to System. Trust the sidebar chip and `/#/system`.
+5. `/#/` goes to Tasks. `/#/health` goes to System. Trust the sidebar chip and `/#/system`.
 
 A fresh setup does not load sample data. `npm run dev` after migrate shows empty states. That is a valid first run, not a crash.
 
@@ -118,7 +137,7 @@ Prisma models, 14 counted in `apps/api/prisma/schema.prisma`: `Agent`, `Run`, `P
 
 The API has 21 controllers (`@Controller` in `apps/api/src`). `team.controller.ts` registers two of them, `mission` and `devices`. The others are sessions, runs, activity, logs, calendar, models, approvals, custom tools, projects, search, usage, events, tickets, docs, health, memory, agents, the root app controller, and system.
 
-Schema changes stay human reviewed. The app does not auto migrate on the `npm run dev` path.
+Schema changes stay human reviewed. On boot the API runs `prisma migrate deploy`, which applies those reviewed migrations. It does not create new ones. That includes `npm run dev` and `node dist/main.js`.
 
 ### Pages
 
@@ -263,9 +282,9 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 **Start with `npm run doctor`.** It prints one line per check. A failing line includes the command to run next. OpenClaw is optional in that report and does not fail the command. The command exits 0 when every required check passes, and exits non zero when one does not.
 
-**The dev server listens on `127.0.0.1:5173`.** Vite `server.host` is `127.0.0.1`. The tunnel `ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000` forwards to that address. Open `http://127.0.0.1:5173/#/tasks` on the machine that opened the tunnel. The API, with `HOST=127.0.0.1`, listens on `127.0.0.1:3000`. `http://localhost:3000` also reaches it when localhost resolves to IPv4.
+**The dev server listens on `127.0.0.1:5173`.** Vite `server.host` is `127.0.0.1`. The tunnel `ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000` forwards to that address. Open `http://127.0.0.1:5173/#/tasks` on the machine that opened the tunnel. On the advanced path the API, with `HOST=127.0.0.1`, listens on `127.0.0.1:3000`. The browser calls `/api` on port 5173 either way. `http://localhost:3000` still reaches the API directly when localhost resolves to IPv4.
 
-**Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or it is up on a different host than `VITE_API_URL` (default `http://localhost:3000`). Start Postgres, export `.env`, then `npm run dev`. A later health failure does not redirect again.
+**Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or `VITE_API_URL` points at a different host. Leave `VITE_API_URL` unset so the page calls `/api` on its own origin. Start the stack with `docker compose up -d --build`, or on the advanced path export `.env` and run `npm run dev`. A later health failure does not redirect again.
 
 **A write returns 401 `unauthorized`.** `INGEST_TOKEN` is set (the template ships `change-me`) and the `x-ingest-token` header is missing or different. This is every `POST`, `PUT`, `PATCH`, and `DELETE`, including `POST /events` and `POST /tickets`. The body is `{"statusCode":401,"message":"unauthorized"}`. Send the same value the API process has. A wrong token failed the same way. Reads such as `GET /health` do not check the header.
 
@@ -281,7 +300,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 **`python3 bridge/mc-bridge-sync.py` says `openclaw` is not on PATH and posts nothing.** Expected on a machine without the OpenClaw CLI. Exit code was 0. Demo data stays. Install the CLI, or POST `/events` yourself using the onboarding file.
 
-**Setup sheet mentions Overview and `/#/health`.** The current home is `/#/tasks`. `/#/health` redirects to `/#/system`. The Connected chip is in the sidebar under the account name.
+**Setup sheet.** The current home is `/#/tasks`. `/#/health` redirects to `/#/system`. The Connected chip is in the sidebar under the account name.
 
 ---
 

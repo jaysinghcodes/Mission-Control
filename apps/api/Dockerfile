@@ -36,8 +36,7 @@ COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 WORKDIR /app/apps/api
 EXPOSE 3000
-# Runtime env (DATABASE_URL, PORT, HOST, WEB_ORIGIN, INGEST_TOKEN, SOCKET_TOKEN, …)
-# is injected by docker-compose `environment:` — the image contains no .env file,
-# so --env-file=.env would fail fatally (crash-loop on a fresh clone).
-# Mirrors the `start:prod` script: migrate, then run the compiled Nest app.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+# Runtime env (DATABASE_URL, PORT, HOST, WEB_ORIGIN, INGEST_TOKEN, SOCKET_TOKEN)
+# is injected by docker-compose `environment:`. The image contains no .env file.
+# dist/main.js loads a .env when one is present, then runs prisma migrate deploy.
+CMD ["node", "dist/main.js"]

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { API_URL } from '../lib/apiBase';
+import { socketUrl } from '../lib/apiBase';
 
 /**
  * Live activity event shape pushed by the API gateway.
@@ -16,7 +16,7 @@ export interface ActivityEvent {
  * useLiveActivity — subscribes to the Mission Control Socket.IO feed.
  *
  * Connection lifecycle:
- *  - connects to the API (VITE_API_URL or localhost:3000) on mount
+ * connects to the API (VITE_API_URL, or this page when that is unset) on mount
  *  - auto-reconnects on drop (socket.io built-in)
  *  - surfaces connection state so the UI can show an honest status dot
  *    (green = connected, red = disconnected — no fake "online")
@@ -47,11 +47,11 @@ export function useLiveActivity(maxEvents = 50): { events: ActivityEvent[]; conn
   maxEventsRef.current = maxEvents;
 
   useEffect(() => {
-    // Same configured API location as REST and the heartbeat (lib/apiBase,
-    // QA-1 polish item 7) — VITE_API_URL, else the NestJS default port.
-    const socket: Socket = io(API_URL, {
-      transports: ['websocket'],
-      // Item 5: do NOT dial in the constructor — see the deferred connect below.
+    // Same origin by default (nginx or Vite proxies /socket.io). An explicit
+    // VITE_API_URL connects there instead (lib/apiBase).
+    const socketOptions = {
+      transports: ['websocket'] as ('websocket')[],
+      // Item 5: do NOT dial in the constructor. See the deferred connect below.
       autoConnect: false,
       // Production socket guard: the api gateway requires SOCKET_TOKEN in the
       // handshake when NODE_ENV=production (docker compose). Compose bakes the
@@ -60,7 +60,9 @@ export function useLiveActivity(maxEvents = 50): { events: ActivityEvent[]; conn
       auth: import.meta.env.VITE_SOCKET_TOKEN
         ? { token: import.meta.env.VITE_SOCKET_TOKEN }
         : undefined,
-    });
+    };
+    const explicit = socketUrl();
+    const socket: Socket = explicit ? io(explicit, socketOptions) : io(socketOptions);
 
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));

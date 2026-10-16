@@ -12,7 +12,7 @@ Without OpenClaw, `npm run seed:demo` fills sample data and the task board still
 
 The web app uses hash routes. Open `http://localhost:5173/#/tasks`. `/` redirects there. A URL with no `#` is not a client route.
 
-These commands were run on a fresh clone with Node v22.14.0 and npm 11.17.0. pnpm is not used. Postgres was 16.15. Docker was not installed there, so do not require Docker. `docker-compose.yml` remains for a host that already has Docker.
+Docker Compose is the default. The browser uses one port. The API loads the root `.env` and runs `prisma migrate deploy` on boot. If Docker is missing, use the advanced Node and Postgres path in the README. Do not invent a second install.
 
 Guide the operator one step at a time.
 
@@ -29,7 +29,8 @@ Confirm each of these:
 * Node.js 20.17 or newer, or 22.9 or newer (`node -v`). The root `packageManager` is `npm@11.17.0`.
 * npm 11.17.0 (`npm -v`). If the shell npm is older, `corepack npm -v` should report 11.17.0 after `corepack prepare npm@11.17.0 --activate`.
 * git (`git --version`).
-* Postgres 16 on `127.0.0.1:5432`, database `mission_control`, user `postgres`. The template password is `postgres`. That is a local default. Ask before you reuse it anywhere but loopback.
+* Docker and the Docker Compose plugin (`docker compose version`). This is the default runtime.
+* Postgres 16 is started by Compose. On the advanced path it must already listen on `127.0.0.1:5432`, database `mission_control`, user `postgres`. The template password is `postgres`. That is a local default. Ask before you reuse it anywhere but loopback.
 * Optional: a running OpenClaw CLI (`openclaw`). Without it, the dashboard still runs. Sample data is a separate command. Do not pretend the bridge synced.
 
 ### Step 2. Clone and install
@@ -44,7 +45,7 @@ npm ci
 
 ### Step 3. Create the root .env
 
-Compose and the shell both read the root `.env` next to `docker-compose.yml`. The API process does not load that file on its own. `apps/api/.env.example` is only a second template.
+Compose and the API both read the root `.env` next to `docker-compose.yml`. A variable that is already set wins over the file. `apps/api/.env` wins over the root file when both set a key. `apps/api/.env.example` is only a second template.
 
 ```sh
 cp .env.example .env
@@ -63,7 +64,15 @@ Walk each variable. Ask the operator for real values. Do not invent one.
 
 ### Step 4. Start the stack
 
-Export the file, generate the client, migrate, and start both apps. Those commands do not load sample data.
+Default, with Docker. Those commands do not load sample data. Leave `VITE_API_URL` unset. The browser uses port 5173, and nginx proxies `/api` and `/socket.io`.
+
+```sh
+docker compose up -d --build
+```
+
+`docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. The API runs `prisma migrate deploy` before it listens.
+
+No Docker? Use the advanced path from the README. Export the file, generate the client, migrate, and start both apps:
 
 ```sh
 set -a; . ./.env; set +a
@@ -72,7 +81,7 @@ set -a; . ./.env; set +a
 npm run dev
 ```
 
-`npm run dev` runs the API on port 3000 and Vite on port 5173. Leave that process running. The board starts empty.
+`npm run dev` runs the API on port 3000 and Vite on port 5173. The dev server proxies `/api` and `/socket.io`. Leave that process running. The board starts empty. The export is required so Vite sees `INGEST_TOKEN`. The API also loads `.env` on its own.
 
 `npm run seed:demo` fills sample agents, tickets, and the rest of the sample set. `npm run seed:clear` removes only that sample data. Registered bots, snapshot rows, and tickets created through the API stay. Both commands are safe to run again. Both refuse `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`.
 
@@ -83,8 +92,8 @@ The API log line is `mission-control api listening on 127.0.0.1:3000` when `HOST
 Ask the operator to open `http://localhost:5173/#/tasks`.
 
 * The task board loads. The sidebar chip says Connected when health and the socket are up.
-* `http://127.0.0.1:3000/health` returns `"status":"ok"` and `"database":"connected"`.
-* `http://127.0.0.1:5173/#/tasks` loads. Vite listens on `127.0.0.1`, the same loopback address as the API.
+* `http://127.0.0.1:5173/api/health` returns `"status":"ok"` and `"database":"connected"`. Direct `http://127.0.0.1:3000/health` does the same when that port is published.
+* `http://127.0.0.1:5173/#/tasks` loads. The page and the API share that origin.
 
 `/#/` redirects to tasks. `/#/health` redirects to `/#/system`. The setup sheet inside the app still mentions an Overview page. Ignore that sentence and use Tasks and System.
 

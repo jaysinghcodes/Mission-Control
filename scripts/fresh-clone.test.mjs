@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { buildInstallScript, readInstallCommands, runShell } from './fresh-clone.mjs'
+import { buildInstallScript, readComposeInstallCommands, readInstallCommands, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -19,9 +19,24 @@ const README_COMMANDS = [
   'npm run dev',
 ]
 
+const COMPOSE_COMMANDS = [
+  'git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control',
+  'cd mission-control',
+  'cp .env.example .env',
+  'docker compose up -d --build',
+]
+
 test('the install block is the README command list', () => {
   const markdown = readFileSync(path.join(root, 'README.md'), 'utf8')
   assert.deepEqual(readInstallCommands(markdown), README_COMMANDS)
+})
+
+test('the default install block is docker compose on one port', () => {
+  const markdown = readFileSync(path.join(root, 'README.md'), 'utf8')
+  assert.deepEqual(readComposeInstallCommands(markdown), COMPOSE_COMMANDS)
+  assert.equal(COMPOSE_COMMANDS.includes('npm run dev'), false)
+  assert.match(markdown, /http:\/\/localhost:5173\/#\/tasks/)
+  assert.match(markdown, /Leave `VITE_API_URL` unset/)
 })
 
 test('the install script clones this checkout and leaves dev to the caller', () => {

@@ -25,11 +25,40 @@ Every event is stored in the `ActivityEvent` table and broadcast live over Socke
 
 ## 2. Install and run
 
-The quick start is the Install and run block in the [README](../README.md). The fresh clone CI job runs those commands. OpenClaw is optional. The dashboard runs with no bridge and no OpenClaw CLI.
+Docker Compose is the default. The browser uses one port. OpenClaw is optional. The dashboard runs with no bridge and no OpenClaw CLI.
 
-Prerequisites: git, Node.js 20.17+ or 22.9+, npm 11.17.0, and Postgres 16 on `127.0.0.1:5432`. Python 3 only if you will run the bridge. Docker is optional.
+Prerequisites: git, Docker, and the Docker Compose plugin. Python 3 only if you will run the bridge.
 
-Create the database the template expects if it is not there yet: database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret.
+```bash
+git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
+cd mission-control
+cp .env.example .env
+docker compose up -d --build
+```
+
+Then open http://localhost:5173/#/tasks
+
+The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service. nginx proxies `/api` and `/socket.io`, so the page stays on port 5173. Leave `VITE_API_URL` unset.
+
+`docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. That log line is the process text in `apps/api/src/main.ts`. Compose sets `HOST=0.0.0.0` inside the container.
+
+`npm run doctor` checks the setup from the repo root. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
+
+`npm run seed:demo` fills sample agents, tickets, projects, and usage. It is idempotent and only touches demo rows. It does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. Registered bots and rows you created through the API stay. A fresh setup does not load sample data.
+
+Edit `.env` before you expose the machine. Rules for you:
+
+* **Never invent secrets.** Ask your operator for any real key.
+* `INGEST_TOKEN`: the template value is `change-me`. Replace it with a random value (`openssl rand -hex 24` is fine) and tell your operator. Every write route checks it when it is set, including `POST /events`. The bridge refuses to run if this is blank. The web UI does not receive the value. Vite and nginx attach it.
+* `OPERATOR_NAME`: display only. It becomes the default assignee for new tickets and runs.
+* `SOCKET_TOKEN`: optional on the local stack. If set, it must be set before the first build because it is baked into the web bundle.
+* `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
+* `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them. Spend on System comes from `usage.snapshot`, not a live provider call.
+* Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
+
+### Advanced: Node and Postgres
+
+CI has no Docker, so the fresh clone job runs this path. It needs Node.js 20.17+ or 22.9+, npm 11.17.0, and Postgres 16 on `127.0.0.1:5432`. Database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret.
 
 ```bash
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
@@ -42,44 +71,19 @@ set -a; . ./.env; set +a
 npm run dev
 ```
 
-Then open http://localhost:5173/#/tasks
+The `set -a` export is still required on this path so Vite and Turbo see `INGEST_TOKEN`. The API also loads the root `.env` itself. `apps/api/.env` wins over the root file when both set a key. A variable that is already set wins over either file.
 
-`npm run doctor` checks the setup from the repo root. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
-
-`npm run seed:demo` fills sample agents, tickets, projects, and usage. It is idempotent and only touches demo rows. `npm run seed:clear` deletes only those sample rows. Registered bots and rows you created through the API stay. A fresh setup does not load sample data.
-
-Edit `.env` before you expose the machine. Rules for you:
-
-* **Never invent secrets.** Ask your operator for any real key.
-* `INGEST_TOKEN`: the template value is `change-me`. Replace it with a random value (`openssl rand -hex 24` is fine) and tell your operator. Every write route checks it when it is set, including `POST /events`. The bridge refuses to run if this is blank. The web UI does not receive the value. Vite and nginx attach it.
-* `OPERATOR_NAME`: display only. It becomes the default assignee for new tickets and runs.
-* `SOCKET_TOKEN`: optional on the local stack. If set, it must be set before the first build because it is baked into the web bundle.
-* `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
-* `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them. Spend on System comes from `usage.snapshot`, not a live provider call.
-* Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`.
-
-Docker Compose is optional. `docker-compose.yml` is in the repo for a host that has Docker. The quick start above is the path the fresh clone CI job runs.
-
-```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs api
-```
-
-The api log should end with `mission-control api listening on 0.0.0.0:3000`. Compose sets `HOST=0.0.0.0` inside the container and runs `prisma migrate deploy` on api boot. That log line is the process text in `apps/api/src/main.ts`.
-
-The api has no `.env` loader. On the quick start path, the `set -a` export is required. Copy the root `.env.example` to the root `.env`. `apps/api/.env` is never loaded.
-
-On npm 11.17.0, `npm ci` skips the Prisma install scripts. The quick start already runs `(cd apps/api && npx prisma generate)`. Run that again before `npm test` or `npm run build` if you have not, or those commands fail to find `.prisma/client`.
+On npm 11.17.0, `npm ci` skips the Prisma install scripts. Run `(cd apps/api && npx prisma generate)` before `npm test` or `npm run build` if you have not, or those commands fail to find `.prisma/client`. The API also runs `prisma migrate deploy` on boot.
 
 Useful URLs (the web app uses hash routes, so always include `/#/`):
 
 | What | URL |
 | --- | --- |
 | Web app (redirects to Tasks) | http://localhost:5173/#/ |
-| API health | http://localhost:3000/health |
+| API health, direct | http://localhost:3000/health |
+| API health, same origin | http://localhost:5173/api/health |
 
-Vite listens on `127.0.0.1:5173`. `http://127.0.0.1:5173` and `http://localhost:5173` both reach it when localhost resolves to that address. Call the API at `http://127.0.0.1:3000` or `http://localhost:3000`.
+Vite listens on `127.0.0.1:5173`. `http://127.0.0.1:5173` and `http://localhost:5173` both reach it when localhost resolves to that address. Direct API calls use `http://127.0.0.1:3000` or `http://localhost:3000`. The browser uses the web port.
 
 Other repo commands: `npm run build`, `npm test`, `npm run test:e2e` (needs a migrated Postgres), `npm run lint`.
 

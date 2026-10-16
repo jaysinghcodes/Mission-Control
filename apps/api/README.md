@@ -10,7 +10,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | `nest start --watch`. Export the root `.env` first. This process does not load `.env` itself. |
+| `npm run dev` | `nest start --watch`. The process loads the root `.env` and runs `prisma migrate deploy` before it listens. Export the root `.env` as well so the Vite dev proxy sees `INGEST_TOKEN`. |
 | `npm run build` | `nest build` |
 | `npm run start:prod` | `node dist/main` |
 | `npm test` | Jest. Most suites mock Prisma and need no database. Six of the nine tests in `src/ingest/ingest.controller.spec.ts` write through the real app and need a migrated Postgres at `DATABASE_URL` (a known event, a valid production token, and the four agent snapshot cases). The unknown type check and the production missing token checks (`POST /events` and `POST /tickets`) do not. Export the root `.env` (`set -a; . ./.env; set +a`), generate the client, and run `npx prisma migrate deploy` in this directory before `npm test` when that database is not already up. |
@@ -19,11 +19,11 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run seed:clear` | Deletes only the rows `seed:demo` created. Registered, snapshot, and API created rows stay. Idempotent. Same production guard. |
 | `npm run lint` | ESLint |
 
-Schema: `npx prisma migrate deploy` from this directory. Schema changes are human reviewed. `npm run dev` does not migrate. The Docker image does, on container boot.
+Schema: `npx prisma migrate deploy` from this directory, and again on API boot (`apps/api/src/boot.ts`). Schema changes are human reviewed. Boot applies those reviewed migrations. It does not create new ones.
 
 ## Environment
 
-Template: [`../../.env.example`](../../.env.example). For `npm run dev`, `set -a; . ./.env; set +a` in the repo root before turbo starts.
+Template: [`../../.env.example`](../../.env.example). The API loads the root `.env` on boot and does not replace variables that are already set. For `npm run dev`, `set -a; . ./.env; set +a` in the repo root before turbo starts so Vite sees `INGEST_TOKEN`.
 
 | Variable | Default | Notes |
 | --- | --- | --- |

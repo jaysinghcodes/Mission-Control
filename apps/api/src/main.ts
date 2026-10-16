@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { bindHost, evaluateWriteBind } from './auth/write-token';
+import { bootApi } from './boot';
 import { webOrigins } from './cors-origins';
 
 /**
@@ -13,6 +14,9 @@ import { webOrigins } from './cors-origins';
  * the only allowed consumer.
  */
 async function bootstrap() {
+  // Load .env, then apply reviewed migrations, before the listen checks.
+  bootApi();
+
   const host = bindHost();
   const decision = evaluateWriteBind();
   if (decision.action === 'refuse') {
