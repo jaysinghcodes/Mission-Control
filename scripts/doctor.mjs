@@ -100,13 +100,24 @@ export function loadEnvFile(file) {
   return out
 }
 
-/** File values, then the process environment wins when a key is set (including blank). */
+const MC_PORT_KEYS = ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT']
+
+/**
+ * File values fill in first. A set process value wins, including a blank,
+ * except MC_*_PORT: a blank there falls through to the file, then the default.
+ */
 export function effectiveEnv(fileEnv, processEnv = process.env) {
   const env = { ...fileEnv }
-  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV']) {
-    if (processEnv[key] !== undefined) env[key] = processEnv[key]
+  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', ...MC_PORT_KEYS]) {
+    if (processEnv[key] === undefined) continue
+    if (MC_PORT_KEYS.includes(key) && String(processEnv[key]).trim() === '') continue
+    env[key] = processEnv[key]
   }
   return env
+}
+
+export function dockerRequested(env) {
+  return env.MC_DOCTOR_DOCKER === '1'
 }
 
 export function parseDatabaseUrl(raw) {
@@ -120,12 +131,49 @@ export function parseDatabaseUrl(raw) {
   }
 }
 
-function apiPort(env) {
-  const raw = typeof env.PORT === 'string' ? env.PORT.trim() : ''
-  if (!raw) return 3000
-  const port = Number(raw)
+function parsePort(raw, fallback) {
+  if (typeof raw !== 'string' || raw.trim() === '') return fallback
+  const port = Number(raw.trim())
   if (!Number.isInteger(port) || port < 1 || port > 65535) return null
   return port
+}
+
+/** Native dev listens on PORT. Compose publishes the API on MC_API_PORT. */
+export function apiListenPort(env) {
+  if (dockerRequested(env)) return parsePort(env.MC_API_PORT, 3000)
+  return parsePort(env.PORT, 3000)
+}
+
+function composeServices(root) {
+  return new Promise((resolve) => {
+    const child = spawn('docker', ['compose', 'ps', '--status', 'running', '--services'], {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    let out = ''
+    const timer = setTimeout(() => {
+      child.kill()
+      resolve('')
+    }, 4000)
+    child.stdout.on('data', (chunk) => {
+      out += chunk
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      resolve(out)
+    })
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve('')
+    })
+  })
+}
+
+async function usingDocker(root, env) {
+  if (env.MC_DOCTOR_DOCKER === '1') return true
+  if (env.MC_DOCTOR_DOCKER === '0') return false
+  const listed = await composeServices(root)
+  return listed.split(/\r?\n/).some((line) => line.trim() === 'api')
 }
 
 function probeHost(host) {
@@ -222,6 +270,14 @@ async function openclawDetail() {
 }
 
 async function databaseFacts(root, env) {
+  if (dockerRequested(env)) {
+    return {
+      state: 'docker',
+      detail: '',
+      migrations: 'docker',
+      pending: [],
+    }
+  }
   const raw = typeof env.DATABASE_URL === 'string' ? env.DATABASE_URL.trim() : ''
   if (!raw) {
     return {
@@ -331,7 +387,7 @@ export async function inspectApiPort(port, host = '127.0.0.1') {
 }
 
 async function portFacts(env) {
-  const port = apiPort(env)
+  const port = apiListenPort(env)
   const host = probeHost(bindHost(env))
   const bind = host === 'localhost' ? '127.0.0.1' : host
   if (port == null) {
@@ -353,7 +409,9 @@ async function portFacts(env) {
 export async function gather(root, processEnv = process.env) {
   const envFile = path.join(root, '.env')
   const envExists = existsSync(envFile)
-  const env = effectiveEnv(loadEnvFile(envFile), processEnv)
+  const loaded = effectiveEnv(loadEnvFile(envFile), processEnv)
+  const docker = await usingDocker(root, loaded)
+  const env = { ...loaded, MC_DOCTOR_DOCKER: docker ? '1' : '0' }
   const [ports, database, openclaw] = await Promise.all([
     portFacts(env),
     databaseFacts(root, env),
@@ -369,16 +427,20 @@ export async function gather(root, processEnv = process.env) {
   }
 }
 
-function portLine(ports) {
+function portLine(ports, docker = false) {
+  const label = docker ? 'MC_API_PORT' : 'PORT'
   if (ports.badPort) {
-    return 'fail ports: PORT is not a valid port number. Set PORT in .env to a free port, then run npm run doctor again.'
+    return `fail ports: ${label} is not a valid port number. Set ${label} in .env to a free port, then run npm run doctor again.`
   }
   if (ports.apiState === 'free') return `pass ports: Port ${ports.api} is free.`
   if (ports.apiState === 'ours') return `pass ports: Port ${ports.api} is already running.`
-  return `fail ports: Port ${ports.api} is used by another program. Stop it or set PORT in .env.`
+  return `fail ports: Port ${ports.api} is used by another program. Stop it or set ${label} in .env.`
 }
 
 function databaseLine(database) {
+  if (database.state === 'docker') {
+    return 'info database: Docker runs Postgres inside Compose. This check did not use a host database client.'
+  }
   if (database.state === 'ok') return 'pass database: The database is reachable.'
   if (database.state === 'missing-url') {
     return `fail database: DATABASE_URL is not set. Create .env with: ${FIX_ENV}`
@@ -399,6 +461,9 @@ function databaseLine(database) {
 }
 
 function migrationsLine(database) {
+  if (database.migrations === 'docker') {
+    return 'info migrations: Docker applies migrations when the API container starts. This check did not read a host migration table.'
+  }
   if (database.migrations === 'current') return 'pass migrations: Migrations are current.'
   if (database.migrations === 'pending') {
     const names = database.pending.join(', ')
@@ -439,11 +504,12 @@ function healthLine(ports) {
 }
 
 export function report(facts) {
+  const docker = dockerRequested(facts.env)
   const lines = [
     nodeSupported(facts.nodeVersion)
       ? `pass node: Node ${facts.nodeVersion} is supported.`
       : `fail node: Node ${facts.nodeVersion} is not supported. ${FIX_NODE}`,
-    portLine(facts.ports),
+    portLine(facts.ports, docker),
     facts.envExists ? 'pass env: .env is present.' : `fail env: .env is missing. Create it with: ${FIX_ENV}`,
     databaseLine(facts.database),
     migrationsLine(facts.database),

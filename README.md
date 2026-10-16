@@ -36,20 +36,23 @@ The sample Office is the floor after `npm run seed:demo`. Each bot sits in the r
 
 ## Install and run
 
-Docker Compose is the default. It starts Postgres, the API, and the web UI. The browser uses one port.
+Docker Compose is the default. One command writes random tokens, starts Postgres, the API, and the web UI, runs doctor, and prints the URL. The browser uses one port.
 
-Prerequisites: git, Docker, and the Docker Compose plugin.
+Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 22 and Postgres 16 instead.
 
 ```bash
-git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
-cd mission-control
-cp .env.example .env
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
 ```
 
-Then open **http://localhost:5173/#/tasks**.
+From a checkout you already have, run `bash install.sh` in the repo root. That is the same installer. It clones into `./mission-control` when you use the one liner above.
 
-OpenClaw is optional. The commands above do not start it. `npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
+Then open the URL the script prints. The default is **http://localhost:5173/#/tasks**.
+
+`bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes `INGEST_TOKEN` and `SOCKET_TOKEN` as two different random values. It never writes `change-me`. A second run keeps every value already in `.env`, including those tokens. The script does not print the token values. It prints that they live in `.env`.
+
+Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, and `MC_WEB_PORT` from the environment are written into a new `.env`. An existing `.env` is left as it is. A shell value still wins for that run.
+
+OpenClaw is optional. The command above does not start it. `npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
 
 The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the image does not contain a `.env` file. A variable that is already set wins over the file, including a blank value.
 
@@ -57,9 +60,11 @@ nginx on the web port proxies `/api` and `/socket.io` to the API. The page and t
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
 
-`npm run doctor` checks Node, the API port, `.env`, the database, migrations, the write token, and API health. A missing OpenClaw bridge is an info line. It does not fail the command.
+The script ends by running doctor (`node scripts/doctor.mjs`). On the Docker path it first waits up to 90 seconds for the API health check on `MC_API_PORT` (default 3000). Doctor then checks that host port. The database and migration lines are info, because Compose runs Postgres and the API container applies migrations. A Docker install does not need `npm ci` for those checks. A missing OpenClaw bridge is an info line. It does not fail doctor. If doctor prints a failing line, the script still prints the URL and then exits non zero.
 
-CI does not run Docker. It runs the advanced path below. The compose file, the nginx config, and the Dockerfiles are checked as text.
+Compose still has a blank token fallback (`dev-ingest-token` and `dev-socket-token`) for a manual copy of `.env.example`. `bash install.sh` writes real tokens first, so that fallback is not the installed path.
+
+CI runs `bash install.sh` on Ubuntu and macOS with a docker stub. It does not boot Compose. The fresh clone job runs the advanced path below. The compose file, the nginx config, and the Dockerfiles are checked as text.
 
 ### Advanced: Node and Postgres
 
@@ -110,7 +115,7 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. `D
 
 ### First run
 
-1. `docker compose up -d --build` starts Postgres, the API, and the web UI. `npm run dev` is the advanced path and starts the API and the web app without Docker.
+1. `bash install.sh` starts Postgres, the API, and the web UI. `docker compose up -d --build` is the same Docker start when the tokens are already in `.env`. `npm run dev` is the advanced path and starts the API and the web app without Docker.
 2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar account chip says **Connected** plus the health latency when `GET /health` succeeds and the Socket.IO feed is up. **API only** means health is up and the socket is still reconnecting. **Offline** means the health probe failed.
 3. If the first health probe fails, the shell sends the browser to `/#/connect`. Later failures do not keep redirecting.
 4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, SSH tunnel, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks.
@@ -268,7 +273,7 @@ npm test
 npm run build
 ```
 
-`npm run doctor` prints one line per check, in this order: Node, the API port (`PORT`, default 3000), `.env`, the database, migrations, the write token, API health, then an info line for the optional OpenClaw bridge. It does not check the web port 5173. OpenClaw staying down does not fail the command. Run it from the repo root when setup fails, or after `npm run dev` is up.
+`npm run doctor` prints one line per check, in this order: Node, the API port, `.env`, the database, migrations, the write token, API health, then an info line for the optional OpenClaw bridge. The native path uses `PORT` (default 3000). When the Compose API service is running, the port check uses `MC_API_PORT` (default 3000) and the database and migration lines are info. It does not check the web port 5173. OpenClaw staying down does not fail the command. Run it from the repo root when setup fails, or after `npm run dev` is up.
 
 On this clone, after that generate, `npm test` passed (API Jest: 37 suites, 255 tests; web: 65 tests) and `npm run build` passed. This pass used Node 22.23.3. Six of the nine tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres unreachable, that file is the only API failure: 6 failed, 249 passed, 255 total. The unknown event type check and the production missing token checks (`POST /events` and `POST /tickets` with no token) return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
 
@@ -284,7 +289,7 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 **The dev server listens on `127.0.0.1:5173`.** Vite `server.host` is `127.0.0.1`. The tunnel `ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000` forwards to that address. Open `http://127.0.0.1:5173/#/tasks` on the machine that opened the tunnel. On the advanced path the API, with `HOST=127.0.0.1`, listens on `127.0.0.1:3000`. The browser calls `/api` on port 5173 either way. `http://localhost:3000` still reaches the API directly when localhost resolves to IPv4.
 
-**Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or `VITE_API_URL` points at a different host. Leave `VITE_API_URL` unset so the page calls `/api` on its own origin. Start the stack with `docker compose up -d --build`, or on the advanced path export `.env` and run `npm run dev`. A later health failure does not redirect again.
+**Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or `VITE_API_URL` points at a different host. Leave `VITE_API_URL` unset so the page calls `/api` on its own origin. Start the stack with `bash install.sh` or `docker compose up -d --build`, or on the advanced path export `.env` and run `npm run dev`. A later health failure does not redirect again.
 
 **A write returns 401 `unauthorized`.** `INGEST_TOKEN` is set (the template ships `change-me`) and the `x-ingest-token` header is missing or different. This is every `POST`, `PUT`, `PATCH`, and `DELETE`, including `POST /events` and `POST /tickets`. The body is `{"statusCode":401,"message":"unauthorized"}`. Send the same value the API process has. A wrong token failed the same way. Reads such as `GET /health` do not check the header.
 
@@ -342,7 +347,7 @@ Read this before you open a port.
 * When `INGEST_TOKEN` is set, every write requires header `x-ingest-token`. That is `POST`, `PUT`, `PATCH`, and `DELETE`: `POST /events`, `POST /tickets`, `PATCH /tickets/:id`, `POST /projects`, `PATCH /projects/:id`, `POST /runs`, `PATCH /runs/:id`, `PUT /mission`, `POST /approvals/:id/decide`, `POST /models`, `DELETE /models/:id`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `DELETE /agents/:id`, and the custom tool writes. A missing or wrong token is 401 JSON `{"statusCode":401,"message":"unauthorized"}`. Reads do not check the token.
 * With no `INGEST_TOKEN` and `HOST` on loopback (`127.0.0.1` by default for `npm run dev`), writes stay open and the API logs one warning, for any `NODE_ENV` other than `production`. The web UI still works.
 * With `NODE_ENV=production` and no `INGEST_TOKEN`, the API still starts on loopback and logs one line that shows how to set `INGEST_TOKEN`. Every write returns 401, including `POST /events`.
-* With no `INGEST_TOKEN` and `HOST` on any other address, the API refuses to start. Set `INGEST_TOKEN` to a long random string (`openssl rand -hex 24`) and start again. Compose sets `HOST=0.0.0.0` inside the api container, so it always has a token: your `.env` value, or `dev-ingest-token` when that value is blank.
+* With no `INGEST_TOKEN` and `HOST` on any other address, the API refuses to start. Set `INGEST_TOKEN` to a long random string (`openssl rand -hex 24`) and start again. Compose sets `HOST=0.0.0.0` inside the api container, so it always has a token: your `.env` value, or `dev-ingest-token` when that value is blank. `bash install.sh` writes a random token into `.env` before Compose starts, so a fresh install does not use `dev-ingest-token`.
 * The browser never receives the token. Dev Vite and compose nginx add `x-ingest-token` on same origin `/api` writes. Do not put `INGEST_TOKEN` in a `VITE_` variable or in local storage. `npm run seed:demo` writes through Prisma and does not send the header. The bridge still posts `POST /events` with the header.
 * Do not publish port 3000 beyond loopback without a token. `npm run dev` binds `127.0.0.1` (`HOST` in the root `.env`). Compose publishes the API on `127.0.0.1` as well.
 * `POST /agents/register` adds one bot without replacing the roster. `agents.snapshot` removes only snapshot rows that the payload omits. Default and registered bots stay. A registered bot with no heartbeat for 10 minutes reads `online: false` and is not deleted. The screen shows Offline and dims the idle robot. Unclaimed sample bots hide once a real bot exists until Show sample bots is on.

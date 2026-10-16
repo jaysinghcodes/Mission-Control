@@ -12,7 +12,7 @@ Without OpenClaw, `npm run seed:demo` fills sample data and the task board still
 
 The web app uses hash routes. Open `http://localhost:5173/#/tasks`. `/` redirects there. A URL with no `#` is not a client route.
 
-Docker Compose is the default. The browser uses one port. The API loads the root `.env` and runs `prisma migrate deploy` on boot. If Docker is missing, use the advanced Node and Postgres path in the README. Do not invent a second install.
+Docker Compose is the default. The browser uses one port. The API loads the root `.env` and runs `prisma migrate deploy` on boot. The one command is `bash install.sh` from the repo root, or the curl one liner in the README. It writes random `INGEST_TOKEN` and `SOCKET_TOKEN` values into `.env` when that file is missing, starts the stack, runs doctor, and prints the URL. It does not print the token. A second run keeps `.env` as it is. If Docker is missing, the script says so and uses Node.js 22 and Postgres 16. Do not invent a second install.
 
 Guide the operator one step at a time.
 
@@ -29,7 +29,8 @@ Confirm each of these:
 * Node.js 20.17 or newer, or 22.9 or newer (`node -v`). The root `packageManager` is `npm@11.17.0`.
 * npm 11.17.0 (`npm -v`). If the shell npm is older, `corepack npm -v` should report 11.17.0 after `corepack prepare npm@11.17.0 --activate`.
 * git (`git --version`).
-* Docker and the Docker Compose plugin (`docker compose version`). This is the default runtime.
+* Docker and the Docker Compose plugin (`docker compose version`). This is the default runtime. `bash install.sh` uses it first.
+* curl and bash, for the one command in the README. From a checkout, `bash install.sh` does not need curl.
 * Postgres 16 is started by Compose. On the advanced path it must already listen on `127.0.0.1:5432`, database `mission_control`, user `postgres`. The template password is `postgres`. That is a local default. Ask before you reuse it anywhere but loopback.
 * Optional: a running OpenClaw CLI (`openclaw`). Without it, the dashboard still runs. Sample data is a separate command. Do not pretend the bridge synced.
 
@@ -38,14 +39,20 @@ Confirm each of these:
 ```sh
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
 cd mission-control
-npm ci
+bash install.sh
 ```
 
-`npm ci` may warn that `@prisma/engines`, `prisma`, and `unrs-resolver` have install scripts not yet covered by allowScripts. Continue to step 4. `npx prisma generate` still succeeded after that warning on npm 11.17.0.
+That writes tokens when `.env` is missing, starts the stack, runs doctor, and prints the URL. A second run keeps `.env`. Do not print the token values. Tell the operator they live in `.env`.
+
+`npm ci` runs only on the native path, when Docker is missing. It may warn that `@prisma/engines`, `prisma`, and `unrs-resolver` have install scripts not yet covered by allowScripts. `npx prisma generate` still succeeded after that warning on npm 11.17.0.
 
 ### Step 3. Create the root .env
 
 Compose and the API both read the root `.env` next to `docker-compose.yml`. A variable that is already set wins over the file. `apps/api/.env` wins over the root file when both set a key. `apps/api/.env.example` is only a second template.
+
+If step 2 already ran `bash install.sh`, `.env` exists. Leave it. The tokens are already random. Do not copy the template over that file.
+
+Copy the template only when `.env` is missing and you are not using the installer:
 
 ```sh
 cp .env.example .env
@@ -54,8 +61,8 @@ cp .env.example .env
 Walk each variable. Ask the operator for real values. Do not invent one.
 
 * `DATABASE_URL`: leave the template unless their Postgres user or password differs.
-* `INGEST_TOKEN`: shared secret for every API write, including `POST /events`. Send it as `x-ingest-token`. You may generate one with `openssl rand -hex 24` and show it once. The template placeholder is not a production secret. Replace it before anyone else can reach the port. The bridge reads this same variable and exits if it is blank. The web UI does not put the value in the browser. If it is unset and `HOST` is not loopback, the API refuses to start.
-* `SOCKET_TOKEN`: optional for `npm run dev`. Required when `NODE_ENV=production` (the Compose API sets that). If they set one, set `VITE_SOCKET_TOKEN` to the same value before a production web build. A blank value is fine for the dev server verified here.
+* `INGEST_TOKEN`: shared secret for every API write, including `POST /events`. Send it as `x-ingest-token`. `bash install.sh` writes a random value when it creates `.env`. You may generate one with `openssl rand -hex 24` and show it once. The template placeholder is not a production secret. Replace it before anyone else can reach the port. The bridge reads this same variable and exits if it is blank. The web UI does not put the value in the browser. If it is unset and `HOST` is not loopback, the API refuses to start. A second run of the installer does not replace a token that is already in `.env`.
+* `SOCKET_TOKEN`: `bash install.sh` writes a random value when it creates `.env`. Optional for `npm run dev`. Required when `NODE_ENV=production` (the Compose API sets that). If they set one, set `VITE_SOCKET_TOKEN` to the same value before a production web build. A blank value is fine for the dev server verified here. A blank value still becomes `dev-socket-token` only when Compose starts without the installer.
 * `WEB_ORIGIN`: leave commented unless they need another origin. The API default is `http://localhost:5173` and `http://127.0.0.1:5173`.
 * `OPERATOR_NAME`: display only, not a secret. Blank means the chip says Operator. For `npm run dev`, set `VITE_OPERATOR_NAME` to the same string if the browser should show the name.
 * `GITHUB_TOKEN`: optional. Ask only if they want pull request merge from Approvals. `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them.
@@ -64,7 +71,7 @@ Walk each variable. Ask the operator for real values. Do not invent one.
 
 ### Step 4. Start the stack
 
-Default, with Docker. Those commands do not load sample data. Leave `VITE_API_URL` unset. The browser uses port 5173, and nginx proxies `/api` and `/socket.io`.
+`bash install.sh` already starts the stack. Running it again is safe and keeps `.env`. Default, with Docker. Those commands do not load sample data. Leave `VITE_API_URL` unset. The browser uses port 5173, and nginx proxies `/api` and `/socket.io`.
 
 ```sh
 docker compose up -d --build
