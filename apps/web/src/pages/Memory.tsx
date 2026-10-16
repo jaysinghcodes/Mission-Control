@@ -7,7 +7,7 @@ import { PageHeader, Segmented, SoftCard, SearchInput, Face, AgentName, StatusCh
 import { findByLabel, type NamingState } from '../lib/crew'
 import { useNaming } from '../lib/naming'
 import { API_URL } from '../lib/apiBase'
-import { formatChicagoClock, formatChicagoDayHeading, formatChicagoSaved } from '../lib/chicago-day'
+import { formatZoneClock, formatZoneDayHeading, formatZoneSaved } from '../lib/zone-day'
 import { groupMemoryByDay } from '../lib/memory-groups'
 import { pluralize } from '../lib/pluralize'
 
@@ -194,7 +194,7 @@ export default function Memory() {
                   onClick={() => setSelected(group.entries[0].id)}
                   className="sticky top-0 z-10 w-full bg-mc-card px-3 py-2 text-left"
                 >
-                  <Kicker>{formatChicagoDayHeading(group.day)} · {group.entries.length}</Kicker>
+                  <Kicker>{formatZoneDayHeading(group.day)} · {group.entries.length}</Kicker>
                 </button>
                 {group.entries.map((row) => {
                   const on = current?.id === row.id
@@ -211,7 +211,7 @@ export default function Memory() {
                       <span className="min-w-0 flex-1">
                         <span className="flex justify-between gap-2">
                           <span className="truncate text-[14px] font-semibold">{row.title}</span>
-                          <span className="whitespace-nowrap text-[11.5px] text-mc-sub">{formatChicagoClock(row.createdAt)}</span>
+                          <span className="whitespace-nowrap text-[11.5px] text-mc-sub">{formatZoneClock(row.createdAt)}</span>
                         </span>
                         <span className="mt-0.5 block truncate text-[12.5px] text-mc-sub">{cap.name} · {row.snippet}</span>
                       </span>
@@ -255,7 +255,7 @@ function MemoryReader({
           <Face agent={who} agents={agents} px={44} />
           <div>
             <AgentName agent={who} size="md" />
-            <div className="text-[12.5px] text-mc-sub">Saved {formatChicagoSaved(entry.createdAt)}</div>
+            <div className="text-[12.5px] text-mc-sub">Saved {formatZoneSaved(entry.createdAt)}</div>
           </div>
         </div>
         <StatusChip label={kindLabel(entry.kind)} tone={kindTone(entry.kind)} />

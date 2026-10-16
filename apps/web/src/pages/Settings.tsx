@@ -1,25 +1,55 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { Card, PillButton, SectionLabel } from '../components/ui'
 import { NamingChoice } from '../components/NamingChoice'
+import { ProviderStatus, type DetectedModel } from '../components/ProviderStatus'
+import { TimezoneSelect } from '../components/TimezoneSelect'
+import { Btn } from '../components/shell'
 import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
 import type { AgentsResp } from '../types'
 
 /**
- * Settings — account & app controls (review fix: avatar menu → Settings).
- * Real, live content only: connection state from /health, theme from the
- * shared topbar toggle, and a Log out that clears the onboarding gate.
+ * Settings. Timezone, agent names, and the detected provider.
+ * Connection state comes from /health. Log out returns to the setup sheet.
  */
 
 interface HealthResp { status: string; uptimeSeconds: number; connectedClients: number; database: string }
+interface ModelsResp { models?: DetectedModel[] }
 
 export default function Settings() {
   const nav = useNavigate()
   const health = useApi<HealthResp>('/health', { pollMs: 15000 })
   const agentsQ = useApi<AgentsResp>('/agents')
+  const modelsQ = useApi<ModelsResp>('/models', { pollMs: 15000 })
   const naming = useNaming()
   const h = health.data
+  const [zone, setZone] = useState(naming.timezone)
+  const [zoneBusy, setZoneBusy] = useState(false)
+  const [zoneError, setZoneError] = useState<string | null>(null)
+  const [zoneSaved, setZoneSaved] = useState(false)
+
+  async function saveZone() {
+    setZoneBusy(true)
+    setZoneError(null)
+    setZoneSaved(false)
+    const message = await naming.save({ timezone: zone })
+    setZoneBusy(false)
+    if (message) setZoneError(message)
+    else setZoneSaved(true)
+  }
+
+  async function applyServerZone() {
+    setZoneBusy(true)
+    setZoneError(null)
+    setZoneSaved(false)
+    setZone(naming.serverTimeZone)
+    const message = await naming.save({ timezone: null })
+    setZoneBusy(false)
+    if (message) setZoneError(message)
+    else setZoneSaved(true)
+  }
 
   const logout = () => {
     localStorage.removeItem('mc-connected')
@@ -31,7 +61,23 @@ export default function Settings() {
       <div className="text-[22px] font-semibold">Settings</div>
       <div className="mt-1 text-[13px] text-mc-sub">Connection state, session and app controls.</div>
 
-      <Card className="mt-6 px-5 py-4">
+      <Card className="mt-6 px-5 py-4" data-settings-timezone="true">
+        <SectionLabel>Timezone</SectionLabel>
+        <p className="mt-2 text-[13px] text-mc-sub">
+          Usage and memory count each day in this timezone. The server timezone is {naming.serverTimeZone}.
+        </p>
+        <div className="mt-4">
+          <TimezoneSelect id="settings-timezone" value={zone} onChange={(next) => { setZone(next); setZoneSaved(false) }} />
+        </div>
+        {zoneError && <p className="mt-3 text-[13px] text-mc-orangetext">{zoneError}</p>}
+        {zoneSaved && <p className="mt-3 text-[13px] text-mc-greentext">Timezone saved</p>}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Btn kind="primary" onClick={() => void saveZone()} disabled={zoneBusy}>{zoneBusy ? 'Saving' : 'Save timezone'}</Btn>
+          <Btn kind="ghost" onClick={() => void applyServerZone()} disabled={zoneBusy}>Use the server timezone</Btn>
+        </div>
+      </Card>
+
+      <Card className="mt-4 px-5 py-4">
         <SectionLabel>Connection</SectionLabel>
         <div className="mt-3 flex items-center gap-3">
           <span
@@ -63,6 +109,20 @@ export default function Settings() {
             intro={false}
             submitLabel="Save names"
           />
+        </div>
+      </Card>
+
+      <Card className="mt-4 px-5 py-4" data-settings-provider="true">
+        <SectionLabel>Provider</SectionLabel>
+        <p className="mt-2 text-[13px] text-mc-sub">
+          The bridge reports the provider and model for each agent. This list updates when that snapshot arrives.
+        </p>
+        <div className="mt-4">
+          {!modelsQ.data && modelsQ.loading ? (
+            <p className="text-[13px] text-mc-sub">Checking for a provider</p>
+          ) : (
+            <ProviderStatus models={modelsQ.data?.models ?? []} />
+          )}
         </div>
       </Card>
 

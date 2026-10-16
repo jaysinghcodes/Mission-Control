@@ -1,6 +1,10 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+
+const webRoot = fileURLToPath(new URL('.', import.meta.url))
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
@@ -47,6 +51,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     proxy,
+    fs: { allow: [webRoot, repoRoot] },
   },
   preview: {
     host: '127.0.0.1',

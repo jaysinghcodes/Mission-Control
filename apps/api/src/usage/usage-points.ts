@@ -6,10 +6,8 @@ import {
   shiftCalendarDay,
   type UsageProvider,
 } from './aggregate-usage';
+import { usageRetentionDays } from '../time/runtime';
 import { usageTimeZone } from './zone-time';
-
-/** How many days a first connect may write. Older points in one payload are dropped. */
-export const USAGE_BACKFILL_DAYS = 30;
 
 export interface UsageBucketWrite {
   day: string;
@@ -70,8 +68,9 @@ export function pointsFromPayload(payload: Record<string, unknown>) {
 }
 
 /**
- * Group points onto calendar days in `timeZone` (the API process zone by default).
- * Only the last 30 days through today are kept. A point after `now` is dropped.
+ * Group points onto calendar days in `timeZone` (the saved zone, or the server zone).
+ * Only the last `USAGE_RETENTION_DAYS` days through today are kept (default 30).
+ * A point after `now` is dropped.
  */
 export function usageBucketsFromPayload(
   payload: Record<string, unknown>,
@@ -80,7 +79,7 @@ export function usageBucketsFromPayload(
 ): UsageBucketWrite[] {
   const nowMs = now.getTime();
   const today = calendarDay(now, timeZone);
-  const oldest = shiftCalendarDay(today, -(USAGE_BACKFILL_DAYS - 1));
+  const oldest = shiftCalendarDay(today, -(usageRetentionDays() - 1));
   const byDay = new Map<string, UsageBucketWrite>();
   for (const point of pointsFromPayload(payload)) {
     if (point.at.getTime() > nowMs) continue;

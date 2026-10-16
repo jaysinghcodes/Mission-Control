@@ -1,20 +1,20 @@
 /**
- * Calendar columns are America/Chicago dates, not the host zone.
+ * Calendar columns are dates in the timezone saved on the server.
  *
  * The page has no week-start setting. The grid starts on Monday, and
  * CronJob.day stays 0=Monday … 6=Sunday (the bridge already stores it
  * that way). Labels are the weekday of each column's date, so a
- * Sunday-start week — covered by tests, not a setting — still names
+ * Sunday-start week, covered by tests and not a setting, still names
  * the column for that date.
  *
- * A clock time is Chicago wall time. 23:30 on a Chicago day stays on
- * that day when the UTC date has already moved on, including across
- * the November fall-back.
+ * A clock time is wall time in that zone. 23:30 stays on that calendar
+ * day when the UTC date has already moved on, including across a fall-back.
  */
 
-import { chicagoDay } from './chicago-day'
+import { activeTimeZone, zoneDay } from './zone-day'
 
-const CHICAGO = 'America/Chicago'
+export { setActiveTimeZone } from './zone-day'
+
 const LABELS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const
 
 export type DayLabel = (typeof LABELS)[number]
@@ -25,7 +25,7 @@ export type WeekStart = 0 | 1
 export const WEEK_STARTS_ON: WeekStart = 1
 
 export interface CalendarDay {
-  /** YYYY-MM-DD in America/Chicago. */
+  /** YYYY-MM-DD in the saved timezone. */
   key: string
   label: DayLabel
   /** Day of month, 1–31. */
@@ -94,9 +94,9 @@ export function calendarDay(dayKey: string, weekStartsOn: WeekStart = WEEK_START
   }
 }
 
-/** Seven columns for the Chicago week that contains `anchor`. */
-export function weekDays(anchor: Date | string, weekStartsOn: WeekStart = WEEK_STARTS_ON): CalendarDay[] {
-  const key = typeof anchor === 'string' ? anchor : chicagoDay(anchor)
+/** Seven columns for the saved-timezone week that contains `anchor`. */
+export function weekDays(anchor: Date | string, weekStartsOn: WeekStart = WEEK_STARTS_ON, timeZone: string = activeTimeZone()): CalendarDay[] {
+  const key = typeof anchor === 'string' ? anchor : zoneDay(anchor, timeZone)
   const start = startOfWeekKey(key, weekStartsOn)
   return Array.from({ length: 7 }, (_, i) => calendarDay(shiftDay(start, i), weekStartsOn))
 }
@@ -145,9 +145,9 @@ export function jobOccursOn(job: { day: number | null }, dayKey: string): boolea
   return job.day == null || job.day === cronDayOf(dayKey)
 }
 
-function chicagoOffsetMs(instant: Date): number {
+function zoneOffsetMs(instant: Date, timeZone: string): number {
   const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: CHICAGO,
+    timeZone,
     hourCycle: 'h23',
     year: 'numeric',
     month: '2-digit',
@@ -174,12 +174,15 @@ function chicagoOffsetMs(instant: Date): number {
   return asUtc - instant.getTime()
 }
 
-/** UTC instant of a clock time on a YYYY-MM-DD America/Chicago day. */
-export function chicagoWallTime(dayKey: string, hour: number, minute: number): Date {
+/** UTC instant of a clock time on a YYYY-MM-DD day in `timeZone`. */
+export function zoneWallTime(dayKey: string, hour: number, minute: number, timeZone: string = activeTimeZone()): Date {
   const [year, month, date] = dayKey.split('-').map(Number)
-  let utc = Date.UTC(year, month - 1, date, hour + 6, minute, 0)
+  if (timeZone === 'UTC' || timeZone === 'Etc/UTC') {
+    return new Date(Date.UTC(year, month - 1, date, hour, minute, 0, 0))
+  }
+  let utc = Date.UTC(year, month - 1, date, hour, minute, 0)
   for (let i = 0; i < 4; i++) {
-    const offset = chicagoOffsetMs(new Date(utc))
+    const offset = zoneOffsetMs(new Date(utc), timeZone)
     const next = Date.UTC(year, month - 1, date, hour, minute, 0) - offset
     if (next === utc) return new Date(utc)
     utc = next
@@ -188,18 +191,18 @@ export function chicagoWallTime(dayKey: string, hour: number, minute: number): D
 }
 
 /**
- * Chicago calendar day a wall-clock job occupies.
+ * Calendar day a wall-clock job occupies in the saved timezone.
  * 23:30 stays on `dayKey` even when that instant's UTC date is the next day.
  */
-export function placedDay(dayKey: string, time: string): string | null {
+export function placedDay(dayKey: string, time: string, timeZone: string = activeTimeZone()): string | null {
   const clock = parseClock(time)
   if (!clock) return null
-  return chicagoDay(chicagoWallTime(dayKey, clock.hour, clock.minute))
+  return zoneDay(zoneWallTime(dayKey, clock.hour, clock.minute, timeZone), timeZone)
 }
 
-export function chicagoClock(now: Date): WallClock {
+export function zoneClock(now: Date, timeZone: string = activeTimeZone()): WallClock {
   const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: CHICAGO,
+    timeZone,
     hourCycle: 'h23',
     hour: '2-digit',
     minute: '2-digit',
@@ -214,14 +217,15 @@ export function chicagoClock(now: Date): WallClock {
 export function nextOccurrence(
   job: { day: number | null; time: string | null },
   now: Date,
+  timeZone: string = activeTimeZone(),
 ): { dayKey: string; hour: number; minute: number } | null {
   const clock = parseClock(job.time)
   if (!clock) return null
-  const today = chicagoDay(now)
+  const today = zoneDay(now, timeZone)
   for (let i = 0; i < 14; i++) {
     const dayKey = shiftDay(today, i)
     if (!jobOccursOn(job, dayKey)) continue
-    const at = chicagoWallTime(dayKey, clock.hour, clock.minute)
+    const at = zoneWallTime(dayKey, clock.hour, clock.minute, timeZone)
     if (at.getTime() > now.getTime()) return { dayKey, hour: clock.hour, minute: clock.minute }
   }
   return null

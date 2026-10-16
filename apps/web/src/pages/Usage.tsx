@@ -110,7 +110,7 @@ export default function Usage() {
               {tokenCount(usage.tokensIn)} tokens in, {tokenCount(usage.tokensOut)} tokens out
             </div>
             <p className="mt-2 text-[12.5px] text-mc-sub">
-              Days follow the server clock{data.timeZone ? ` (${data.timeZone})` : ''}. Ollama and any local provider are $0.00.
+              Days follow the timezone in Settings{data.timeZone ? ` (${data.timeZone})` : ''}. Ollama and any local provider are $0.00.
             </p>
             {data.note ? <p className="mt-2 text-[13px] text-mc-sub">{data.note}</p> : null}
             {unpriced ? (

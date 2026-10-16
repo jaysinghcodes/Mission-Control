@@ -77,8 +77,14 @@ services:
       OPENCLAW_GATEWAY_HOST: ${OPENCLAW_GATEWAY_HOST:-127.0.0.1}
       OPENCLAW_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-18789}
       OPENCLAW_LOG_DIR: ${OPENCLAW_LOG_DIR:-/tmp/openclaw}
-      # Usage days follow this clock. Unset stays UTC.
+      # Server timezone when Settings has not saved one. Unset stays UTC.
       TZ: ${TZ:-UTC}
+      # Registered bots go offline after this many milliseconds. Default 10 minutes.
+      OFFLINE_AFTER_MS: ${OFFLINE_AFTER_MS:-600000}
+      # Socket health.tick interval. 0 disables it. Default 30 seconds.
+      HEALTH_TICK_MS: ${HEALTH_TICK_MS:-30000}
+      # Usage days a snapshot may keep, through today. Default 30.
+      USAGE_RETENTION_DAYS: ${USAGE_RETENTION_DAYS:-30}
     volumes:
       # ${DOCS_ROOT} here is the HOST path from the project .env (compose
       # interpolation), not the container path set just above. `:-` keeps

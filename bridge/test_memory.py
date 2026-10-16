@@ -28,6 +28,10 @@ class MemoryMapTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.mod = load()
+        cls.zone = cls.mod.iana_zone("America/Chicago")
+
+    def setUp(self):
+        self.assertIsNotNone(self.zone)
 
     def test_sample_tree_kinds_and_stable_ids(self):
         agents = self.mod.agents_from_memory_dir(SAMPLE)
@@ -75,7 +79,7 @@ class MemoryMapTest(unittest.TestCase):
             # 2026-01-15 23:58 America/Chicago (CST) = 2026-01-16T05:58:00Z
             stamp = datetime.datetime(2026, 1, 16, 5, 58, tzinfo=datetime.timezone.utc).timestamp()
             os.utime(note, (stamp, stamp))
-            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root))
+            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root), tz=self.zone)
             hit = next(row for row in rows if row["ref"] == "memory/2026-01-15.md")
             self.assertEqual(hit["createdAt"], "2026-01-16T05:58:00Z")
             self.assertEqual(hit["agent"], "Aegis")
@@ -94,13 +98,13 @@ class MemoryMapTest(unittest.TestCase):
             long_term.write_text("# Forge long-term\n\nKept.\n", encoding="utf-8")
             stamp = datetime.datetime(2026, 3, 1, 15, 4, tzinfo=datetime.timezone.utc).timestamp()
             os.utime(long_term, (stamp, stamp))
-            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root))
+            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root), tz=self.zone)
             daily_row = next(row for row in rows if row["ref"] == "memory/2024-06-01.md")
             created = datetime.datetime.strptime(
                 daily_row["createdAt"], "%Y-%m-%dT%H:%M:%SZ"
             ).replace(tzinfo=datetime.timezone.utc)
-            self.assertEqual(self.mod.chicago_day_of(created), "2024-06-01")
-            self.assertEqual(daily_row["createdAt"], self.mod.iso_z(self.mod.chicago_wall("2024-06-01", 12, 0)))
+            self.assertEqual(self.mod.zone_day_of(created, self.zone), "2024-06-01")
+            self.assertEqual(daily_row["createdAt"], self.mod.iso_z(self.mod.zone_wall("2024-06-01", 12, 0, self.zone)))
             self.assertNotEqual(daily_row["createdAt"], self.mod.iso_utc(now))
             memory_md = next(row for row in rows if row["ref"] == "MEMORY.md")
             self.assertEqual(memory_md["createdAt"], "2026-03-01T15:04:00Z")
@@ -112,13 +116,13 @@ class MemoryMapTest(unittest.TestCase):
             shutil.copytree(SAMPLE, root)
             note = root / "Aegis" / "memory" / "2026-01-15.md"
             os.utime(note, None)
-            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root))
+            rows = self.mod.collect_memory(self.mod.agents_from_memory_dir(root), tz=self.zone)
             hit = next(row for row in rows if row["ref"] == "memory/2026-01-15.md")
             self.assertEqual(hit["createdAt"], "2026-01-16T05:58:00Z")
             created = datetime.datetime.strptime(
                 hit["createdAt"], "%Y-%m-%dT%H:%M:%SZ"
             ).replace(tzinfo=datetime.timezone.utc)
-            self.assertEqual(self.mod.chicago_day_of(created), "2026-01-15")
+            self.assertEqual(self.mod.zone_day_of(created, self.zone), "2026-01-15")
 
     def test_empty_agent_list_is_not_an_empty_snapshot(self):
         self.assertIsNone(self.mod.collect_memory([]))
@@ -126,11 +130,14 @@ class MemoryMapTest(unittest.TestCase):
 
 class MemoryDryRunTest(unittest.TestCase):
     def test_dry_run_prints_memory_events(self):
+        env = os.environ.copy()
+        env["MC_TIMEZONE"] = "America/Chicago"
         proc = subprocess.run(
             [sys.executable, str(BRIDGE), "--dry-run", "--memory-dir", str(SAMPLE)],
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("INGEST_TOKEN", proc.stdout)
@@ -156,6 +163,7 @@ class MemoryDryRunTest(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
         again_events = [json.loads(line) for line in again.stdout.splitlines() if line.strip()]
         again_memory = [event for event in again_events if event["type"] == "memory.snapshot"]

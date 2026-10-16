@@ -9,11 +9,12 @@ function transpile(src) {
   }).outputText
 }
 
-const chicagoJs = transpile(await readFile(new URL('../src/lib/chicago-day.ts', import.meta.url), 'utf8'))
-const chicagoUrl = 'data:text/javascript;base64,' + Buffer.from(chicagoJs).toString('base64')
+const zoneJs = transpile(await readFile(new URL('../src/lib/zone-day.ts', import.meta.url), 'utf8'))
+const zoneUrl = 'data:text/javascript;base64,' + Buffer.from(zoneJs).toString('base64')
 let calendarJs = transpile(await readFile(new URL('../src/lib/calendar-days.ts', import.meta.url), 'utf8'))
-calendarJs = calendarJs.replace(/from\s+['"]\.\/chicago-day['"]/g, `from ${JSON.stringify(chicagoUrl)}`)
+calendarJs = calendarJs.replace(/from\s+['"]\.\/zone-day['"]/g, `from ${JSON.stringify(zoneUrl)}`)
 const days = await import('data:text/javascript;base64,' + Buffer.from(calendarJs).toString('base64'))
+days.setActiveTimeZone('America/Chicago')
 
 function stamp(daysList) {
   return daysList.map((day) => `${day.label} ${day.date} ${day.key}`)
@@ -75,7 +76,7 @@ test('week of Sunday Nov 1 2026 labels the DST fall-back day and places cron tim
   // Security scan is Sunday 02:00 (CronJob.day 6). 02:00 happens once, after the fall-back.
   assert.equal(days.jobOccursOn({ day: 6 }, sunday.key), true)
   assert.equal(days.jobOccursOn({ day: 6 }, week[5].key), false)
-  const scan = days.chicagoWallTime('2026-11-01', 2, 0)
+  const scan = days.zoneWallTime('2026-11-01', 2, 0)
   assert.equal(scan.toISOString(), '2026-11-01T08:00:00.000Z')
   assert.equal(days.placedDay('2026-11-01', '02:00'), '2026-11-01')
 
@@ -86,12 +87,12 @@ test('week of Sunday Nov 1 2026 labels the DST fall-back day and places cron tim
 
 test('11:30 PM America/Chicago stays on that calendar day, not the next UTC day', () => {
   // Oct 31 23:30 CDT is Nov 1 04:30 UTC.
-  const cdt = days.chicagoWallTime('2026-10-31', 23, 30)
+  const cdt = days.zoneWallTime('2026-10-31', 23, 30)
   assert.equal(cdt.toISOString(), '2026-11-01T04:30:00.000Z')
   assert.equal(days.placedDay('2026-10-31', '23:30'), '2026-10-31')
 
   // Nov 1 23:30 CST is Nov 2 05:30 UTC. The fall-back has already happened.
-  const cst = days.chicagoWallTime('2026-11-01', 23, 30)
+  const cst = days.zoneWallTime('2026-11-01', 23, 30)
   assert.equal(cst.toISOString(), '2026-11-02T05:30:00.000Z')
   assert.equal(days.placedDay('2026-11-01', '23:30'), '2026-11-01')
 

@@ -104,7 +104,7 @@ Ask the operator to open `http://localhost:5173/#/tasks`.
 * `http://127.0.0.1:5173/api/health` returns `"status":"ok"` and `"database":"connected"`. Direct `http://127.0.0.1:3000/health` does the same when that port is published.
 * `http://127.0.0.1:5173/#/tasks` loads. The page and the API share that origin.
 
-`/#/` redirects to tasks. `/#/health` redirects to `/#/system`. The setup sheet inside the app still mentions an Overview page. Ignore that sentence and use Tasks and System.
+`/#/` redirects to tasks. Open `/#/system` for health. The setup sheet does not mention an Overview page. Use Tasks and System.
 
 If the first health check fails, the app opens `/#/connect`. Fix the API, then reload `/#/tasks`.
 

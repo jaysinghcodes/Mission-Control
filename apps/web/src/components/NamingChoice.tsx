@@ -15,12 +15,14 @@ export function NamingChoice({
   initialMap,
   intro,
   submitLabel,
+  onSaved,
 }: {
   agents: readonly Agent[]
   initialMode: NamingMode | null
   initialMap: Record<string, string>
   intro: boolean
   submitLabel: string
+  onSaved?: () => void
 }) {
   const naming = useNaming()
   const seats = naming.seats
@@ -54,6 +56,7 @@ export function NamingChoice({
     const message = await naming.save({ namingMode: mode, crewMap })
     setSaving(false)
     if (message) setError(message)
+    else onSaved?.()
   }
 
   return (

@@ -1,16 +1,69 @@
 /**
  * Calendar helpers for whatever zone the caller names.
- * Usage days use the API process zone until Launch 8 stores a setting.
+ * The stored settings timezone wins. When it is empty, the server
+ * timezone is `TZ` if that name is in config/timezones.json, otherwise the host zone.
+ * Legacy names (Asia/Calcutta, Europe/Kiev) convert to the current name first.
+ * Offsets and abbreviations such as +02:00 and CST are not in that file.
  */
 
-export function usageTimeZone(): string {
+import { canonicalTimeZone } from '../time/timezones';
+
+export function isValidTimeZone(zone: string): boolean {
+  return canonicalTimeZone(zone) !== null;
+}
+
+/** Process timezone. `TZ=Europe/Berlin` wins when that name is in the list. */
+export function serverTimeZone(): string {
+  const fromEnv = canonicalTimeZone(process.env.TZ ?? '');
+  if (fromEnv) return fromEnv;
   try {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (zone) return zone;
+    const host = zone ? canonicalTimeZone(zone) : null;
+    if (host) return host;
   } catch {
     // Intl can throw if the zone database is missing. UTC is the fallback.
   }
   return 'UTC';
+}
+
+/** Saved name converted to the current zone, or the server timezone when nothing is stored. */
+export function resolveTimeZone(stored: string | null | undefined): string {
+  return canonicalTimeZone(stored ?? '') ?? serverTimeZone();
+}
+
+export function usageTimeZone(): string {
+  return serverTimeZone();
+}
+
+export function zoneDay(
+  input: Date | string | number,
+  timeZone: string,
+): string {
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+/** Shift a YYYY-MM-DD label by whole calendar days. Not an instant conversion. */
+export function shiftZoneDay(day: string, deltaDays: number): string {
+  const [y, m, d] = day.split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d));
+  next.setUTCDate(next.getUTCDate() + deltaDays);
+  return next.toISOString().slice(0, 10);
+}
+
+/** UTC instants of [midnight, next midnight) for a YYYY-MM-DD day in `timeZone`. */
+export function zoneDayBounds(
+  day: string,
+  timeZone: string,
+): { start: Date; end: Date } {
+  const start = zoneWallTime(day, 0, 0, timeZone);
+  return { start, end: zoneWallTime(shiftZoneDay(day, 1), 0, 0, timeZone) };
 }
 
 function zoneOffsetMs(instant: Date, timeZone: string): number {

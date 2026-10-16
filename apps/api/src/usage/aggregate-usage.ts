@@ -1,5 +1,5 @@
 import { monthStartUtc } from './period-window';
-import { zoneWallTime } from './zone-time';
+import { shiftZoneDay, zoneDay, zoneWallTime } from './zone-time';
 import {
   rawLineFromProvider,
   type PricedUsageLine,
@@ -57,20 +57,12 @@ export interface AggregateResult {
 }
 
 export function calendarDay(input: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(input);
+  return zoneDay(input, timeZone);
 }
 
 /** Shift a YYYY-MM-DD label by whole calendar days. */
 export function shiftCalendarDay(day: string, deltaDays: number): string {
-  const [y, m, d] = day.split('-').map(Number);
-  const next = new Date(Date.UTC(y, m - 1, d));
-  next.setUTCDate(next.getUTCDate() + deltaDays);
-  return next.toISOString().slice(0, 10);
+  return shiftZoneDay(day, deltaDays);
 }
 
 /**
@@ -211,7 +203,7 @@ function blank(nowMs: number): AggregateResult {
  * the same day buckets as the other windows. There is no hourly series.
  * `7d` is the last 7 calendar days through today. `month` is that
  * timezone's calendar month to date. A day with no point is absent, not zero.
- * Usage passes the API process zone. Memory stays on America/Chicago.
+ * Usage and memory both use the timezone saved in settings.
  */
 export function aggregateUsage(
   points: UsagePoint[],

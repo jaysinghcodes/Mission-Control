@@ -9,7 +9,7 @@ import type { AgentsResp } from '../types'
 import { PageHeader, SoftCard, Btn, AgentName, Kicker, EmptyState, FieldError } from '../components/shell'
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { OPERATOR_NAME } from '../config'
-import { formatChicagoSaved } from '../lib/chicago-day'
+import { formatZoneSaved } from '../lib/zone-day'
 import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
@@ -41,7 +41,7 @@ interface DevicesResp {
 
 function deviceStatus(device: DeviceRow): { on: boolean; status: string } {
   if (device.online) return { on: true, status: 'Online' }
-  const when = device.lastSeenAt ? formatChicagoSaved(device.lastSeenAt) : ''
+  const when = device.lastSeenAt ? formatZoneSaved(device.lastSeenAt) : ''
   if (when) return { on: false, status: `Last seen ${when}` }
   return { on: false, status: 'Offline' }
 }

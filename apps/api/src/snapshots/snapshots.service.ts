@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   asRosterAgent,
@@ -10,6 +10,7 @@ import {
 import { wireText } from '../wire-text';
 import { PrismaService } from '../prisma/prisma.service';
 import { SETTING_ID } from '../team/mission';
+import { TimezoneService } from '../time/timezone.service';
 import { usageBucketsFromPayload } from '../usage/usage-points';
 import { usageTimeZone } from '../usage/zone-time';
 
@@ -24,7 +25,10 @@ import { usageTimeZone } from '../usage/zone-time';
  */
 @Injectable()
 export class SnapshotsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly zones?: TimezoneService,
+  ) {}
 
   /**
    * Merge an agents.snapshot into the roster.
@@ -123,9 +127,11 @@ export class SnapshotsService {
   async applyUsage(
     payload: Record<string, unknown>,
     now: Date = new Date(),
-    timeZone: string = usageTimeZone(),
+    timeZone?: string,
   ): Promise<void> {
-    const buckets = usageBucketsFromPayload(payload, now, timeZone);
+    const zone =
+      timeZone ?? (this.zones ? await this.zones.current() : usageTimeZone());
+    const buckets = usageBucketsFromPayload(payload, now, zone);
     for (const bucket of buckets) {
       await this.prisma.usageBucket.upsert({
         where: { day: bucket.day },

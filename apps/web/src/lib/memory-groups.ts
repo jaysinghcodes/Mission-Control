@@ -1,5 +1,5 @@
 /**
- * Group memory rows by the day the API already computed (America/Chicago).
+ * Group memory rows by the day the API already computed (the saved timezone).
  * Input is newest first. Days with no rows are not emitted. The same day
  * is not repeated when its rows are not adjacent.
  */

@@ -2,6 +2,13 @@ import { promiseFn } from '../../test/lint-helpers';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MemoryController, memorySnippet } from './memory.controller';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { TimezoneService } from '../time/timezone.service';
+
+function zoned(prisma: PrismaService, zone = 'UTC') {
+  return new MemoryController(prisma, {
+    current: promiseFn(() => zone),
+  } as TimezoneService);
+}
 
 type Row = {
   id: string;
@@ -127,7 +134,7 @@ describe('MemoryController', () => {
 
   it('buckets 23:58 and 00:02 onto the Chicago day, in CST and CDT', async () => {
     const { prisma } = makePrisma(rows);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma, 'America/Chicago');
 
     const jan15 = await controller.list('2026-01-15');
     expect(jan15.entries.map((entry) => entry.id)).toEqual(['late-cst']);
@@ -145,7 +152,7 @@ describe('MemoryController', () => {
 
   it('rejects a bad day or kind and a missing id', async () => {
     const { prisma } = makePrisma(rows);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma);
     await expect(controller.list('2026-02-31')).rejects.toBeInstanceOf(
       BadRequestException,
     );
@@ -162,7 +169,7 @@ describe('MemoryController', () => {
 
   it('returns 200 with an empty list when nothing is stored', async () => {
     const { prisma } = makePrisma([]);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma);
     const res = await controller.list();
     expect(res.entries).toEqual([]);
     expect(res.total).toBe(0);
@@ -179,7 +186,7 @@ describe('MemoryController', () => {
         kind: 'long-term',
       }),
     ]);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma);
     const list = await controller.list();
     expect(list.entries[0]).not.toHaveProperty('body');
     expect(list.entries[0].snippet.length).toBeLessThan(long.length);
@@ -191,7 +198,7 @@ describe('MemoryController', () => {
 
   it('escapes LIKE wildcards in search', async () => {
     const { prisma, calls } = makePrisma(rows);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma);
     const res = await controller.list(undefined, undefined, '100%');
     expect(res.entries.map((entry) => entry.id)).toEqual(['early-cdt']);
     const where = calls[0] as { OR: { title: { contains: string } }[] };
@@ -200,7 +207,7 @@ describe('MemoryController', () => {
 
   it('honors limit and offset and reports the size of the filtered list', async () => {
     const { prisma, orderBys } = makePrisma(rows);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma);
     const page = await controller.list(
       undefined,
       undefined,
@@ -237,7 +244,7 @@ describe('MemoryController', () => {
       }),
     ];
     const { prisma, orderBys } = makePrisma(tied);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma);
     const page = await controller.list(undefined, 'daily', undefined, '2', '0');
     expect(page.entries.map((entry) => entry.id)).toEqual(['b', 'a']);
     expect(page.total).toBe(3);
@@ -258,7 +265,7 @@ describe('MemoryController', () => {
 
   it('filters kind and reports the filtered total', async () => {
     const { prisma } = makePrisma(rows);
-    const controller = new MemoryController(prisma);
+    const controller = zoned(prisma);
     const res = await controller.list(undefined, 'long-term');
     expect(res.entries.map((entry) => entry.id)).toEqual(['late-cdt']);
     expect(res.total).toBe(1);

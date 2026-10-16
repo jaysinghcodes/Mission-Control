@@ -9,7 +9,7 @@ import type { Request, Response } from 'express';
 import { WriteAuthMiddleware } from '../auth/write-auth.middleware';
 
 import { AgentsController } from './agents.controller';
-import { OFFLINE_AFTER_MS } from './agent-merge';
+import { offlineAfterMs } from './agent-merge';
 import type { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -241,14 +241,14 @@ describe('AgentsController register, heartbeat, delete', () => {
     expect(heartbeats).toHaveLength(0);
 
     rows.get('forge_helper')!.lastSeenAt = new Date(
-      Date.now() - OFFLINE_AFTER_MS,
+      Date.now() - offlineAfterMs(),
     );
     const listed = await controller.list();
     expect(listed.agents[0].online).toBe(false);
     expect(listed.agents).toHaveLength(1);
 
     rows.get('forge_helper')!.lastSeenAt = new Date(
-      Date.now() - OFFLINE_AFTER_MS + 1000,
+      Date.now() - offlineAfterMs() + 1000,
     );
     const fresh = await controller.list();
     expect(fresh.agents[0].online).toBe(true);

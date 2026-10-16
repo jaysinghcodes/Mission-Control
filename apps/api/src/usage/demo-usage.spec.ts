@@ -1,5 +1,8 @@
-import { chicagoDay, shiftChicagoDay } from '../memory/chicago-day';
-import { aggregateUsage, calendarDay } from './aggregate-usage';
+import {
+  aggregateUsage,
+  calendarDay,
+  shiftCalendarDay,
+} from './aggregate-usage';
 import {
   demoUsageBuckets,
   demoUsageId,
@@ -16,16 +19,18 @@ const CHICAGO = 'America/Chicago';
 
 function expectWindows(now: Date) {
   const buckets = demoUsageBuckets(now, CHICAGO);
-  const today = chicagoDay(now);
+  const today = calendarDay(now, CHICAGO);
   expect(buckets).toHaveLength(30);
   expect(new Set(buckets.map((b) => b.day)).size).toBe(30);
   expect(buckets[0].day).toBe(today);
-  expect(buckets[29].day).toBe(shiftChicagoDay(today, -29));
+  expect(buckets[29].day).toBe(shiftCalendarDay(today, -29));
 
   const todayBucket = buckets.find((b) => b.day === today);
   expect(todayBucket).toBeDefined();
   expect(todayBucket!.at.getTime()).toBe(now.getTime());
-  expect(buckets.filter((b) => chicagoDay(b.at) === today)).toHaveLength(1);
+  expect(
+    buckets.filter((b) => calendarDay(b.at, CHICAGO) === today),
+  ).toHaveLength(1);
 
   const points = buckets.map((b) => ({
     at: b.at,
@@ -45,7 +50,7 @@ function expectWindows(now: Date) {
   );
 
   const weekDays = new Set(
-    Array.from({ length: 7 }, (_, i) => shiftChicagoDay(today, -i)),
+    Array.from({ length: 7 }, (_, i) => shiftCalendarDay(today, -i)),
   );
   const monthPrefix = today.slice(0, 7);
   const expectedWeek = buckets
@@ -105,12 +110,12 @@ describe('demo usage marker', () => {
 
 describe('demoUsageBuckets', () => {
   it('at 07:58 Chicago, Today equals today and 7d and month equal the seeded sums', () => {
-    expect(chicagoDay(MORNING)).toBe('2026-10-10');
+    expect(calendarDay(MORNING, CHICAGO)).toBe('2026-10-10');
     expectWindows(MORNING);
   });
 
   it('at 23:30 Chicago, Today equals today and 7d and month equal the seeded sums', () => {
-    expect(chicagoDay(EVENING)).toBe('2026-10-10');
+    expect(calendarDay(EVENING, CHICAGO)).toBe('2026-10-10');
     expectWindows(EVENING);
   });
 

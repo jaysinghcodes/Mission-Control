@@ -11,19 +11,20 @@ async function loadTs(rel) {
   return import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'))
 }
 
-const days = await loadTs('../src/lib/chicago-day.ts')
+const days = await loadTs('../src/lib/zone-day.ts')
+days.setActiveTimeZone('America/Chicago')
 const started = await loadTs('../src/lib/started.ts')
 const groups = await loadTs('../src/lib/memory-groups.ts')
 
 test('23:58 and 00:02 Central land on different days, including DST', () => {
-  assert.equal(days.chicagoDay('2026-01-16T05:58:00.000Z'), '2026-01-15')
-  assert.equal(days.chicagoDay('2026-01-16T06:02:00.000Z'), '2026-01-16')
-  assert.equal(days.chicagoDay('2026-07-16T04:58:00.000Z'), '2026-07-15')
-  assert.equal(days.chicagoDay('2026-07-16T05:02:00.000Z'), '2026-07-16')
-  assert.equal(days.chicagoDay('2026-03-08T05:58:00.000Z'), '2026-03-07')
-  assert.equal(days.chicagoDay('2026-03-08T06:02:00.000Z'), '2026-03-08')
-  assert.equal(days.chicagoDay('2026-11-01T04:58:00.000Z'), '2026-10-31')
-  assert.equal(days.chicagoDay('2026-11-01T05:02:00.000Z'), '2026-11-01')
+  assert.equal(days.zoneDay('2026-01-16T05:58:00.000Z'), '2026-01-15')
+  assert.equal(days.zoneDay('2026-01-16T06:02:00.000Z'), '2026-01-16')
+  assert.equal(days.zoneDay('2026-07-16T04:58:00.000Z'), '2026-07-15')
+  assert.equal(days.zoneDay('2026-07-16T05:02:00.000Z'), '2026-07-16')
+  assert.equal(days.zoneDay('2026-03-08T05:58:00.000Z'), '2026-03-07')
+  assert.equal(days.zoneDay('2026-03-08T06:02:00.000Z'), '2026-03-08')
+  assert.equal(days.zoneDay('2026-11-01T04:58:00.000Z'), '2026-10-31')
+  assert.equal(days.zoneDay('2026-11-01T05:02:00.000Z'), '2026-11-01')
 })
 
 test('Decided today is a Chicago calendar day, not a rolling 24 hours', () => {
@@ -35,7 +36,7 @@ test('Decided today is a Chicago calendar day, not a rolling 24 hours', () => {
     { createdAt: '2026-10-06T05:10:00.000Z' }, // Oct 6, 12:10 AM CDT
     { createdAt: '2026-10-05T06:00:00.000Z' }, // Oct 5, 1:00 AM CDT — also within 24h of 00:30
   ]
-  assert.equal(days.countOnChicagoDay(rows, now), 1)
+  assert.equal(days.countOnZoneDay(rows, now), 1)
   const rolling = rows.filter((row) => now.getTime() - new Date(row.createdAt).getTime() < 86_400_000)
   assert.equal(rolling.length, 3)
 })
@@ -55,8 +56,8 @@ test('Started matches the run by ticket id and uses startedAt', () => {
 test('saved time names the Chicago date and the zone, so the two 1:30s differ', () => {
   // Fall back is 2026-11-01 02:00 CDT → 01:00 CST.
   // 01:30 CDT is 06:30 UTC. 01:30 CST is 07:30 UTC.
-  const cdt = days.formatChicagoSaved('2026-11-01T06:30:00.000Z')
-  const cst = days.formatChicagoSaved('2026-11-01T07:30:00.000Z')
+  const cdt = days.formatZoneSaved('2026-11-01T06:30:00.000Z')
+  const cst = days.formatZoneSaved('2026-11-01T07:30:00.000Z')
   assert.match(cdt, /Nov 1, 2026/)
   assert.match(cdt, /1:30/)
   assert.match(cdt, /AM/)

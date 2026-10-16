@@ -3,12 +3,12 @@ import { useApi, apiSend } from '../hooks/useApi'
 import { PageHeader, Segmented, SoftCard, Face, StatusChip, Btn, EmptyState } from '../components/shell'
 import { useNaming } from '../lib/naming'
 import type { Agent, AgentsResp } from '../types'
-import { chicagoDay } from '../lib/chicago-day'
+import { zoneDay } from '../lib/zone-day'
 import { activityHaystack } from '../lib/activity-text'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import {
-  chicagoClock,
+  zoneClock,
   formatDayHeading,
   formatSideDate,
   formatWeekdayLong,
@@ -29,9 +29,9 @@ import {
  * matching activity, or an agent whose current task names the job.
  * Day and month are the same jobs, not a second data source.
  *
- * Columns are America/Chicago dates. The week starts on Monday; there is
- * no week-start setting. Each label is that column's weekday, and a clock
- * time such as 23:30 is Chicago wall time (it does not roll to the next UTC day).
+ * Columns are dates in the timezone saved in Settings. The week starts on
+ * Monday. There is no week-start setting. Each label is that column's
+ * weekday, and a clock time such as 23:30 is wall time in that zone.
  */
 
 interface Job { id: string; name: string; schedule: string | null; day: number | null; time: string | null; color: string | null; enabled: boolean }
@@ -77,16 +77,16 @@ export default function Calendar() {
   }
 
   const [view, setView] = useState(1)
-  const [weekStartKey, setWeekStartKey] = useState(() => startOfWeekKey(chicagoDay(new Date())))
-  const [selectedKey, setSelectedKey] = useState(() => chicagoDay(new Date()))
+  const [weekStartKey, setWeekStartKey] = useState(() => startOfWeekKey(zoneDay(new Date())))
+  const [selectedKey, setSelectedKey] = useState(() => zoneDay(new Date()))
   const [openId, setOpenId] = useState<string | null>(null)
   const [ran, setRan] = useState<string | null>(null)
 
   const days = useMemo(() => weekDays(weekStartKey), [weekStartKey])
 
   const now = new Date()
-  const todayKey = chicagoDay(now)
-  const clockNow = chicagoClock(now)
+  const todayKey = zoneDay(now)
+  const clockNow = zoneClock(now)
   const timed = jobs.filter((j) => parseTime(j.time))
   const overnight = timed.filter((j) => {
     const t = parseTime(j.time)
@@ -131,7 +131,7 @@ export default function Calendar() {
     : 'Loading the schedule…'
 
   function jumpToday() {
-    const key = chicagoDay(new Date())
+    const key = zoneDay(new Date())
     setWeekStartKey(startOfWeekKey(key))
     setSelectedKey(key)
   }

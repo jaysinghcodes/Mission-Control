@@ -36,11 +36,10 @@ async function assertNoWindowDots(page) {
   if (hits > 0) throw new Error('The sidebar still shows window dots.')
 }
 
-async function chooseOwnNames(page) {
+async function skipSetup(page) {
   await page.goto(`${web}/#/tasks`, { waitUntil: 'domcontentloaded' })
-  await page.getByRole('heading', { level: 1, name: 'Name your agents' }).waitFor({ timeout: 30000 })
-  await page.getByRole('button', { name: 'Keep my own names' }).click()
-  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await page.getByRole('heading', { level: 1, name: 'Choose a timezone' }).waitFor({ timeout: 30000 })
+  await page.getByRole('button', { name: 'Skip setup' }).click()
   await page.getByRole('heading', { level: 1, name: 'Tasks' }).waitFor({ timeout: 30000 })
 }
 
@@ -61,7 +60,7 @@ async function main() {
   ]
 
   try {
-    await chooseOwnNames(page)
+    await skipSetup(page)
     for (const [hash, heading, empty] of pages) {
       await page.goto(`${web}/${hash}`, { waitUntil: 'domcontentloaded' })
       await page.getByRole('heading', { level: 1, name: heading }).waitFor({ timeout: 30000 })
