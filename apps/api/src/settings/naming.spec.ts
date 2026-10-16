@@ -141,6 +141,87 @@ describe('SettingsController', () => {
     expect(saved.seats.find((seat) => seat.id === 'speedy')?.name).toBe(
       'Speedy',
     );
+    expect(first.setupDone).toBe(false);
+    expect(first.timezoneSaved).toBe(false);
+  });
+
+  it('saves a timezone and setup flag without clearing names', async () => {
+    let row: {
+      namingMode: string | null;
+      crewMap: unknown;
+      timezone: string | null;
+      setupDone: boolean;
+    } | null = null;
+    const prisma = {
+      setting: {
+        findUnique: jest.fn(() => row),
+        upsert: jest.fn(
+          (args: {
+            create: {
+              namingMode: string | null;
+              crewMap: unknown;
+              timezone: string | null;
+              setupDone: boolean;
+            };
+            update: {
+              namingMode?: string | null;
+              crewMap?: unknown;
+              timezone?: string | null;
+              setupDone?: boolean;
+            };
+          }) => {
+            row = row
+              ? {
+                  namingMode:
+                    args.update.namingMode !== undefined
+                      ? args.update.namingMode
+                      : row.namingMode,
+                  crewMap:
+                    args.update.crewMap !== undefined
+                      ? args.update.crewMap
+                      : row.crewMap,
+                  timezone:
+                    args.update.timezone !== undefined
+                      ? args.update.timezone
+                      : row.timezone,
+                  setupDone:
+                    args.update.setupDone !== undefined
+                      ? args.update.setupDone
+                      : row.setupDone,
+                }
+              : {
+                  namingMode: args.create.namingMode,
+                  crewMap: args.create.crewMap,
+                  timezone: args.create.timezone,
+                  setupDone: args.create.setupDone,
+                };
+            return row;
+          },
+        ),
+      },
+    };
+    const controller = new SettingsController(
+      prisma as unknown as PrismaService,
+    );
+    await controller.put({ namingMode: 'own' });
+    const zoned = await controller.put({ timezone: 'Europe/Berlin' });
+    expect(zoned.namingMode).toBe('own');
+    expect(zoned.timezone).toBe('Europe/Berlin');
+    expect(zoned.timezoneSaved).toBe(true);
+    expect(zoned.setupDone).toBe(false);
+    const done = await controller.put({ setupDone: true });
+    expect(done.setupDone).toBe(true);
+    expect(done.namingMode).toBe('own');
+    expect(done.timezone).toBe('Europe/Berlin');
+    const cleared = await controller.put({ timezone: null });
+    expect(cleared.timezoneSaved).toBe(false);
+    expect(cleared.namingMode).toBe('own');
+    await expect(
+      controller.put({ timezone: 'Not/AZone' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.put({})).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('PUT /settings is a write and production without a token is 401', () => {

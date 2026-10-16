@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   NAME_MAX,
-  OFFLINE_AFTER_MS,
+  offlineAfterMs,
   SNAPSHOT_ID,
   backfillSource,
   isOnline,
@@ -261,9 +261,9 @@ describe('agent merge', () => {
     if (!beat.ok) return;
     expect(beat.row.lastSeenAt).toEqual(now);
     expect(isOnline('registered', now, now)).toBe(true);
-    const later = new Date(now.getTime() + OFFLINE_AFTER_MS);
+    const later = new Date(now.getTime() + offlineAfterMs());
     expect(isOnline('registered', now, later)).toBe(false);
-    const almost = new Date(now.getTime() + OFFLINE_AFTER_MS - 1);
+    const almost = new Date(now.getTime() + offlineAfterMs() - 1);
     expect(isOnline('registered', now, almost)).toBe(true);
     expect(isOnline('default', null, later)).toBe(true);
     const patched = planHeartbeat(bot, now, {

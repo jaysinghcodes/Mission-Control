@@ -1,5 +1,6 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Optional, Query } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TimezoneService } from '../time/timezone.service';
 import { aggregateUsage, type UsageProvider } from './aggregate-usage';
 import { applyUsagePrices } from './price-usage';
 import { loadPriceTable, type PriceTable } from './prices';
@@ -10,13 +11,17 @@ import { usageTimeZone } from './zone-time';
  * UsageController: cost so far.
  *
  * Rows are daily buckets. Today (`24h`), `7d`, and `month` are summed here.
- * The day is the calendar day in the API process timezone until Launch 8.
+ * The day is the calendar day in the timezone saved in settings.
+ * When that value is empty, the server timezone is used (`TZ`, else the host).
  * Dollars are tokens times config/prices.json, unless the provider sent costUsd.
  * The price files are read on each request.
  */
 @Controller('usage')
 export class UsageController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly zones?: TimezoneService,
+  ) {}
 
   @Get()
   async get(@Query('period') period = '24h') {
@@ -32,7 +37,9 @@ export class UsageController {
       localProviders?: ReadonlySet<string>;
     },
   ) {
-    const timeZone = opts?.timeZone ?? usageTimeZone();
+    const timeZone =
+      opts?.timeZone ??
+      (this.zones ? await this.zones.current() : usageTimeZone());
     const rows = await this.prisma.usageBucket.findMany();
     const agg = aggregateUsage(
       rows.map((row) => ({

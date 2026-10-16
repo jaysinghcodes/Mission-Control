@@ -20,7 +20,7 @@ datasource db {
 /// `snapshot` rows. Identity for new rows is `id`, a lowercase slug.
 /// `position` is roster order and does not change when a row is registered.
 /// `lastSeenAt` is set on register and heartbeat. The API reports a registered
-/// bot offline after 10 minutes. Rows are never auto deleted.
+/// bot offline after OFFLINE_AFTER_MS (default 10 minutes). Rows are never auto deleted.
 model Agent {
   id              String    @id @default(cuid())
   /// Display name. Not unique: a snapshot may add another row with the same name and a different id.
@@ -139,7 +139,7 @@ model CronJob {
 
 /// One collected usage day. The bridge posts timestamped points
 /// (`usage.snapshot`); 24h, 7 day, and month views sum `at`.
-/// `day` is the America/Chicago calendar day and the upsert key.
+/// `day` is the calendar day in the saved timezone and the upsert key.
 /// Re-posting a day replaces that row. Other days stay.
 model UsageBucket {
   id        String   @id @default(cuid())
@@ -181,7 +181,7 @@ model Approval {
 /// The web app reads this table and does not open OpenClaw files.
 /// `id` is stable (agent + path, or a fixed demo id) so a re-sync updates
 /// the same row. Day groups are not stored: the API buckets `createdAt`
-/// into America/Chicago calendar days.
+/// into calendar days in the saved timezone.
 model MemoryEntry {
   id        String   @id
   title     String
@@ -226,6 +226,10 @@ model Setting {
   namingMode       String?
   /// Agent id to crew seat id. The screen applies it only when namingMode is crew.
   crewMap          Json?
+  /// IANA timezone for usage and memory days. Null uses the server timezone.
+  timezone         String?
+  /// True after the first open is finished or skipped.
+  setupDone        Boolean  @default(false)
   updatedAt        DateTime @updatedAt
 }
 
@@ -233,7 +237,7 @@ model Setting {
 /// sample rows. The bridge has no devices channel, so this table is the
 /// source — the page works with no OpenClaw. `online` is the status flag.
 /// `lastSeenAt` is when we last saw an offline machine (the page renders
-/// that instant in America/Chicago).
+/// that instant in the timezone saved in settings).
 model Device {
   id         String    @id
   name       String

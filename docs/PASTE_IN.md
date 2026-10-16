@@ -20,7 +20,7 @@ Tell your operator the URL the installer printed. Say that `INGEST_TOKEN` and `S
 
 ## Register and heartbeat
 
-Read `INGEST_TOKEN` from `.env`. Send it as the header `x-ingest-token`. Do not print it. Call the API on the port this run already chose. On Docker the installer prints `Waiting for the API health check on port`. On the native path doctor prints `pass ports: Port`. Use `127.0.0.1` and that port. POST `/agents/register` with your own id and name, then POST `/agents/<id>/heartbeat`. The request shapes are in [API.md](API.md#410-register-heartbeat-and-delete). A 401 means the header does not match the token. That line is in [API.md](API.md#41-auth). Do not choose crew names for the operator. The dashboard asks them to use the Mission Control crew or keep their own names.
+Read `INGEST_TOKEN` from `.env`. Send it as the header `x-ingest-token`. Do not print it. Call the API on the port this run already chose. On Docker the installer prints `Waiting for the API health check on port`. On the native path doctor prints `pass ports: Port`. Use `127.0.0.1` and that port. POST `/agents/register` with your own id and name, then POST `/agents/<id>/heartbeat`. The request shapes are in [API.md](API.md#410-register-heartbeat-and-delete). A 401 means the header does not match the token. That line is in [API.md](API.md#41-auth). Do not choose a timezone, crew names, or a provider for the operator. The dashboard asks for a timezone, then the Mission Control crew or their own names, then confirms the detected provider. Skip finishes that open.
 
 ## Stop
 

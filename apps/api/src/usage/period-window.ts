@@ -1,6 +1,6 @@
 /**
  * UTC month start. Aggregation tests use this for the UTC window.
- * The System page displays America/Chicago, not this instant.
+ * The System page displays the saved timezone, not this instant.
  */
 export function monthStartUtc(nowMs: number): number {
   const d = new Date(nowMs);

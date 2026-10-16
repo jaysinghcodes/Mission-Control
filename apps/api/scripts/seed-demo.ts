@@ -10,7 +10,7 @@
  *   - 3 projects (Onboarding 1 of 2 done, Pipeline 0 of 3, Ideas empty)
  *   - 10 activity events (run.* + approvals) so Activity/Office have history
  *   - 1 pending approval (matches the `approval.new` activity event)
- *   - sample memories across several America/Chicago days (ticket 5)
+ *   - sample memories across several days in the server timezone (ticket 5)
  *   - sample markdown docs in DOCS_ROOT (ticket 6; default <repo>/data/docs)
  *   - a sample mission statement and 3 devices (ticket 7)
  *   - 1 experimental custom tool (ticket 10; a prompt template only — the

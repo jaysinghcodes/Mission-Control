@@ -3,12 +3,14 @@ import {
   Controller,
   Get,
   NotFoundException,
+  Optional,
   Param,
   Query,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { escapeLike } from '../search/escape-like';
-import { chicagoDay, chicagoDayBounds } from './chicago-day';
+import { TimezoneService } from '../time/timezone.service';
+import { resolveTimeZone, zoneDay, zoneDayBounds } from '../usage/zone-time';
 
 /**
  * MemoryController — read-only agent memory (ticket 5).
@@ -18,8 +20,8 @@ import { chicagoDay, chicagoDayBounds } from './chicago-day';
  * page renders as the empty state. 400 is a bad query. 404 is an unknown id.
  * Never a 200 body shaped like `{ error }`.
  *
- * Day filters use America/Chicago calendar bounds, so 23:58 and 00:02 land
- * on different days, including during CDT.
+ * Day filters use the saved timezone (the server timezone when unset),
+ * so 23:58 and 00:02 land on different days, including across daylight saving.
  */
 
 const KINDS = ['long-term', 'daily', 'other'] as const;
@@ -42,7 +44,15 @@ type MemoryRow = {
 
 @Controller('memory')
 export class MemoryController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly zones?: TimezoneService,
+  ) {}
+
+  private async timeZone(): Promise<string> {
+    if (this.zones) return this.zones.current();
+    return resolveTimeZone(null);
+  }
 
   @Get()
   async list(
@@ -52,7 +62,8 @@ export class MemoryController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    const where = memoryListWhere(day, kind, q);
+    const timeZone = await this.timeZone();
+    const where = memoryListWhere(day, kind, q, timeZone);
     const take = parseLimit(limit);
     const skip = parseOffset(offset);
     const [rows, total] = await Promise.all([
@@ -67,7 +78,7 @@ export class MemoryController {
       this.prisma.memoryEntry.count({ where }),
     ]);
     return {
-      entries: rows.map(toListEntry),
+      entries: rows.map((row) => toListEntry(row, timeZone)),
       total,
       ts: Date.now(),
     };
@@ -79,12 +90,20 @@ export class MemoryController {
     if (!row) {
       throw new NotFoundException(`memory "${id}" not found`);
     }
-    return { entry: toDetailEntry(row), ts: Date.now() };
+    return {
+      entry: toDetailEntry(row, await this.timeZone()),
+      ts: Date.now(),
+    };
   }
 }
 
 /** Query object for GET /memory. Exported so tests can pin the day bounds. */
-export function memoryListWhere(day?: string, kind?: string, q?: string) {
+export function memoryListWhere(
+  day?: string,
+  kind?: string,
+  q?: string,
+  timeZone: string = resolveTimeZone(null),
+) {
   const where: {
     kind?: MemoryKind;
     createdAt?: { gte: Date; lt: Date };
@@ -98,7 +117,7 @@ export function memoryListWhere(day?: string, kind?: string, q?: string) {
   const dayText = (day ?? '').trim();
   if (dayText) {
     assertDay(dayText);
-    const bounds = chicagoDayBounds(dayText);
+    const bounds = zoneDayBounds(dayText, timeZone);
     where.createdAt = { gte: bounds.start, lt: bounds.end };
   }
 
@@ -166,23 +185,23 @@ export function memorySnippet(body: string, max = 180): string {
   return `${flat.slice(0, max - 1)}…`;
 }
 
-function toListEntry(row: MemoryRow) {
+function toListEntry(row: MemoryRow, timeZone: string) {
   return {
     id: row.id,
     title: row.title,
     snippet: memorySnippet(row.body),
     agent: row.agent,
     createdAt: row.createdAt.toISOString(),
-    day: chicagoDay(row.createdAt),
+    day: zoneDay(row.createdAt, timeZone),
     kind: row.kind,
     source: row.source,
     ref: row.ref,
   };
 }
 
-function toDetailEntry(row: MemoryRow) {
+function toDetailEntry(row: MemoryRow, timeZone: string) {
   return {
-    ...toListEntry(row),
+    ...toListEntry(row, timeZone),
     body: row.body,
   };
 }

@@ -939,12 +939,24 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
 
 
 # Session counters are cumulative. The first sync places each session on the
-# local calendar day of its last activity, up to 30 days back, when that
-# timestamp exists. Later syncs post only the increase, on the day of the
-# sync. Sessions with no timestamp are collected on the sync day only.
-# The API stores the day again in the server timezone. The payload is daily
-# points. It does not include a 7d or month total.
-USAGE_BACKFILL_DAYS = 30
+# calendar day of its last activity, up to USAGE_RETENTION_DAYS back (default
+# 30), when that timestamp exists. Later syncs post only the increase, on the
+# day of the sync. Sessions with no timestamp are collected on the sync day
+# only. The day uses the timezone from GET /settings, then MC_TIMEZONE, then
+# TZ, then the host zone. The payload is daily points. It does not include a
+# 7d or month total.
+def usage_retention_days() -> int:
+    """How many calendar days a usage payload may include. Default 30."""
+    raw = os.environ.get("USAGE_RETENTION_DAYS", "").strip()
+    if not raw:
+        return 30
+    try:
+        count = int(raw)
+    except ValueError:
+        return 30
+    if count < 1 or count > 3660:
+        return 30
+    return count
 
 
 def _usage_num(v: Any) -> float:
@@ -987,8 +999,9 @@ def _shift_day(day: str, delta: int) -> str:
     return (datetime.date(year, month, date) + datetime.timedelta(days=delta)).isoformat()
 
 
-def _recent_days(today: str, n: int = USAGE_BACKFILL_DAYS) -> set:
-    return {_shift_day(today, -i) for i in range(n)}
+def _recent_days(today: str, n: Optional[int] = None) -> set:
+    count = usage_retention_days() if n is None else n
+    return {_shift_day(today, -i) for i in range(count)}
 
 
 def _blank_usage_day(at_ms: int) -> Dict[str, Any]:
@@ -1197,7 +1210,7 @@ def usage_points_from_sessions(
 DAILY_NOTE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:-.+)?\.md$")
 # A line by itself, so a sentence that happens to mention a clock is not a timestamp.
 NOTE_CLOCK = re.compile(
-    r"^(?:#+\s*)?(?:time\s*:\s*)?(\d{1,2}):(\d{2})\s*(AM|PM)?(?:\s*(?:CT|CST|CDT))?\s*$",
+    r"^(?:#+\s*)?(?:time\s*:\s*)?(\d{1,2}):(\d{2})\s*(AM|PM)?(?:\s+\S+)?\s*$",
     re.IGNORECASE,
 )
 MAX_MEMORY_BYTES = 1_000_000
@@ -1219,48 +1232,65 @@ def iso_z(dt: datetime.datetime) -> str:
     return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _nth_sunday(year: int, month: int, n: int) -> int:
-    """Day-of-month of the nth Sunday. weekday(): Monday is 0, Sunday is 6."""
-    first = datetime.date(year, month, 1)
-    offset = (6 - first.weekday()) % 7
-    return 1 + offset + (n - 1) * 7
+def iana_zone(name: str) -> Optional[datetime.tzinfo]:
+    """IANA zone from the stdlib. None when the name is blank or unknown."""
+    text = (name or "").strip()
+    if not text:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        return None
+    try:
+        return ZoneInfo(text)
+    except Exception:
+        return None
 
 
-def chicago_offset_seconds(utc_naive: datetime.datetime) -> int:
+def resolve_tz(name: Optional[str] = None) -> datetime.tzinfo:
     """
-    Seconds to add to a UTC instant to get America/Chicago wall time.
+    Timezone for daily notes and usage days.
 
-    US Central rules since 2007, stdlib only (no zoneinfo, so Python 3.8
-    can run the bridge): DST starts the second Sunday in March at 02:00 CST
-    (08:00 UTC) and ends the first Sunday in November at 02:00 CDT (07:00 UTC).
+    A name from GET /settings wins. Then MC_TIMEZONE, then TZ, then the host zone.
     """
-    year = utc_naive.year
-    start = datetime.datetime(year, 3, _nth_sunday(year, 3, 2), 8, 0, 0)
-    end = datetime.datetime(year, 11, _nth_sunday(year, 11, 1), 7, 0, 0)
-    if start <= utc_naive < end:
-        return -5 * 3600
-    return -6 * 3600
+    if name:
+        found = iana_zone(name)
+        if found is not None:
+            return found
+    for key in ("MC_TIMEZONE", "TZ"):
+        found = iana_zone(os.environ.get(key, ""))
+        if found is not None:
+            return found
+    return _local_tz()
 
 
-def chicago_day_of(dt: datetime.datetime) -> str:
+def fetch_api_timezone(api_url: str) -> Optional[str]:
+    """GET /settings timezone. None when the API is down or the field is missing."""
+    req = urllib.request.Request(f"{api_url.rstrip('/')}/settings", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    zone = body.get("timezone")
+    if isinstance(zone, str) and zone.strip():
+        return zone.strip()
+    return None
+
+
+def zone_day_of(dt: datetime.datetime, tz: datetime.tzinfo) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=datetime.timezone.utc)
-    utc = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-    local = utc + datetime.timedelta(seconds=chicago_offset_seconds(utc))
-    return local.strftime("%Y-%m-%d")
+    return dt.astimezone(tz).strftime("%Y-%m-%d")
 
 
-def chicago_wall(day: str, hour: int, minute: int) -> datetime.datetime:
-    """UTC instant of a clock time on a Chicago calendar day."""
+def zone_wall(day: str, hour: int, minute: int, tz: datetime.tzinfo) -> datetime.datetime:
+    """UTC instant of a clock time on a calendar day in `tz`."""
     year, month, date = (int(part) for part in day.split("-"))
-    local = datetime.datetime(year, month, date, hour, minute)
-    as_cdt = local + datetime.timedelta(hours=5)
-    as_cst = local + datetime.timedelta(hours=6)
-    if chicago_offset_seconds(as_cdt) == -5 * 3600:
-        utc = as_cdt
-    else:
-        utc = as_cst
-    return utc.replace(tzinfo=datetime.timezone.utc)
+    local = datetime.datetime(year, month, date, hour, minute, tzinfo=tz)
+    return local.astimezone(datetime.timezone.utc)
 
 
 def parse_note_clock(body: str) -> Optional[tuple]:
@@ -1284,23 +1314,24 @@ def parse_note_clock(body: str) -> Optional[tuple]:
     return None
 
 
-def daily_created_at(day: str, mtime: float, body: str) -> str:
+def daily_created_at(day: str, mtime: float, body: str, tz: Optional[datetime.tzinfo] = None) -> str:
     """
-    Daily notes take their calendar day from the filename, in America/Chicago.
+    Daily notes take their calendar day from the filename, in `tz`.
 
     A copy, restore, or checkout rewrites mtime, and appending after midnight
     must not move yesterday's note onto today. Use mtime only when that
-    instant already falls on the filename's Chicago date. Otherwise a
-    standalone clock in the note (``Time: 23:58 CT``), and if there is none,
-    12:00 CT on that date.
+    instant already falls on the filename date in `tz`. Otherwise a
+    standalone clock in the note (``Time: 23:58``), and if there is none,
+    12:00 on that date in `tz`.
     """
+    zone = tz if tz is not None else resolve_tz()
     mtime_dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc)
-    if chicago_day_of(mtime_dt) == day:
+    if zone_day_of(mtime_dt, zone) == day:
         return iso_utc(mtime)
     clock = parse_note_clock(body)
     if clock:
-        return iso_z(chicago_wall(day, clock[0], clock[1]))
-    return iso_z(chicago_wall(day, 12, 0))
+        return iso_z(zone_wall(day, clock[0], clock[1], zone))
+    return iso_z(zone_wall(day, 12, 0, zone))
 
 
 def memory_title(body: str, fallback: str) -> str:
@@ -1381,6 +1412,7 @@ def entry_from_file(
     path: Path,
     kind: str,
     day: Optional[str] = None,
+    tz: Optional[datetime.tzinfo] = None,
 ) -> Optional[Dict[str, Any]]:
     text = _read_memory_text(path)
     if text is None:
@@ -1396,7 +1428,7 @@ def entry_from_file(
         return None
     # `day` is the filename date for a daily note. Long-term MEMORY.md has
     # no date in the name and keeps the file mtime.
-    created = daily_created_at(day, mtime, body) if day else iso_utc(mtime)
+    created = daily_created_at(day, mtime, body, tz) if day else iso_utc(mtime)
     return {
         "id": memory_stable_id(agent_id, rel),
         "title": memory_title(body, path.stem),
@@ -1412,6 +1444,7 @@ def entry_from_file(
 def collect_memory(
     agents: List[Dict[str, Any]],
     base: Optional[Path] = None,
+    tz: Optional[datetime.tzinfo] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Read each agent's MEMORY.md and memory/YYYY-MM-DD*.md.
@@ -1439,7 +1472,7 @@ def collect_memory(
         agent_name = str(first(agent, "identityName", "name", "id") or agent_id)
         long_term = workspace / "MEMORY.md"
         if long_term.is_file():
-            row = entry_from_file(agent_id, agent_name, workspace, long_term, "long-term")
+            row = entry_from_file(agent_id, agent_name, workspace, long_term, "long-term", tz=tz)
             if row:
                 by_id[row["id"]] = row
         daily_dir = workspace / "memory"
@@ -1451,7 +1484,7 @@ def collect_memory(
             match = DAILY_NOTE.match(path.name)
             if not match or not is_real_day(match.group(1)):
                 continue
-            row = entry_from_file(agent_id, agent_name, workspace, path, "daily", match.group(1))
+            row = entry_from_file(agent_id, agent_name, workspace, path, "daily", match.group(1), tz)
             if row:
                 by_id[row["id"]] = row
     if readable == 0:
@@ -1744,6 +1777,10 @@ def main() -> int:
 
     src = Sources(args.from_dir)
     now_ms = int(time.time() * 1000)
+    # Dry run stays on env so a missing API does not add a timeout.
+    # A real sync reads the timezone the API is bucketing with.
+    api_zone = None if args.dry_run else fetch_api_timezone(api_url)
+    zone = resolve_tz(api_zone)
     events: List[Tuple[str, Dict[str, Any]]] = []
 
     sessions_rows = as_list(src.sessions(), "sessions")
@@ -1783,7 +1820,7 @@ def main() -> int:
             if isinstance(usage_cfg, dict):
                 local_names = local_provider_names(usage_cfg)
         usage_payload, usage_state = usage_points_from_sessions(
-            sessions, now_ms, state.get("_mcUsage"), local_names
+            sessions, now_ms, state.get("_mcUsage"), local_names, zone
         )
         state["_mcUsage"] = usage_state
         if usage_payload["points"]:
@@ -1808,9 +1845,9 @@ def main() -> int:
         elif len(mem_agents) == 0:
             log(f"memory dir {args.memory_dir} has no agent workspaces — skipping memory.snapshot")
         else:
-            memory_entries = collect_memory(mem_agents)
+            memory_entries = collect_memory(mem_agents, tz=zone)
     elif agents_rows is not None:
-        memory_entries = collect_memory(agents_rows, base=args.from_dir)
+        memory_entries = collect_memory(agents_rows, base=args.from_dir, tz=zone)
     if memory_entries is not None:
         events.append(("memory.snapshot", {"entries": memory_entries}))
 

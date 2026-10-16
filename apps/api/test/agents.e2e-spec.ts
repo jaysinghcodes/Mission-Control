@@ -5,7 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
-import { OFFLINE_AFTER_MS, SNAPSHOT_ID } from './../src/agents/agent-merge';
+import { offlineAfterMs, SNAPSHOT_ID } from './../src/agents/agent-merge';
 import { applyWriteToken } from './write-token';
 import { bodyMessage, responseJson } from './lint-helpers';
 
@@ -307,7 +307,7 @@ describe('Agents register (e2e)', () => {
 
     await prisma.agent.update({
       where: { id },
-      data: { lastSeenAt: new Date(Date.now() - OFFLINE_AFTER_MS) },
+      data: { lastSeenAt: new Date(Date.now() - offlineAfterMs()) },
     });
     const stale = await request(app.getHttpServer()).get(`/agents/${id}`);
     expect(stale.status).toBe(200);

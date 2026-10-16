@@ -14,8 +14,20 @@ export const OFFLINE_LABEL = 'Offline'
 export const SHOW_SAMPLE_BOTS_KEY = 'mc-show-sample-bots'
 export const SHOW_SAMPLE_BOTS_EVENT = 'mc-show-sample-bots'
 
-/** Same window as the API: 10 minutes without a heartbeat. */
-export const OFFLINE_AFTER_MS = 10 * 60 * 1000
+/**
+ * Same window as the API. GET /settings sends `offlineAfterMs`
+ * (`OFFLINE_AFTER_MS`). Until that arrives, the clock check stays open
+ * and the server `online` flag is what marks a bot offline.
+ */
+let offlineWindowMs = Number.POSITIVE_INFINITY
+
+export function setOfflineWindowMs(ms: number) {
+  if (Number.isFinite(ms) && ms > 0) offlineWindowMs = ms
+}
+
+export function offlineWindowMsNow(): number {
+  return offlineWindowMs
+}
 
 export interface RosterSource {
   source?: string | null
@@ -58,13 +70,13 @@ export function showSampleTag(agent: RosterSource): boolean {
 
 /**
  * A registered bot is Offline when the server says so, or when lastSeenAt
- * is at least 10 minutes behind the clock this page is using.
+ * is at least the API offline window behind the clock this page is using.
  */
 export function isRegisteredOffline(agent: RosterPresence, now: number): boolean {
   if (agent.source !== 'registered') return false
   if (typeof agent.lastSeenAt === 'string' && agent.lastSeenAt.length > 0) {
     const seen = Date.parse(agent.lastSeenAt)
-    if (Number.isFinite(seen) && now - seen >= OFFLINE_AFTER_MS) return true
+    if (Number.isFinite(seen) && now - seen >= offlineWindowMs) return true
   }
   return agent.online === false
 }

@@ -6,7 +6,7 @@
 --
 -- The web app reads this table. It does not open OpenClaw files on disk.
 -- kind is long-term | daily | other. Calendar days are not stored: the API
--- derives America/Chicago days from createdAt.
+-- derives calendar days in the saved timezone from createdAt.
 --
 -- updatedAt has no SQL default on purpose, matching Project. Prisma writes
 -- it. A CHECK on kind is intentionally absent: a check failure would surface

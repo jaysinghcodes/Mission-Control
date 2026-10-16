@@ -38,7 +38,10 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `OPENCLAW_GATEWAY_PORT` | `18789` | Gateway probe port |
 | `OPENCLAW_LOG_DIR` | `/tmp/openclaw` | Directory of `openclaw-*.log` |
 | `GIT_SHA` | git, or `git-sha.txt` in the image | Commit shown by `GET /health` |
+| `TZ` | host zone | Server timezone when Settings has not saved one. `TZ=Europe/Berlin` buckets usage and memory on Berlin days |
+| `OFFLINE_AFTER_MS` | `600000` | How long a registered bot can go without a heartbeat before it is offline |
 | `HEALTH_TICK_MS` | `30000` | Socket `health.tick` interval. `0` disables it |
+| `USAGE_RETENTION_DAYS` | `30` | How many calendar days of usage a snapshot may keep, through today |
 | `DOCS_ROOT` | `<repo>/data/docs` | Markdown for `GET /docs`. The browser never receives a filesystem path |
 
 ## Layout

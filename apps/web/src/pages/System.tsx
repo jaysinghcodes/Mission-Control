@@ -20,7 +20,7 @@ import CustomTools from './CustomTools'
  * System. Health, models and spend, and the old observe pages behind a click.
  * Today / last 7 days / month to date read GET /usage?period=24h|7d|month.
  * Those windows are sums of daily points. Today is the calendar day in
- * the API process timezone. A short range shows the API note (for example
+ * the timezone saved in Settings. A short range shows the API note (for example
  * "Showing 3 days of data so far") and only the days that were collected.
  * Dollars come from the price table unless OpenClaw reported a cost.
  */

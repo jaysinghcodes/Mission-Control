@@ -101,6 +101,19 @@ class UsagePointsTest(unittest.TestCase):
         self.assertEqual(sum(by_cost), 3.5)
         self.assertGreaterEqual(len(payload2["points"]), 2)
 
+    def test_named_zone_buckets_the_local_day(self):
+        zone = self.mod.iana_zone("Europe/Berlin")
+        self.assertIsNotNone(zone)
+        instant = int(datetime.datetime(2026, 1, 15, 23, 30, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+        _payload, state = self.mod.usage_points_from_sessions(
+            [session("a", instant, "zai/glm", 1)],
+            instant,
+            None,
+            None,
+            zone,
+        )
+        self.assertEqual(list(state["days"]), ["2026-01-16"])
+
 
 if __name__ == "__main__":
     unittest.main()

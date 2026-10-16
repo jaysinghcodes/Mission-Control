@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
+import { healthTickMs } from '../time/runtime';
 
 /**
  * HealthTickerService — periodic `health.tick` broadcasts.
@@ -25,10 +26,10 @@ export class HealthTickerService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly gateway: LiveActivityGateway) {}
 
   onModuleInit(): void {
-    const ms = Number(process.env.HEALTH_TICK_MS ?? 30000);
-    if (!Number.isFinite(ms) || ms <= 0) {
+    const ms = healthTickMs();
+    if (ms <= 0) {
       this.logger.warn(
-        'HEALTH_TICK_MS disabled (0 or invalid) — no health.tick broadcasts',
+        'HEALTH_TICK_MS disabled (0). No health.tick broadcasts.',
       );
       return;
     }

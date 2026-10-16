@@ -6,7 +6,7 @@
  * have, alone. Names are generic — no personal ids, no "Demo Builder".
  *
  * The offline laptop carries a last-seen offset. Online machines do not:
- * the page shows "Online" for them and a Chicago time for the other.
+ * the page shows "Online" for them and a saved timezone time for the other.
  */
 
 export const DEMO_MISSION =

@@ -252,7 +252,7 @@ export default function AppLayout() {
     )
   }
 
-  if (naming.mode == null) return <FirstRun />
+  if (!naming.setupDone) return <FirstRun />
 
   return (
       <div className="mc-window relative flex h-dvh w-screen overflow-hidden">

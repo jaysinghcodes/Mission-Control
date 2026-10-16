@@ -75,17 +75,19 @@ test('criterion 4: Show sample bots brings defaults back and the saved value is 
   assert.equal(roster.SHOW_SAMPLE_BOTS_LABEL, 'Show sample bots')
 })
 
-test('criterion 5: 10 minutes without a heartbeat is Offline and the idle pose is what we dim', () => {
+test('criterion 5: the API offline window without a heartbeat is Offline and the idle pose is what we dim', () => {
   const seen = 1_000_000
+  const windowMs = 10 * 60 * 1000
+  roster.setOfflineWindowMs(windowMs)
   const bot = registered('ribbon', { lastSeenAt: new Date(seen).toISOString(), online: true, status: 'working' })
-  assert.equal(roster.isRegisteredOffline(bot, seen + roster.OFFLINE_AFTER_MS - 1), false)
-  assert.equal(roster.isRegisteredOffline(bot, seen + roster.OFFLINE_AFTER_MS), true)
-  assert.equal(roster.robotStatusFor(bot, seen + roster.OFFLINE_AFTER_MS, 'working'), 'idle')
+  assert.equal(roster.isRegisteredOffline(bot, seen + windowMs - 1), false)
+  assert.equal(roster.isRegisteredOffline(bot, seen + windowMs), true)
+  assert.equal(roster.robotStatusFor(bot, seen + windowMs, 'working'), 'idle')
   assert.equal(roster.robotStatusFor(bot, seen, 'working'), 'working')
   assert.equal(roster.isRegisteredOffline(registered('ribbon', { online: false, lastSeenAt: new Date(seen).toISOString() }), seen + 1000), true)
-  assert.equal(roster.isRegisteredOffline(sample('forge'), seen + roster.OFFLINE_AFTER_MS), false)
+  assert.equal(roster.isRegisteredOffline(sample('forge'), seen + windowMs), false)
   assert.equal(roster.OFFLINE_LABEL, 'Offline')
-  assert.equal(roster.OFFLINE_AFTER_MS, 10 * 60 * 1000)
+  assert.equal(roster.offlineWindowMsNow(), windowMs)
 })
 
 test('criterion 6: deleting every real bot brings the defaults back', () => {
@@ -105,6 +107,7 @@ test('criterion 7: a snapshot does not remove a registered bot from the visible 
   ]
   const shown = roster.visibleAgents(rows, false)
   assert.deepEqual(shown.map((agent) => agent.id), ['ribbon', 'snap_only'])
+  roster.setOfflineWindowMs(10 * 60 * 1000)
   assert.equal(roster.isRegisteredOffline(shown[0], Date.parse(shown[0].lastSeenAt) + 1000), false)
   const afterSnapshotKeepsRegistered = rows.filter((agent) => agent.source !== 'snapshot')
   assert.ok(roster.visibleAgents(afterSnapshotKeepsRegistered, false).some((agent) => agent.id === 'ribbon'))

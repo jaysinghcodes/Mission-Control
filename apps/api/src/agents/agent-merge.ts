@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { offlineAfterMs } from '../time/runtime';
 import { wireText } from '../wire-text';
 
 /**
@@ -27,7 +28,7 @@ export const NAME_MAX = 200;
 export const TEXT_MAX = 200;
 
 /** A registered bot with no register or heartbeat for this long is offline. */
-export const OFFLINE_AFTER_MS = 10 * 60 * 1000;
+export { offlineAfterMs };
 
 export const REGISTER_FIELDS = [
   'id',
@@ -169,7 +170,7 @@ export function isOnline(
 ): boolean {
   if (source !== 'registered') return true;
   if (!lastSeenAt) return false;
-  return now.getTime() - lastSeenAt.getTime() < OFFLINE_AFTER_MS;
+  return now.getTime() - lastSeenAt.getTime() < offlineAfterMs();
 }
 
 export function asRosterAgent(row: {
