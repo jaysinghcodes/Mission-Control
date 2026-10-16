@@ -24,6 +24,7 @@ type Row = {
   assignee: string | null;
   tags: string[];
   projectId: string | null;
+  description?: string;
 };
 
 type ProjectRow = { id: string; name: string; archivedAt: Date | null };
@@ -131,6 +132,8 @@ function makeFakePrisma() {
                 assignee: row.assignee,
                 priority: row.priority,
                 projectId: row.projectId ?? null,
+                title: row.title,
+                description: row.description ?? '',
               },
             ]
           : [];

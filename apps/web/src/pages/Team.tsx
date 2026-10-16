@@ -10,6 +10,7 @@ import { PageHeader, SoftCard, Btn, AgentName, Kicker, EmptyState, FieldError } 
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { OPERATOR_NAME } from '../config'
 import { formatZoneSaved } from '../lib/zone-day'
+import { deviceStatus } from '../lib/device-status'
 import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
@@ -33,17 +34,12 @@ interface DeviceRow {
   type: string
   online: boolean
   lastSeenAt: string | null
+  pairedAt?: string | null
+  requestedAt?: string | null
 }
 
 interface DevicesResp {
   devices: DeviceRow[]
-}
-
-function deviceStatus(device: DeviceRow): { on: boolean; status: string } {
-  if (device.online) return { on: true, status: 'Online' }
-  const when = device.lastSeenAt ? formatZoneSaved(device.lastSeenAt) : ''
-  if (when) return { on: false, status: `Last seen ${when}` }
-  return { on: false, status: 'Offline' }
 }
 
 export default function Team() {
@@ -230,7 +226,7 @@ export default function Team() {
         ) : devicesQ.data ? (
           <ul className="mt-2 divide-y divide-mc-sep">
             {devices.map((d) => {
-              const status = deviceStatus(d)
+              const status = deviceStatus(d, formatZoneSaved)
               return (
                 <li key={d.id} className="flex items-center gap-3 py-3">
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-mc-fill text-mc-sub2" aria-hidden>

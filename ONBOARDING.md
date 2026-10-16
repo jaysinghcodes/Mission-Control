@@ -121,7 +121,7 @@ With no `openclaw` binary, `--dry-run` exits 0 and posts nothing. That was verif
 
 `bash install.sh` already schedules that command when `openclaw` is on PATH. Do not add a second cron line. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The schedule PATH includes the `openclaw` directory and the `python3` directory. `bash install.sh --uninstall-schedule` removes the schedule, removes the sync timestamp, and leaves every other cron line and service unit alone. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). A missing timestamp is an info line. A stale timestamp is also an info line when no schedule is installed.
 
-Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) when OpenClaw should bring the dashboard up. The operator only says yes. A 401 means the header `x-ingest-token` does not match the API `INGEST_TOKEN`. That line is in [docs/API.md](docs/API.md#41-auth). The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
+Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) when OpenClaw should bring the dashboard up. The operator only says yes. A 401 means the token is wrong, or that route is for the dashboard only. That line is in [docs/API.md](docs/API.md#41-auth). The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
 
 Optional starter limits, merged into `~/.openclaw/openclaw.json` and not a replacement of that file: `agents.defaults.subagents.maxChildrenPerAgent` is 3 and `maxConcurrent` is 4, from `bridge/openclaw.starter.json`. The API does not read those keys. The installer offers this merge and does not edit the file.
 

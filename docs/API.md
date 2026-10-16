@@ -19,7 +19,7 @@ It is a turbo monorepo:
 Data reaches Mission Control two ways:
 
 1. **Snapshot and event intake:** `POST /events` with a shared token. This is how OpenClaw state (agents, sessions, cron, usage, approvals, memory) gets in. The bundled bridge does this for you.
-2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. Run writes use the same `x-ingest-token` header as `POST /events`. Ticket, project, and model writes are dashboard routes: open on loopback, session cookie off loopback.
+2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. Run writes use the same `x-ingest-token` header as `POST /events`. `POST /tickets` and `PATCH /tickets/:id` also accept that token. Project and model writes, ticket delete, and every other dashboard write stay open on loopback and need a session cookie off loopback.
 
 Every event is stored in the `ActivityEvent` table and broadcast live over Socket.IO to open dashboards.
 
@@ -167,9 +167,21 @@ Agent ingest is unchanged. `x-ingest-token` is not counted by the login limit.
 
 `npm run dev` stays frictionless. `HOST` is `127.0.0.1` and the Vite proxy connects from `127.0.0.1`, so the dashboard does not ask for a password.
 
-**Agent ingest.** When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>` on `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, and `PATCH /runs/:id`. A session cookie does not replace that header. Dashboard routes do not check it.
+**Agent ingest.** When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>` on `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, and `PATCH /runs/:id`. A session cookie does not replace that header.
 
-A missing or wrong ingest token, and a missing dashboard session off loopback, are both HTTP 401 and this JSON body:
+`POST /tickets` and `PATCH /tickets/:id` accept that same header when the caller is not loopback and has no session. Send `x-actor-id`, or JSON `actor`, with a registered agent id. Activity stores that id. A token PATCH may set `status`, `assignee`, `title`, and `description` only. Loopback and a session cookie still open those two routes without the header.
+
+Which check applies:
+
+| Routes | Auth |
+| --- | --- |
+| `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, `PATCH /runs/:id` | `x-ingest-token` when `INGEST_TOKEN` is set. A session cookie does not replace it. |
+| `POST /tickets`, `PATCH /tickets/:id` | Loopback, a session cookie, or `x-ingest-token`. A token write also names a registered agent. |
+| Ticket delete, `POST /projects`, `PATCH /projects/:id`, `PUT /mission`, `PUT /settings`, `POST /models`, `DELETE /models/:id`, `POST /approvals/:id/decide`, custom tool writes, `DELETE /agents/:id`, and every other dashboard write | Loopback or a session cookie. A token does not open them. |
+| Dashboard reads, including `GET /sessions`, `GET /health`, `GET /tickets` | Loopback or a session cookie. |
+| `POST /auth/login`, `POST /auth/logout`, `POST /auth/login-reset`, `GET /auth/session` | Open, so a browser can sign in. |
+
+A 401 means the token is wrong, or that route is for the dashboard only. A missing or wrong ingest token on an ingest route, a token on a dashboard only write, and a missing session off loopback, are all HTTP 401 and this JSON body:
 
 ```json
 {"statusCode":401,"message":"unauthorized"}
@@ -204,7 +216,7 @@ Snapshot types write tables. **Warning:** sessions and calendar replace a whole 
 | `approvals.snapshot` | `{ approvals: [{ kind, tag, desc, status?, meta? }] }` | Deletes pending approvals, keeps decided ones, inserts these. `kind` is exec, pair, msg, sess or pr. A `pr` approval needs `meta: { repo, number, branch? }` to merge on approve |
 | `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term" or "daily" or "other", source?, ref? }] }` | Upserts by `id`; removes bridge sourced rows for the agents present that are not in the payload. An empty storable list is a no op and does not wipe the table |
 | `models.snapshot` | `{ agents: [{ id?, name?, provider, model }], models?: [{ provider, model }], openclawVersion? }` | Replaces every model row. Stores `openclawVersion` on the settings row when that string is non empty. A payload with neither array is ignored |
-| `devices.snapshot` | `{ devices?: [{ id, name, type, online, lastSeenAt? }], nodes?: [{ id, name, type, online, lastSeenAt? }] }` | Replaces bridge rows for each array that is present and removes sample devices. A node with the same id replaces that device row. Neither array present is ignored. An empty array clears that kind only |
+| `devices.snapshot` | `{ devices?: [{ id, name, type, online, lastSeenAt?, pairedAt?, requestedAt? }], nodes?: [{ id, name, type, online, lastSeenAt?, pairedAt?, requestedAt? }] }` | Replaces bridge rows for each array that is present and removes sample devices. A node with the same id replaces that device row. Neither array present is ignored. An empty array clears that kind only. `online` is true only for a live connection. `lastSeenAt` is a real last seen time and is empty while online. `pairedAt` is the pairing time. `requestedAt` is a pending request. A paired machine with no connection and no last seen time is not online |
 | `gateway.snapshot` | `{ up: true or false, checkedAt: unix ms, host?, port?, latencyMs?, version? }` | Stored as the latest gateway check. `up` must be a boolean and `checkedAt` must be a number, or the API returns 400 and stores nothing. Under Compose, `GET /system` reads the newest row. A missing row, or `checkedAt` older than `GATEWAY_STATUS_MAX_AGE_MS`, is `unknown` |
 
 ### 4.3 The bridge (recommended for snapshots)
@@ -219,7 +231,7 @@ python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw
 
 With no `openclaw` binary, `--dry-run` exits 0, skips sessions, agents, cron, devices, and nodes, and prints one `gateway.snapshot`. It still does not post. The same command with `--memory-dir bridge/examples/openclaw-memory` prints one `memory.snapshot` plus the gateway check and still does not post.
 
-It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` from the shell, then `.env`, then `http://127.0.0.1` plus the API port (default 3000). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts one `usage.snapshot` of daily points (up to 30 days on first connect when sessions have timestamps). It does not post separate 7 day or month totals. It posts `models.snapshot` from `~/.openclaw/openclaw.json` (or `OPENCLAW_CONFIG_PATH`). When that file has no agent model, it runs `openclaw models list`. A missing file and a missing CLI skip that event. It posts `devices.snapshot` from `openclaw devices list` and `openclaw nodes list`. A source that cannot be read is omitted. An empty reading still posts that array. When paired nodes omit `connected`, the bridge also reads `openclaw nodes status`. Every run also probes the gateway at `127.0.0.1` on `OPENCLAW_GATEWAY_PORT` (default 18789) and posts `gateway.snapshot` with `up`, `checkedAt`, and `version` when the CLI prints one. A refused connection is `up: false`. That post uses `x-ingest-token`. A gateway only run does not write the sync stamp. A successful OpenClaw run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). Doctor fails when that timestamp is older than `MC_BRIDGE_STALE_SECONDS` (default 600). Gateway down or unknown does not fail doctor.
+It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` from the shell, then `.env`, then `http://127.0.0.1` plus the API port (default 3000). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts one `usage.snapshot` of daily points (up to 30 days on first connect when sessions have timestamps). It does not post separate 7 day or month totals. It posts `models.snapshot` from `~/.openclaw/openclaw.json` (or `OPENCLAW_CONFIG_PATH`). When that file has no agent model, it runs `openclaw models list`. A missing file and a missing CLI skip that event. It posts `devices.snapshot` from `openclaw devices list` and `openclaw nodes list`. A source that cannot be read is omitted. An empty reading still posts that array. When paired nodes omit `connected`, the bridge also reads `openclaw nodes status`. A paired device is online only when that source says it is connected, or it keeps a real last seen time. `approvedAtMs` is `pairedAt`, not `lastSeenAt`. A pending request is `requestedAt`. Every run also probes the gateway at `127.0.0.1` on `OPENCLAW_GATEWAY_PORT` (default 18789) and posts `gateway.snapshot` with `up`, `checkedAt`, and `version` when the CLI prints one. A refused connection is `up: false`. That post uses `x-ingest-token`. A gateway only run does not write the sync stamp. A successful OpenClaw run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). Doctor fails when that timestamp is older than `MC_BRIDGE_STALE_SECONDS` (default 600). Gateway down or unknown does not fail doctor.
 
 `bash install.sh` installs that schedule when `openclaw` is on PATH. You do not add a cron line by hand. `bash install.sh --uninstall-schedule` removes it. The same script is what the schedule runs:
 
@@ -235,10 +247,10 @@ Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merg
 | Call | Body | Notes |
 | --- | --- | --- |
 | `GET /tickets?status=&projectId=` | | Newest 100. `projectId=none` gives unassigned |
-| `POST /tickets` | `{ title, status?, priority?, assignee?, tags?: string[], projectId? }` | 201. `title` required. `status` only `backlog` (default) or `todo`. `priority` defaults `med` (high, med, low). Key auto assigned as `MC-150`, `MC-151`... |
-| `PATCH /tickets/:id` | `{ status?, assignee?, priority?, projectId? }` | `:id` is the ticket id, not the key. Status must be one of `backlog`, `todo`, `build`, `qa`, `review`, `done` (`inprogress` is a legacy alias of `build`). `projectId: null` unassigns |
+| `POST /tickets` | `{ title, status?, priority?, assignee?, tags?: string[], projectId?, description?, actor? }` | 201. `title` required. `status` only `backlog` (default) or `todo`. `priority` defaults `med` (high, med, low). `description` defaults empty. Key auto assigned as `MC-150`, `MC-151`... |
+| `PATCH /tickets/:id` | `{ status?, assignee?, title?, description?, priority?, projectId? }` | `:id` is the ticket id, not the key. Status must be one of `backlog`, `todo`, `build`, `qa`, `review`, `done` (`inprogress` is a legacy alias of `build`). `projectId: null` unassigns. A token may send `status`, `assignee`, `title`, and `description` only |
 
-Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Ticket writes are dashboard routes (section 4.1): open on loopback, session cookie off loopback. A checked create with `{"title":"Onboarding check","status":"todo"}` on loopback returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
+Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Loopback and a session cookie can call both routes. An ingest token can too, when `x-actor-id` or `actor` is a registered agent id, and Activity stores that id (section 4.1). A token cannot delete a ticket and cannot patch `priority`, `projectId`, or `tags`. A checked create with `{"title":"Onboarding check","status":"todo"}` on loopback returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
 
 ### 4.5 Projects
 
@@ -408,7 +420,7 @@ That prints `204`.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
 * Devices have no dashboard write route. `devices.snapshot` fills them from `openclaw devices list` and `openclaw nodes list`. `npm run seed:demo` still writes three sample devices, and the next snapshot removes those sample rows.
-* Do not publish port 3000 on a non loopback address without `INGEST_TOKEN` and a dashboard password. The API refuses that start. With the ingest token set, an ingest call that omits `x-ingest-token` is 401. A dashboard call off loopback without a session cookie is also 401.
+* Do not publish port 3000 on a non loopback address without `INGEST_TOKEN` and a dashboard password. The API refuses that start. With the ingest token set, an ingest call that omits `x-ingest-token` is 401. A dashboard call off loopback without a session cookie is also 401, except `POST /tickets` and `PATCH /tickets/:id` when the ingest token and a registered agent id are sent.
 
 ## 7. First read checklist
 
@@ -434,13 +446,13 @@ The operator paste is [PASTE_IN.md](PASTE_IN.md). It runs the installer, reports
      -H "x-ingest-token: $MC_TOKEN" \
      -d '{"type":"run.completed","payload":{"name":"onboarding check","agent":"YOUR_NAME","summary":"Mission Control connected"}}'
    ```
-   Expect `{"accepted":true,...}` and HTTP 202. A 401 means the token does not match the api.
+   Expect `{"accepted":true,...}` and HTTP 202. A 401 on this ingest call means the token does not match the api. A 401 on another route can also mean that route is for the dashboard only.
 5. **Confirm it shows up.**
    ```bash
    curl -s 'http://127.0.0.1:3000/activity?limit=5'
    ```
    Your event should be first. A checked call returned 200, and the first row was `run.completed` with name `onboarding check`. Ask your operator to open http://localhost:5173/#/office and look for that name in the activity list. The floor seats will not move because of this event.
-6. **File a test ticket and move it.** Ticket routes are dashboard writes. On loopback they do not use `x-ingest-token`. Off loopback, including Compose, send the session cookie.
+6. **File a test ticket and move it.** On loopback the calls below need no token. On Compose, add `x-ingest-token: $MC_TOKEN` and `x-actor-id: YOUR_AGENT_ID` (a registered agent id). A token may set status, assignee, title, and description. Activity stores that agent id. Ticket delete and every other dashboard write still need loopback or a session cookie. A 401 means the token is wrong, or that route is for the dashboard only.
    ```bash
    curl -sS -X POST http://127.0.0.1:3000/tickets \
      -H 'content-type: application/json' \

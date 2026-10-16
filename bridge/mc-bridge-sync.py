@@ -423,8 +423,51 @@ def _pending_id(row: Dict[str, Any], live_ids: Set[str]) -> Optional[str]:
     return pid
 
 
+def _connection_fields(item: Dict[str, Any], pending: bool) -> Dict[str, Any]:
+    """Online only from a real connection. Pairing time is never last seen.
+
+    `connected: true` is online, and lastSeenAt is then empty. A last seen
+    field (lastSeenAt, lastConnectedAtMs, connectedAtMs) is lastSeenAt only
+    while the machine is not online. approvedAtMs and pairedAt are pairedAt.
+    A pending request uses requestedAt and is not online.
+    """
+    if pending:
+        requested = to_ms(
+            first(item, "requestedAtMs", "requestedAt", "ts", "createdAtMs")
+        )
+        return {
+            "online": False,
+            "lastSeenAt": None,
+            "pairedAt": None,
+            "requestedAt": _iso_ms(requested),
+        }
+    online = item.get("connected") is True
+    seen = to_ms(
+        first(
+            item,
+            "lastSeenAtMs",
+            "lastSeenAt",
+            "lastConnectedAtMs",
+            "connectedAtMs",
+        )
+    )
+    paired = to_ms(
+        first(item, "pairedAtMs", "pairedAt", "approvedAtMs", "createdAtMs")
+    )
+    return {
+        "online": online,
+        "lastSeenAt": None if online else _iso_ms(seen),
+        "pairedAt": _iso_ms(paired),
+        "requestedAt": None,
+    }
+
+
 def map_openclaw_devices(raw: Any) -> Optional[List[Dict[str, Any]]]:
-    """Paired and pending devices, or None when the payload is not a list."""
+    """Paired and pending devices, or None when the payload is not a list.
+
+    A paired row with no connected flag and no last seen field is paired,
+    not online. approvedAtMs is pairedAt, never lastSeenAt.
+    """
     parsed = split_pair_payload(raw)
     if parsed is None:
         return None
@@ -438,8 +481,7 @@ def map_openclaw_devices(raw: Any) -> Optional[List[Dict[str, Any]]]:
             "id": did,
             "name": _machine_name(item, did),
             "type": _device_type(item),
-            "online": True,
-            "lastSeenAt": _iso_ms(to_ms(first(item, "approvedAtMs", "createdAtMs"))),
+            **_connection_fields(item, False),
         }
     for item in pending:
         pid = _pending_id(item, set(rows))
@@ -450,8 +492,7 @@ def map_openclaw_devices(raw: Any) -> Optional[List[Dict[str, Any]]]:
             "id": pid,
             "name": _machine_name(item, label),
             "type": "pending",
-            "online": False,
-            "lastSeenAt": _iso_ms(to_ms(first(item, "ts", "createdAtMs"))),
+            **_connection_fields(item, True),
         }
     return list(rows.values())
 
@@ -459,8 +500,8 @@ def map_openclaw_devices(raw: Any) -> Optional[List[Dict[str, Any]]]:
 def map_openclaw_nodes(raw: Any) -> Optional[List[Dict[str, Any]]]:
     """Paired and pending nodes, or None when the payload is not a list.
 
-    `connected: true` is online. A missing flag stays offline and keeps
-    lastSeenAt, so a list without live state does not pretend the node is up.
+    `connected: true` is online. A missing flag stays offline. lastSeenAt
+    comes from a last seen field, not from approvedAtMs.
     """
     parsed = split_pair_payload(raw)
     if parsed is None:
@@ -472,14 +513,11 @@ def map_openclaw_nodes(raw: Any) -> Optional[List[Dict[str, Any]]]:
         nid = _clip(first(item, "nodeId", "deviceId", "id"), 200)
         if not nid or nid.startswith("demo-"):
             continue
-        online = item.get("connected") is True
-        seen = _iso_ms(to_ms(first(item, "lastConnectedAtMs", "connectedAtMs", "approvedAtMs")))
         rows[nid] = {
             "id": nid,
             "name": _machine_name(item, nid),
             "type": _node_type(item),
-            "online": online,
-            "lastSeenAt": None if online else seen,
+            **_connection_fields(item, False),
         }
     for item in pending:
         pid = _pending_id(item, set(rows))
@@ -490,8 +528,7 @@ def map_openclaw_nodes(raw: Any) -> Optional[List[Dict[str, Any]]]:
             "id": pid,
             "name": _machine_name(item, label),
             "type": "pending",
-            "online": False,
-            "lastSeenAt": _iso_ms(to_ms(first(item, "ts", "createdAtMs"))),
+            **_connection_fields(item, True),
         }
     return list(rows.values())
 

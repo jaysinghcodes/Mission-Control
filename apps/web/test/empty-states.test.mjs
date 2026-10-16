@@ -17,7 +17,8 @@ test('approvals, logs, docs, sessions, and devices explain an empty install', as
   const docs = await source('../src/pages/Docs.tsx')
   const sessions = await source('../src/pages/Sessions.tsx')
   const team = await source('../src/pages/Team.tsx')
-  for (const text of [approvals, logs, docs, sessions, team]) {
+  const deviceStatus = await source('../src/lib/device-status.ts')
+  for (const text of [approvals, logs, docs, sessions, team, deviceStatus]) {
     assert.equal(DASH.test(text), false)
     assert.equal(text.includes('->'), false)
   }
@@ -30,4 +31,7 @@ test('approvals, logs, docs, sessions, and devices explain an empty install', as
   assert.match(sessions, /sessions\.snapshot/)
   assert.match(team, /openclaw devices list/)
   assert.match(team, /openclaw nodes list/)
+  assert.match(deviceStatus, /Requested /)
+  assert.match(deviceStatus, /Paired /)
+  assert.match(deviceStatus, /Last seen /)
 })

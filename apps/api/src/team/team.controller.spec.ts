@@ -211,6 +211,8 @@ describe('Team mission and devices', () => {
         type: 'server',
         online: true,
         lastSeenAt: null,
+        pairedAt: null,
+        requestedAt: null,
       },
       {
         id: 'b',
@@ -218,6 +220,8 @@ describe('Team mission and devices', () => {
         type: 'laptop',
         online: false,
         lastSeenAt: '2026-10-06T15:04:00.000Z',
+        pairedAt: null,
+        requestedAt: null,
       },
     ]);
     expect(res.body).not.toHaveProperty('error');

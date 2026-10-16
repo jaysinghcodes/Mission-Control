@@ -109,17 +109,45 @@ describe('devices.snapshot', () => {
           id: 'mac-1',
           name: 'Kitchen Mac',
           type: 'macos',
-          online: true,
+          online: false,
           lastSeenAt: 1_700_000_000_000,
+          pairedAt: '2026-10-01T00:00:00.000Z',
+          requestedAt: '2026-09-01T00:00:00.000Z',
         },
       ],
     });
     expect(parsed?.rows).toHaveLength(1);
     expect(parsed?.rows[0].kind).toBe('node');
     expect(parsed?.rows[0].type).toBe('macos');
-    expect(parsed?.rows[0].online).toBe(true);
+    expect(parsed?.rows[0].online).toBe(false);
     expect(parsed?.rows[0].lastSeenAt?.toISOString()).toBe(
       new Date(1_700_000_000_000).toISOString(),
+    );
+    expect(parsed?.rows[0].pairedAt?.toISOString()).toBe(
+      '2026-10-01T00:00:00.000Z',
+    );
+    expect(parsed?.rows[0].requestedAt?.toISOString()).toBe(
+      '2026-09-01T00:00:00.000Z',
+    );
+  });
+
+  it('drops last seen while the machine is online', () => {
+    const parsed = deviceRowsFromPayload({
+      devices: [
+        {
+          id: 'mac-1',
+          name: 'Kitchen Mac',
+          type: 'operator',
+          online: true,
+          lastSeenAt: '2026-10-16T12:00:00.000Z',
+          pairedAt: '2023-07-22T00:00:00.000Z',
+        },
+      ],
+    });
+    expect(parsed?.rows[0].online).toBe(true);
+    expect(parsed?.rows[0].lastSeenAt).toBeNull();
+    expect(parsed?.rows[0].pairedAt?.toISOString()).toBe(
+      '2023-07-22T00:00:00.000Z',
     );
   });
 

@@ -409,6 +409,8 @@ export type DeviceWrite = {
   type: string;
   online: boolean;
   lastSeenAt: Date | null;
+  pairedAt: Date | null;
+  requestedAt: Date | null;
   source: 'bridge';
   kind: 'device' | 'node';
 };
@@ -454,12 +456,15 @@ function oneDevice(item: unknown, kind: 'device' | 'node'): DeviceWrite | null {
   const fallback = kind === 'node' ? 'node' : 'device';
   const name = textField(rec.name, 200) || id;
   const type = textField(rec.type, 80) || fallback;
+  const online = rec.online === true;
   return {
     id,
     name,
     type,
-    online: rec.online === true,
-    lastSeenAt: seenAt(rec.lastSeenAt),
+    online,
+    lastSeenAt: online ? null : seenAt(rec.lastSeenAt),
+    pairedAt: seenAt(rec.pairedAt),
+    requestedAt: seenAt(rec.requestedAt),
     source: 'bridge',
     kind,
   };

@@ -107,6 +107,8 @@ model Ticket {
   /// project row must not delete its tickets (archive is the supported path).
   projectId String?
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  /// Optional note. Empty when the caller omitted it.
+  description String @default("")
   createdAt DateTime @default(now())
   runs      Run[]
 
@@ -235,19 +237,22 @@ model Setting {
 
 /// A machine listed on the Team page. `npm run seed:demo` writes three
 /// sample rows (`source` demo). `devices.snapshot` writes live rows
-/// (`source` bridge) from OpenClaw devices and nodes. `online` is the
-/// status flag. `lastSeenAt` is when we last saw an offline machine
-/// (the page renders that instant in the timezone saved in settings).
-/// `kind` is device or node so one failed CLI does not wipe the other.
+/// (`source` bridge) from OpenClaw devices and nodes. `online` is true
+/// only when the source reported a live connection. `lastSeenAt` is a
+/// real last seen time, never the pairing time. `pairedAt` is when it
+/// was paired. `requestedAt` is a pending request. `kind` is device or
+/// node so one failed CLI does not wipe the other.
 model Device {
-  id         String    @id
-  name       String
-  type       String
-  online     Boolean   @default(false)
-  lastSeenAt DateTime?
-  source     String    @default("demo")
-  kind       String    @default("device")
-  updatedAt  DateTime  @updatedAt
+  id          String    @id
+  name        String
+  type        String
+  online      Boolean   @default(false)
+  lastSeenAt  DateTime?
+  pairedAt    DateTime?
+  requestedAt DateTime?
+  source      String    @default("demo")
+  kind        String    @default("device")
+  updatedAt   DateTime  @updatedAt
 }
 
 /// Experimental custom tool (ticket 10). A named prompt template plus the

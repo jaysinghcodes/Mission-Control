@@ -3,6 +3,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -26,10 +27,16 @@ class DevicesSnapshotTest(unittest.TestCase):
         node_rows = mod.map_openclaw_nodes(nodes)
         self.assertEqual([row["id"] for row in device_rows], ["mac-1", "pending:req-1"])
         self.assertEqual(device_rows[0]["type"], "operator")
-        self.assertTrue(device_rows[0]["online"])
+        self.assertFalse(device_rows[0]["online"])
+        self.assertIsNone(device_rows[0]["lastSeenAt"])
+        self.assertIsNotNone(device_rows[0]["pairedAt"])
+        self.assertIsNone(device_rows[0]["requestedAt"])
         self.assertEqual(device_rows[1]["name"], "New Phone")
         self.assertFalse(device_rows[1]["online"])
         self.assertEqual(device_rows[1]["type"], "pending")
+        self.assertIsNone(device_rows[1]["lastSeenAt"])
+        self.assertIsNone(device_rows[1]["pairedAt"])
+        self.assertIsNotNone(device_rows[1]["requestedAt"])
         blob = json.dumps({"devices": device_rows, "nodes": node_rows})
         self.assertNotIn("secret-token", blob)
         by_id = {row["id"]: row for row in node_rows}
@@ -39,6 +46,7 @@ class DevicesSnapshotTest(unittest.TestCase):
         self.assertIsNone(by_id["mac-1"]["lastSeenAt"])
         self.assertFalse(by_id["phone-1"]["online"])
         self.assertIsNotNone(by_id["phone-1"]["lastSeenAt"])
+        self.assertIsNone(by_id["phone-1"]["requestedAt"])
 
     def test_unrecognized_shape_skips_and_empty_list_posts(self):
         mod = load()
@@ -85,6 +93,47 @@ class DevicesSnapshotTest(unittest.TestCase):
         self.assertIn("mac-1", [row["id"] for row in payload["devices"]])
         self.assertIn("phone-1", [row["id"] for row in payload["nodes"]])
         self.assertNotIn("secret-token", json.dumps(payload))
+        paired = next(row for row in payload["devices"] if row["id"] == "mac-1")
+        self.assertFalse(paired["online"])
+        self.assertIsNone(paired["lastSeenAt"])
+
+    def test_dry_run_paired_device_without_connection_is_not_online(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "devices.json").write_text(
+                json.dumps(
+                    {
+                        "paired": [
+                            {
+                                "deviceId": "studio-1",
+                                "displayName": "Studio",
+                                "roles": ["operator"],
+                                "approvedAtMs": 1690000000000,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, str(BRIDGE), "--dry-run", "--from-dir", str(folder)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+        machines = [event for event in events if event.get("type") == "devices.snapshot"]
+        self.assertEqual(len(machines), 1)
+        payload = machines[0]["payload"]
+        self.assertNotIn("nodes", payload)
+        self.assertEqual(len(payload["devices"]), 1)
+        row = payload["devices"][0]
+        self.assertEqual(row["id"], "studio-1")
+        self.assertFalse(row["online"])
+        self.assertIsNone(row["lastSeenAt"])
+        self.assertIsNotNone(row["pairedAt"])
+        self.assertIsNone(row["requestedAt"])
 
 
 if __name__ == "__main__":
