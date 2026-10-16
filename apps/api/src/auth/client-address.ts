@@ -1,14 +1,17 @@
 /**
  * Who is calling, from the TCP socket.
  *
- * X-Forwarded-For is ignored unless the immediate peer is a trusted proxy.
- * A client cannot claim to be loopback by sending that header.
+ * X-Forwarded-For and X-Real-IP are ignored unless the immediate peer is
+ * a trusted proxy or the bundled nginx. A client cannot claim to be
+ * loopback by sending those headers.
  */
 
 export interface ClientAddressInput {
   remoteAddress?: string | null;
   forwardedFor?: string | string[] | null;
+  realIp?: string | string[] | null;
   trustedProxies?: string | null;
+  bundledPeers?: string[] | null;
 }
 
 /** 127.0.0.0/8 and ::1. 0.0.0.0 and :: are not loopback. */
@@ -27,17 +30,19 @@ export function isLoopbackAddress(host: string | null | undefined): boolean {
 
 /**
  * The address this process should judge. The socket address wins.
- * A trusted proxy may supply the client hop in X-Forwarded-For.
- * The rightmost hop that is not itself a trusted proxy is the client.
+ * A trusted proxy, or the bundled nginx, may supply the client hop.
+ * X-Forwarded-For is the chain. X-Real-IP is used only when that chain
+ * is empty. The rightmost hop that is not itself trusted is the client.
  */
 export function clientAddress(input: ClientAddressInput): string | null {
   const peer = normalizeIp(input.remoteAddress);
   if (!peer) return null;
-  const trusted = parseTrusted(input.trustedProxies);
+  const trusted = trustedEntries(input.trustedProxies, input.bundledPeers);
   if (trusted.length === 0 || !matchesTrusted(peer, trusted)) return peer;
   const forwarded = forwardedHops(input.forwardedFor);
-  for (let i = forwarded.length - 1; i >= 0; i -= 1) {
-    const hop = forwarded[i];
+  const hops = forwarded.length > 0 ? forwarded : forwardedHops(input.realIp);
+  for (let i = hops.length - 1; i >= 0; i -= 1) {
+    const hop = hops[i];
     if (!matchesTrusted(hop, trusted)) return hop;
   }
   return peer;
@@ -81,6 +86,18 @@ function forwardedHops(value: string | string[] | null | undefined): string[] {
     if (ip) hops.push(ip);
   }
   return hops;
+}
+
+function trustedEntries(
+  trustedProxies: string | null | undefined,
+  bundledPeers: string[] | null | undefined,
+): string[] {
+  const entries = parseTrusted(trustedProxies);
+  for (const peer of bundledPeers ?? []) {
+    const ip = normalizeIp(peer);
+    if (ip && !entries.includes(ip)) entries.push(ip);
+  }
+  return entries;
 }
 
 function parseTrusted(raw: string | null | undefined): string[] {

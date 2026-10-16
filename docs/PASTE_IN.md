@@ -18,7 +18,7 @@ Usage prices session tokens from `config/prices.json`. Copy a model into `config
 
 ## Report the URL
 
-Tell your operator the URL the installer printed. Say that `INGEST_TOKEN` lives in `.env` and that the dashboard password was printed once. Do not print the token or the password hash. If doctor prints a failing line, include that line. A missing OpenClaw command is an info line. When a schedule is installed, a sync older than `MC_BRIDGE_STALE_SECONDS` fails doctor. On Compose the dashboard asks for that password, because the API sees the Docker network and not loopback. Log out ends every session, so a copied cookie stops working after a restart. Too many wrong passwords from another machine ask the operator to wait. Loopback stays open. Agent ingest with `x-ingest-token` is not part of that wait.
+Tell your operator the URL the installer printed. Say that `INGEST_TOKEN` lives in `.env` and that the dashboard password was printed once. Do not print the token or the password hash. If doctor prints a failing line, include that line. A missing OpenClaw command is an info line. When a schedule is installed, a sync older than `MC_BRIDGE_STALE_SECONDS` fails doctor. On Compose the dashboard asks for that password, because the API sees the Docker network and not loopback. nginx passes the client address, so the host and a remote client do not share a login lock. Log out ends every session, so a copied cookie stops working after a restart. Too many wrong passwords ask the operator to wait. `npm run login:reset` clears that lock. Under Compose run `docker compose exec api npm run login:reset`. Loopback stays open. Agent ingest with `x-ingest-token` is not part of that wait.
 
 ## Register and heartbeat
 

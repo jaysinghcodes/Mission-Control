@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { Request, Response } from 'express';
+import { currentBundledPeers } from './bundled-proxy';
 import {
   clientAddress,
   isTrustedProxyPeer,
@@ -39,6 +40,7 @@ export interface LoopbackRequest {
   headers: {
     cookie?: string | string[];
     'x-forwarded-for'?: string | string[];
+    'x-real-ip'?: string | string[];
   };
 }
 
@@ -49,7 +51,9 @@ export function requestLoopback(
   return requestIsLoopback({
     remoteAddress: req.socket?.remoteAddress,
     forwardedFor: req.headers['x-forwarded-for'],
+    realIp: req.headers['x-real-ip'],
     trustedProxies: trustedProxyList(env),
+    bundledPeers: currentBundledPeers(env),
   });
 }
 
@@ -169,11 +173,14 @@ export function verifySession(
 
 export function peerAddress(
   req: Pick<Request, 'socket' | 'headers'>,
+  env: NodeJS.ProcessEnv = process.env,
 ): string | null {
   return clientAddress({
     remoteAddress: req.socket?.remoteAddress,
     forwardedFor: req.headers['x-forwarded-for'],
-    trustedProxies: trustedProxyList(),
+    realIp: req.headers['x-real-ip'],
+    trustedProxies: trustedProxyList(env),
+    bundledPeers: currentBundledPeers(env),
   });
 }
 
@@ -201,6 +208,7 @@ function cookieSecure(req: Request | undefined): boolean {
     ?.trim()
     .toLowerCase();
   if (first !== 'https') return false;
+  // The bundled nginx is plain HTTP. Only TRUSTED_PROXY may set Secure.
   return isTrustedProxyPeer(req.socket?.remoteAddress, trustedProxyList());
 }
 

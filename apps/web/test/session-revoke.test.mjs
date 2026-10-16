@@ -10,7 +10,7 @@ const DASH = /[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]/
 test('login and settings name the rate limit and the revoke control', async () => {
   const session = await readFile(new URL('../src/lib/session.tsx', import.meta.url), 'utf8')
   const settings = await readFile(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8')
-  assert.match(session, /Too many tries\. Try again in a minute\./)
+  assert.match(session, /Too many tries\. Try again in a minute\. npm run login:reset clears the lock\./)
   assert.match(session, /status === 429/)
   assert.match(settings, /Revoke sessions/)
   assert.match(settings, /data-settings-revoke="true"/)

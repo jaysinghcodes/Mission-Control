@@ -56,8 +56,9 @@ export type ActivityEventType =
  *
  * Security:
  *  - Off loopback, the handshake must carry the dashboard session cookie.
- *    Loopback is the socket address, not X-Forwarded-For, unless TRUSTED_PROXY
- *    lists that peer. The web bundle does not contain a socket token.
+ *    Loopback is the socket address. X-Forwarded-For and X-Real-IP count
+ *    only when the peer is the bundled nginx or TRUSTED_PROXY lists it.
+ *    The web bundle does not contain a socket token.
  *  - The gateway only emits server-authored events; it never echoes
  *    client-supplied payloads.
  */
@@ -146,12 +147,14 @@ function socketAllowed(client: Socket): boolean {
   const headers = client.handshake?.headers ?? {};
   const cookie = headers.cookie;
   const forwarded = headers['x-forwarded-for'];
+  const realIp = headers['x-real-ip'];
   if (
     requestLoopback({
       socket: { remoteAddress: client.handshake?.address },
       headers: {
         cookie,
         'x-forwarded-for': forwarded,
+        'x-real-ip': realIp,
       },
     })
   ) {

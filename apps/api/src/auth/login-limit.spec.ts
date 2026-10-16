@@ -41,7 +41,9 @@ describe('login rate limit', () => {
       windowSeconds: 60,
       maxBackoffSeconds: 900,
     });
-    expect(LOGIN_LIMIT_MESSAGE).toBe('Too many tries. Try again in a minute.');
+    expect(LOGIN_LIMIT_MESSAGE).toBe(
+      'Too many tries. Try again in a minute. npm run login:reset clears the lock.',
+    );
   });
 
   it('blocks the 6th try inside the window and allows it after the wait', () => {

@@ -1,6 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import {
+  refreshBundledPeers,
+  scheduleBundledPeerRefresh,
+} from './auth/bundled-proxy';
 import { bindHost, evaluateWriteBind } from './auth/write-token';
 import { evaluateDashboardBind } from './auth/password';
 import { bootApi } from './boot';
@@ -57,6 +61,9 @@ async function bootstrap() {
     origin: webOrigins(),
     credentials: true,
   });
+
+  await refreshBundledPeers();
+  scheduleBundledPeerRefresh();
 
   await app.listen(process.env.PORT ?? 3000, host);
 

@@ -6,9 +6,10 @@ import { requestLoopback, validSession } from './session';
 /**
  * Dashboard reads and writes.
  *
- * Loopback, judged from the socket address, stays open.
- * Any other peer needs a session cookie. Agent ingest and the login
- * routes skip this check.
+ * Loopback stays open. The address is the socket, unless the peer is
+ * the bundled nginx or listed in TRUSTED_PROXY. Then the forwarded
+ * client is used. Any other peer needs a session cookie. Agent ingest
+ * and the login routes skip this check.
  */
 @Injectable()
 export class SessionAuthMiddleware implements NestMiddleware {

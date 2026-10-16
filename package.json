@@ -10,12 +10,13 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "test": "turbo run test && node --test scripts/doctor.test.mjs scripts/fresh-clone.test.mjs scripts/compose-static.test.mjs scripts/install.test.mjs scripts/paste-in.test.mjs",
+    "test": "turbo run test && node --test scripts/doctor.test.mjs scripts/fresh-clone.test.mjs scripts/compose-static.test.mjs scripts/install.test.mjs scripts/paste-in.test.mjs scripts/nginx-client-ip.test.mjs",
     "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
     "seed:demo": "npm run seed:demo --workspace api",
     "seed:clear": "npm run seed:clear --workspace api",
+    "login:reset": "npm run login:reset --workspace api",
     "doctor": "node scripts/doctor.mjs"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ import { AppModule } from '../app.module';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { hashPassword } from './password';
 import { isIngestWrite, skipsSession } from './route-class';
+import { resetBundledPeerCache } from './bundled-proxy';
 import {
   LOGIN_LIMIT_MESSAGE,
   resetLoginLimits,
@@ -106,6 +107,8 @@ describe('dashboard session', () => {
 
   it('ignores X-Forwarded-For when the peer is not a trusted proxy', async () => {
     delete process.env.TRUSTED_PROXY;
+    delete process.env.BUNDLED_PROXY;
+    resetBundledPeerCache();
     const spoofed = await request(app.getHttpServer())
       .get('/sessions')
       .set('x-forwarded-for', REMOTE);
@@ -171,6 +174,8 @@ describe('dashboard session', () => {
     const ip = lanIp();
     if (!ip) return;
     delete process.env.TRUSTED_PROXY;
+    delete process.env.BUNDLED_PROXY;
+    resetBundledPeerCache();
     await app.listen(0, '0.0.0.0');
     // The HTTP server type from Nest is any here. Read the port without using it.
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
@@ -270,6 +275,137 @@ describe('dashboard session', () => {
       expect(ok.status).toBe(204);
     } finally {
       resetLoginLimits();
+    }
+  });
+
+  it('gives the host its own bucket and clears it with login reset', async () => {
+    const savedProxy = process.env.TRUSTED_PROXY;
+    const savedBundled = process.env.BUNDLED_PROXY;
+    delete process.env.TRUSTED_PROXY;
+    process.env.BUNDLED_PROXY = '127.0.0.1';
+    resetBundledPeerCache();
+    resetLoginLimits();
+    const remote = '203.0.113.77';
+    const host = '172.18.0.1';
+    const other = '198.51.100.77';
+    try {
+      for (let i = 0; i < 6; i += 1) {
+        const loop = await request(app.getHttpServer())
+          .post('/auth/login')
+          .send({ password: 'nope' });
+        expect(loop.status).toBe(401);
+        expect(loop.headers['retry-after']).toBeUndefined();
+      }
+
+      for (let i = 0; i < 5; i += 1) {
+        const wrong = await request(app.getHttpServer())
+          .post('/auth/login')
+          .set('x-forwarded-for', remote)
+          .set('x-real-ip', '198.51.100.4')
+          .send({ password: 'nope' });
+        expect(wrong.status).toBe(401);
+      }
+      const blocked = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-forwarded-for', remote)
+        .send({ password: PASSWORD });
+      expect(blocked.status).toBe(429);
+      expect(blocked.body).toEqual({
+        statusCode: 429,
+        message: LOGIN_LIMIT_MESSAGE,
+      });
+      expect(LOGIN_LIMIT_MESSAGE).toContain('npm run login:reset');
+
+      const owner = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-forwarded-for', host)
+        .set('x-real-ip', remote)
+        .send({ password: PASSWORD });
+      expect(owner.status).toBe(204);
+
+      const second = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-real-ip', other)
+        .send({ password: 'nope' });
+      expect(second.status).toBe(401);
+      expect(second.headers['retry-after']).toBeUndefined();
+
+      const ingest = await request(app.getHttpServer())
+        .post('/events')
+        .set('x-forwarded-for', remote)
+        .set('x-ingest-token', TOKEN)
+        .send({ type: 'health.tick', payload: {} });
+      expect(ingest.status).not.toBe(429);
+
+      const reset = await request(app.getHttpServer())
+        .post('/auth/login-reset')
+        .set('x-forwarded-for', remote)
+        .set('x-real-ip', '127.0.0.1');
+      expect(reset.status).toBe(204);
+      const again = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-forwarded-for', remote)
+        .send({ password: PASSWORD });
+      expect(again.status).toBe(204);
+    } finally {
+      resetLoginLimits();
+      resetBundledPeerCache();
+      if (savedProxy === undefined) delete process.env.TRUSTED_PROXY;
+      else process.env.TRUSTED_PROXY = savedProxy;
+      if (savedBundled === undefined) delete process.env.BUNDLED_PROXY;
+      else process.env.BUNDLED_PROXY = savedBundled;
+    }
+  });
+
+  it('ignores a spoofed header on the API port and will not reset from that socket', async () => {
+    const ip = lanIp();
+    if (!ip) return;
+    const savedProxy = process.env.TRUSTED_PROXY;
+    delete process.env.TRUSTED_PROXY;
+    delete process.env.BUNDLED_PROXY;
+    resetBundledPeerCache();
+    resetLoginLimits();
+    try {
+      // The HTTP server type from Nest is any here.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      const current: unknown = app.getHttpServer().address();
+      if (!current) await app.listen(0, '0.0.0.0');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      const port = listenPort(app.getHttpServer().address());
+      const post = (path: string, xff: string, password?: string) =>
+        fetch(`http://${ip}:${port}${path}`, {
+          method: 'POST',
+          headers: {
+            ...(password === undefined
+              ? {}
+              : { 'content-type': 'application/json' }),
+            'x-forwarded-for': xff,
+            'x-real-ip': '127.0.0.1',
+          },
+          body:
+            password === undefined ? undefined : JSON.stringify({ password }),
+        });
+      for (let i = 0; i < 5; i += 1) {
+        const wrong = await post('/auth/login', '203.0.113.9', 'nope');
+        expect(wrong.status).toBe(401);
+      }
+      const locked = await post('/auth/login', '198.51.100.9', PASSWORD);
+      expect(locked.status).toBe(429);
+      const spoofedReset = await post('/auth/login-reset', '127.0.0.1');
+      expect(spoofedReset.status).toBe(401);
+      const still = await post('/auth/login', '203.0.113.9', PASSWORD);
+      expect(still.status).toBe(429);
+      const cleared = await request(app.getHttpServer()).post(
+        '/auth/login-reset',
+      );
+      expect(cleared.status).toBe(204);
+      const after = await post('/auth/login', '203.0.113.9', PASSWORD);
+      expect(after.status).toBe(204);
+    } finally {
+      resetLoginLimits();
+      resetBundledPeerCache();
+      if (savedProxy === undefined) delete process.env.TRUSTED_PROXY;
+      else process.env.TRUSTED_PROXY = savedProxy;
     }
   });
 

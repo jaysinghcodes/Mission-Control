@@ -17,6 +17,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run test:e2e` | Separate Jest config under `test/`. Also needs a migrated Postgres at `DATABASE_URL`. |
 | `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Not part of a fresh setup. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run seed:clear` | Deletes only the rows `seed:demo` created. Registered, snapshot, and API created rows stay. Idempotent. Same production guard. |
+| `npm run login:reset` | Clears login lockouts in the API on this machine. It calls `POST /auth/login-reset` on `127.0.0.1`. Under Compose run `docker compose exec api npm run login:reset`. |
 | `npm run lint` | ESLint |
 
 Schema: `npx prisma migrate deploy` from this directory, and again on API boot (`apps/api/src/boot.ts`). Schema changes are human reviewed. Boot applies those reviewed migrations. It does not create new ones.
@@ -37,7 +38,8 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `LOGIN_FAIL_LIMIT` | `5` | Wrong passwords per client IP before a wait. Loopback is exempt. Ingest is exempt |
 | `LOGIN_WINDOW_SECONDS` | `60` | Failure window and the first wait, in seconds |
 | `LOGIN_BACKOFF_MAX_SECONDS` | `900` | Longest wait, in seconds. Later lockouts double until this cap |
-| `TRUSTED_PROXY` | empty | Peers allowed to supply `X-Forwarded-For`. Leave empty for Compose |
+| `TRUSTED_PROXY` | empty | Extra peers allowed to supply `X-Forwarded-For`. Leave empty for Compose. Do not set the Docker bridge |
+| `BUNDLED_PROXY` | `web` when `MC_COMPOSE=1`, otherwise empty | Hostname or IP of the bundled nginx. Compose sets the web service name. The API resolves it and trusts forwarded client headers only from that peer |
 | `SOCKET_TOKEN` | empty | Retired. The web bundle does not receive a socket token |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |

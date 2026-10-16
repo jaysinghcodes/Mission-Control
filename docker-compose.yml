@@ -8,8 +8,9 @@
 # The browser uses that one port. nginx proxies /api and /socket.io.
 # No OpenClaw? `npm run seed:demo` (from the host) fills sample data.
 # Published ports bind 127.0.0.1 only. Inside the api container HOST is
-# 0.0.0.0, and the peer is the Docker bridge address of the web container,
-# not 127.0.0.1. That is why Compose asks for the dashboard password.
+# 0.0.0.0. nginx records the client address and the API trusts the web
+# service (BUNDLED_PROXY, default web). A browser on the host still signs
+# in. That host has its own login lock, separate from a remote client.
 # Leave TRUSTED_PROXY unset. Do not point it at the Docker bridge.
 #
 # Host ports are overridable. 5432, 3000, and 5173 are often taken:
@@ -81,8 +82,15 @@ services:
       LOGIN_FAIL_LIMIT: ${LOGIN_FAIL_LIMIT:-5}
       LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-60}
       LOGIN_BACKOFF_MAX_SECONDS: ${LOGIN_BACKOFF_MAX_SECONDS:-900}
-      # Leave this empty. The API decides loopback from the socket address.
-      # Trusting the Docker bridge would let a browser skip the password.
+      # Hostname of the bundled nginx on this network. The API resolves it
+      # and trusts X-Forwarded-For and X-Real-IP only from that peer.
+      # The default is the web service name. Set an IP or another hostname
+      # when that service is renamed. This is not the Docker bridge.
+      BUNDLED_PROXY: ${BUNDLED_PROXY:-web}
+      # Extra proxies, comma separated. Blank stays blank. The bundled
+      # nginx is trusted through BUNDLED_PROXY, not through this list.
+      # Do not set this to the Docker bridge. That would let a browser
+      # skip the password.
       TRUSTED_PROXY: ${TRUSTED_PROXY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Display only. Default assignee for new tickets and runs. Blank means Operator.
