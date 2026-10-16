@@ -4,7 +4,8 @@ import { parseLogLine, tailNewestOpenclawLog } from './openclaw-log';
 /**
  * LogsController — REAL gateway log tail.
  *
- * Reads the newest /tmp/openclaw/openclaw-<date>.log (JSON-lines format with
+ * Reads the newest openclaw-<date>.log under OPENCLAW_LOG_DIR (default
+ * /tmp/openclaw). JSON-lines format with
  * _meta.logLevelName + message + time). Parse is defensive: non-JSON lines
  * pass through as raw text so the viewer never breaks on format drift.
  * Loopback-only API reading a local log file = same trust domain.

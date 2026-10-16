@@ -1,6 +1,8 @@
 import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { buildInfo, type BuildInfo } from '../build-info';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { SETTING_ID } from '../team/mission';
 
 export interface HealthBody {
   service: 'mission-control';
@@ -10,6 +12,12 @@ export interface HealthBody {
   connectedClients: number;
   database: 'connected' | 'unavailable';
   lastIngestAt: string | null;
+  /** apps/api/package.json version. */
+  version: string;
+  /** Git commit, or null when this process has no SHA. */
+  gitSha: string | null;
+  /** OpenClaw version from the latest models.snapshot, or null. */
+  openclawVersion: string | null;
   ts: number;
 }
 
@@ -35,10 +43,11 @@ export class HealthController {
    */
   @Get()
   async getHealth(): Promise<HealthBody> {
+    const info = buildInfo();
     try {
       if (!this.prisma.dbReady) {
         throw new HttpException(
-          this.payload(false, null),
+          this.payload(false, null, null, info),
           HttpStatus.SERVICE_UNAVAILABLE,
         );
       }
@@ -47,17 +56,40 @@ export class HealthController {
         orderBy: { ts: 'desc' },
         select: { ts: true },
       });
-      return this.payload(true, row?.ts ? row.ts.toISOString() : null);
+      return this.payload(
+        true,
+        row?.ts ? row.ts.toISOString() : null,
+        await this.openclawVersion(),
+        info,
+      );
     } catch (err) {
       if (err instanceof HttpException) throw err;
       throw new HttpException(
-        this.payload(false, null),
+        this.payload(false, null, null, info),
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
   }
 
-  private payload(dbUp: boolean, lastIngestAt: string | null): HealthBody {
+  private async openclawVersion(): Promise<string | null> {
+    try {
+      const row = await this.prisma.setting.findUnique({
+        where: { id: SETTING_ID },
+        select: { openclawVersion: true },
+      });
+      const version = row?.openclawVersion?.trim() ?? '';
+      return version || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private payload(
+    dbUp: boolean,
+    lastIngestAt: string | null,
+    openclawVersion: string | null,
+    info: BuildInfo,
+  ): HealthBody {
     return {
       service: 'mission-control',
       db: dbUp ? 'up' : 'down',
@@ -66,6 +98,9 @@ export class HealthController {
       connectedClients: this.gateway.clientCount,
       database: dbUp ? 'connected' : 'unavailable',
       lastIngestAt,
+      version: info.version,
+      gitSha: info.gitSha,
+      openclawVersion,
       ts: Date.now(),
     };
   }

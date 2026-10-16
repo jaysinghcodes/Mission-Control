@@ -34,7 +34,10 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `SOCKET_TOKEN` | empty | Required for the socket handshake when `NODE_ENV=production` |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |
-| `DEEPSEEK_API_KEY` / `ZAI_API_KEY` | empty | Unused by the API. Spend comes from `usage.snapshot` |
+| `OPENCLAW_GATEWAY_HOST` | `127.0.0.1` | Gateway probe host for `GET /system` |
+| `OPENCLAW_GATEWAY_PORT` | `18789` | Gateway probe port |
+| `OPENCLAW_LOG_DIR` | `/tmp/openclaw` | Directory of `openclaw-*.log` |
+| `GIT_SHA` | git, or `git-sha.txt` in the image | Commit shown by `GET /health` |
 | `HEALTH_TICK_MS` | `30000` | Socket `health.tick` interval. `0` disables it |
 | `DOCS_ROOT` | `<repo>/data/docs` | Markdown for `GET /docs`. The browser never receives a filesystem path |
 

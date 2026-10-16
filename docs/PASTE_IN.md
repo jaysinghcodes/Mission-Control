@@ -10,6 +10,8 @@ The script is Docker first. If Docker is missing, it says so and uses Node.js 22
 
 When the `openclaw` command is on PATH, the same command installs the bridge schedule. It does not start the OpenClaw gateway. Remove the schedule later with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer skips that step and still finishes. `npm run seed:demo` fills sample data and does not need OpenClaw. `npm run doctor` is the same check the installer runs at the end.
 
+The bridge posts each agent provider and model from `~/.openclaw/openclaw.json`. When that file has no model, it runs `openclaw models list`. System shows those rows. With no bridge, the page says "No providers found yet. Run the bridge to detect them."
+
 ## Report the URL
 
 Tell your operator the URL the installer printed. Say that `INGEST_TOKEN` and `SOCKET_TOKEN` live in `.env`. If doctor prints a failing line, include that line. A missing OpenClaw command is an info line. When a schedule is installed, a sync older than `MC_BRIDGE_STALE_SECONDS` fails doctor.

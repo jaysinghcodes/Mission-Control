@@ -17,6 +17,8 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
                                           + POST /runs and PATCH /runs/:id
                                             (ticketId when the job has one)
   (derived from sessions token counts) →  usage.snapshot (daily points, up to 30 days)
+  ~/.openclaw/openclaw.json               models.snapshot
+    (fallback: openclaw models list)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
   agent workspace MEMORY.md + memory/*.md → memory.snapshot
 
@@ -182,6 +184,44 @@ class Sources:
         cmd = os.environ.get("MC_BRIDGE_APPROVALS_CMD", "").strip()
         return self._cli(shlex.split(cmd)) if cmd else None
 
+    def model_catalog(self) -> Optional[List[Dict[str, str]]]:
+        """`openclaw models list` when the config file has no agent models.
+
+        `--json` first. Plain stdout is one model key per line. `--from-dir`
+        never shells out, so a fixture run cannot pick up a real install.
+        """
+        if self.from_dir:
+            return None
+        raw = self._cli(["openclaw", "models", "list", "--json"])
+        if raw is not None:
+            rows = models_from_list_payload(raw)
+            if rows:
+                return rows
+        text = self._models_list_text()
+        if text is None:
+            return None
+        return models_from_list_text(text) or None
+
+    def _models_list_text(self) -> Optional[str]:
+        try:
+            proc = subprocess.run(
+                ["openclaw", "models", "list"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except FileNotFoundError:
+            log("`openclaw` not found on PATH. Skipping models list")
+            return None
+        except subprocess.TimeoutExpired:
+            log("`openclaw models list` timed out. Skipping")
+            return None
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout).strip().splitlines()[-1:] or ["(no output)"]
+            log(f"`openclaw models list` exited {proc.returncode}: {tail[0][:200]}. Skipping")
+            return None
+        return proc.stdout
+
 
 def as_list(raw: Any, *keys: str) -> Optional[List[Dict[str, Any]]]:
     """
@@ -293,6 +333,309 @@ def unique_agent_slug(base: str, used: Set[str]) -> str:
         n += 1
     used.add(slug)
     return slug
+
+
+def config_path_for(from_dir: Optional[Path]) -> Optional[Path]:
+    """Config file for models.snapshot.
+
+    `--from-dir` reads only `<dir>/openclaw.json`. CLI mode uses
+    OPENCLAW_CONFIG_PATH, then ~/.openclaw/openclaw.json.
+    """
+    if from_dir is not None:
+        candidate = from_dir / "openclaw.json"
+        return candidate if candidate.is_file() else None
+    override = os.environ.get("OPENCLAW_CONFIG_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".openclaw" / "openclaw.json"
+
+
+def parse_config_json(text: str) -> Any:
+    """JSON, or JSON with comments and trailing commas (OpenClaw writes JSON5)."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(strip_json5(text))
+
+
+def strip_json5(text: str) -> str:
+    """Drop // and /* */ comments outside strings, then trailing commas."""
+    out: List[str] = []
+    i = 0
+    n = len(text)
+    in_str = False
+    quote = ""
+    escaped = False
+    while i < n:
+        ch = text[i]
+        if in_str:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                in_str = False
+            i += 1
+            continue
+        if ch in "\"'":
+            in_str = True
+            quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            i += 2
+            while i < n and text[i] not in "\n\r":
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i = min(n, i + 2)
+            continue
+        out.append(ch)
+        i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+
+
+def read_openclaw_config(path: Path) -> Optional[Dict[str, Any]]:
+    """Parsed config object, or None when the file cannot be used.
+
+    None means skip the snapshot. A readable file with no models is an
+    empty object from models_from_config, not None here.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        log(f"could not read {path} ({exc}). Skipping models.snapshot")
+        return None
+    try:
+        raw = parse_config_json(text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        log(f"{path} is not JSON ({exc}). Skipping models.snapshot")
+        return None
+    if not isinstance(raw, dict):
+        log(f"{path} is not a JSON object. Skipping models.snapshot")
+        return None
+    return raw
+
+
+def split_model_ref(ref: str) -> Optional[Tuple[str, str]]:
+    """`provider/model`. The model id may itself contain slashes."""
+    text = ref.strip()
+    if not text or "/" not in text or "*" in text:
+        return None
+    provider, model = text.split("/", 1)
+    provider = provider.strip()
+    model = model.strip()
+    if not provider or not model:
+        return None
+    return provider, model
+
+
+def model_primary(value: Any) -> Optional[str]:
+    """String ref, or `{primary}` from agents.defaults.model / entries.*.model."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, dict):
+        primary = value.get("primary")
+        if isinstance(primary, str) and primary.strip():
+            return primary.strip()
+    return None
+
+
+def agent_display_name(entry: Dict[str, Any], fallback: str) -> str:
+    identity = entry.get("identity")
+    if isinstance(identity, dict):
+        named = identity.get("name")
+        if isinstance(named, str) and named.strip():
+            return named.strip()
+    for key in ("name", "identityName"):
+        named = entry.get(key)
+        if isinstance(named, str) and named.strip():
+            return named.strip()
+    return fallback
+
+
+def _agent_model_row(
+    agent_id: str,
+    entry: Dict[str, Any],
+    default_ref: Optional[str],
+    used: Set[str],
+) -> Optional[Dict[str, str]]:
+    ref = model_primary(entry.get("model")) or default_ref
+    parsed = split_model_ref(ref) if ref else None
+    if not parsed:
+        return None
+    provider, model = parsed
+    return {
+        "id": unique_agent_slug(agent_id, used),
+        "name": agent_display_name(entry, agent_id),
+        "provider": provider,
+        "model": model,
+    }
+
+
+def models_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Per agent provider and model, plus meta.lastTouchedVersion when set."""
+    agents_root = cfg.get("agents") if isinstance(cfg.get("agents"), dict) else {}
+    defaults = agents_root.get("defaults") if isinstance(agents_root.get("defaults"), dict) else {}
+    default_ref = model_primary(defaults.get("model"))
+    used: Set[str] = set()
+    rows: List[Dict[str, str]] = []
+    entries = agents_root.get("entries")
+    if isinstance(entries, dict) and entries:
+        for agent_id, entry in entries.items():
+            body = entry if isinstance(entry, dict) else {}
+            row = _agent_model_row(str(agent_id), body, default_ref, used)
+            if row:
+                rows.append(row)
+    else:
+        listing = agents_root.get("list")
+        if isinstance(listing, list):
+            for entry in listing:
+                if not isinstance(entry, dict):
+                    continue
+                agent_id = str(entry.get("id") or entry.get("name") or "agent")
+                row = _agent_model_row(agent_id, entry, default_ref, used)
+                if row:
+                    rows.append(row)
+    if not rows and default_ref:
+        row = _agent_model_row("main", {}, default_ref, used)
+        if row:
+            rows.append(row)
+    version = None
+    meta = cfg.get("meta")
+    if isinstance(meta, dict):
+        for key in ("lastTouchedVersion", "version"):
+            raw = meta.get(key)
+            if isinstance(raw, str) and raw.strip():
+                version = raw.strip()[:80]
+                break
+    return {"agents": rows, "models": [], "openclawVersion": version}
+
+
+def models_from_list_payload(raw: Any) -> List[Dict[str, str]]:
+    """Rows from `openclaw models list --json`."""
+    items: Optional[List[Any]] = None
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, dict):
+        for key in ("models", "items", "available"):
+            if isinstance(raw.get(key), list):
+                items = raw[key]
+                break
+    if items is None:
+        return []
+    out: List[Dict[str, str]] = []
+    seen: Set[Tuple[str, str]] = set()
+    for item in items:
+        parsed: Optional[Tuple[str, str]] = None
+        if isinstance(item, str):
+            parsed = split_model_ref(item)
+        elif isinstance(item, dict):
+            provider = item.get("provider")
+            model = item.get("model")
+            if isinstance(provider, str) and isinstance(model, str):
+                provider = provider.strip()
+                model = model.strip()
+                if provider and model and "*" not in model:
+                    parsed = (provider, model)
+            if parsed is None:
+                ref = item.get("key") or item.get("ref") or item.get("id") or item.get("name")
+                if isinstance(ref, str):
+                    parsed = split_model_ref(ref)
+                if parsed is None and isinstance(provider, str) and isinstance(item.get("id"), str):
+                    ident = str(item["id"]).strip()
+                    if provider.strip() and ident and "/" not in ident and "*" not in ident:
+                        parsed = (provider.strip(), ident)
+        if not parsed or parsed in seen:
+            continue
+        seen.add(parsed)
+        out.append({"provider": parsed[0], "model": parsed[1]})
+    return out
+
+
+def models_from_list_text(text: str) -> List[Dict[str, str]]:
+    """Plain `openclaw models list`: one model key per line, first token."""
+    out: List[Dict[str, str]] = []
+    seen: Set[Tuple[str, str]] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parsed = split_model_ref(stripped.split()[0])
+        if not parsed or parsed in seen:
+            continue
+        seen.add(parsed)
+        out.append({"provider": parsed[0], "model": parsed[1]})
+    return out
+
+
+def version_line(text: str) -> Optional[str]:
+    line = text.strip().splitlines()[0].strip() if text.strip() else ""
+    return line[:80] or None
+
+
+def openclaw_cli_version() -> Optional[str]:
+    """First line of `openclaw --version`, or None when the CLI is missing."""
+    try:
+        proc = subprocess.run(
+            ["openclaw", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except FileNotFoundError:
+        return None
+    except subprocess.TimeoutExpired:
+        log("`openclaw --version` timed out")
+        return None
+    if proc.returncode != 0:
+        return None
+    return version_line(proc.stdout or proc.stderr)
+
+
+def collect_models(src: Sources, from_dir: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """models.snapshot payload, or None when the source was not readable.
+
+    A readable config with no models, and no CLI list, still returns empty
+    arrays so the dashboard can show that nothing is configured. A missing
+    file plus a missing CLI skips the event and leaves the previous rows.
+    """
+    path = config_path_for(from_dir)
+    file_ok = False
+    payload: Dict[str, Any]
+    if path is not None and path.is_file():
+        cfg = read_openclaw_config(path)
+        if cfg is None:
+            return None
+        file_ok = True
+        payload = models_from_config(cfg)
+    elif from_dir is not None:
+        return None
+    else:
+        payload = {"agents": [], "models": [], "openclawVersion": None}
+    if not payload["agents"]:
+        listed = src.model_catalog()
+        if listed:
+            payload["models"] = listed
+        elif not file_ok:
+            return None
+    if from_dir is None:
+        version = openclaw_cli_version()
+        if version:
+            payload["openclawVersion"] = version
+    if not payload.get("openclawVersion"):
+        payload.pop("openclawVersion", None)
+    payload["models"] = payload.get("models") or []
+    return {
+        "agents": payload["agents"],
+        "models": payload["models"],
+        **({"openclawVersion": payload["openclawVersion"]} if payload.get("openclawVersion") else {}),
+    }
 
 
 def wants_self_register() -> bool:
@@ -1336,6 +1679,10 @@ def main() -> int:
         memory_entries = collect_memory(agents_rows, base=args.from_dir)
     if memory_entries is not None:
         events.append(("memory.snapshot", {"entries": memory_entries}))
+
+    models_payload = collect_models(src, args.from_dir)
+    if models_payload is not None:
+        events.append(("models.snapshot", models_payload))
 
     if not events:
         # Every source was unavailable. Do not stamp, or doctor treats a broken

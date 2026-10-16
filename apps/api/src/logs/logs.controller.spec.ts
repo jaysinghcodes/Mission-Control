@@ -32,9 +32,26 @@ const enoent = () => {
 
 describe('OpenClaw log empty states (ticket 2)', () => {
   beforeEach(() => {
+    delete process.env.OPENCLAW_LOG_DIR;
     readdirSync.mockReset();
     statSync.mockReset();
     readFileSync.mockReset();
+  });
+
+  it('GET /logs uses OPENCLAW_LOG_DIR when it is an absolute path', () => {
+    process.env.OPENCLAW_LOG_DIR = '/var/log/openclaw-test';
+    readdirSync.mockImplementation(enoent);
+    const res = new LogsController().list('10');
+    expect(res.available).toBe(false);
+    expect(res.reason).toMatch(/\/var\/log\/openclaw-test/);
+    expect(res.reason).not.toMatch(/\/tmp\/openclaw/);
+  });
+
+  it('GET /logs keeps the default directory when OPENCLAW_LOG_DIR is relative', () => {
+    process.env.OPENCLAW_LOG_DIR = 'openclaw';
+    readdirSync.mockImplementation(enoent);
+    const res = new LogsController().list('10');
+    expect(res.reason).toMatch(/\/tmp\/openclaw/);
   });
 
   it('GET /logs → empty, available:false, with a reason when /tmp/openclaw is missing', () => {

@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.10.15"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-4.1"
+      }
+    },
+    "entries": {
+      "quill": {
+        "name": "Quill",
+        "model": "openai/gpt-4.1"
+      },
+      "sage": {
+        "name": "Sage",
+        "model": {
+          "primary": "anthropic/claude-sonnet-4-6"
+        }
+      },
+      "nova": {
+        "name": "Nova",
+        "model": "deepseek/deepseek-chat"
+      },
+      "router": {
+        "name": "Router",
+        "model": "openrouter/anthropic/claude-sonnet-4-6"
+      },
+      "lens": {
+        "name": "Lens",
+        "model": "google/gemini-2.5-flash"
+      },
+      "local": {
+        "name": "Local",
+        "model": "ollama/llama3.1"
+      }
+    }
+  }
+}

@@ -42,6 +42,7 @@ export type ActivityEventType =
   | 'usage.snapshot'
   | 'approvals.snapshot'
   | 'memory.snapshot'
+  | 'models.snapshot'
   | 'agent.status';
 
 /**

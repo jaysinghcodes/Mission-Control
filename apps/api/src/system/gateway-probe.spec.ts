@@ -1,0 +1,74 @@
+import { createServer, type Server } from 'net';
+import { gatewayTarget, probeGateway } from './gateway-probe';
+import { SystemController } from './system.controller';
+
+function listen(server: Server): Promise<number> {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      resolve(typeof address === 'object' && address ? address.port : 0);
+    });
+  });
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise((resolve) => server.close(() => resolve()));
+}
+
+describe('gateway probe', () => {
+  const savedHost = process.env.OPENCLAW_GATEWAY_HOST;
+  const savedPort = process.env.OPENCLAW_GATEWAY_PORT;
+
+  afterEach(() => {
+    if (savedHost === undefined) delete process.env.OPENCLAW_GATEWAY_HOST;
+    else process.env.OPENCLAW_GATEWAY_HOST = savedHost;
+    if (savedPort === undefined) delete process.env.OPENCLAW_GATEWAY_PORT;
+    else process.env.OPENCLAW_GATEWAY_PORT = savedPort;
+  });
+
+  it('defaults to 127.0.0.1 port 18789', () => {
+    delete process.env.OPENCLAW_GATEWAY_HOST;
+    delete process.env.OPENCLAW_GATEWAY_PORT;
+    expect(gatewayTarget()).toEqual({ host: '127.0.0.1', port: 18789 });
+  });
+
+  it('uses a configured host and port', () => {
+    process.env.OPENCLAW_GATEWAY_HOST = 'localhost';
+    process.env.OPENCLAW_GATEWAY_PORT = '19001';
+    expect(gatewayTarget()).toEqual({ host: 'localhost', port: 19001 });
+    process.env.OPENCLAW_GATEWAY_HOST = 'not a host';
+    process.env.OPENCLAW_GATEWAY_PORT = '0';
+    expect(gatewayTarget()).toEqual({ host: '127.0.0.1', port: 18789 });
+  });
+
+  it('reports up when a stub gateway accepts the connection', async () => {
+    const server = createServer((socket) => {
+      socket.end();
+    });
+    const port = await listen(server);
+    process.env.OPENCLAW_GATEWAY_HOST = '127.0.0.1';
+    process.env.OPENCLAW_GATEWAY_PORT = String(port);
+    try {
+      const body = await new SystemController().system();
+      expect(body.gateway.host).toBe('127.0.0.1');
+      expect(body.gateway.port).toBe(port);
+      expect(body.gateway.up).toBe(true);
+      expect(typeof body.gateway.latencyMs).toBe('number');
+    } finally {
+      await close(server);
+    }
+  });
+
+  it('reports down when nothing is listening', async () => {
+    const server = createServer();
+    const port = await listen(server);
+    await close(server);
+    process.env.OPENCLAW_GATEWAY_HOST = '127.0.0.1';
+    process.env.OPENCLAW_GATEWAY_PORT = String(port);
+    const result = await probeGateway();
+    expect(result.up).toBe(false);
+    expect(result.latencyMs).toBeNull();
+    expect(result.host).toBe('127.0.0.1');
+    expect(result.port).toBe(port);
+  });
+});
