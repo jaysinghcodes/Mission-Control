@@ -140,6 +140,22 @@ export const STEP_DATA: ConnectStep[] = [
         desc: 'Signs the session cookie. `bash install.sh` writes a random value. A second run does not replace it.',
       },
       {
+        name: 'SESSION_STATE_PATH',
+        desc: 'File that stores the session version and a changed password hash. Log out and a password change bump the version, so an old cookie returns 401 after a restart. Default is apps/api/data/session-state.json. Compose uses /data/auth/session-state.json on the mc-auth volume. When the file has a hash, it overrides DASHBOARD_PASSWORD_HASH on startup.',
+      },
+      {
+        name: 'LOGIN_FAIL_LIMIT',
+        desc: 'Wrong dashboard passwords allowed from one IP inside the window. Default 5. Loopback is not counted. Agent ingest is not counted.',
+      },
+      {
+        name: 'LOGIN_WINDOW_SECONDS',
+        desc: 'Window for those failures, in seconds. Default 60. The first wait after the limit matches this number.',
+      },
+      {
+        name: 'LOGIN_BACKOFF_MAX_SECONDS',
+        desc: 'Longest login wait, in seconds. Default 900, which is 15 minutes. Each later lockout doubles until it reaches this cap.',
+      },
+      {
         name: 'TRUSTED_PROXY',
         desc: 'Optional. Comma separated addresses of proxies whose X-Forwarded-For header is trusted. Leave this blank. Do not set it to the Docker bridge, or a browser could skip the password.',
       },

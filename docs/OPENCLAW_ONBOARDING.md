@@ -28,7 +28,7 @@ Request shapes are in [API.md](API.md#4-how-you-report-into-mission-control).
 
 ### 4.1 Auth
 
-A missing or wrong `x-ingest-token` on agent ingest is HTTP 401 with `{"statusCode":401,"message":"unauthorized"}`. The same body is a dashboard call that is not from loopback and has no session cookie. The 401 line is in [API.md](API.md#41-auth).
+A missing or wrong `x-ingest-token` on agent ingest is HTTP 401 with `{"statusCode":401,"message":"unauthorized"}`. The same body is a dashboard call that is not from loopback and has no session cookie. Logout bumps a session version, so a copied cookie is 401 after logout and after a restart. Too many wrong dashboard passwords from one IP return 429. Loopback is not limited. Ingest is not limited. The 401 line is in [API.md](API.md#41-auth).
 
 ### 4.2 Events: `POST /events`
 

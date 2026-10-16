@@ -33,6 +33,10 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `INGEST_TOKEN` | empty in code, placeholder in the example file | `x-ingest-token` for agent ingest: `POST /events`, register, heartbeat, and run writes. Unset on loopback when `NODE_ENV` is not `production`: ingest stays open, one warning. Unset in production, including loopback: process starts and ingest returns 401. Unset on any other `HOST`: process refuses to start |
 | `DASHBOARD_PASSWORD_HASH` | empty | scrypt hash of the dashboard password. Blank on loopback leaves the dashboard open. Required when `HOST` is not loopback, including Compose |
 | `SESSION_SECRET` | empty | Signs the `mc_session` cookie. Required with the hash when `HOST` is not loopback |
+| `SESSION_STATE_PATH` | `apps/api/data/session-state.json` | Session version and a changed password hash. Compose uses `/data/auth/session-state.json` on the `mc-auth` volume. A stored hash overrides `DASHBOARD_PASSWORD_HASH` on startup |
+| `LOGIN_FAIL_LIMIT` | `5` | Wrong passwords per client IP before a wait. Loopback is exempt. Ingest is exempt |
+| `LOGIN_WINDOW_SECONDS` | `60` | Failure window and the first wait, in seconds |
+| `LOGIN_BACKOFF_MAX_SECONDS` | `900` | Longest wait, in seconds. Later lockouts double until this cap |
 | `TRUSTED_PROXY` | empty | Peers allowed to supply `X-Forwarded-For`. Leave empty for Compose |
 | `SOCKET_TOKEN` | empty | Retired. The web bundle does not receive a socket token |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |

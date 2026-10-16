@@ -45,14 +45,14 @@ async function readSession(): Promise<SessionInfo | null> {
   }
 }
 
-export async function submitPassword(password: string): Promise<boolean> {
+export async function submitPassword(password: string): Promise<number> {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ password }),
   })
-  return res.status === 204
+  return res.status
 }
 
 function applyStoredTheme() {
@@ -99,8 +99,12 @@ export function SessionGate({ children }: { children: ReactNode }) {
     setBusy(true)
     setError(null)
     try {
-      const ok = await submitPassword(password)
-      if (!ok) {
+      const status = await submitPassword(password)
+      if (status === 429) {
+        setError('Too many tries. Try again in a minute.')
+        return
+      }
+      if (status !== 204) {
         setError('That password is wrong.')
         return
       }

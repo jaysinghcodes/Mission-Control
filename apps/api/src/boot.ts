@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
+import { applyStoredPassword } from './auth/session-state';
 
 /**
  * Startup for the API process.
@@ -96,6 +97,7 @@ export function bootApi(): void {
   if (loaded.length > 0) {
     console.log(`loaded env from ${loaded.join(', ')}`);
   }
+  applyStoredPassword(process.env);
   console.log('running prisma migrate deploy');
   try {
     runMigrate(apiDir, process.env);

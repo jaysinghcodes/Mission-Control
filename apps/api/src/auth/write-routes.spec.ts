@@ -98,7 +98,7 @@ describe('write route coverage', () => {
         expect(allowed.status).not.toBe(401);
       } else if (isAuthRoute(route.method, route.path)) {
         // Login checks the password. An empty body is a failed login.
-        // Logout only clears the cookie.
+        // Loopback logout revokes the session version, then clears the cookie.
         if (route.method === 'POST' && route.path === '/auth/logout') {
           expect(denied.status).not.toBe(401);
         }

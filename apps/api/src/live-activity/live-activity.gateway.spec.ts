@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { LiveActivityGateway } from './live-activity.gateway';
 import { Server, Socket } from 'socket.io';
 import { hashPassword } from '../auth/password';
 import { signSession } from '../auth/session';
+import { revokeSessions } from '../auth/session-state';
 
 /**
  * Unit tests for LiveActivityGateway (GLM review 🟡 #11 — zero coverage).
@@ -9,11 +13,26 @@ import { signSession } from '../auth/session';
  */
 describe('LiveActivityGateway', () => {
   let gateway: LiveActivityGateway;
+  let stateDir: string;
+  let savedStatePath: string | undefined;
+
+  beforeAll(() => {
+    savedStatePath = process.env.SESSION_STATE_PATH;
+    stateDir = mkdtempSync(join(tmpdir(), 'mc-socket-'));
+  });
+
+  afterAll(() => {
+    if (savedStatePath === undefined) delete process.env.SESSION_STATE_PATH;
+    else process.env.SESSION_STATE_PATH = savedStatePath;
+    rmSync(stateDir, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
     gateway = new LiveActivityGateway();
     gateway.server = { emit: jest.fn() } as unknown as Server;
     process.env.NODE_ENV = 'test';
+    process.env.SESSION_STATE_PATH = join(stateDir, 'state.json');
+    rmSync(process.env.SESSION_STATE_PATH, { force: true });
   });
 
   function fakeSocket(
@@ -101,6 +120,40 @@ describe('LiveActivityGateway', () => {
 
     expect(disconnect).not.toHaveBeenCalled();
     expect(gateway.clientCount).toBe(1);
+    delete process.env.SESSION_SECRET;
+    delete process.env.DASHBOARD_PASSWORD_HASH;
+  });
+
+  it('disconnects a remote socket when the session version changes', () => {
+    process.env.SESSION_SECRET = 'socket-secret';
+    process.env.DASHBOARD_PASSWORD_HASH = hashPassword('pw');
+    const oldCookie = `mc_session=${encodeURIComponent(signSession('socket-secret', 3600))}`;
+    const remote = fakeSocket('203.0.113.10', oldCookie);
+    const local = fakeSocket('127.0.0.1');
+    gateway.handleConnection(remote.client);
+    gateway.handleConnection(local.client);
+
+    revokeSessions();
+    const sockets = new Map<string, Socket>([
+      [remote.client.id, remote.client],
+      [local.client.id, local.client],
+    ]);
+    gateway.server = { sockets: { sockets } } as unknown as Server;
+    gateway.dropRevokedSockets();
+
+    expect(remote.disconnect).toHaveBeenCalledWith(true);
+    expect(local.disconnect).not.toHaveBeenCalled();
+    expect(gateway.clientCount).toBe(1);
+
+    const fresh = `mc_session=${encodeURIComponent(signSession('socket-secret', 3600))}`;
+    const again = fakeSocket('203.0.113.10', fresh);
+    gateway.handleConnection(again.client);
+    expect(again.disconnect).not.toHaveBeenCalled();
+
+    const stale = fakeSocket('203.0.113.10', oldCookie);
+    gateway.handleConnection(stale.client);
+    expect(stale.disconnect).toHaveBeenCalledWith(true);
+
     delete process.env.SESSION_SECRET;
     delete process.env.DASHBOARD_PASSWORD_HASH;
   });
