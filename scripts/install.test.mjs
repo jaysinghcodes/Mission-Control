@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -114,6 +115,7 @@ const SCHEDULE_ENV_KEYS = [
   'MC_BRIDGE_LAUNCHD_LABEL',
   'MC_BRIDGE_UNIT_NAME',
   'MC_BRIDGE_CRON_MARK',
+  'MC_BRIDGE_PATH',
   'MC_API_URL',
 ]
 
@@ -849,6 +851,91 @@ function beginCount(text) {
   return (String(text).match(/# BEGIN mission-control-bridge/g) ?? []).length
 }
 
+function sortedNames(dir) {
+  return readdirSync(dir).sort()
+}
+
+function plistKeys(xml) {
+  const stripped = xml.replace(/<\?xml[^>]*\?>/g, '').replace(/<!DOCTYPE[^>]*>/g, '')
+  const stack = []
+  const tagRe = /<\/?([A-Za-z0-9]+)(?:\s[^>]*)?\/?>/g
+  let match = tagRe.exec(stripped)
+  while (match) {
+    const whole = match[0]
+    const name = match[1]
+    if (whole.startsWith('</')) {
+      const top = stack.pop()
+      if (top !== name) throw new Error(`plist tag mismatch ${top} ${name}`)
+    } else if (!whole.endsWith('/>')) {
+      stack.push(name)
+    }
+    match = tagRe.exec(stripped)
+  }
+  if (stack.length !== 0) throw new Error(`plist unclosed ${stack.join(',')}`)
+  const keys = new Set()
+  const keyRe = /<key>([^<]+)<\/key>/g
+  match = keyRe.exec(xml)
+  while (match) {
+    keys.add(match[1])
+    match = keyRe.exec(xml)
+  }
+  return keys
+}
+
+function verifySystemd(servicePath, timerPath) {
+  const service = readFileSync(servicePath, 'utf8')
+  const timer = readFileSync(timerPath, 'utf8')
+  for (const key of [
+    '[Unit]',
+    '[Service]',
+    'Type=oneshot',
+    'WorkingDirectory=',
+    'Environment="MC_BRIDGE_REGISTER=',
+    'Environment="MC_API_URL=',
+    'Environment="MC_BRIDGE_STAMP_FILE=',
+    'Environment="PATH=',
+    'ExecStart=',
+  ]) {
+    assert.equal(service.includes(key), true, key)
+  }
+  for (const key of ['[Unit]', '[Timer]', 'OnBootSec=', 'OnUnitActiveSec=', 'Persistent=true', '[Install]', 'WantedBy=timers.target']) {
+    assert.equal(timer.includes(key), true, key)
+  }
+  const analyze = spawnSync('systemd-analyze', ['verify', servicePath, timerPath], { encoding: 'utf8' })
+  if (analyze.error) {
+    assert.equal(analyze.error.code, 'ENOENT')
+    return
+  }
+  assert.equal(analyze.status, 0, `${analyze.stdout}\n${analyze.stderr}`)
+}
+
+function verifyLaunchd(plistPath) {
+  const text = readFileSync(plistPath, 'utf8')
+  const keys = plistKeys(text)
+  for (const key of [
+    'Label',
+    'ProgramArguments',
+    'WorkingDirectory',
+    'EnvironmentVariables',
+    'StartInterval',
+    'RunAtLoad',
+    'StandardOutPath',
+    'StandardErrorPath',
+    'PATH',
+    'MC_BRIDGE_REGISTER',
+    'MC_API_URL',
+    'MC_BRIDGE_STAMP_FILE',
+  ]) {
+    assert.equal(keys.has(key), true, key)
+  }
+  const lint = spawnSync('plutil', ['-lint', plistPath], { encoding: 'utf8' })
+  if (lint.error) {
+    assert.equal(lint.error.code, 'ENOENT')
+    return
+  }
+  assert.equal(lint.status, 0, lint.stderr || lint.stdout)
+}
+
 test('bridge schedule: missing OpenClaw skips with exit 0', async () => {
   const fx = scheduleFixture({ openclaw: false })
   let health
@@ -881,7 +968,7 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
   try {
     const first = runInstall(fx.repo, { ...fx.env, MC_BRIDGE_SCHEDULER: 'systemd' })
     const firstText = outputOf(first)
-    assert.match(firstText, /Installed the bridge schedule with systemd\. It runs every 300 seconds\./)
+    assert.match(firstText, /Installed the bridge schedule with a systemd user timer\. It runs every 300 seconds\./)
     assert.match(firstText, /Optional: merge bridge\/openclaw\.starter\.json/)
     assert.match(firstText, /This installer does not edit that file\./)
     const service = path.join(fx.systemdDir, 'mission-control-bridge.service')
@@ -891,7 +978,9 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
     assert.match(timerText, /OnUnitActiveSec=300s/)
     assert.match(serviceText, /Environment="MC_BRIDGE_REGISTER=1"/)
     assert.match(serviceText, /Environment="MC_API_URL=http:\/\/127\.0\.0\.1:3000"/)
+    assert.equal(serviceText.includes(`Environment="PATH=${fx.bin}`), true, serviceText)
     assert.match(serviceText, /mc-bridge-sync\.py/)
+    verifySystemd(service, timer)
     const token = assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8')).INGEST_TOKEN
     assert.equal(serviceText.includes(token), false)
     assert.equal(timerText.includes(token), false)
@@ -901,7 +990,7 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
     assert.equal(PUNCT.test(firstText), false)
 
     const second = runInstall(fx.repo, { ...fx.env, MC_BRIDGE_SCHEDULER: 'systemd' })
-    assert.match(outputOf(second), /Installed the bridge schedule with systemd/)
+    assert.match(outputOf(second), /Installed the bridge schedule with a systemd user timer/)
     assert.equal(readFileSync(service, 'utf8'), serviceText)
     assert.equal(readFileSync(timer, 'utf8'), timerText)
     assert.equal(readFileSync(fx.cronFile, 'utf8'), FOREIGN_CRON)
@@ -939,7 +1028,7 @@ test('bridge schedule: cron install and uninstall leave other lines', () => {
     assert.match(cron, /15 4 \* \* \* echo keep-foreign-job/)
     assert.match(cron, /# keep this comment/)
     assert.match(cron, /0 1 \* \* \* echo also-keep/)
-    assert.match(cron, /\*\/5 \* \* \* \* MC_BRIDGE_REGISTER='1'/)
+    assert.match(cron, /\*\/5 \* \* \* \* PATH='[^']+' MC_BRIDGE_REGISTER='1'/)
     assert.match(cron, /mc-bridge-sync\.py/)
     assert.equal(existsSync(path.join(fx.systemdDir, 'mission-control-bridge.timer')), false)
     assert.equal(PUNCT.test(text), false)
@@ -977,7 +1066,9 @@ test('bridge schedule: launchd install and uninstall leave other agents', () => 
     const plist = readFileSync(plistPath, 'utf8')
     assert.match(plist, /<key>StartInterval<\/key>\s*<integer>300<\/integer>/)
     assert.match(plist, /<key>MC_BRIDGE_REGISTER<\/key>\s*<string>1<\/string>/)
+    assert.equal(plist.includes(fx.bin), true, plist)
     assert.match(plist, /mc-bridge-sync\.py/)
+    verifyLaunchd(plistPath)
     const token = assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8')).INGEST_TOKEN
     assert.equal(plist.includes(token), false)
     assert.match(readFileSync(fx.launchctlLog, 'utf8'), /bootstrap/)
@@ -1039,19 +1130,22 @@ test('bridge schedule: shell interval and register win over .env', () => {
       MC_BRIDGE_INTERVAL_SECONDS: '120',
       MC_BRIDGE_REGISTER: '0',
       MC_API_URL: 'http://127.0.0.1:3999',
+      MC_BRIDGE_PATH: '/opt/mc-bridge-tools:/usr/bin',
     })
     const createdText = outputOf(created)
     assert.match(createdText, /Wrote bridge schedule values from the environment into \.env\./)
-    assert.match(createdText, /Installed the bridge schedule with systemd\. It runs every 120 seconds\./)
+    assert.match(createdText, /Installed the bridge schedule with a systemd user timer\. It runs every 120 seconds\./)
     const written = readFileSync(path.join(fx.repo, '.env'), 'utf8')
     assert.match(written, /^MC_BRIDGE_INTERVAL_SECONDS=120$/m)
     assert.match(written, /^MC_BRIDGE_REGISTER=0$/m)
     assert.match(written, /^MC_API_URL=http:\/\/127\.0\.0\.1:3999$/m)
+    assert.match(written, /^MC_BRIDGE_PATH=\/opt\/mc-bridge-tools:\/usr\/bin$/m)
     const service = readFileSync(path.join(fx.systemdDir, 'mission-control-bridge.service'), 'utf8')
     const timer = readFileSync(path.join(fx.systemdDir, 'mission-control-bridge.timer'), 'utf8')
     assert.match(timer, /OnUnitActiveSec=120s/)
     assert.match(service, /Environment="MC_BRIDGE_REGISTER=0"/)
     assert.match(service, /Environment="MC_API_URL=http:\/\/127\.0\.0\.1:3999"/)
+    assert.match(service, /Environment="PATH=\/opt\/mc-bridge-tools:\/usr\/bin"/)
     assert.equal(PUNCT.test(createdText), false)
 
     const envFile = path.join(kept.repo, '.env')
@@ -1081,7 +1175,7 @@ test('bridge schedule: shell interval and register win over .env', () => {
   }
 })
 
-test('bridge schedule: a successful run records a stamp', () => {
+test('bridge schedule: unavailable sources do not record a stamp', () => {
   const fx = scheduleFixture()
   try {
     const result = runInstall(fx.repo, {
@@ -1093,13 +1187,122 @@ test('bridge schedule: a successful run records a stamp', () => {
     assert.match(text, /Running the bridge once so a successful sync can record a timestamp before the next interval\./)
     assert.doesNotMatch(text, /The first bridge run exited/)
     const stamp = path.join(fx.repo, 'bridge', '.state', 'last-sync')
-    assert.equal(existsSync(stamp), true, text)
-    const age = Date.now() / 1000 - Number(readFileSync(stamp, 'utf8').trim())
-    assert.ok(age >= 0 && age < 30, readFileSync(stamp, 'utf8'))
+    assert.equal(existsSync(stamp), false, text)
     assert.equal(beginCount(readFileSync(fx.cronFile, 'utf8')), 1)
     assert.equal(PUNCT.test(text), false)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('bridge schedule: the cron line finds openclaw outside the default PATH', async () => {
+  const fx = scheduleFixture()
+  const calls = path.join(fx.dir, 'openclaw-calls.txt')
+  let server
+  try {
+    writeFileSync(calls, '')
+    writeExe(
+      path.join(fx.bin, 'openclaw'),
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> ${shellQuote(calls)}\nprintf '%s\\n' '[]'\n`,
+    )
+    server = await startPlainOk(fx.dir)
+    const port = server.port
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      MC_BRIDGE_SCHEDULER: 'cron',
+      MC_BRIDGE_RUN_NOW: '0',
+      MC_API_URL: `http://127.0.0.1:${port}`,
+    })
+    const text = outputOf(result)
+    assert.match(text, /Installed the bridge schedule with cron/)
+    const cron = readFileSync(fx.cronFile, 'utf8')
+    assert.equal(cron.includes(`PATH='${fx.bin}`), true, cron)
+    const command = cron
+      .split('\n')
+      .find((line) => line.includes('mc-bridge-sync.py') && !line.startsWith('#'))
+      .replace(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+/, '')
+    const run = spawnSync('env', ['-i', 'PATH=/usr/bin:/bin', `HOME=${fx.home}`, 'sh', '-c', command], {
+      encoding: 'utf8',
+    })
+    const logPath = path.join(fx.repo, 'bridge', '.state', 'sync.log')
+    const logText = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}\n${logText}\n${command}`)
+    const seen = readFileSync(calls, 'utf8')
+    assert.match(seen, /agents list/)
+    const stamp = path.join(fx.repo, 'bridge', '.state', 'last-sync')
+    assert.equal(existsSync(stamp), true, seen)
+    const age = Date.now() / 1000 - Number(readFileSync(stamp, 'utf8').trim())
+    assert.ok(age >= 0 && age < 30, readFileSync(stamp, 'utf8'))
+    assert.equal(PUNCT.test(text), false)
+  } finally {
+    server?.child.kill()
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('bridge schedule: install and uninstall touch only the schedule files', () => {
+  const systemdFx = scheduleFixture()
+  const launchFx = scheduleFixture()
+  const cronFx = scheduleFixture()
+  try {
+    const systemdBefore = sortedNames(systemdFx.systemdDir)
+    const launchBefore = sortedNames(systemdFx.launchDir)
+    const cronBefore = readFileSync(systemdFx.cronFile)
+    const systemdInstall = runInstall(systemdFx.repo, { ...systemdFx.env, MC_BRIDGE_SCHEDULER: 'systemd' })
+    assert.match(outputOf(systemdInstall), /Installed the bridge schedule with a systemd user timer/)
+    assert.deepEqual(sortedNames(systemdFx.systemdDir), [...systemdBefore, 'mission-control-bridge.service', 'mission-control-bridge.timer'].sort())
+    assert.deepEqual(sortedNames(systemdFx.launchDir), launchBefore)
+    assert.deepEqual(readFileSync(systemdFx.cronFile), cronBefore)
+    const state = path.join(systemdFx.repo, 'bridge', '.state')
+    mkdirSync(state, { recursive: true })
+    const stamp = path.join(state, 'last-sync')
+    const log = path.join(state, 'sync.log')
+    writeFileSync(stamp, '1\n')
+    writeFileSync(log, 'keep log\n')
+    const removed = runInstall(systemdFx.repo, systemdFx.env, ['--uninstall-schedule'])
+    const removedText = outputOf(removed)
+    assert.equal(removed.status, 0, removedText)
+    assert.match(removedText, /The bridge schedule is uninstalled\. The sync timestamp was removed\./)
+    assert.deepEqual(sortedNames(systemdFx.systemdDir), systemdBefore)
+    assert.deepEqual(sortedNames(systemdFx.launchDir), launchBefore)
+    assert.deepEqual(readFileSync(systemdFx.cronFile), cronBefore)
+    assert.equal(existsSync(stamp), false)
+    assert.equal(readFileSync(log, 'utf8'), 'keep log\n')
+
+    const launchUnits = sortedNames(launchFx.systemdDir)
+    const launchAgents = sortedNames(launchFx.launchDir)
+    const launchCron = readFileSync(launchFx.cronFile)
+    const launchInstall = runInstall(launchFx.repo, { ...launchFx.env, MC_BRIDGE_SCHEDULER: 'launchd' })
+    assert.match(outputOf(launchInstall), /Installed the bridge schedule with launchd/)
+    assert.deepEqual(sortedNames(launchFx.launchDir), [...launchAgents, 'com.missioncontrol.bridge.plist'].sort())
+    assert.deepEqual(sortedNames(launchFx.systemdDir), launchUnits)
+    assert.deepEqual(readFileSync(launchFx.cronFile), launchCron)
+    verifyLaunchd(path.join(launchFx.launchDir, 'com.missioncontrol.bridge.plist'))
+    const launchRemoved = runInstall(launchFx.repo, launchFx.env, ['--uninstall-schedule'])
+    assert.equal(launchRemoved.status, 0, outputOf(launchRemoved))
+    assert.deepEqual(sortedNames(launchFx.launchDir), launchAgents)
+    assert.deepEqual(sortedNames(launchFx.systemdDir), launchUnits)
+    assert.deepEqual(readFileSync(launchFx.cronFile), launchCron)
+
+    const cronUnits = sortedNames(cronFx.systemdDir)
+    const cronAgents = sortedNames(cronFx.launchDir)
+    const cronInstall = runInstall(cronFx.repo, { ...cronFx.env, MC_BRIDGE_SCHEDULER: 'cron' })
+    assert.match(outputOf(cronInstall), /Installed the bridge schedule with cron/)
+    assert.deepEqual(sortedNames(cronFx.systemdDir), cronUnits)
+    assert.deepEqual(sortedNames(cronFx.launchDir), cronAgents)
+    const cronText = readFileSync(cronFx.cronFile, 'utf8')
+    assert.equal(beginCount(cronText), 1)
+    assert.match(cronText, /keep-foreign-job/)
+    assert.match(cronText, /also-keep/)
+    const cronRemoved = runInstall(cronFx.repo, cronFx.env, ['--uninstall-schedule'])
+    assert.equal(cronRemoved.status, 0, outputOf(cronRemoved))
+    assert.equal(readFileSync(cronFx.cronFile, 'utf8'), FOREIGN_CRON)
+    assert.deepEqual(sortedNames(cronFx.systemdDir), cronUnits)
+    assert.deepEqual(sortedNames(cronFx.launchDir), cronAgents)
+  } finally {
+    rmSync(systemdFx.dir, { recursive: true, force: true })
+    rmSync(launchFx.dir, { recursive: true, force: true })
+    rmSync(cronFx.dir, { recursive: true, force: true })
   }
 })
 

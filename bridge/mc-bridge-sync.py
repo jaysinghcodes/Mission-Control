@@ -1338,9 +1338,9 @@ def main() -> int:
         events.append(("memory.snapshot", {"entries": memory_entries}))
 
     if not events:
+        # Every source was unavailable. Do not stamp, or doctor treats a broken
+        # schedule as a recent sync.
         log("no OpenClaw sources available — nothing to post (dashboard data left untouched)")
-        if not args.dry_run:
-            record_sync()
         return 0
 
     if args.dry_run:

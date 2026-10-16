@@ -4,7 +4,8 @@
 # Docker is the default. If the docker command is missing, this uses Node.js 22 and Postgres 16.
 # When the openclaw command is on PATH, this installs a bridge schedule.
 # Linux uses a systemd user timer, or cron when that timer is not available.
-# macOS uses launchd. Remove it with: bash install.sh --uninstall-schedule
+# macOS uses launchd. The schedule PATH includes the openclaw directory and the python3 directory.
+# Remove it with: bash install.sh --uninstall-schedule. That also removes the sync timestamp.
 # A second run keeps every value already in .env. Token values are not printed.
 
 set -euo pipefail
@@ -220,6 +221,11 @@ apply_shell_schedule() {
   value="${MC_BRIDGE_SCHEDULER-}"
   if [[ "$value" == "systemd" || "$value" == "launchd" || "$value" == "cron" ]]; then
     write_env_key "$file" MC_BRIDGE_SCHEDULER "$value"
+    wrote=1
+  fi
+  value="${MC_BRIDGE_PATH-}"
+  if [[ -n "$value" && "$value" != *$'\n'* && "$value" != *[[:space:]]* ]]; then
+    write_env_key "$file" MC_BRIDGE_PATH "$value"
     wrote=1
   fi
   if [[ "$wrote" -eq 1 ]]; then
@@ -564,6 +570,59 @@ choose_scheduler() {
   printf '%s' "cron"
 }
 
+# Add one directory to a colon separated PATH when it is not already listed.
+add_schedule_dir() {
+  local current dir
+  current="$1"
+  dir="$2"
+  if [[ -z "$dir" || "$dir" == "." ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  if [[ ":${current}:" == *":${dir}:"* ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  if [[ -z "$current" ]]; then
+    printf '%s' "$dir"
+    return 0
+  fi
+  printf '%s:%s' "$current" "$dir"
+}
+
+# Shell MC_BRIDGE_PATH, then .env, then the openclaw directory, the python3 directory, and PATH.
+bridge_schedule_path() {
+  local configured bin python_bin acc part old_ifs
+  local -a parts
+  configured="$(resolved_value MC_BRIDGE_PATH "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  acc=""
+  bin="$(command -v openclaw 2>/dev/null || true)"
+  if [[ -n "$bin" ]]; then
+    acc="$(add_schedule_dir "$acc" "$(dirname "$bin")")"
+  fi
+  python_bin="$(bridge_python)"
+  if [[ -n "$python_bin" && "$python_bin" != */* ]]; then
+    python_bin="$(command -v "$python_bin" 2>/dev/null || true)"
+  fi
+  if [[ -n "$python_bin" ]]; then
+    acc="$(add_schedule_dir "$acc" "$(dirname "$python_bin")")"
+  fi
+  if [[ -n "${PATH:-}" ]]; then
+    old_ifs="$IFS"
+    IFS=':'
+    read -r -a parts <<< "${PATH}"
+    IFS="$old_ifs"
+    for part in "${parts[@]}"; do
+      acc="$(add_schedule_dir "$acc" "$part")"
+    done
+  fi
+  printf '%s' "$acc"
+}
+
 sh_quote() {
   local value
   value="$1"
@@ -632,8 +691,9 @@ cron_command_line() {
   local schedule
   schedule="$(cron_expr "$(bridge_interval)")"
   schedule="${schedule%$'\n'}"
-  printf '%s MC_BRIDGE_REGISTER=%s MC_API_URL=%s MC_BRIDGE_STAMP_FILE=%s %s %s >> %s 2>&1\n' \
+  printf '%s PATH=%s MC_BRIDGE_REGISTER=%s MC_API_URL=%s MC_BRIDGE_STAMP_FILE=%s %s %s >> %s 2>&1\n' \
     "$schedule" \
+    "$(sh_quote "$(bridge_schedule_path)")" \
     "$(sh_quote "$(bridge_register)")" \
     "$(sh_quote "$(bridge_api_url)")" \
     "$(sh_quote "$(bridge_stamp_file)")" \
@@ -725,8 +785,17 @@ remove_systemd_units() {
   fi
 }
 
+# systemd treats quotes on WorkingDirectory as part of the path.
+systemd_path() {
+  local value
+  value="$1"
+  value="${value//\\/\\\\}"
+  value="${value// /\\ }"
+  printf '%s' "$value"
+}
+
 write_systemd_units() {
-  local dir unit py script work api register stamp interval service timer
+  local dir unit py script work api register stamp interval schedule_path service timer
   dir="$(systemd_user_dir)"
   unit="$(bridge_unit_name)"
   py="$(bridge_python)"
@@ -736,6 +805,7 @@ write_systemd_units() {
   register="$(bridge_register)"
   stamp="$(bridge_stamp_file)"
   interval="$(bridge_interval)"
+  schedule_path="$(bridge_schedule_path)"
   mkdir -p "$dir"
   service="${dir}/${unit}.service"
   timer="${dir}/${unit}.timer"
@@ -745,10 +815,11 @@ Description=Mission Control OpenClaw bridge sync
 
 [Service]
 Type=oneshot
-WorkingDirectory=$(systemd_quote "$work")
+WorkingDirectory=$(systemd_path "$work")
 Environment="MC_BRIDGE_REGISTER=${register}"
 Environment="MC_API_URL=${api}"
 Environment="MC_BRIDGE_STAMP_FILE=${stamp}"
+Environment=$(systemd_quote "PATH=${schedule_path}")
 ExecStart=$(systemd_quote "$py") $(systemd_quote "$script")
 EOF
   cat > "$timer" <<EOF
@@ -783,7 +854,7 @@ install_systemd_schedule() {
   fi
   remove_cron_block
   remove_launchd_agent
-  echo "Installed the bridge schedule with systemd. It runs every $(bridge_interval) seconds. Remove it with: bash install.sh --uninstall-schedule"
+  echo "Installed the bridge schedule with a systemd user timer. It runs every $(bridge_interval) seconds. Remove it with: bash install.sh --uninstall-schedule"
 }
 
 remove_launchd_agent() {
@@ -806,7 +877,7 @@ remove_launchd_agent() {
 }
 
 write_launchd_plist() {
-  local dir label plist py script work api register stamp log interval
+  local dir label plist py script work api register stamp log interval schedule_path
   dir="$(launchd_dir)"
   label="$(launchd_label)"
   py="$(bridge_python)"
@@ -817,6 +888,7 @@ write_launchd_plist() {
   stamp="$(bridge_stamp_file)"
   log="$(bridge_log_file)"
   interval="$(bridge_interval)"
+  schedule_path="$(bridge_schedule_path)"
   mkdir -p "$dir"
   plist="${dir}/${label}.plist"
   cat > "$plist" <<EOF
@@ -841,6 +913,8 @@ write_launchd_plist() {
     <string>$(xml_escape "$api")</string>
     <key>MC_BRIDGE_STAMP_FILE</key>
     <string>$(xml_escape "$stamp")</string>
+    <key>PATH</key>
+    <string>$(xml_escape "$schedule_path")</string>
   </dict>
   <key>StartInterval</key>
   <integer>${interval}</integer>
@@ -954,9 +1028,16 @@ install_bridge_schedule() {
 }
 
 uninstall_schedule() {
+  local stamp
   remove_systemd_units
   remove_launchd_agent
   remove_cron_block
+  stamp="$(bridge_stamp_file)"
+  if [[ -n "$stamp" && -f "$stamp" ]]; then
+    rm -f -- "$stamp"
+    echo "The bridge schedule is uninstalled. The sync timestamp was removed."
+    return 0
+  fi
   echo "The bridge schedule is uninstalled."
 }
 

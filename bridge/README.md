@@ -12,15 +12,17 @@ the root README used to point at, so a fresh clone ships with the integration.
 
 `bash install.sh` installs the schedule when the `openclaw` command is on PATH.
 Linux uses a systemd user timer, or cron when that user timer is not available.
-macOS uses launchd. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300).
-The job sets `MC_BRIDGE_REGISTER` (default 1). Cron rounds an interval up to whole
-minutes. Remove the schedule with:
+macOS uses launchd. The installer names the scheduler it used. The interval is
+`MC_BRIDGE_INTERVAL_SECONDS` (default 300). The job sets `MC_BRIDGE_REGISTER`
+(default 1). Its PATH includes the `openclaw` directory, the `python3` directory,
+and the PATH from install time. Cron rounds an interval up to whole minutes.
+Remove the schedule with:
 
 ```bash
 bash install.sh --uninstall-schedule
 ```
 
-That flag removes only this schedule. Other cron lines and other service units stay.
+That flag removes only this schedule and the sync timestamp. Other cron lines and other service units stay.
 If `openclaw` is not on PATH, the installer prints a skip line and continues.
 A second install replaces the same unit or cron block. It does not add another one.
 
@@ -33,8 +35,10 @@ python3 bridge/mc-bridge-sync.py
 ```
 
 A successful run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default
-`bridge/.state/last-sync`). `npm run doctor` fails when that file is older than
-`MC_BRIDGE_STALE_SECONDS` (default 600). A missing file is an info line.
+`bridge/.state/last-sync`). A run where every OpenClaw source is unavailable
+does not write that file. `npm run doctor` fails when a schedule is installed
+and that file is older than `MC_BRIDGE_STALE_SECONDS` (default 600). A missing
+file is an info line. A stale file is an info line when no schedule is installed.
 
 ### Configuration
 
@@ -44,7 +48,7 @@ A successful run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default
 | `MC_API_URL` | `http://127.0.0.1:3000` | Mission Control api base URL. Loopback by default. Change only deliberately. The installer resolves the shell, then `.env`, then the API port. |
 | `MC_BRIDGE_REGISTER` | `1` on the installed schedule | Also `POST /agents/register` for each mapped agent when this is `1`, `true`, or `yes`. `0` posts snapshots only. |
 | `MC_BRIDGE_INTERVAL_SECONDS` | `300` | Schedule interval in seconds. Cron rounds up to whole minutes. |
-| `MC_BRIDGE_STALE_SECONDS` | `600` | Doctor fails when the last successful sync is older than this. |
+| `MC_BRIDGE_STALE_SECONDS` | `600` | Doctor fails when a schedule is installed and the last successful sync is older than this. With no schedule, that age is an info line. |
 | `MC_BRIDGE_STAMP_FILE` | `bridge/.state/last-sync` | Unix timestamp written after a successful sync. |
 | `MC_BRIDGE_APPROVALS_CMD` | unset | Optional command printing pending approvals as JSON (see below). Unset means approvals stay untouched. |
 | `MC_BRIDGE_STATE_FILE` | `bridge/.state/last-run.json` | Where run-diff state is kept (git-ignored). |

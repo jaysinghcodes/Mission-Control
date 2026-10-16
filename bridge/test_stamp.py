@@ -67,8 +67,19 @@ class StampTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(real.returncode, 0, real.stderr)
-            self.assertTrue(stamp.is_file())
-            self.assertRegex(stamp.read_text(encoding="utf-8").strip(), r"^[0-9]+$")
+            self.assertFalse(stamp.exists())
+
+            empty = Path(tmp) / "empty-openclaw"
+            empty.mkdir()
+            missed = subprocess.run(
+                [sys.executable, str(BRIDGE), "--from-dir", str(empty)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(missed.returncode, 0, missed.stderr)
+            self.assertFalse(stamp.exists())
 
 
 if __name__ == "__main__":

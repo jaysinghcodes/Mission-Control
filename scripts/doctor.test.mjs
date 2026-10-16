@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -131,7 +131,7 @@ test('each required failure names the next command and exits non zero', () => {
     },
     {
       name: 'bridge',
-      facts: facts({ bridge: { state: 'stale', limit: 600 } }),
+      facts: facts({ bridge: { state: 'stale', limit: 600, scheduled: true } }),
       includes: 'The last OpenClaw sync is older than 600 seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.',
     },
     {
@@ -441,6 +441,21 @@ test('docker doctor reports host database checks as info and checks the custom A
   }
 })
 
+function isolatedSchedule(dir, installed) {
+  const systemdDir = path.join(dir, installed ? 'systemd-on' : 'systemd-off')
+  const launchDir = path.join(dir, installed ? 'launch-on' : 'launch-off')
+  mkdirSync(systemdDir, { recursive: true })
+  mkdirSync(launchDir, { recursive: true })
+  if (installed) {
+    writeFileSync(path.join(systemdDir, 'mission-control-bridge.timer'), '[Timer]\nOnUnitActiveSec=300s\n')
+  }
+  return {
+    MC_BRIDGE_SYSTEMD_DIR: systemdDir,
+    MC_BRIDGE_LAUNCHD_DIR: launchDir,
+    MC_BRIDGE_CRON_MARK: 'mission-control-bridge-test',
+  }
+}
+
 test('bridge sync: a stale timestamp fails doctor', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-stale-'))
   const stamp = path.join(dir, 'last-sync')
@@ -456,7 +471,11 @@ test('bridge sync: a stale timestamp fails doctor', async () => {
       path.join(dir, '.env'),
       ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
     )
-    const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1', MC_BRIDGE_STAMP_FILE: stamp })
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_BRIDGE_STAMP_FILE: stamp,
+      ...isolatedSchedule(dir, true),
+    })
     assert.equal(result.code, 1, result.lines.join('\n'))
     const fails = result.lines.filter((line) => line.startsWith('fail '))
     assert.deepEqual(fails, [
@@ -502,9 +521,19 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
       MC_DOCTOR_DOCKER: '1',
       MC_BRIDGE_STAMP_FILE: stamp,
       MC_BRIDGE_STALE_SECONDS: '30',
+      ...isolatedSchedule(dir, true),
     })
     assert.equal(stale.code, 1, stale.lines.join('\n'))
     assert.match(stale.lines[8], /^fail bridge: The last OpenClaw sync is older than 30 seconds\./)
+
+    const unscheduled = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_BRIDGE_STAMP_FILE: stamp,
+      MC_BRIDGE_STALE_SECONDS: '30',
+      ...isolatedSchedule(dir, false),
+    })
+    assert.equal(unscheduled.code, 0, unscheduled.lines.join('\n'))
+    assert.match(unscheduled.lines[8], /^info bridge: The last OpenClaw sync is older than 30 seconds\. No bridge schedule is installed\./)
     for (const line of stale.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
     await new Promise((resolve) => server.close(resolve))

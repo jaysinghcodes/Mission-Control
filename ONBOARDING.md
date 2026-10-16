@@ -119,7 +119,7 @@ python3 bridge/mc-bridge-sync.py
 
 With no `openclaw` binary, `--dry-run` exits 0 and posts nothing. That was verified. A real sync needs the CLI and a non blank `INGEST_TOKEN`.
 
-`bash install.sh` already schedules that command when `openclaw` is on PATH. Do not add a second cron line. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). `bash install.sh --uninstall-schedule` removes the schedule and leaves every other cron line and service unit alone. `npm run doctor` fails when the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). A missing timestamp is only an info line.
+`bash install.sh` already schedules that command when `openclaw` is on PATH. Do not add a second cron line. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The schedule PATH includes the `openclaw` directory and the `python3` directory. `bash install.sh --uninstall-schedule` removes the schedule, removes the sync timestamp, and leaves every other cron line and service unit alone. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). A missing timestamp is an info line. A stale timestamp is also an info line when no schedule is installed.
 
 Paste [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md) when the agent itself should POST events. A 401 means the header `x-ingest-token` does not match the API `INGEST_TOKEN`.
 
