@@ -9,7 +9,8 @@ import { probeGateway } from './gateway-probe';
  *
  * CPU, memory, disk, and the gateway result are measured on this request.
  * The gateway target is OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT.
- * Those default to 127.0.0.1 and 18789.
+ * Outside Compose those default to 127.0.0.1 and 18789. Compose sets the
+ * host default to host.docker.internal.
  */
 @Controller('system')
 export class SystemController {

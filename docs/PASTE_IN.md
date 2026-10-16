@@ -10,6 +10,8 @@ The script is Docker first. If Docker is missing, it says so and uses Node.js 22
 
 When the `openclaw` command is on PATH, the same command installs the bridge schedule. It does not start the OpenClaw gateway. Remove the schedule later with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer skips that step and still finishes. `npm run seed:demo` fills sample data and does not need OpenClaw. `npm run doctor` is the same check the installer runs at the end.
 
+The gateway probe is optional. Under Compose it uses `host.docker.internal` port `18789` unless `OPENCLAW_GATEWAY_HOST` or `OPENCLAW_GATEWAY_PORT` is set. Outside Compose those defaults are `127.0.0.1` and `18789`. Linux Compose maps `host.docker.internal` through `extra_hosts` and `host-gateway`. When System shows the gateway down, set those two variables. Do not start the gateway unless the operator asked.
+
 The bridge posts each agent provider and model from `~/.openclaw/openclaw.json`. When that file has no model, it runs `openclaw models list`. System shows those rows. With no bridge, the page says "No providers found yet. Run the bridge to detect them."
 
 Usage prices session tokens from `config/prices.json`. Copy a model into `config/prices.local.json` to change that price without a rebuild. A provider `costUsd` wins when OpenClaw reports one. Ollama costs $0.00. A model with no price shows `Price not set`.

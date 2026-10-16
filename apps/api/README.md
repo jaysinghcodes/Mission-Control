@@ -37,7 +37,7 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `SOCKET_TOKEN` | empty | Retired. The web bundle does not receive a socket token |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |
-| `OPENCLAW_GATEWAY_HOST` | `127.0.0.1` | Gateway probe host for `GET /system` |
+| `OPENCLAW_GATEWAY_HOST` | `127.0.0.1` outside Compose, `host.docker.internal` under Compose | Gateway probe host for `GET /system`. Compose adds `extra_hosts` with `host-gateway` so Linux can reach the host |
 | `OPENCLAW_GATEWAY_PORT` | `18789` | Gateway probe port |
 | `OPENCLAW_LOG_DIR` | `/tmp/openclaw` | Directory of `openclaw-*.log` |
 | `GIT_SHA` | git, or `git-sha.txt` in the image | Commit shown by `GET /health` |

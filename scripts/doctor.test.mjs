@@ -23,6 +23,8 @@ import {
   readHealthIdentity,
   report,
   runDoctor,
+  gatewayLine,
+  gatewayTarget,
   loginState,
   tokenState,
 } from './doctor.mjs'
@@ -83,7 +85,7 @@ test('token rules match loopback, production, and off loopback', () => {
 test('a healthy report exits 0 and keeps OpenClaw informational', () => {
   const result = report(facts())
   assert.equal(result.code, 0)
-  assert.equal(result.lines.length, 10)
+  assert.equal(result.lines.length, 11)
   assert.ok(result.lines.every((line) => !hasDashPunctuation(line)))
   assert.match(result.lines[0], /^pass node:/)
   assert.match(result.lines[1], /^pass ports: Port 3000 is already running\.$/)
@@ -95,6 +97,7 @@ test('a healthy report exits 0 and keeps OpenClaw informational', () => {
   assert.match(result.lines[6], /^pass login: HOST is loopback, so the dashboard stays open without a password\.$/)
   assert.match(result.lines[8], /^info openclaw: OpenClaw is optional/)
   assert.match(result.lines[9], /^info bridge: No OpenClaw sync timestamp was found/)
+  assert.match(result.lines[10], /^info gateway: The gateway probe uses 127\.0\.0\.1 port 18789\./)
 })
 
 test('each required failure names the next command and exits non zero', () => {
@@ -354,6 +357,59 @@ test('OpenClaw staying unreachable does not fail the command', () => {
   assert.match(result.lines[8], /^info openclaw:/)
   assert.doesNotMatch(result.lines[8], /^fail /)
   assert.match(result.lines[9], /^info bridge:/)
+  assert.match(result.lines[10], /^info gateway:/)
+  assert.doesNotMatch(result.lines[10], /^fail /)
+})
+
+test('gateway host defaults to host.docker.internal under Compose and 127.0.0.1 outside it', () => {
+  assert.deepEqual(gatewayTarget({}), { host: '127.0.0.1', port: 18789 })
+  assert.deepEqual(gatewayTarget({ MC_DOCTOR_DOCKER: '0' }), { host: '127.0.0.1', port: 18789 })
+  assert.deepEqual(gatewayTarget({ MC_DOCTOR_DOCKER: '1' }), { host: 'host.docker.internal', port: 18789 })
+  assert.deepEqual(
+    gatewayTarget({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }),
+    { host: 'gateway.internal', port: 19001 },
+  )
+  assert.deepEqual(
+    gatewayTarget({ OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }),
+    { host: 'gateway.internal', port: 19001 },
+  )
+  assert.deepEqual(
+    gatewayTarget({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_HOST: 'not a host', OPENCLAW_GATEWAY_PORT: '0' }),
+    { host: 'host.docker.internal', port: 18789 },
+  )
+  assert.deepEqual(
+    gatewayTarget({ OPENCLAW_GATEWAY_HOST: 'not a host', OPENCLAW_GATEWAY_PORT: '70000' }),
+    { host: '127.0.0.1', port: 18789 },
+  )
+  assert.equal(
+    gatewayLine({}),
+    'info gateway: The gateway probe uses 127.0.0.1 port 18789. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.',
+  )
+  assert.equal(
+    gatewayLine({ MC_DOCTOR_DOCKER: '1' }),
+    'info gateway: Under Compose the gateway probe uses host.docker.internal port 18789. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.',
+  )
+  const compose = report(facts({
+    env: {
+      HOST: '127.0.0.1',
+      INGEST_TOKEN: 'change-me',
+      PORT: '3000',
+      MC_DOCTOR_DOCKER: '1',
+      DASHBOARD_PASSWORD_HASH: 'scrypt:1',
+      SESSION_SECRET: 'ab',
+    },
+  }))
+  assert.equal(compose.code, 0)
+  assert.match(compose.lines[10], /host\.docker\.internal port 18789/)
+  assert.equal(hasDashPunctuation(compose.lines.join('\n')), false)
+  assert.equal(
+    effectiveEnv({ OPENCLAW_GATEWAY_HOST: 'gateway.internal' }, { OPENCLAW_GATEWAY_HOST: '10.0.0.4' }).OPENCLAW_GATEWAY_HOST,
+    '10.0.0.4',
+  )
+  assert.equal(
+    effectiveEnv({ OPENCLAW_GATEWAY_HOST: 'gateway.internal' }, { OPENCLAW_GATEWAY_HOST: '  ' }).OPENCLAW_GATEWAY_HOST,
+    'gateway.internal',
+  )
 })
 
 test('bridge sync age uses the limit and treats an equal age as recent', () => {

@@ -131,6 +131,8 @@ const MC_BLANK_FALLTHROUGH = [
   'MC_BRIDGE_CRON_MARK',
   'DASHBOARD_PASSWORD_HASH',
   'SESSION_SECRET',
+  'OPENCLAW_GATEWAY_HOST',
+  'OPENCLAW_GATEWAY_PORT',
 ]
 
 /**
@@ -642,6 +644,46 @@ function loginLine(env) {
   return 'pass login: A dashboard password is configured.'
 }
 
+const NATIVE_GATEWAY_HOST = '127.0.0.1'
+const COMPOSE_GATEWAY_HOST = 'host.docker.internal'
+const DEFAULT_GATEWAY_PORT = 18789
+
+function isGatewayHost(value) {
+  if (!value || value.length > 253) return false
+  if (value.includes('/') || /\s/.test(value) || value.includes('\0')) return false
+  return /^[A-Za-z0-9.:-]+$/.test(value)
+}
+
+function gatewayPort(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : ''
+  if (!/^\d+$/.test(text)) return DEFAULT_GATEWAY_PORT
+  const port = Number(text)
+  if (port < 1 || port > 65535) return DEFAULT_GATEWAY_PORT
+  return port
+}
+
+/**
+ * Same host rules as apps/api/src/system/gateway-probe.ts, plus the Compose
+ * default. Compose injects host.docker.internal when OPENCLAW_GATEWAY_HOST
+ * is unset. Native installs keep 127.0.0.1. An explicit host wins in both.
+ */
+export function gatewayTarget(env) {
+  const hostRaw = typeof env.OPENCLAW_GATEWAY_HOST === 'string' ? env.OPENCLAW_GATEWAY_HOST.trim() : ''
+  const fallback = env.MC_DOCTOR_DOCKER === '1' ? COMPOSE_GATEWAY_HOST : NATIVE_GATEWAY_HOST
+  return {
+    host: isGatewayHost(hostRaw) ? hostRaw : fallback,
+    port: gatewayPort(env.OPENCLAW_GATEWAY_PORT),
+  }
+}
+
+export function gatewayLine(env) {
+  const target = gatewayTarget(env)
+  const lead = env.MC_DOCTOR_DOCKER === '1' && target.host === COMPOSE_GATEWAY_HOST
+    ? 'Under Compose the gateway probe uses host.docker.internal'
+    : `The gateway probe uses ${target.host}`
+  return `info gateway: ${lead} port ${target.port}. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.`
+}
+
 function bridgeLine(bridge) {
   const item = bridge ?? { state: 'missing', limit: 600 }
   if (item.state === 'fresh') return 'pass bridge: The last OpenClaw sync is recent.'
@@ -691,6 +733,7 @@ export function report(facts) {
     healthLine(facts.ports),
     `info openclaw: ${facts.openclaw}`,
     bridgeLine(facts.bridge),
+    gatewayLine(facts.env),
   ]
   const code = lines.some((line) => line.startsWith('fail ')) ? 1 : 0
   return { lines, code }

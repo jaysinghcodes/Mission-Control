@@ -9,6 +9,7 @@ import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import { providerLabel } from '../lib/provider-label'
+import { gatewayLine } from '../lib/gateway-status'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
 import Logs from './Logs'
@@ -117,16 +118,6 @@ function shown(value: string | null | undefined): string {
 function agentModelName(row: ModelRow): string {
   const name = (row.agentName || row.label || row.agentId || '').trim()
   return name || 'Not assigned'
-}
-
-function gatewayLine(gw: GatewayResp | undefined): { value: string; ok: boolean } {
-  if (!gw) return { value: 'Waiting', ok: false }
-  const where = `${gw.host}:${gw.port}`
-  if (gw.up) {
-    const latency = gw.latencyMs != null ? `, ${gw.latencyMs} ms` : ''
-    return { value: `Up at ${where}${latency}`, ok: true }
-  }
-  return { value: `Down at ${where}`, ok: false }
 }
 
 function tokens(n: number | undefined): string {
@@ -276,6 +267,11 @@ export default function System() {
           <Fact label="OpenClaw" value={shown(health.data?.openclawVersion)} wrap />
           <Fact label="Gateway" value={gateway.value} ok={gateway.ok} wrap />
         </div>
+        {gateway.hint ? (
+          <p className="mt-3 text-[13px] leading-relaxed text-mc-sub" data-testid="gateway-hint">
+            {gateway.hint}
+          </p>
+        ) : null}
       </SoftCard>
 
       <div className="mb-3 mt-8"><Kicker>Providers</Kicker></div>

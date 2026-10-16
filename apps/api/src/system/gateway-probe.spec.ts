@@ -41,6 +41,15 @@ describe('gateway probe', () => {
     expect(gatewayTarget()).toEqual({ host: '127.0.0.1', port: 18789 });
   });
 
+  it('accepts the Compose default host', () => {
+    process.env.OPENCLAW_GATEWAY_HOST = 'host.docker.internal';
+    process.env.OPENCLAW_GATEWAY_PORT = '18789';
+    expect(gatewayTarget()).toEqual({
+      host: 'host.docker.internal',
+      port: 18789,
+    });
+  });
+
   it('reports up when a stub gateway accepts the connection', async () => {
     const server = createServer((socket) => {
       socket.end();

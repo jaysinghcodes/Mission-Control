@@ -52,8 +52,9 @@ test('compose yaml lists db, api, and web on loopback', () => {
   }
   assert.equal(compose.services.api.build.dockerfile, 'apps/api/Dockerfile')
   assert.equal(compose.services.api.build.args.GIT_SHA, '${GIT_SHA:-}')
-  assert.equal(compose.services.api.environment.OPENCLAW_GATEWAY_HOST, '${OPENCLAW_GATEWAY_HOST:-127.0.0.1}')
+  assert.equal(compose.services.api.environment.OPENCLAW_GATEWAY_HOST, '${OPENCLAW_GATEWAY_HOST:-host.docker.internal}')
   assert.equal(compose.services.api.environment.OPENCLAW_GATEWAY_PORT, '${OPENCLAW_GATEWAY_PORT:-18789}')
+  assert.deepEqual(compose.services.api.extra_hosts, ['host.docker.internal:host-gateway'])
   assert.equal(compose.services.api.environment.OPENCLAW_LOG_DIR, '${OPENCLAW_LOG_DIR:-/tmp/openclaw}')
   assert.equal(compose.services.web.build.dockerfile, 'apps/web/Dockerfile')
 })

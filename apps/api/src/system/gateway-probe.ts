@@ -3,9 +3,11 @@ import { connect } from 'net';
 /**
  * TCP probe of the OpenClaw gateway.
  *
- * Host and port come from the environment. The defaults are 127.0.0.1 and
- * 18789. A connect that succeeds is up. A refusal, timeout, or bad address
- * is down. Nothing here is a stored status.
+ * Host and port come from the environment. Outside Compose the defaults
+ * are 127.0.0.1 and 18789. Compose sets OPENCLAW_GATEWAY_HOST to
+ * host.docker.internal when that variable is unset, and maps the name with
+ * extra_hosts. A connect that succeeds is up. A refusal, timeout, or bad
+ * address is down. Nothing here is a stored status.
  */
 
 const DEFAULT_HOST = '127.0.0.1';
