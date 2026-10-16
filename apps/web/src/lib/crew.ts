@@ -66,6 +66,16 @@ export function presentAgent(agent: NamedAgent, state: NamingState): Presented {
   }
 }
 
+/** Ticket assignees match this. A stored name or a crew name does not. */
+export function findById<T extends { id: string }>(
+  agents: readonly T[],
+  id: string | null | undefined,
+): T | undefined {
+  const key = (id ?? '').trim()
+  if (!key) return undefined
+  return agents.find((agent) => agent.id.trim() === key)
+}
+
 /** Id, stored name, or the crew name for a mapped id. Not a role keyword. */
 export function findByLabel<T extends NamedAgent>(
   agents: readonly T[],

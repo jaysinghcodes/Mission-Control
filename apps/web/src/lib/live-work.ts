@@ -2,14 +2,14 @@
  * One live placement for Agents, Team, and Office.
  *
  * Precedence, first match wins:
- * 1. Active ticket. The bot is the assignee (id or name) of a ticket in
- *    build, qa, or review (inprogress counts as build). The room is that
- *    stage. The subtitle is the ticket title. Several tickets: newest
- *    createdAt, then the later stage. A ticket in done does not seat its
- *    bot. The bot returns to Commons. Pipeline still counts that ticket
- *    in Deploy.
+ * 1. Active ticket. The assignee equals the agent id. A display name does
+ *    not seat a bot. The ticket is in build, qa, or review (inprogress
+ *    counts as build). The room is that stage. The subtitle is the ticket
+ *    title. Several tickets: newest createdAt, then the later stage. A
+ *    ticket in done does not seat its bot. The bot returns to Commons.
+ *    Pipeline still counts that ticket in Deploy.
  * 2. Active run, when no active ticket applies. status is running or
- *    needs_approval, the run names this bot, and ticketId points at a
+ *    needs_approval, agent equals this bot's id, and ticketId points at a
  *    ticket in build, qa, review, or done. The room is that ticket's
  *    stage. Deploy seats a bot only when this run points at a ticket in
  *    done. A run on a review ticket seats Ship. The subtitle is the
@@ -96,14 +96,17 @@ function timeMs(iso: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0
 }
 
+/**
+ * Ticket assignees and run agents match the agent id.
+ * A display name never seats a bot.
+ */
 export function samePerson(
-  agent: { id: string; name: string },
+  agent: { id: string; name?: string },
   label: string | null | undefined,
 ): boolean {
   const raw = (label ?? '').trim()
   if (!raw) return false
-  const key = raw.toLowerCase()
-  return key === agent.id.trim().toLowerCase() || key === agent.name.trim().toLowerCase()
+  return raw === agent.id.trim()
 }
 
 function ticketSubtitle(ticket: LiveTicket): string {

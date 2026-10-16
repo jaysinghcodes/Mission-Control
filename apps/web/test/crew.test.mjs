@@ -53,6 +53,27 @@ test('a role word does not pick a seat when the map is empty', () => {
   assert.equal(shown.desk, null)
 })
 
+test('findById matches the agent id and ignores a stored name', () => {
+  const agents = [
+    { id: 'forge', name: 'Sample' },
+    { id: 'reg_forge', name: 'Forge' },
+  ]
+  assert.equal(crew.findById(agents, 'forge').id, 'forge')
+  assert.equal(crew.findById(agents, 'Forge'), undefined)
+  assert.equal(crew.findById(agents, 'reg_forge').name, 'Forge')
+  assert.equal(crew.findById(agents, '  '), undefined)
+})
+
+test('ticket, pipeline, and project faces match assignees by id', async () => {
+  const tickets = await readFile(new URL('../src/pages/Tickets.tsx', import.meta.url), 'utf8')
+  const pipeline = await readFile(new URL('../src/pages/Pipeline.tsx', import.meta.url), 'utf8')
+  const projects = await readFile(new URL('../src/pages/Projects.tsx', import.meta.url), 'utf8')
+  for (const page of [tickets, pipeline, projects]) {
+    assert.match(page, /findById/)
+    assert.equal(page.includes('findByLabel'), false)
+  }
+})
+
 test('assignSeatsInOrder follows position and ignores names', () => {
   const agents = [
     { id: 'dev', name: 'Speedy', position: 1 },

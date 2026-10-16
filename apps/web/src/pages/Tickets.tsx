@@ -4,8 +4,7 @@ import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, Banner, SearchInput, FieldError, EmptyState } from '../components/shell'
 import type { Agent, AgentsResp, ProjectsResp } from '../types'
-import { findByLabel, type NamingState } from '../lib/crew'
-import { useNaming } from '../lib/naming'
+import { findById } from '../lib/crew'
 import { ticketCreateQueue } from '../lib/serialQueue'
 import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
 import { pluralize } from '../lib/pluralize'
@@ -39,16 +38,15 @@ interface RunsResp { runs: LinkedRun[] }
 /** Columns live in board.ts so the board, Pipeline, and Office share one status map. */
 
 /**
- * Assignee sticker. The card used to draw the generic Bot glyph. Match the
- * name (or the roster display name) to a real agent so the ticket wears the
- * same robot as Team / Office. Unknown and empty assignees still get a
- * sticker — hashed from the label — without being folded into the live
- * roster (that would burn a seat and renumber a child).
+ * Assignee sticker. Match the agent id so the ticket wears the same robot
+ * as Team and Office. A display name does not. Unknown and empty assignees
+ * still get a sticker hashed from the label, without being folded into the
+ * live roster (that would burn a seat and renumber a child).
  */
-function assigneeFace(assignee: string | null, roster: readonly Agent[], state: NamingState): { agent: Agent | { id: string; name: string; status: string }; agents?: readonly Agent[] } {
+function assigneeFace(assignee: string | null, roster: readonly Agent[]): { agent: Agent | { id: string; name: string; status: string }; agents?: readonly Agent[] } {
   const label = assignee?.trim() || ''
   if (!label) return { agent: { id: 'unassigned', name: 'unassigned', status: 'offline' } }
-  const hit = findByLabel(roster, label, state)
+  const hit = findById(roster, label)
   if (hit) return { agent: hit, agents: roster }
   return { agent: { id: label, name: label, status: 'idle' } }
 }
@@ -80,7 +78,6 @@ export default function Tickets() {
   const activeProjects = allProjects.filter((p) => !p.archivedAt)
   // Same roster Team uses, so an assignee's sticker matches their card.
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
-  const naming = useNaming()
   const roster = rosterQ.data?.agents ?? []
   const { events } = useLiveActivity()
   const [title, setTitle] = useState('')
@@ -400,7 +397,7 @@ export default function Tickets() {
   }
 
   function openCard(t: Ticket) {
-    const face = assigneeFace(t.assignee, roster, naming)
+    const face = assigneeFace(t.assignee, roster)
     const flagged = needsYou(t)
     return (
       <SoftCard className="px-3.5 py-3">
