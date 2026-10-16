@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { buildInstallScript, readComposeInstallCommands, readInstallCommands, runShell } from './fresh-clone.mjs'
+import { spawnSync } from 'node:child_process'
+import { buildInstallScript, finishFreshInstall, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -74,6 +75,162 @@ test('a fresh install does not seed, and the clone job seeds later', () => {
   assert.match(clone, /run', 'seed:demo'/)
   const smoke = readFileSync(path.join(root, 'scripts/ui-smoke.mjs'), 'utf8')
   assert.match(smoke, /seed-demo\.ts/)
+})
+
+test('installer mode is compose, native, or the fresh clone default', () => {
+  assert.equal(installMode({}), '')
+  assert.equal(installMode({ FRESH_INSTALL_MODE: 'compose' }), 'compose')
+  assert.equal(installMode({ FRESH_INSTALL_MODE: 'native' }), 'native')
+  assert.throws(() => installMode({ FRESH_INSTALL_MODE: 'windows' }), /compose or native/)
+})
+
+test('the installer log yields the password and the dashboard URL', () => {
+  const log = 'Dashboard password, shown once: abc_DEF-123\nOpen http://localhost:5173/#/tasks\n'
+  assert.equal(parseDashboardPassword(log), 'abc_DEF-123')
+  assert.equal(parseInstallerUrl(log), 'http://127.0.0.1:5173/')
+  assert.equal(parseDashboardPassword('no password here'), '')
+  assert.equal(parseInstallerUrl('Open http://example.com/'), '')
+})
+
+test('CI runs Compose and native installs and the fixture bridge', () => {
+  const workflow = readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8')
+  assert.match(workflow, /mode: compose/)
+  assert.match(workflow, /os: ubuntu-latest[\s\S]*mode: native/)
+  assert.match(workflow, /os: macos-latest[\s\S]*mode: native/)
+  assert.match(workflow, /FRESH_INSTALL_MODE: \$\{\{ matrix\.mode \}\}/)
+  assert.doesNotMatch(workflow, /macos-latest[\s\S]{0,200}mode: compose/)
+  const clone = readFileSync(path.join(root, 'scripts/fresh-clone.mjs'), 'utf8')
+  assert.match(clone, /bridge-fixture\.mjs/)
+  assert.match(clone, /examples\/fresh-install/)
+  const readme = readFileSync(path.join(root, 'README.md'), 'utf8')
+  assert.match(readme, /Ubuntu runs the Docker Compose install and the native install/)
+  assert.match(readme, /macOS runs the native install only/)
+})
+
+test('the ticket auth table does not list a delete route', () => {
+  const api = readFileSync(path.join(root, 'docs/API.md'), 'utf8')
+  assert.doesNotMatch(api, /Ticket delete/)
+  assert.match(api, /There is no ticket delete route/)
+  const tickets = api.split('### 4.4 Tickets')[1].split('### 4.5')[0]
+  assert.match(tickets, /`POST \/tickets`/)
+  assert.match(tickets, /`PATCH \/tickets\/:id`/)
+  assert.doesNotMatch(tickets, /DELETE \/tickets/)
+})
+
+test('the fresh install fixture dry run maps devices, nodes, approvals, and the gateway', () => {
+  const proc = spawnSync(
+    'python3',
+    ['bridge/mc-bridge-sync.py', '--dry-run', '--from-dir', 'bridge/examples/fresh-install'],
+    { cwd: root, encoding: 'utf8' },
+  )
+  assert.equal(proc.status, 0, proc.stderr)
+  const events = proc.stdout
+    .split(/\n/)
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line))
+  const machines = events.find((event) => event.type === 'devices.snapshot').payload
+  const approvals = events.find((event) => event.type === 'approvals.snapshot').payload.approvals
+  const gateway = events.find((event) => event.type === 'gateway.snapshot').payload
+  assert.deepEqual(
+    machines.devices.map((row) => row.id),
+    ['fresh-studio', 'pending:req-fresh'],
+  )
+  assert.deepEqual(
+    machines.nodes.map((row) => row.id),
+    ['fresh-node'],
+  )
+  assert.equal(machines.nodes[0].online, true)
+  assert.equal(approvals[0].tag, 'FreshInstall')
+  assert.equal(gateway.host, '127.0.0.1')
+  assert.equal(typeof gateway.up, 'boolean')
+})
+
+test('cleanup removes a user owned checkout and does not hide an install failure', async () => {
+  const owned = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
+  mkdirSync(path.join(owned, 'data', 'docs'), { recursive: true })
+  let privileged = false
+  const removed = await removeInstallWork(owned, process.env, async () => {
+    privileged = true
+    return { code: 0, stdout: '', stderr: '' }
+  })
+  assert.equal(removed, true)
+  assert.equal(privileged, false)
+  assert.equal(existsSync(owned), false)
+
+  const blockedParent = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
+  const blocked = path.join(blockedParent, 'data')
+  mkdirSync(path.join(blocked, 'docs'), { recursive: true })
+  chmodSync(blocked, 0o000)
+  try {
+    const calls = []
+    const left = await removeInstallWork(blockedParent, process.env, async (script) => {
+      calls.push(script)
+      if (script.startsWith('sudo -n rm -rf ')) {
+        chmodSync(blocked, 0o755)
+        rmSync(blockedParent, { recursive: true, force: true })
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      return { code: 1, stdout: '', stderr: 'unused' }
+    })
+    assert.equal(left, true)
+    assert.equal(calls.length, 1)
+    assert.match(calls[0], /^sudo -n rm -rf /)
+    assert.equal(existsSync(blockedParent), false)
+
+    const stuck = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
+    const stuckDir = path.join(stuck, 'data')
+    mkdirSync(path.join(stuckDir, 'docs'), { recursive: true })
+    chmodSync(stuckDir, 0o000)
+    const attempts = []
+    try {
+      const missed = await removeInstallWork(stuck, process.env, async (script) => {
+        attempts.push(script)
+        return { code: 1, stdout: '', stderr: 'denied' }
+      })
+      assert.equal(missed, false)
+      assert.equal(attempts.length, 2)
+      assert.match(attempts[1], /docker run --rm/)
+      assert.equal(existsSync(stuck), true)
+    } finally {
+      chmodSync(stuckDir, 0o755)
+      rmSync(stuck, { recursive: true, force: true })
+    }
+
+    await finishFreshInstall({
+      workParent: stuck,
+      cloneDir: stuck,
+      mode: 'native',
+      env: process.env,
+      keep: false,
+      installError: null,
+      stop: async () => {},
+      remove: async () => {
+        throw new Error('cleanup exploded')
+      },
+    })
+    await assert.rejects(
+      () =>
+        finishFreshInstall({
+          workParent: stuck,
+          cloneDir: stuck,
+          mode: 'native',
+          env: process.env,
+          keep: true,
+          installError: new Error('bash install.sh failed (exit 1).'),
+          stop: async () => {
+            throw new Error('compose down failed')
+          },
+          remove: async () => {
+            throw new Error('cleanup exploded')
+          },
+        }),
+      /bash install\.sh failed \(exit 1\)\./,
+    )
+    await assert.rejects(() => removeInstallWork(tmpdir(), process.env, async () => ({ code: 0, stdout: '', stderr: '' })), /Refusing to remove/)
+  } finally {
+    if (existsSync(blocked)) chmodSync(blocked, 0o755)
+    if (existsSync(blockedParent)) rmSync(blockedParent, { recursive: true, force: true })
+  }
 })
 
 test('a README without npm run dev is rejected', () => {

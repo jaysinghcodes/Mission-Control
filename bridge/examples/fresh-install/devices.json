@@ -1,0 +1,18 @@
+{
+  "pending": [
+    {
+      "requestId": "req-fresh",
+      "deviceId": "fresh-phone",
+      "displayName": "Fresh Phone",
+      "ts": 1710000000000
+    }
+  ],
+  "paired": [
+    {
+      "deviceId": "fresh-studio",
+      "displayName": "Fresh Studio",
+      "roles": ["operator"],
+      "approvedAtMs": 1700000000000
+    }
+  ]
+}

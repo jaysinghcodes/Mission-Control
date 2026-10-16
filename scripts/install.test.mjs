@@ -374,6 +374,10 @@ test('a fresh run writes unique random tokens, calls compose, and prints the URL
     }
     assertNoSecrets(textA, envA)
     assertNoSecrets(textB, envB)
+    const docsDir = path.join(first.repo, 'data', 'docs')
+    assert.equal(existsSync(docsDir), true)
+    assert.equal(statSync(docsDir).uid, process.getuid())
+    assert.match(textA, /Created .+\/data\/docs for the Compose docs bind\./)
     const log = readFileSync(first.log, 'utf8')
     assert.match(log, /compose version/)
     assert.match(log, /compose up -d --build/)
@@ -382,6 +386,60 @@ test('a fresh run writes unique random tokens, calls compose, and prints the URL
   } finally {
     rmSync(first.dir, { recursive: true, force: true })
     rmSync(second.dir, { recursive: true, force: true })
+  }
+})
+
+test('the Compose docs directory follows the shell, then .env, then data/docs', () => {
+  const fromShell = freshDir()
+  const fromFile = freshDir()
+  const fromEmpty = freshDir()
+  try {
+    const addDocs = (repo, value) => {
+      const file = path.join(repo, '.env.example')
+      writeFileSync(file, `${readFileSync(file, 'utf8')}\nDOCS_ROOT=${value}\n`)
+    }
+    addDocs(fromShell.repo, 'from-file/docs')
+    const shellRun = runInstall(fromShell.repo, { ...fromShell.env, DOCS_ROOT: 'from-shell/docs' })
+    const shellText = outputOf(shellRun)
+    const shellFailed = assertReadableDoctor(shellText).some((line) => line.startsWith('fail '))
+    assert.equal(shellRun.status, shellFailed ? 1 : 0, shellText)
+    assert.equal(existsSync(path.join(fromShell.repo, 'from-shell', 'docs')), true)
+    assert.equal(existsSync(path.join(fromShell.repo, 'from-file', 'docs')), false)
+    assert.equal(existsSync(path.join(fromShell.repo, 'data', 'docs')), false)
+    assert.equal(statSync(path.join(fromShell.repo, 'from-shell', 'docs')).uid, process.getuid())
+
+    addDocs(fromFile.repo, 'from-file/docs')
+    const fileRun = runInstall(fromFile.repo, { ...fromFile.env, DOCS_ROOT: undefined })
+    const fileText = outputOf(fileRun)
+    const fileFailed = assertReadableDoctor(fileText).some((line) => line.startsWith('fail '))
+    assert.equal(fileRun.status, fileFailed ? 1 : 0, fileText)
+    assert.equal(existsSync(path.join(fromFile.repo, 'from-file', 'docs')), true)
+    assert.equal(existsSync(path.join(fromFile.repo, 'data', 'docs')), false)
+
+    addDocs(fromEmpty.repo, 'from-file/docs')
+    const emptyRun = runInstall(fromEmpty.repo, { ...fromEmpty.env, DOCS_ROOT: '' })
+    const emptyText = outputOf(emptyRun)
+    const emptyFailed = assertReadableDoctor(emptyText).some((line) => line.startsWith('fail '))
+    assert.equal(emptyRun.status, emptyFailed ? 1 : 0, emptyText)
+    assert.equal(existsSync(path.join(fromEmpty.repo, 'data', 'docs')), true)
+    assert.equal(existsSync(path.join(fromEmpty.repo, 'from-file', 'docs')), false)
+  } finally {
+    rmSync(fromShell.dir, { recursive: true, force: true })
+    rmSync(fromFile.dir, { recursive: true, force: true })
+    rmSync(fromEmpty.dir, { recursive: true, force: true })
+  }
+})
+
+test('a docs path that is a file stops the installer', () => {
+  const fx = freshDir()
+  try {
+    mkdirSync(path.join(fx.repo, 'data'))
+    writeFileSync(path.join(fx.repo, 'data', 'docs'), 'not a directory')
+    const result = runInstall(fx.repo, fx.env)
+    assert.notEqual(result.status, 0)
+    assert.match(outputOf(result), /Path .+\/data\/docs exists and is not a directory\./)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
   }
 })
 
@@ -402,6 +460,8 @@ test('a rerun keeps existing tokens and every other .env value', () => {
     assert.equal(text.includes(assignments(before.toString('utf8')).INGEST_TOKEN), false)
     assert.match(readFileSync(fx.log, 'utf8'), /compose up -d --build[\s\S]*compose up -d --build/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
+    assert.doesNotMatch(text, /Created .+ for the Compose docs bind\./)
+    assert.equal(existsSync(path.join(fx.repo, 'data', 'docs')), true)
     assert.equal(mode, 0o600)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })

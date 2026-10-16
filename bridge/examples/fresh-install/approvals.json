@@ -1,0 +1,7 @@
+[
+  {
+    "kind": "exec",
+    "tag": "FreshInstall",
+    "desc": "Allow the fresh install fixture command"
+  }
+]

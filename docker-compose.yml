@@ -127,7 +127,9 @@ services:
     volumes:
       # ${DOCS_ROOT} here is the HOST path from the project .env (compose
       # interpolation), not the container path set just above. `:-` keeps
-      # ./data/docs when that variable is unset or empty.
+      # ./data/docs when that variable is unset or empty. install.sh creates
+      # this directory as the invoking user before `up`, so the checkout
+      # stays deletable. A missing path would be created as root.
       - ${DOCS_ROOT:-./data/docs}:/data/docs
       # Session version and a changed password hash. Survives recreate.
       - mc-auth:/data/auth
