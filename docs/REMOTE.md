@@ -93,6 +93,6 @@ On a tunnel other than Cloudflare, a client that sends a new spoofed `CF-Connect
 
 ## Gateway status
 
-Under Compose the bridge runs on the host. It checks the OpenClaw gateway at `127.0.0.1` on `OPENCLAW_GATEWAY_PORT` (default 18789) and posts `gateway.snapshot` with `x-ingest-token`. System shows that report. A missing report, or a report older than `GATEWAY_STATUS_MAX_AGE_MS`, counts as stale and shows Unknown. The default is 600000 milliseconds, which is 10 minutes. Blank, 0, or an invalid number uses that default. Unknown is not the same as down. Down is a real check.
+Under Compose the bridge runs on the host. It checks the OpenClaw gateway at `127.0.0.1` on `OPENCLAW_GATEWAY_PORT` (default 18789) and posts `gateway.snapshot` with `x-ingest-token`. System shows that report. A missing report, or a report older than `GATEWAY_STATUS_MAX_AGE_MS`, counts as stale and shows Unknown. A future checkedAt is counted from the time the API stored the report. The default is 600000 milliseconds, which is 10 minutes. Blank, 0, or an invalid number uses that default. Unknown is not the same as down. Down is a real check.
 
 A native install, or an explicit `OPENCLAW_GATEWAY_HOST`, probes that host instead of reading the bridge report. OpenClaw does not have to be running. A down or unknown gateway does not block sign in, and `npm run seed:demo` does not need it.

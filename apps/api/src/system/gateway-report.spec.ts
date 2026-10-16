@@ -154,6 +154,48 @@ describe('GET /system gateway report', () => {
     expect(agedGateway.up).toBe(false);
   });
 
+  it('ages a future dated report from the time it was stored and leaves a normal report up', async () => {
+    process.env.GATEWAY_STATUS_MAX_AGE_MS = '60000';
+    const now = Date.now();
+    const normal = await post({
+      up: true,
+      host: '127.0.0.1',
+      port: 18789,
+      checkedAt: now - 1000,
+      latencyMs: 3,
+    });
+    expect(normal.status).toBe(202);
+    const fresh = await request(app.getHttpServer()).get('/system');
+    expect(responseJson<GatewayBody>(fresh).gateway).toMatchObject({
+      state: 'up',
+      up: true,
+      source: 'bridge',
+    });
+
+    await prisma.activityEvent.deleteMany({
+      where: { type: 'gateway.snapshot' },
+    });
+    const future = await post({
+      up: true,
+      host: '127.0.0.1',
+      port: 18789,
+      checkedAt: now + 24 * 60 * 60 * 1000,
+      latencyMs: 3,
+    });
+    expect(future.status).toBe(202);
+    const skewed = await request(app.getHttpServer()).get('/system');
+    expect(responseJson<GatewayBody>(skewed).gateway.state).toBe('up');
+
+    await prisma.activityEvent.updateMany({
+      where: { type: 'gateway.snapshot' },
+      data: { ts: new Date(Date.now() - 120_000) },
+    });
+    const aged = await request(app.getHttpServer()).get('/system');
+    const agedGateway = responseJson<GatewayBody>(aged).gateway;
+    expect(agedGateway.state).toBe('unknown');
+    expect(agedGateway.up).toBe(false);
+  });
+
   it('treats a max age of 0 as 10 minutes and keeps an explicit port on the bridge report', async () => {
     process.env.GATEWAY_STATUS_MAX_AGE_MS = '0';
     process.env.OPENCLAW_GATEWAY_PORT = '19001';

@@ -20,7 +20,8 @@ import {
  * CPU, memory, and disk are measured on this request. Native installs probe
  * OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT (defaults 127.0.0.1 and
  * 18789). Under Compose, with the host blank, status comes from the latest
- * gateway.snapshot. An explicit host still probes that address.
+ * gateway.snapshot. Age uses the row timestamp when checkedAt is later.
+ * An explicit host still probes that address.
  */
 @Controller('system')
 export class SystemController {
@@ -98,12 +99,14 @@ export class SystemController {
       const row = await this.prisma.activityEvent.findFirst({
         where: { type: 'gateway.snapshot' },
         orderBy: { ts: 'desc' },
-        select: { payload: true },
+        select: { payload: true, ts: true },
       });
-      const payload = row?.payload;
+      if (!row) return null;
+      const payload = row.payload;
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         return null;
       }
+      const receivedAt = receivedAtMs(row.ts);
       return {
         up: payload.up,
         host: payload.host,
@@ -111,9 +114,16 @@ export class SystemController {
         checkedAt: payload.checkedAt,
         latencyMs: payload.latencyMs,
         version: payload.version,
+        ...(receivedAt == null ? {} : { receivedAt }),
       };
     } catch {
       return null;
     }
   }
+}
+
+function receivedAtMs(ts: unknown): number | null {
+  if (!(ts instanceof Date)) return null;
+  const ms = ts.getTime();
+  return Number.isFinite(ms) ? ms : null;
 }

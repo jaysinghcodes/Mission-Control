@@ -13,9 +13,11 @@ import {
   FIX_MIGRATIONS,
   FIX_NODE,
   FIX_TOKEN,
+  DOCKER_PERMISSION_HINT,
   apiListenPort,
   bridgeStaleSeconds,
   bridgeSyncState,
+  dockerPermissionDenied,
   effectiveEnv,
   hasDashPunctuation,
   inspectApiPort,
@@ -506,6 +508,82 @@ test('docker doctor reads gateway state from /system and an override probes dire
   } finally {
     await new Promise((resolve) => server.close(resolve))
     await new Promise((resolve) => gateway.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('compose doctor names the missing Docker socket permission', async () => {
+  const denied = gatewayLine(
+    { MC_DOCTOR_DOCKER: '1' },
+    { state: 'unknown', host: '127.0.0.1', port: 18789, dockerDenied: true },
+  )
+  assert.equal(
+    denied,
+    `info gateway: Gateway status is unknown. ${DOCKER_PERMISSION_HINT}`,
+  )
+  assert.match(denied, /permission to use the Docker socket/)
+  assert.match(denied, /docker group/)
+  assert.match(denied, /sudo usermod -aG docker/)
+  assert.match(denied, /new login session/)
+  assert.equal(hasDashPunctuation(denied), false)
+  assert.equal(/[→←⇒]|->/.test(denied), false)
+  assert.equal(
+    dockerPermissionDenied(
+      'permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock',
+    ),
+    true,
+  )
+  assert.equal(dockerPermissionDenied('connection refused'), false)
+
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-docker-perm-'))
+  const bin = path.join(dir, 'bin')
+  mkdirSync(bin)
+  writeFileSync(
+    path.join(bin, 'docker'),
+    [
+      '#!/bin/sh',
+      'echo "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock" >&2',
+      'exit 1',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  const server = http.createServer((req, res) => {
+    if (req.url === '/system') {
+      res.writeHead(401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ statusCode: 401, message: 'unauthorized' }))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    writeFileSync(
+      path.join(dir, '.env'),
+      [
+        'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
+        'PORT=3000',
+        `MC_API_PORT=${port}`,
+        'HOST=127.0.0.1',
+        'INGEST_TOKEN=abc123',
+        'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
+        'SESSION_SECRET=001122',
+        '',
+      ].join('\n'),
+    )
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    assert.equal(result.code, 0, result.lines.join('\n'))
+    const line = result.lines.find((item) => item.startsWith('info gateway:'))
+    assert.equal(line, denied)
+    assert.doesNotMatch(line, /Run the bridge to check it/)
+    for (const item of result.lines) assert.equal(hasDashPunctuation(item), false, item)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
     rmSync(dir, { recursive: true, force: true })
   }
 })

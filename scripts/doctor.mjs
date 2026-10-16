@@ -572,7 +572,7 @@ export async function gather(root, processEnv = process.env) {
     openclaw,
     bridge: bridgeFacts(root, env, processEnv),
   }
-  facts.gateway = await gatewayReading(facts.env, facts.ports, root)
+  facts.gateway = await gatewayReading(facts.env, facts.ports, root, processEnv)
   return facts
 }
 
@@ -649,6 +649,14 @@ function loginLine(env) {
 const NATIVE_GATEWAY_HOST = '127.0.0.1'
 const DEFAULT_GATEWAY_PORT = 18789
 const GATEWAY_UNKNOWN_HINT = 'Gateway status comes from the bridge. Run the bridge to check it.'
+export const DOCKER_PERMISSION_HINT =
+  'This user lacks permission to use the Docker socket. Add the user to the docker group with sudo usermod -aG docker "$USER", start a new login session, then run npm run doctor again.'
+
+/** Docker socket denial, including a user who is not in the docker group. */
+export function dockerPermissionDenied(text) {
+  const raw = String(text ?? '')
+  return /permission denied/i.test(raw) && /docker/i.test(raw)
+}
 
 function isGatewayHost(value) {
   if (!value || value.length > 253) return false
@@ -694,7 +702,8 @@ export function gatewayLine(env, reading) {
     if (state === 'down') {
       return `info gateway: The bridge reported the gateway down at ${reading.host} port ${reading.port}.`
     }
-    return `info gateway: Gateway status is unknown. ${GATEWAY_UNKNOWN_HINT}`
+    const hint = reading && reading.dockerDenied ? DOCKER_PERMISSION_HINT : GATEWAY_UNKNOWN_HINT
+    return `info gateway: Gateway status is unknown. ${hint}`
   }
   const target = gatewayTarget(env)
   if (reading && (reading.state === 'up' || reading.state === 'down')) {
@@ -739,20 +748,28 @@ function parseGatewayBody(text) {
 const DOCKER_SYSTEM_JS =
   'fetch("http://127.0.0.1:3000/system").then(async (res) => { const text = await res.text(); process.stdout.write(text); process.exit(res.ok ? 0 : 1); }).catch(() => process.exit(1))'
 
-function dockerLoopbackSystem(root) {
+function dockerLoopbackSystem(root, processEnv = process.env) {
   try {
     const result = spawnSync('docker', ['compose', 'exec', '-T', 'api', 'node', '-e', DOCKER_SYSTEM_JS], {
       cwd: root,
       encoding: 'utf8',
       timeout: 8000,
+      env: { ...process.env, ...processEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
-    return { status: result.status === 0 ? 200 : 0, text: result.stdout || '' }
-  } catch {
-    return { status: 0, text: '' }
+    const detail = `${result.stdout || ''}\n${result.stderr || ''}\n${result.error ? result.error.message : ''}`
+    return {
+      status: result.status === 0 ? 200 : 0,
+      text: result.stdout || '',
+      dockerDenied: dockerPermissionDenied(detail),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { status: 0, text: '', dockerDenied: dockerPermissionDenied(message) }
   }
 }
 
-async function gatewayReading(env, ports, root) {
+async function gatewayReading(env, ports, root, processEnv = process.env) {
   const target = gatewayTarget(env)
   if (!gatewayUsesBridge(env)) return probeGatewayTarget(target)
   const unknown = { state: 'unknown', host: NATIVE_GATEWAY_HOST, port: target.port }
@@ -761,8 +778,9 @@ async function gatewayReading(env, ports, root) {
   const systemUrl = healthUrl.replace(/\/health$/, '/system')
   let res = await httpGet(systemUrl)
   if (res.status === 401 && env.MC_DOCTOR_DOCKER === '1' && root) {
-    res = dockerLoopbackSystem(root)
+    res = dockerLoopbackSystem(root, processEnv)
   }
+  if (res.dockerDenied) return { ...unknown, dockerDenied: true }
   return parseGatewayBody(res.text) ?? unknown
 }
 

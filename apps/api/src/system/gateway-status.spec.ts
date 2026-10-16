@@ -123,6 +123,84 @@ describe('gateway status', () => {
     expect(stale.checkedAt).toBe(NOW - 600001);
   });
 
+  it('limits a future checkedAt to the time the API stored the report', () => {
+    const freshSkew = gatewayStatusFromReport(
+      {
+        up: true,
+        checkedAt: NOW + 86_400_000,
+        port: 18789,
+        receivedAt: NOW,
+        latencyMs: 4,
+      },
+      NOW,
+      600000,
+      18789,
+    );
+    expect(freshSkew.state).toBe('up');
+    expect(freshSkew.checkedAt).toBe(NOW + 86_400_000);
+
+    const atLimit = gatewayStatusFromReport(
+      {
+        up: true,
+        checkedAt: NOW + 86_400_000,
+        port: 18789,
+        receivedAt: NOW - 600000,
+      },
+      NOW,
+      600000,
+      18789,
+    );
+    expect(atLimit.state).toBe('up');
+
+    const aged = gatewayStatusFromReport(
+      {
+        up: true,
+        checkedAt: NOW + 86_400_000,
+        port: 18789,
+        receivedAt: NOW - 600001,
+      },
+      NOW,
+      600000,
+      18789,
+    );
+    expect(aged.state).toBe('unknown');
+    expect(aged.up).toBe(false);
+    expect(aged.checkedAt).toBe(NOW + 86_400_000);
+
+    const normal = gatewayStatusFromReport(
+      {
+        up: true,
+        checkedAt: NOW - 1000,
+        port: 18789,
+        receivedAt: NOW,
+        latencyMs: 4,
+      },
+      NOW,
+      600000,
+      18789,
+    );
+    expect(normal).toMatchObject({
+      state: 'up',
+      up: true,
+      checkedAt: NOW - 1000,
+      latencyMs: 4,
+    });
+
+    const staleOnArrival = gatewayStatusFromReport(
+      {
+        up: true,
+        checkedAt: NOW - 600001,
+        port: 18789,
+        receivedAt: NOW,
+      },
+      NOW,
+      600000,
+      18789,
+    );
+    expect(staleOnArrival.state).toBe('unknown');
+    expect(staleOnArrival.checkedAt).toBe(NOW - 600001);
+  });
+
   it('does not call a bad report Down', () => {
     expect(
       gatewayStatusFromReport({ up: 'yes', checkedAt: NOW }, NOW, 600000, 18789)
