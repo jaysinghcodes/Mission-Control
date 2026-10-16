@@ -44,6 +44,8 @@ bash install.sh
 
 That writes tokens when `.env` is missing, starts the stack, runs doctor, and prints the URL. A second run keeps `.env`. Do not print the token values. Tell the operator they live in `.env`.
 
+If `openclaw` is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The interval comes from `MC_BRIDGE_INTERVAL_SECONDS` (default 300). Remove it with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer says so and continues. `npm run seed:demo` still works.
+
 `npm ci` runs only on the native path, when Docker is missing. It may warn that `@prisma/engines`, `prisma`, and `unrs-resolver` have install scripts not yet covered by allowScripts. `npx prisma generate` still succeeded after that warning on npm 11.17.0.
 
 ### Step 3. Create the root .env
@@ -117,11 +119,11 @@ python3 bridge/mc-bridge-sync.py
 
 With no `openclaw` binary, `--dry-run` exits 0 and posts nothing. That was verified. A real sync needs the CLI and a non blank `INGEST_TOKEN`.
 
-Schedule it about every 5 minutes if they want it to stay current. See `bridge/README.md`.
+`bash install.sh` already schedules that command when `openclaw` is on PATH. Do not add a second cron line. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The schedule PATH includes the `openclaw` directory and the `python3` directory. `bash install.sh --uninstall-schedule` removes the schedule, removes the sync timestamp, and leaves every other cron line and service unit alone. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). A missing timestamp is an info line. A stale timestamp is also an info line when no schedule is installed.
 
 Paste [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md) when the agent itself should POST events. A 401 means the header `x-ingest-token` does not match the API `INGEST_TOKEN`.
 
-Optional starter limits, merged into `~/.openclaw/openclaw.json` and not a replacement of that file: `agents.defaults.subagents.maxChildrenPerAgent` is 3 and `maxConcurrent` is 4, from `bridge/openclaw.starter.json`. The API does not read those keys.
+Optional starter limits, merged into `~/.openclaw/openclaw.json` and not a replacement of that file: `agents.defaults.subagents.maxChildrenPerAgent` is 3 and `maxConcurrent` is 4, from `bridge/openclaw.starter.json`. The API does not read those keys. The installer offers this merge and does not edit the file.
 
 ### Step 7. Another machine
 

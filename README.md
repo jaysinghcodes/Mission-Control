@@ -52,7 +52,11 @@ Then open the URL the script prints. The default is **http://localhost:5173/#/ta
 
 Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, and `MC_WEB_PORT` from the environment are written into a new `.env`. An existing `.env` is left as it is. A shell value still wins for that run.
 
-OpenClaw is optional. The command above does not start it. `npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
+OpenClaw is optional. The command above does not start the OpenClaw gateway. `npm run seed:demo` writes the sample bots, tickets, and usage in the screenshots above. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
+
+When the `openclaw` command is on PATH, `bash install.sh` installs a bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The installer names the scheduler it used. The interval is `MC_BRIDGE_INTERVAL_SECONDS` from the shell, then `.env`, then 300. The job runs `bridge/mc-bridge-sync.py` and sets `MC_BRIDGE_REGISTER` from the shell, then `.env`, then 1. Its PATH includes the `openclaw` directory, the `python3` directory, and the PATH from install time, so a later run can find `openclaw`. Remove only that schedule with `bash install.sh --uninstall-schedule`. That flag also removes the sync timestamp. It does not stop Docker, does not delete `.env`, and does not change other cron lines or other service units. If `openclaw` is not on PATH, the installer prints a skip line and continues. A second run installs the same schedule again without duplicating it.
+
+Doctor reads the sync timestamp at `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). A missing timestamp is an info line. A timestamp older than `MC_BRIDGE_STALE_SECONDS` (default 600) is a failing line. A missing `openclaw` command is still an info line and does not by itself fail doctor. The installer also offers `bridge/openclaw.starter.json`. Merge that file into `~/.openclaw/openclaw.json` if you want it. The installer does not edit that file.
 
 The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the image does not contain a `.env` file. A variable that is already set wins over the file, including a blank value.
 
@@ -60,7 +64,7 @@ nginx on the web port proxies `/api` and `/socket.io` to the API. The page and t
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
 
-The script ends by running doctor (`node scripts/doctor.mjs`). On the Docker path it first waits up to 90 seconds for the API health check on `MC_API_PORT` (default 3000). Doctor then checks that host port. The database and migration lines are info, because Compose runs Postgres and the API container applies migrations. A Docker install does not need `npm ci` for those checks. A missing OpenClaw bridge is an info line. It does not fail doctor. If doctor prints a failing line, the script still prints the URL and then exits non zero.
+The script ends by running doctor (`node scripts/doctor.mjs`). On the Docker path it first waits up to 90 seconds for the API health check on `MC_API_PORT` (default 3000). Doctor then checks that host port. The database and migration lines are info, because Compose runs Postgres and the API container applies migrations. A Docker install does not need `npm ci` for those checks. A missing OpenClaw command is an info line. A missing sync timestamp is an info line. A timestamp older than `MC_BRIDGE_STALE_SECONDS` fails doctor. If doctor prints a failing line, the script still prints the URL and then exits non zero.
 
 Compose still has a blank token fallback (`dev-ingest-token` and `dev-socket-token`) for a manual copy of `.env.example`. `bash install.sh` writes real tokens first, so that fallback is not the installed path.
 
@@ -273,7 +277,7 @@ npm test
 npm run build
 ```
 
-`npm run doctor` prints one line per check, in this order: Node, the API port, `.env`, the database, migrations, the write token, API health, then an info line for the optional OpenClaw bridge. The native path uses `PORT` (default 3000). When the Compose API service is running, the port check uses `MC_API_PORT` (default 3000) and the database and migration lines are info. It does not check the web port 5173. OpenClaw staying down does not fail the command. Run it from the repo root when setup fails, or after `npm run dev` is up.
+`npm run doctor` prints one line per check, in this order: Node, the API port, `.env`, the database, migrations, the write token, API health, an info line for the optional OpenClaw command, then the bridge sync age. The native path uses `PORT` (default 3000). When the Compose API service is running, the port check uses `MC_API_PORT` (default 3000) and the database and migration lines are info. It does not check the web port 5173. OpenClaw staying down does not fail the command. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` does. Run it from the repo root when setup fails, or after `npm run dev` is up.
 
 On this clone, after that generate, `npm test` passed (API Jest: 37 suites, 255 tests; web: 65 tests) and `npm run build` passed. This pass used Node 22.23.3. Six of the nine tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres unreachable, that file is the only API failure: 6 failed, 249 passed, 255 total. The unknown event type check and the production missing token checks (`POST /events` and `POST /tickets` with no token) return before they write. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
 
@@ -285,7 +289,9 @@ On this clone, after that generate, `npm test` passed (API Jest: 37 suites, 255 
 
 These are the failures hit while bringing up a fresh clone. Commands were run from the repo root unless noted.
 
-**Start with `npm run doctor`.** It prints one line per check. A failing line includes the command to run next. OpenClaw is optional in that report and does not fail the command. The command exits 0 when every required check passes, and exits non zero when one does not.
+**Start with `npm run doctor`.** It prints one line per check. A failing line includes the command to run next. OpenClaw is optional in that report. A missing command does not fail doctor. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` does. The command exits 0 when every required check passes, and exits non zero when one does not.
+
+**Doctor says the last OpenClaw sync is older than the limit.** A bridge schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS`. Run `python3 bridge/mc-bridge-sync.py` once, or run `bash install.sh` again. If no schedule is installed, that same age is an info line. `bash install.sh --uninstall-schedule` removes the schedule and the sync timestamp.
 
 **The dev server listens on `127.0.0.1:5173`.** Vite `server.host` is `127.0.0.1`. The tunnel `ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000` forwards to that address. Open `http://127.0.0.1:5173/#/tasks` on the machine that opened the tunnel. On the advanced path the API, with `HOST=127.0.0.1`, listens on `127.0.0.1:3000`. The browser calls `/api` on port 5173 either way. `http://localhost:3000` still reaches the API directly when localhost resolves to IPv4.
 

@@ -62,7 +62,9 @@ class AgentSlugTest(unittest.TestCase):
 
     def test_dry_run_from_examples_does_not_register_unless_asked(self):
         env = os.environ.copy()
-        env.pop("MC_BRIDGE_REGISTER", None)
+        # Pin off. The bridge loads repo .env when this variable is absent,
+        # and a fresh install sets MC_BRIDGE_REGISTER=1 there.
+        env["MC_BRIDGE_REGISTER"] = "0"
         proc = subprocess.run(
             [sys.executable, str(BRIDGE), "--dry-run", "--from-dir", str(EXAMPLES)],
             capture_output=True,

@@ -119,3 +119,9 @@ jobs:
 
       - name: Run install.sh with a docker stub
         run: node --test scripts/install.test.mjs
+
+      - name: Install and uninstall the bridge schedule
+        run: node --test --test-name-pattern "bridge schedule" scripts/install.test.mjs
+
+      - name: Doctor stale bridge check
+        run: node --test --test-name-pattern "bridge sync" scripts/doctor.test.mjs

@@ -43,7 +43,9 @@ The API loads the root `.env` when that file is on disk, and it runs `prisma mig
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. That log line is the process text in `apps/api/src/main.ts`. Compose sets `HOST=0.0.0.0` inside the container.
 
-The installer runs doctor from the repo root. `npm run doctor` is that same check. On the Docker path the installer waits for the API health check on `MC_API_PORT` (default 3000), and doctor checks that host port. Database and migration lines are info, because Compose runs Postgres and applies migrations. A Docker install does not need `npm ci` for those checks. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing bridge does not fail the command.
+The installer runs doctor from the repo root. `npm run doctor` is that same check. On the Docker path the installer waits for the API health check on `MC_API_PORT` (default 3000), and doctor checks that host port. Database and migration lines are info, because Compose runs Postgres and applies migrations. A Docker install does not need `npm ci` for those checks. It prints one line per check. It checks the API port and does not check the web port 5173. OpenClaw is optional in that report. A missing command is an info line. A missing sync timestamp is an info line. A timestamp older than `MC_BRIDGE_STALE_SECONDS` (default 600) fails the command.
+
+When `openclaw` is on PATH, `bash install.sh` installs the bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The installer names the scheduler it used. The interval is `MC_BRIDGE_INTERVAL_SECONDS` from the shell, then `.env`, then 300. The job sets `MC_BRIDGE_REGISTER` from the shell, then `.env`, then 1. Its PATH includes the `openclaw` directory, the `python3` directory, and the PATH from install time. Remove it with `bash install.sh --uninstall-schedule`. That removes the sync timestamp. It does not stop the stack and does not change other cron lines or other units. If `openclaw` is not on PATH, the installer prints a skip line and still exits 0 for that step. `npm run seed:demo` does not need the schedule.
 
 `npm run seed:demo` fills sample agents, tickets, projects, and usage. It is idempotent and only touches demo rows. It does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. Registered bots and rows you created through the API stay. A fresh setup does not load sample data.
 
@@ -176,13 +178,16 @@ python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw
 
 With no `openclaw` binary, `--dry-run` exits 0, skips sessions, agents, and cron, and posts nothing. The same command with `--memory-dir bridge/examples/openclaw-memory` prints one `memory.snapshot` and still does not post.
 
-It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` (default `http://127.0.0.1:3000`). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts one `usage.snapshot` of daily points (up to 30 days on first connect when sessions have timestamps). It does not post separate 7 day or month totals. Schedule it every 5 minutes with an OpenClaw cron job or system cron:
+It reads `INGEST_TOKEN` from the env or the repo root `.env`, and `MC_API_URL` from the shell, then `.env`, then `http://127.0.0.1` plus the API port (default 3000). It skips any source it cannot read instead of posting empty, and emits `run.running`, `run.completed`, `run.failed` only when a cron job changes state. When sessions are readable it posts one `usage.snapshot` of daily points (up to 30 days on first connect when sessions have timestamps). It does not post separate 7 day or month totals. A successful run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). Doctor fails when that timestamp is older than `MC_BRIDGE_STALE_SECONDS` (default 600).
 
-```cron
-*/5 * * * * /usr/bin/python3 /path/to/mission-control/bridge/mc-bridge-sync.py >> /tmp/mc-bridge.log 2>&1
+`bash install.sh` installs that schedule when `openclaw` is on PATH. You do not add a cron line by hand. `bash install.sh --uninstall-schedule` removes it. The same script is what the schedule runs:
+
+```bash
+python3 bridge/mc-bridge-sync.py --dry-run
+python3 bridge/mc-bridge-sync.py
 ```
 
-Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merge, do not replace): `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4.
+Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merge, do not replace): `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The installer prints that offer and does not edit the file.
 
 ### 4.4 Tickets: your units of work
 
@@ -350,7 +355,7 @@ That prints `204`.
 * **Make runs visible.** For a longer job, `POST /runs` with an optional `status`, or create the run queued and `PATCH` it to `running`, then send progress and `done` or `failed`. You can also post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time. The curls in section 4.6 do both.
 * **Ask, do not act, on gated work.** Put anything that needs your operator in an approval (via `approvals.snapshot`) and wait for the decision.
 * **Write daily memory** to `memory/YYYY-MM-DD.md` so Memory shows your day.
-* **Keep the bridge scheduled** so roster, cron, sessions, usage and memory stay current. `agents.snapshot` updates snapshot rows only. One bot can also call `POST /agents/register` (section 4.10).
+* **Keep the bridge scheduled** so roster, cron, sessions, usage and memory stay current. `bash install.sh` does that when `openclaw` is on PATH. The default interval is `MC_BRIDGE_INTERVAL_SECONDS` (300). `agents.snapshot` updates snapshot rows only. The installed schedule sets `MC_BRIDGE_REGISTER` (default 1), which also calls `POST /agents/register` (section 4.10).
 
 ## 6. Not implemented yet (do not rely on these)
 
