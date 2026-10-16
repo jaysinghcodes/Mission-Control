@@ -1,0 +1,33 @@
+# Troubleshooting
+
+These are the failures hit while bringing up a fresh clone. Commands were run from the repo root unless noted. The installer itself is [INSTALL.md](INSTALL.md). Login and the tunnel port are [SECURITY.md](SECURITY.md) and [REMOTE.md](REMOTE.md).
+
+**Start with `npm run doctor`.** It prints one line per check. A failing line includes the command to run next. OpenClaw is optional in that report. A missing command does not fail doctor. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` does, when a bridge schedule is installed. The command exits 0 when every required check passes, and exits non zero when one does not.
+
+`npm run doctor` prints one line per check, in this order: Node, the API port, `.env`, the database, migrations, the ingest token, dashboard login, API health, an info line for the optional OpenClaw command, then the bridge sync age. The native path uses `PORT` (default 3000). When the Compose API service is running, the port check uses `MC_API_PORT` (default 3000) and the database and migration lines are info. It does not check the web port 5173 or the tunnel port 3011. OpenClaw staying down does not fail the command. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` does when a schedule is installed. Run it from the repo root when setup fails, or after `npm run dev` is up.
+
+**Doctor says the last OpenClaw sync is older than the limit.** A bridge schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS`. Run `python3 bridge/mc-bridge-sync.py` once, or run `bash install.sh` again. If no schedule is installed, that same age is an info line. `bash install.sh --uninstall-schedule` removes the schedule and the sync timestamp.
+
+**The dev server listens on `127.0.0.1:5173`.** Vite `server.host` is `127.0.0.1`. The tunnel `ssh -L 5173:127.0.0.1:5173` forwards that owner port. Open `http://127.0.0.1:5173/#/tasks` on the machine that opened the tunnel. On the advanced path the API, with `HOST=127.0.0.1`, listens on `127.0.0.1:3000`. The browser calls `/api` on port 5173 either way. `http://localhost:3000` still reaches the API directly when localhost resolves to IPv4. Tailscale Serve and Cloudflare Tunnel use port 3011. The steps are in [REMOTE.md](REMOTE.md).
+
+**Sidebar says Offline and the browser lands on `/#/connect`.** The first `GET /health` failed. The API is not up, or `VITE_API_URL` points at a different host. Leave `VITE_API_URL` unset so the page calls `/api` on its own origin. Start the stack with `bash install.sh` or `docker compose up -d --build`, or on the advanced path export `.env` and run `npm run dev`. A later health failure does not redirect again.
+
+**A call returns 401 `unauthorized`.** For agent ingest, `INGEST_TOKEN` is set (the template ships `change-me`) and the `x-ingest-token` header is missing or different. That is `POST /events`, register, heartbeat, and the run routes. `POST /tickets` and `PATCH /tickets/:id` accept that token too. A 401 means the token is wrong, or that route is for the dashboard only. There is no ticket delete route. Every other dashboard write needs loopback or a session cookie. For the dashboard, the caller is not loopback and the session cookie is missing, revoked, or wrong. That includes `GET /sessions` and `GET /health`. The body is `{"statusCode":401,"message":"unauthorized"}`. Compose is not loopback: the API sees the Docker network address, not 127.0.0.1. Sign in with the password the installer printed. Loopback is the socket address only. A forwarded `127.0.0.1` does not open the dashboard. Leave `TRUSTED_PROXY` unset in Compose. Do not set it to the Docker bridge.
+
+**Sign in says "Too many tries. Try again in a minute. npm run login:reset clears the lock."** That client sent too many wrong passwords. Under Compose the same sentence names `docker compose exec api npm run login:reset`, because `MC_COMPOSE` is set. The default is 5 failures in 60 seconds. Wait for the `Retry-After` time, then try the right password. The wait doubles on each later lockout, up to 15 minutes. Another client is not locked. The owner on the local web port has a separate count from a tunnel client. Loopback is not limited. On this machine, `npm run login:reset` clears the lock. Under Compose the counters live in the api container, so run `docker compose exec api npm run login:reset`. Restarting the API clears the wait too. It does not restore a revoked session.
+
+**A cookie that worked now returns 401.** Logout or a password change bumped the session version. Sign in again. The version is stored in the session state file, so a restart keeps the revocation.
+
+**`POST /events` returns 400 unknown event type.** `type` is not in `KNOWN_TYPES`. The response body lists the allowed names.
+
+**`POST /events` returns 400 `payload must be a JSON object`.** `payload` was an array or some other non object. Omit it or send `{}`.
+
+**`POST /tickets` returns 400 `title is required`.** The title was missing or blank. Create status must be `backlog` or `todo` if you send one.
+
+**`npm ci` warns that install scripts are not covered by allowScripts.** Seen for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. Until `(cd apps/api && npx prisma generate)`, `npm test` and `npm run build` fail with `Cannot find module '.prisma/client/default'`. Generate succeeds after the warning. If generate cannot find query engines, allow those scripts (`npm approve-scripts` in the npm 11 docs) and generate again.
+
+**`npm run lint` exits 1.** oxlint or eslint found an error. The command does not rewrite files. Run `npm run lint:fix` for the automatic fixes, then fix anything it still reports.
+
+**`python3 bridge/mc-bridge-sync.py` says `openclaw` is not on PATH and posts nothing.** Expected on a machine without the OpenClaw CLI. Exit code is 0. Demo data stays. Install the CLI, or POST `/events` yourself using [PASTE_IN.md](PASTE_IN.md). A fixture run with no CLI is `python3 bridge/mc-bridge-sync.py --from-dir bridge/examples/fresh-install`. That reads JSON from the repo. It does not start OpenClaw.
+
+**Setup sheet.** The current home is `/#/tasks`. Open `/#/system` for health. The Connected chip is in the sidebar under the account name.

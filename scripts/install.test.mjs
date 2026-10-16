@@ -723,7 +723,8 @@ test('docker install waits for a custom MC_API_PORT and doctor exits 0 without h
     assert.match(text, /^info migrations:/m)
     assert.match(text, /pass health: The health check says the database is up\./)
     assert.equal(/\bfail /.test(text), false, text)
-    assert.equal(text.includes('npm ci'), false, text)
+    assert.doesNotMatch(text, /^npm ci$/m)
+    assert.match(text, /Run npm ci in the checkout before npm run seed:demo or npm run seed:clear\. Without that install, prisma is not found and the seed command fails\./)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assert.equal(existsSync(path.join(fx.repo, 'node_modules')), false)
   } finally {

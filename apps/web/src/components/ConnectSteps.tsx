@@ -100,6 +100,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'ON THE HOST',
     body: [
       'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and prints the URL. The password is shown once.',
+      'The README opens with that installer on one line. From a directory that is not this checkout, that line clones into mission-control and runs bash install.sh.',
       'CI runs this installer with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker.',
       'Before Compose starts, the installer creates `data/docs` as the user running the script. That user can delete the checkout. `npm run seed:demo` on the host writes sample docs as that same user.',
       'A second run keeps the existing `.env`. It fills a missing dashboard password or session secret and does not replace other values.',
@@ -254,7 +255,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       '**No OpenClaw needed:** Tickets. There is no ticket delete route. Create one, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.',
       '**No OpenClaw needed:** after `npm run seed:demo`, Calendar / Team / Office / Live Activity show labelled sample data.',
-      '**Needs the step-6 bridge:** your real cron jobs on Calendar, the real roster on Team, Office bots moving on real `run.*` events, and live agent activity.',
+      '**Needs the step 6 bridge:** your real cron jobs on Calendar, the real roster on Team, Office bots moving on real `run.*` events, and live agent activity.',
     ],
     links: [
       { label: 'Tickets', to: '/tickets' },

@@ -4,7 +4,7 @@ You are the OpenClaw agent. Your operator pasted this file so the Mission Contro
 
 ## Run the installer
 
-From this repository, run `bash install.sh`. If you are not in a checkout, use the curl command in the README section Install and run. That command runs the same script.
+From this repository, run `bash install.sh`. If you are not in a checkout, use the curl command at the top of the README. The same command is the first command in the README section Install and run. That command runs the same script. Longer installer notes are in [INSTALL.md](INSTALL.md).
 
 The script is Docker first. If Docker is missing, it says so and uses Node.js 22 and Postgres 16. CI runs that script with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker. It writes a random ingest token, a dashboard password hash, and a session secret to `.env` and sets that file to mode 600, only when `.env` is missing. The password is printed once. A plain second run leaves `.env` unchanged. It fills a missing password hash or session secret without changing other keys. It resolves ports from the shell, then `.env`, then the defaults, and writes `DATABASE_URL` with that `MC_DB_PORT` on a new file. A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. Before Compose starts, it creates the host docs directory (`DOCS_ROOT`, or `data/docs`) as the user running the script. That user can delete the checkout. It runs doctor and prints the dashboard URL. Use that URL. Do not choose another one.
 
