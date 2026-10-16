@@ -37,8 +37,10 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `SOCKET_TOKEN` | empty | Retired. The web bundle does not receive a socket token |
 | `OPERATOR_NAME` | blank, then `Operator` | Display only. Default assignee for new tickets and runs |
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |
-| `OPENCLAW_GATEWAY_HOST` | `127.0.0.1` | Gateway probe host for `GET /system` |
-| `OPENCLAW_GATEWAY_PORT` | `18789` | Gateway probe port |
+| `OPENCLAW_GATEWAY_HOST` | blank, then `127.0.0.1` | Direct probe host. Under Compose a blank host uses the bridge report instead of a probe from the container |
+| `OPENCLAW_GATEWAY_PORT` | `18789` | Port for a direct probe. Under Compose the bridge checks `127.0.0.1` on this port |
+| `GATEWAY_STATUS_MAX_AGE_MS` | `600000` | Compose bridge report older than this is Unknown. Blank, 0, or invalid uses 600000 |
+| `MC_COMPOSE` | unset | `docker-compose.yml` sets `1`. That selects the bridge report when the gateway host is blank |
 | `OPENCLAW_LOG_DIR` | `/tmp/openclaw` | Directory of `openclaw-*.log` |
 | `GIT_SHA` | git, or `git-sha.txt` in the image | Commit shown by `GET /health` |
 | `TZ` | host zone | Server timezone when Settings has not saved one. The name has to be in `config/timezones.json`. A legacy name is converted. `TZ=Europe/Berlin` buckets usage and memory on Berlin days |

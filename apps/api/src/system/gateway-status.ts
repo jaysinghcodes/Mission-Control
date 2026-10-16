@@ -1,0 +1,174 @@
+/**
+ * Gateway status for GET /system.
+ *
+ * Native installs probe OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT
+ * (defaults 127.0.0.1 and 18789). Under Compose (MC_COMPOSE=1) a blank host
+ * does not probe from inside the container. The host bridge posts
+ * gateway.snapshot, and this report is what System shows. An explicit
+ * OPENCLAW_GATEWAY_HOST probes that address directly and ignores the report.
+ * OPENCLAW_GATEWAY_PORT is the port for whichever path is active. The bridge
+ * always checks 127.0.0.1 on that port.
+ *
+ * A missing report, or one older than GATEWAY_STATUS_MAX_AGE_MS, is unknown.
+ * Unknown is not down. Down is only a real check.
+ */
+
+const DEFAULT_PORT = 18789;
+export const DEFAULT_GATEWAY_MAX_AGE_MS = 10 * 60 * 1000;
+const MAX_GATEWAY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+export type GatewayState = 'up' | 'down' | 'unknown';
+export type GatewaySource = 'probe' | 'bridge';
+
+export interface GatewayStatus {
+  host: string;
+  port: number;
+  state: GatewayState;
+  /** True only when state is up. False is unknown or down. Read state. */
+  up: boolean;
+  latencyMs: number | null;
+  checkedAt: number | null;
+  source: GatewaySource;
+  version?: string;
+}
+
+export interface GatewayReport {
+  up?: unknown;
+  host?: unknown;
+  port?: unknown;
+  checkedAt?: unknown;
+  latencyMs?: unknown;
+  version?: unknown;
+}
+
+export function gatewayMaxAgeMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.GATEWAY_STATUS_MAX_AGE_MS;
+  if (raw == null || raw.trim() === '') return DEFAULT_GATEWAY_MAX_AGE_MS;
+  if (!/^\d+$/.test(raw.trim())) return DEFAULT_GATEWAY_MAX_AGE_MS;
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n < 1 || n > MAX_GATEWAY_MAX_AGE_MS) {
+    return DEFAULT_GATEWAY_MAX_AGE_MS;
+  }
+  return n;
+}
+
+export function usesBridgeReport(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.MC_COMPOSE !== '1') return false;
+  return !explicitGatewayHost(env);
+}
+
+export function explicitGatewayHost(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const host = (env.OPENCLAW_GATEWAY_HOST ?? '').trim();
+  return isGatewayHost(host) ? host : null;
+}
+
+export function configuredGatewayPort(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return parsePort(env.OPENCLAW_GATEWAY_PORT);
+}
+
+export function gatewayStatusFromProbe(
+  probe: { host: string; port: number; up: boolean; latencyMs: number | null },
+  checkedAt: number,
+): GatewayStatus {
+  return {
+    host: probe.host,
+    port: probe.port,
+    state: probe.up ? 'up' : 'down',
+    up: probe.up,
+    latencyMs: probe.latencyMs,
+    checkedAt,
+    source: 'probe',
+  };
+}
+
+/**
+ * Bridge report. No report, a report that is not a real check, or a report
+ * older than maxAgeMs is unknown. Age equal to maxAgeMs is still fresh.
+ */
+export function gatewayStatusFromReport(
+  report: GatewayReport | null,
+  now: number,
+  maxAgeMs: number,
+  fallbackPort: number,
+): GatewayStatus {
+  const port = reportPort(report, fallbackPort);
+  const unknown = (checkedAt: number | null): GatewayStatus => ({
+    host: '127.0.0.1',
+    port,
+    state: 'unknown',
+    up: false,
+    latencyMs: null,
+    checkedAt,
+    source: 'bridge',
+  });
+  if (!report || typeof report.up !== 'boolean') return unknown(null);
+  if (
+    typeof report.checkedAt !== 'number' ||
+    !Number.isFinite(report.checkedAt)
+  ) {
+    return unknown(null);
+  }
+  const age = now - report.checkedAt;
+  if (age > maxAgeMs) return unknown(report.checkedAt);
+  const host =
+    typeof report.host === 'string' && isGatewayHost(report.host)
+      ? report.host
+      : '127.0.0.1';
+  const latency =
+    report.up &&
+    typeof report.latencyMs === 'number' &&
+    Number.isFinite(report.latencyMs)
+      ? Math.max(0, Math.round(report.latencyMs))
+      : null;
+  const version =
+    typeof report.version === 'string' && report.version.trim()
+      ? report.version.trim().slice(0, 80)
+      : undefined;
+  return {
+    host,
+    port: reportPort(report, fallbackPort),
+    state: report.up ? 'up' : 'down',
+    up: report.up,
+    latencyMs: latency,
+    checkedAt: report.checkedAt,
+    source: 'bridge',
+    ...(version ? { version } : {}),
+  };
+}
+
+export function isGatewayHost(value: string): boolean {
+  if (!value || value.length > 253) return false;
+  if (value.includes('/') || /\s/.test(value) || value.includes('\0')) {
+    return false;
+  }
+  return /^[A-Za-z0-9.:-]+$/.test(value);
+}
+
+function parsePort(raw: string | undefined): number {
+  const text = (raw ?? '').trim();
+  if (!/^\d+$/.test(text)) return DEFAULT_PORT;
+  const port = Number(text);
+  if (port < 1 || port > 65535) return DEFAULT_PORT;
+  return port;
+}
+
+function reportPort(
+  report: GatewayReport | null,
+  fallbackPort: number,
+): number {
+  if (
+    !report ||
+    typeof report.port !== 'number' ||
+    !Number.isInteger(report.port)
+  ) {
+    return fallbackPort;
+  }
+  if (report.port < 1 || report.port > 65535) return fallbackPort;
+  return report.port;
+}

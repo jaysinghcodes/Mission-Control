@@ -19,6 +19,8 @@ ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
   (derived from sessions token counts) →  usage.snapshot (daily points, up to 30 days)
   ~/.openclaw/openclaw.json               models.snapshot
     (fallback: openclaw models list)
+  TCP connect to 127.0.0.1                gateway.snapshot
+    (OPENCLAW_GATEWAY_PORT or 18789)
   $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
   agent workspace MEMORY.md + memory/*.md → memory.snapshot
 
@@ -60,6 +62,7 @@ import json
 import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -609,6 +612,44 @@ def models_from_list_text(text: str) -> List[Dict[str, str]]:
 def version_line(text: str) -> Optional[str]:
     line = text.strip().splitlines()[0].strip() if text.strip() else ""
     return line[:80] or None
+
+
+def gateway_listen_port() -> int:
+    """Port the host gateway listens on. Blank or invalid uses 18789."""
+    raw = os.environ.get("OPENCLAW_GATEWAY_PORT", "").strip()
+    if raw.isdigit():
+        port = int(raw)
+        if 1 <= port <= 65535:
+            return port
+    return 18789
+
+
+def probe_gateway() -> Dict[str, Any]:
+    """TCP check of the gateway on this machine. The bridge runs on the host.
+
+    Stock OpenClaw listens on 127.0.0.1, which a container cannot reach.
+    A refused connection is down. A version is included when the CLI prints one.
+    """
+    host = "127.0.0.1"
+    port = gateway_listen_port()
+    started = time.monotonic()
+    up = False
+    try:
+        with socket.create_connection((host, port), timeout=0.8):
+            up = True
+    except OSError:
+        up = False
+    payload: Dict[str, Any] = {
+        "up": up,
+        "host": host,
+        "port": port,
+        "checkedAt": int(time.time() * 1000),
+        "latencyMs": int((time.monotonic() - started) * 1000) if up else None,
+    }
+    version = openclaw_cli_version()
+    if version:
+        payload["version"] = version
+    return payload
 
 
 def openclaw_cli_version() -> Optional[str]:
@@ -1919,20 +1960,26 @@ def main() -> int:
     if models_payload is not None:
         events.append(("models.snapshot", models_payload))
 
-    if not events:
-        # Every source was unavailable. Do not stamp, or doctor treats a broken
-        # schedule as a recent sync.
-        log("no OpenClaw sources available — nothing to post (dashboard data left untouched)")
-        return 0
+    # The gateway check always posts, including when OpenClaw itself is missing.
+    # It is not an OpenClaw snapshot, so it does not refresh the sync stamp
+    # and a rejected check does not fail the sync. The next run tries again.
+    openclaw_events = len(events)
+    gateway_payload = probe_gateway()
+    if openclaw_events == 0:
+        log("no OpenClaw sources available. Posting the gateway check only")
 
     if args.dry_run:
         for etype, payload in events:
             print(json.dumps({"type": etype, "payload": payload}))
+        print(json.dumps({"type": "gateway.snapshot", "payload": gateway_payload}))
         for body in register_bodies:
             print(json.dumps({"call": "POST /agents/register", "body": body}))
         return 0  # dry-run never writes the state file either
 
     event_failures = sum(0 if post(api_url, token, t, p) else 1 for t, p in events)
+    gateway_ok = post(api_url, token, "gateway.snapshot", gateway_payload)
+    if not gateway_ok:
+        log("gateway.snapshot was not accepted. The next run will try again.")
     # Optional. Off unless MC_BRIDGE_REGISTER is 1, true, or yes. A failed
     # register does not undo the snapshot that already landed.
     register_failures = sum(0 if post_register(api_url, token, body) else 1 for body in register_bodies)
@@ -1954,10 +2001,10 @@ def main() -> int:
     # back, and the runs that succeeded stay saved.
     if event_failures == 0 and (cron_rows is not None or sessions is not None):
         persist_run_state(state_file, state, 0)
-    posted = len(events) + len(register_bodies) - failures
-    total = len(events) + len(register_bodies)
+    posted = len(events) + len(register_bodies) - failures + (1 if gateway_ok else 0)
+    total = len(events) + len(register_bodies) + 1
     log(f"posted {posted}/{total} events to {api_url}/events")
-    if event_failures == 0:
+    if event_failures == 0 and openclaw_events > 0:
         record_sync()
     return 1 if failures else 0
 

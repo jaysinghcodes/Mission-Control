@@ -82,11 +82,15 @@ services:
       # means ./data/docs) and the api read the same files. A missing folder is
       # an empty Docs page, not a crash.
       DOCS_ROOT: /data/docs
-      # Gateway probe. Defaults match a loopback OpenClaw gateway.
-      # Inside Compose, 127.0.0.1 is the api container. Point the host at
-      # the machine that runs the gateway when that is not this container.
-      OPENCLAW_GATEWAY_HOST: ${OPENCLAW_GATEWAY_HOST:-127.0.0.1}
-      OPENCLAW_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-18789}
+      # Compose marker. A blank gateway host means status comes from the
+      # bridge, which runs on the host and checks 127.0.0.1. Set the host
+      # to probe that address from this container instead.
+      MC_COMPOSE: "1"
+      OPENCLAW_GATEWAY_HOST: ${OPENCLAW_GATEWAY_HOST:-}
+      OPENCLAW_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-}
+      # A bridge report older than this many milliseconds is Unknown.
+      # Blank, 0, or an invalid number uses 600000 (10 minutes).
+      GATEWAY_STATUS_MAX_AGE_MS: ${GATEWAY_STATUS_MAX_AGE_MS:-600000}
       OPENCLAW_LOG_DIR: ${OPENCLAW_LOG_DIR:-/tmp/openclaw}
       # Server timezone when Settings has not saved one. Unset stays UTC.
       TZ: ${TZ:-UTC}
@@ -96,6 +100,9 @@ services:
       HEALTH_TICK_MS: ${HEALTH_TICK_MS:-30000}
       # Usage days a snapshot may keep, through today. Default 30.
       USAGE_RETENTION_DAYS: ${USAGE_RETENTION_DAYS:-30}
+    extra_hosts:
+      # Linux does not provide host.docker.internal unless this mapping exists.
+      - "host.docker.internal:host-gateway"
     volumes:
       # ${DOCS_ROOT} here is the HOST path from the project .env (compose
       # interpolation), not the container path set just above. `:-` keeps

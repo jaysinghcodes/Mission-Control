@@ -1,15 +1,16 @@
 import { connect } from 'net';
+import { configuredGatewayPort, explicitGatewayHost } from './gateway-status';
 
 /**
- * TCP probe of the OpenClaw gateway.
+ * Direct TCP probe of the OpenClaw gateway.
  *
  * Host and port come from the environment. The defaults are 127.0.0.1 and
  * 18789. A connect that succeeds is up. A refusal, timeout, or bad address
- * is down. Nothing here is a stored status.
+ * is down. Compose does not use this probe unless OPENCLAW_GATEWAY_HOST is
+ * set. That path reads the bridge report instead.
  */
 
 const DEFAULT_HOST = '127.0.0.1';
-const DEFAULT_PORT = 18789;
 const PROBE_TIMEOUT_MS = 800;
 
 export interface GatewayTarget {
@@ -27,10 +28,10 @@ export interface GatewayProbe {
 export function gatewayTarget(
   env: NodeJS.ProcessEnv = process.env,
 ): GatewayTarget {
-  const hostRaw = (env.OPENCLAW_GATEWAY_HOST ?? '').trim();
-  const host = isGatewayHost(hostRaw) ? hostRaw : DEFAULT_HOST;
-  const port = parsePort(env.OPENCLAW_GATEWAY_PORT);
-  return { host, port };
+  return {
+    host: explicitGatewayHost(env) ?? DEFAULT_HOST,
+    port: configuredGatewayPort(env),
+  };
 }
 
 export function probeGateway(
@@ -57,20 +58,4 @@ export function probeGateway(
     socket.once('timeout', () => finish(false));
     socket.once('error', () => finish(false));
   });
-}
-
-function parsePort(raw: string | undefined): number {
-  const text = (raw ?? '').trim();
-  if (!/^\d+$/.test(text)) return DEFAULT_PORT;
-  const port = Number(text);
-  if (port < 1 || port > 65535) return DEFAULT_PORT;
-  return port;
-}
-
-function isGatewayHost(value: string): boolean {
-  if (!value || value.length > 253) return false;
-  if (value.includes('/') || /\s/.test(value) || value.includes('\0')) {
-    return false;
-  }
-  return /^[A-Za-z0-9.:-]+$/.test(value);
 }

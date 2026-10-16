@@ -192,7 +192,8 @@ class MemoryDryRunTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(proc.stdout.strip(), "")
+            events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+            self.assertEqual([event.get("type") for event in events], ["gateway.snapshot"])
             self.assertIn("no agent workspaces", proc.stderr)
 
     def test_missing_memory_dir_skips(self):
@@ -204,7 +205,8 @@ class MemoryDryRunTest(unittest.TestCase):
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.strip(), "")
+        events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+        self.assertEqual([event.get("type") for event in events], ["gateway.snapshot"])
         self.assertIn("not found", proc.stderr)
 
 
