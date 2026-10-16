@@ -46,23 +46,23 @@ export interface ConnectStep {
 export const OS_STEPS: Record<OsKey, { name: string; cmd: string; note: string }> = {
   mac: {
     name: 'macOS',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000 ubuntu@<your-server-ip>',
-    note: 'Open Terminal. Replace <your-server-ip> with your OpenClaw host (public IP or tailnet name).',
+    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
+    note: 'Open Terminal. Replace <your-server-ip> with your host. If the installer printed another web port, use that port.',
   },
   windows: {
     name: 'Windows',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000 ubuntu@<your-server-ip>',
-    note: 'Open PowerShell. OpenSSH is built in. Replace <your-server-ip> with your OpenClaw host.',
+    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
+    note: 'Open PowerShell. OpenSSH is built in. Replace <your-server-ip> with your host. If the installer printed another web port, use that port.',
   },
   linux: {
     name: 'Linux',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000 ubuntu@<your-server-ip>',
-    note: 'Open a terminal. Replace <your-server-ip> with your OpenClaw host.',
+    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
+    note: 'Open a terminal. Replace <your-server-ip> with your host. If the installer printed another web port, use that port.',
   },
   other: {
     name: 'Other',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 -L 3000:127.0.0.1:3000 ubuntu@<your-server-ip>',
-    note: 'Open your terminal and run the command below.',
+    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
+    note: 'Open your terminal and run the command below. If the installer printed another web port, use that port.',
   },
 }
 
@@ -157,7 +157,7 @@ export const STEP_DATA: ConnectStep[] = [
       },
       {
         name: 'TRUSTED_PROXY',
-        desc: 'Optional. Comma separated addresses of proxies whose X-Forwarded-For header is trusted. Leave this blank. Do not set it to the Docker bridge, or a browser could skip the password.',
+        desc: 'Optional. Comma separated addresses of proxies whose X-Forwarded-For header is trusted for the login bucket only. Leave this blank. Do not set it to the Docker bridge. It does not skip login. Cloudflare Tunnel and Tailscale Serve do not need it. They use the tunnel port.',
       },
       {
         name: 'WEB_ORIGIN',
@@ -233,8 +233,12 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'here',
     phaseLabel: 'YOU ARE HERE',
     body: [
-      'Run the command for the OS you are on, replacing `<your-server-ip>` with your host.',
-      'The dashboard is one port. After the tunnel, open the web port. The page calls the API on that same origin. Port 3000 is the direct API, for curl and the bridge. Keep the SSH session open while you browse.',
+      'Three free ways from a laptop are in the remote access guide: SSH to the owner port, Tailscale Serve, and Cloudflare Tunnel. Login is required on a Compose install.',
+      'Run the SSH command for the OS you are on, replacing `<your-server-ip>` with your host. The default owner port is 5173. If the installer printed another web port, use that port. Keep the SSH session open. The page calls the API on that same origin.',
+      'Tailscale Serve and Cloudflare Tunnel point at `127.0.0.1` on the tunnel port. `MC_REMOTE_PORT` defaults to 3011. Leave `TRUSTED_PROXY` unset.',
+    ],
+    links: [
+      { label: 'Remote access guide', to: 'https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md', external: true },
     ],
     probe: 'health',
     confirmable: false,

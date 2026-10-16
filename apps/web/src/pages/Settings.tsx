@@ -93,7 +93,7 @@ export default function Settings() {
               {h ? `API ${h.status === 'ok' ? 'Connected' : 'Degraded'}` : 'Contacting API…'}
             </div>
             <div className="text-[12px] text-mc-sub">
-              {h ? `uptime ${Math.floor(h.uptimeSeconds / 60)}m · database ${h.database} · ${pluralize(h.connectedClients, 'client')}` : 'check your SSH tunnel'}
+              {h ? `uptime ${Math.floor(h.uptimeSeconds / 60)}m · database ${h.database} · ${pluralize(h.connectedClients, 'client')}` : 'waiting for the API'}
             </div>
           </div>
         </div>
@@ -151,7 +151,16 @@ export default function Settings() {
       </Card>
 
       <p className="mt-6 text-[12px] text-mc-faint">
-        A browser on this machine stays open when the API sees a loopback address. Docker Compose asks for the password the installer printed, because the API sees the Docker network, not loopback. Setup lives on the Connect page.
+        A browser on this machine stays open when the API sees a loopback address. Docker Compose asks for the password the installer printed, because the API sees the Docker network, not loopback. From another machine, use the{' '}
+        <a
+          href="https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md"
+          className="font-semibold text-mc-accent-text"
+          target="_blank"
+          rel="noreferrer"
+        >
+          remote access guide
+        </a>
+        .
       </p>
     </div>
   )
