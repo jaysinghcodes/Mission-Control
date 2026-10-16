@@ -224,8 +224,15 @@ export default function System() {
           <div>
             <PageHeader title="Connection" summary="How this browser reaches the API." />
             <SoftCard className="px-5 py-4 text-[14px]">
-              <p>The API is loopback-only. From another machine, use the SSH tunnel in setup.</p>
-              <Link to="/connect" className="mt-3 inline-block font-semibold text-mc-accent-text">Open setup</Link>
+              <p>Sign in from another machine. SSH, Tailscale, and Cloudflare Tunnel are in the remote access guide.</p>
+              <a
+                href="https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md"
+                className="mt-3 inline-block font-semibold text-mc-accent-text"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Remote access guide
+              </a>
             </SoftCard>
           </div>
         )}
@@ -475,7 +482,7 @@ export default function System() {
         {[
           ['Logs', 'Live', 'logs'],
           ['Sessions', pluralize(sessions.data?.sessions.length ?? 0, 'active', 'active'), 'sessions'],
-          ['Connection', 'SSH tunnel', 'connection'],
+          ['Connection', 'Remote access', 'connection'],
           ['Settings', 'Theme, account', 'settings'],
           ['Custom tools', 'Experimental', 'tools'],
         ].map(([label, hint, id]) => (

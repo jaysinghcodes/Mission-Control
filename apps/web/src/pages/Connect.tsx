@@ -256,7 +256,7 @@ export default function Connect() {
               {probe && !probe.ok && (
                 <p className="mt-1 text-[12.5px] text-mc-sub">
                   {step.id === 7
-                    ? 'Keep the SSH session open, re-run the tunnel, then retry. If the stack is not up, finish the earlier steps on the host.'
+                    ? 'Keep the SSH session open, re-run the tunnel, then retry. Tailscale and Cloudflare use the tunnel port in the remote access guide. If the stack is not up, finish the earlier steps on the host.'
                     : 'Start the stack on the host (steps 1 to 4), then retry.'}
                 </p>
               )}

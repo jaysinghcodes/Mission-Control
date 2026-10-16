@@ -255,13 +255,13 @@ export default function Team() {
 
       {invite && (
         <Sheet title="Invite a teammate" onClose={() => setInvite(false)}>
-          <p className="text-[14px] text-mc-sub2">This build does not send invites. Share the setup guide. They connect with the SSH tunnel in ONBOARDING.md.</p>
-          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setInvite(false)}>Open setup</Link>
+          <p className="text-[14px] text-mc-sub2">This build does not send invites. Share the remote access guide. SSH, Tailscale, and Cloudflare Tunnel are in that guide.</p>
+          <a href="https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" target="_blank" rel="noreferrer">Remote access guide</a>
         </Sheet>
       )}
       {pair && (
         <Sheet title="Pair a device" onClose={() => setPair(false)}>
-          <p className="text-[14px] text-mc-sub2">Pairing is the SSH tunnel from another machine. Step 7 of setup has the command for your OS and a live API check.</p>
+          <p className="text-[14px] text-mc-sub2">Pairing from another machine is in the remote access guide. Setup step 7 has the SSH command and a live API check.</p>
           <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setPair(false)}>Open setup</Link>
         </Sheet>
       )}

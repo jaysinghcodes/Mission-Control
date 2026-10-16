@@ -184,8 +184,40 @@ test('compose, nginx, and the install docs have no dash punctuation or arrows', 
     'docs/OPENCLAW_ONBOARDING.md',
     'docs/PASTE_IN.md',
     'docs/API.md',
+    'docs/REMOTE.md',
     'ONBOARDING.md',
   ]) {
     assert.equal(dash.test(read(rel)), false, rel)
+    assert.equal(read(rel).includes('->'), false, rel)
   }
+})
+
+test('the remote access guide matches the shipped tunnel listener', () => {
+  const text = read('docs/REMOTE.md')
+  const guides = text.split(/^## /m).filter((part) => /^(SSH tunnel|Tailscale Serve|Cloudflare Tunnel)\n/.test(part))
+  assert.equal(guides.length, 3)
+  for (const guide of guides) {
+    assert.match(guide, /Login is required/)
+  }
+  assert.match(text, /ssh -L 5173:127\.0\.0\.1:5173 /)
+  assert.match(text, /tailscale serve http:\/\/127\.0\.0\.1:\$\{MC_REMOTE_PORT:-3011\}/)
+  assert.match(text, /cloudflared tunnel --url http:\/\/127\.0\.0\.1:\$\{MC_REMOTE_PORT:-3011\}/)
+  assert.match(text, /X-MC-Remote/)
+  assert.match(text, /CF-Connecting-IP/)
+  assert.match(text, /X-Forwarded-For/)
+  assert.match(text, /owner bucket/)
+  assert.match(text, /5 failures in 60 seconds|Five failures in 60 seconds/)
+  assert.match(text, /429/)
+  assert.match(text, /Retry-After/)
+  assert.match(text, /15 minutes/)
+  assert.match(text, /docker compose exec api npm run login:reset/)
+  assert.match(text, /MC_COMPOSE/)
+  assert.match(text, /GATEWAY_STATUS_MAX_AGE_MS/)
+  assert.match(text, /10 minutes/)
+  assert.match(text, /Leave `TRUSTED_PROXY` unset/)
+  assert.doesNotMatch(text, /TRUSTED_PROXY=/)
+  assert.match(text, /spoofed `CF-Connecting-IP`/)
+  assert.match(text, /Cloudflare Tunnel, or a long password/)
+  assert.equal(text.includes('->'), false)
+  assert.equal(/[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]/.test(text), false)
 })
