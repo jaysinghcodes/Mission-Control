@@ -14,8 +14,9 @@ import {
  *
  * The root comes from DOCS_ROOT (default `<repo>/data/docs`). A missing or
  * empty root is an empty list, which the page renders as the empty state.
- * Addresses are a server-issued id or a root-relative slug. The service
- * never returns a filesystem path.
+ * Addresses are a server-issued id or a root-relative slug. The list
+ * route adds `dir` from DOCS_ROOT so the empty state can name that folder.
+ * This service still does not return a filesystem path.
  */
 @Injectable()
 export class DocsService {

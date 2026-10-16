@@ -16,10 +16,10 @@ import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample
 import { useRosterView } from '../lib/useSampleRoster'
 
 /**
- * Team — ticket 13 layout (mission, people, devices), filled from the API.
+ * Team. Mission, people, and devices, filled from the API.
  * Mission and devices are rows in Postgres. People are the roster robots
  * from GET /agents, captioned Name · Function, each linking to Agents.
- * Invite and pairing stay as sheets; they do not create accounts.
+ * Invite and pairing stay as sheets. They do not create accounts.
  */
 
 interface MissionResp {
@@ -153,7 +153,7 @@ export default function Team() {
           {!agentsQ.data && agentsQ.loading ? (
             <p className="mt-4 text-[13px] text-mc-sub">Loading people…</p>
           ) : people.length === 0 ? (
-            <p className="mt-4 text-[13px] text-mc-sub">No agents yet. Seed or connect the bridge.</p>
+            <p className="mt-4 text-[13px] text-mc-sub">No agents yet. Connect the OpenClaw bridge, or run npm run seed:demo.</p>
           ) : (
             <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-3">
               {people.map((agent) => {
@@ -195,7 +195,7 @@ export default function Team() {
           {!agentsQ.data && agentsQ.loading ? (
             <p className="mt-4 text-[13px] text-mc-sub">Loading agents…</p>
           ) : roster.length === 0 ? (
-            <p className="mt-4 text-[13px] text-mc-sub">No agents yet. Seed or connect the bridge.</p>
+            <p className="mt-4 text-[13px] text-mc-sub">No agents yet. Connect the OpenClaw bridge, or run npm run seed:demo.</p>
           ) : (
             <div className="mt-3 flex flex-wrap gap-2">
               {people.map((agent) => {
@@ -226,7 +226,7 @@ export default function Team() {
           <p className="mt-3 text-[13px] text-mc-orangetext">Couldn't load devices ({devicesQ.errorMessage}).</p>
         )}
         {devicesQ.data && devices.length === 0 ? (
-          <EmptyState title="No devices" body="No machines yet. npm run seed:demo adds three sample devices." />
+          <EmptyState title="No devices" body="No machines yet. The bridge posts devices from openclaw devices list and nodes from openclaw nodes list. npm run seed:demo adds three sample devices." />
         ) : devicesQ.data ? (
           <ul className="mt-2 divide-y divide-mc-sep">
             {devices.map((d) => {
@@ -261,7 +261,18 @@ export default function Team() {
       )}
       {pair && (
         <Sheet title="Pair a device" onClose={() => setPair(false)}>
-          <p className="text-[14px] text-mc-sub2">Pairing from another machine is in the remote access guide. Setup step 7 has the SSH command and a live API check.</p>
+          <p className="text-[14px] text-mc-sub2">
+            Pairing from another machine is in the{' '}
+            <a
+              href="https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md"
+              className="font-semibold text-mc-accent-text"
+              target="_blank"
+              rel="noreferrer"
+            >
+              remote access guide
+            </a>
+            . Setup step 7 has the SSH command and a live API check.
+          </p>
           <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setPair(false)}>Open setup</Link>
         </Sheet>
       )}

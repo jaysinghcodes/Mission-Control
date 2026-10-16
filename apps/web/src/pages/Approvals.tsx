@@ -8,7 +8,7 @@ import { pluralize } from '../lib/pluralize'
 import type { Agent, AgentsResp } from '../types'
 
 /**
- * Approvals — decide what agents are waiting on.
+ * Approvals. Decide what agents are waiting on.
  * Pending is the default list. Decided is behind the segment (GET ?status=decided).
  */
 
@@ -80,7 +80,7 @@ export default function Approvals() {
       {tab === 0 && (
         <div className="mx-auto max-w-3xl">
           {pendingQ.data && pending.length === 0 && (
-            <EmptyState title="Nothing is waiting on you" body="When an agent needs a decision, it shows up here. Approve merges a pull request on GitHub when that is what was asked." />
+            <EmptyState title="Nothing is waiting on you" body="Set MC_BRIDGE_APPROVALS_CMD to a command that prints a JSON array of pending approvals, then run the bridge. OpenClaw has no pending approvals command of its own. npm run seed:demo adds a sample. Approving a pull request merges it on GitHub when that is what was asked." />
           )}
           {pending.length > 0 && <Kicker tone="red">Needs you</Kicker>}
           <div className="mt-3 space-y-8">
@@ -137,7 +137,7 @@ export default function Approvals() {
           <Kicker>Decided</Kicker>
           {decided.length === 0 ? (
             <div className="mt-3">
-              <EmptyState title="No decisions yet" body="Approved and declined requests stay here. A fresh database has none until you decide one, or until seed:demo inserts a sample." />
+              <EmptyState title="No decisions yet" body="Approved and declined requests stay here. They show up after you decide one, after the bridge posts approvals from MC_BRIDGE_APPROVALS_CMD, or after npm run seed:demo." />
             </div>
           ) : (
             <SoftCard className="mt-3 divide-y divide-mc-sep">

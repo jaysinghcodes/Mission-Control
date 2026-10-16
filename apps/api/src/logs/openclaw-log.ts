@@ -45,16 +45,18 @@ export interface LogLine {
   msg: string;
 }
 
-/** Result of a tail. `available=false` ⇒ no OpenClaw log source on this machine. */
+/** Result of a tail. `available` false means no OpenClaw log source on this machine. */
 export interface LogTail {
   /** True when a readable openclaw-*.log was found. */
   available: boolean;
   /** Absolute path of the file that was read (null when unavailable). */
   file: string | null;
-  /** Raw (unparsed) lines, oldest → newest, already limited to `maxLines`. */
+  /** Raw (unparsed) lines, oldest first, already limited to `maxLines`. */
   lines: string[];
-  /** Why there are no lines — shown verbatim by the UI empty state. */
+  /** Why there are no lines. The UI empty state shows this with `dir`. */
   reason: string | null;
+  /** Log directory from OPENCLAW_LOG_DIR, or the default when that is unset. */
+  dir: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export function tailNewestOpenclawLog(maxLines: number): LogTail {
       file: null,
       lines: [],
       reason: `No OpenClaw gateway log found (${logDir} is missing). Connect OpenClaw via bridge/ to see live logs.`,
+      dir: logDir,
     };
   }
 
@@ -99,6 +102,7 @@ export function tailNewestOpenclawLog(maxLines: number): LogTail {
       file: null,
       lines: [],
       reason: `No openclaw-*.log files in ${logDir} yet.`,
+      dir: logDir,
     };
   }
 
@@ -112,6 +116,7 @@ export function tailNewestOpenclawLog(maxLines: number): LogTail {
       file: newest,
       lines,
       reason: lines.length ? null : 'Log file is empty.',
+      dir: logDir,
     };
   } catch {
     return {
@@ -119,6 +124,7 @@ export function tailNewestOpenclawLog(maxLines: number): LogTail {
       file: null,
       lines: [],
       reason: `Could not read ${newest}.`,
+      dir: logDir,
     };
   }
 }

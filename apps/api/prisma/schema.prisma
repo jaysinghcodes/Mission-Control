@@ -234,16 +234,19 @@ model Setting {
 }
 
 /// A machine listed on the Team page. `npm run seed:demo` writes three
-/// sample rows. The bridge has no devices channel, so this table is the
-/// source — the page works with no OpenClaw. `online` is the status flag.
-/// `lastSeenAt` is when we last saw an offline machine (the page renders
-/// that instant in the timezone saved in settings).
+/// sample rows (`source` demo). `devices.snapshot` writes live rows
+/// (`source` bridge) from OpenClaw devices and nodes. `online` is the
+/// status flag. `lastSeenAt` is when we last saw an offline machine
+/// (the page renders that instant in the timezone saved in settings).
+/// `kind` is device or node so one failed CLI does not wipe the other.
 model Device {
   id         String    @id
   name       String
   type       String
   online     Boolean   @default(false)
   lastSeenAt DateTime?
+  source     String    @default("demo")
+  kind       String    @default("device")
   updatedAt  DateTime  @updatedAt
 }
 

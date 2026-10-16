@@ -286,6 +286,41 @@ export class SnapshotsService {
       }
     });
   }
+
+  /**
+   * Replace live devices and nodes from devices.snapshot.
+   *
+   * A payload with neither array is ignored, so a bad event cannot wipe
+   * the table. An empty array is a real reading and clears that kind.
+   * Sample rows (source demo) are removed when either array is present,
+   * because a bridge report replaces the seed only list. A devices array
+   * does not delete node rows, and a nodes array does not delete device
+   * rows, so one failed CLI cannot erase the other list.
+   */
+  async applyDevices(payload: Record<string, unknown>): Promise<void> {
+    const parsed = deviceRowsFromPayload(payload);
+    if (!parsed) return;
+    const { rows, sawDevices, sawNodes } = parsed;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.device.deleteMany({ where: { source: 'demo' } });
+      if (sawDevices) {
+        await tx.device.deleteMany({
+          where: { source: 'bridge', kind: 'device' },
+        });
+      }
+      if (sawNodes) {
+        await tx.device.deleteMany({
+          where: { source: 'bridge', kind: 'node' },
+        });
+      }
+      if (rows.length > 0) {
+        await tx.device.deleteMany({
+          where: { id: { in: rows.map((row) => row.id) } },
+        });
+        await tx.device.createMany({ data: rows });
+      }
+    });
+  }
 }
 
 const MEMORY_KINDS = new Set(['long-term', 'daily', 'other']);
@@ -366,6 +401,85 @@ function modelRow(item: unknown, withAgent: boolean): ModelWrite | null {
 
 function clip(value: unknown, max: number): string {
   return wireText(value).trim().slice(0, max);
+}
+
+export type DeviceWrite = {
+  id: string;
+  name: string;
+  type: string;
+  online: boolean;
+  lastSeenAt: Date | null;
+  source: 'bridge';
+  kind: 'device' | 'node';
+};
+
+export type DeviceSnapshot = {
+  rows: DeviceWrite[];
+  sawDevices: boolean;
+  sawNodes: boolean;
+};
+
+/**
+ * Rows for devices.snapshot, or null when the payload is not a snapshot.
+ * Node rows replace a device row with the same id. A demo id is dropped
+ * so ingest cannot take a seed row's key.
+ */
+export function deviceRowsFromPayload(
+  payload: Record<string, unknown>,
+): DeviceSnapshot | null {
+  const sawDevices = Array.isArray(payload.devices);
+  const sawNodes = Array.isArray(payload.nodes);
+  if (!sawDevices && !sawNodes) return null;
+  const byId = new Map<string, DeviceWrite>();
+  if (sawDevices) {
+    for (const item of payload.devices as unknown[]) {
+      const row = oneDevice(item, 'device');
+      if (row) byId.set(row.id, row);
+    }
+  }
+  if (sawNodes) {
+    for (const item of payload.nodes as unknown[]) {
+      const row = oneDevice(item, 'node');
+      if (row) byId.set(row.id, row);
+    }
+  }
+  return { rows: [...byId.values()], sawDevices, sawNodes };
+}
+
+function oneDevice(item: unknown, kind: 'device' | 'node'): DeviceWrite | null {
+  if (!item || typeof item !== 'object') return null;
+  const rec = item as Record<string, unknown>;
+  const id = textField(rec.id, 200);
+  if (!id || id.startsWith('demo-')) return null;
+  const fallback = kind === 'node' ? 'node' : 'device';
+  const name = textField(rec.name, 200) || id;
+  const type = textField(rec.type, 80) || fallback;
+  return {
+    id,
+    name,
+    type,
+    online: rec.online === true,
+    lastSeenAt: seenAt(rec.lastSeenAt),
+    source: 'bridge',
+    kind,
+  };
+}
+
+function textField(value: unknown, max: number): string {
+  if (typeof value !== 'string') return '';
+  return value.replaceAll('\0', '').trim().slice(0, max);
+}
+
+function seenAt(value: unknown): Date | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const at = new Date(value);
+    return Number.isNaN(at.getTime()) ? null : at;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const at = new Date(value);
+    return Number.isNaN(at.getTime()) ? null : at;
+  }
+  return null;
 }
 
 function openclawVersionFrom(payload: Record<string, unknown>): string | null {

@@ -2,7 +2,7 @@ import { useApi } from '../hooks/useApi'
 import { Bot, Card, Progress } from '../components/ui'
 
 /**
- * Sessions — real agent sessions from the API (synced via sessions.snapshot).
+ * Sessions. Real agent sessions from the API (synced via sessions.snapshot).
  */
 
 interface Session { id: string; name: string; agent: string; model: string | null; ctx: number; lastActivity: string | null; hot: boolean }
@@ -42,7 +42,7 @@ export default function Sessions() {
         {error && <div className="px-[18px] py-8 text-[12.5px] text-mc-faint">API unreachable.</div>}
         {!error && rows.length === 0 && (
           <div className="px-[18px] py-8 text-[12.5px] text-mc-faint">
-            No sessions synced yet. The bridge pushes real sessions every few minutes.
+            No sessions yet. The bridge posts sessions.snapshot from OpenClaw. A fresh install has none until that sync. npm run seed:demo does not add sessions.
           </div>
         )}
         {rows.map((row) => (
