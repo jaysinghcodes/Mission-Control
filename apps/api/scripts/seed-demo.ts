@@ -67,6 +67,7 @@ import { DEMO_DEVICES, DEMO_MISSION } from '../src/team/demo-team';
 import { SETTING_ID } from '../src/team/mission';
 import { demoUsageBuckets, demoUsageId } from '../src/usage/demo-usage';
 import { slugFromName } from '../src/agents/agent-merge';
+import { demoAgentId, demoAssigneeRewrites } from '../src/seed/demo-assignees';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -162,15 +163,16 @@ const CRON_JOBS = [
 ];
 
 // Statuses are the kanban columns in Tickets.tsx (todo/build/qa/review/done) + backlog.
+// Assignees are agent ids. A display name does not seat a bot.
 const TICKETS = [
-  { id: 'demo-ticket-1', key: 'DEMO-1', title: 'Draft onboarding checklist', status: 'todo', priority: 'med', assignee: 'Atlas', tags: ['docs'], points: 2 },
-  { id: 'demo-ticket-2', key: 'DEMO-2', title: 'Add dark-mode screenshots', status: 'todo', priority: 'low', assignee: 'Pixel', tags: ['design'], points: 1 },
-  { id: 'demo-ticket-3', key: 'DEMO-3', title: 'Wire calendar week view', status: 'build', priority: 'high', assignee: 'Forge', tags: ['web'], points: 5 },
-  { id: 'demo-ticket-4', key: 'DEMO-4', title: 'Regression pass on Tickets', status: 'qa', priority: 'high', assignee: 'Sentinel', tags: ['qa'], points: 3 },
-  { id: 'demo-ticket-5', key: 'DEMO-5', title: 'Release notes for the next cut', status: 'review', priority: 'med', assignee: 'Quill', tags: ['summary'], points: 2 },
-  { id: 'demo-ticket-6', key: 'DEMO-6', title: 'Rotate demo ingest token', status: 'done', priority: 'med', assignee: 'Aegis', tags: ['ops'], points: 1 },
-  { id: 'demo-ticket-7', key: 'DEMO-7', title: 'Research provider pricing', status: 'backlog', priority: 'low', assignee: 'Echo', tags: ['research'], points: 3 },
-  { id: 'demo-ticket-8', key: 'DEMO-8', title: 'Office floor ambient animations', status: 'backlog', priority: 'low', assignee: 'Pixel', tags: ['design'], points: 2 },
+  { id: 'demo-ticket-1', key: 'DEMO-1', title: 'Draft onboarding checklist', status: 'todo', priority: 'med', assignee: demoAgentId('Atlas'), tags: ['docs'], points: 2 },
+  { id: 'demo-ticket-2', key: 'DEMO-2', title: 'Add dark-mode screenshots', status: 'todo', priority: 'low', assignee: demoAgentId('Pixel'), tags: ['design'], points: 1 },
+  { id: 'demo-ticket-3', key: 'DEMO-3', title: 'Wire calendar week view', status: 'build', priority: 'high', assignee: demoAgentId('Forge'), tags: ['web'], points: 5 },
+  { id: 'demo-ticket-4', key: 'DEMO-4', title: 'Regression pass on Tickets', status: 'qa', priority: 'high', assignee: demoAgentId('Sentinel'), tags: ['qa'], points: 3 },
+  { id: 'demo-ticket-5', key: 'DEMO-5', title: 'Release notes for the next cut', status: 'review', priority: 'med', assignee: demoAgentId('Quill'), tags: ['summary'], points: 2 },
+  { id: 'demo-ticket-6', key: 'DEMO-6', title: 'Rotate demo ingest token', status: 'done', priority: 'med', assignee: demoAgentId('Aegis'), tags: ['ops'], points: 1 },
+  { id: 'demo-ticket-7', key: 'DEMO-7', title: 'Research provider pricing', status: 'backlog', priority: 'low', assignee: demoAgentId('Echo'), tags: ['research'], points: 3 },
+  { id: 'demo-ticket-8', key: 'DEMO-8', title: 'Office floor ambient animations', status: 'backlog', priority: 'low', assignee: demoAgentId('Pixel'), tags: ['design'], points: 2 },
 ];
 
 // Activity: `minsAgo` gives a believable spread on first insert. Types are
@@ -193,7 +195,7 @@ const ACTIVITY = [
 // Note: a later real `approvals.snapshot` from the bridge drops all PENDING
 // rows (snapshot contract), which is exactly what we want for demo data.
 const APPROVALS = [
-  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Aegis' } },
+  { id: 'demo-approval-1', kind: 'exec', tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.', status: 'pending', meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: demoAgentId('Aegis') } },
   { id: 'demo-approval-2', kind: 'pr', tag: 'Merge the roster update', desc: 'You approved. Sample decision so the Decided tab is not empty.', status: 'approved' },
 ];
 
@@ -201,12 +203,12 @@ const APPROVALS = [
 // startedMinAgo is distinct so Pipeline "Started" is not one seed instant
 // on every moving ticket. DEMO-6 has its own finished run.
 const RUNS = [
-  { id: 'demo-run-1', name: 'Deploy preview build', agent: 'Aegis', status: 'needs_approval', progress: 80, ticketId: null as string | null, startedMinAgo: 40, finishedMinAgo: null as number | null },
-  { id: 'demo-run-2', name: 'Wire calendar week view', agent: 'Forge', status: 'running', progress: 40, ticketId: 'demo-ticket-3', startedMinAgo: 180, finishedMinAgo: null },
-  { id: 'demo-run-3', name: 'Regression pass on Tickets', agent: 'Sentinel', status: 'running', progress: 55, ticketId: 'demo-ticket-4', startedMinAgo: 75, finishedMinAgo: null },
-  { id: 'demo-run-4', name: 'Release notes for the next cut', agent: 'Quill', status: 'running', progress: 90, ticketId: 'demo-ticket-5', startedMinAgo: 26, finishedMinAgo: null },
-  { id: 'demo-run-5', name: 'Morning Brief', agent: 'Speedy', status: 'done', progress: 100, ticketId: null, startedMinAgo: 500, finishedMinAgo: 470 },
-  { id: 'demo-run-6', name: 'Rotate demo ingest token', agent: 'Aegis', status: 'done', progress: 100, ticketId: 'demo-ticket-6', startedMinAgo: 2400, finishedMinAgo: 2200 },
+  { id: 'demo-run-1', name: 'Deploy preview build', agent: demoAgentId('Aegis'), status: 'needs_approval', progress: 80, ticketId: null as string | null, startedMinAgo: 40, finishedMinAgo: null as number | null },
+  { id: 'demo-run-2', name: 'Wire calendar week view', agent: demoAgentId('Forge'), status: 'running', progress: 40, ticketId: 'demo-ticket-3', startedMinAgo: 180, finishedMinAgo: null },
+  { id: 'demo-run-3', name: 'Regression pass on Tickets', agent: demoAgentId('Sentinel'), status: 'running', progress: 55, ticketId: 'demo-ticket-4', startedMinAgo: 75, finishedMinAgo: null },
+  { id: 'demo-run-4', name: 'Release notes for the next cut', agent: demoAgentId('Quill'), status: 'running', progress: 90, ticketId: 'demo-ticket-5', startedMinAgo: 26, finishedMinAgo: null },
+  { id: 'demo-run-5', name: 'Morning Brief', agent: demoAgentId('Speedy'), status: 'done', progress: 100, ticketId: null, startedMinAgo: 500, finishedMinAgo: 470 },
+  { id: 'demo-run-6', name: 'Rotate demo ingest token', agent: demoAgentId('Aegis'), status: 'done', progress: 100, ticketId: 'demo-ticket-6', startedMinAgo: 2400, finishedMinAgo: 2200 },
 ];
 
 async function main(): Promise<void> {
@@ -255,12 +257,6 @@ async function main(): Promise<void> {
     const taken = await prisma.agent.findFirst({ where: { name: to }, select: { id: true } });
     if (taken) continue;
     await prisma.agent.update({ where: { id: old.id }, data: { name: to } });
-  }
-  for (const [from, to] of Object.entries(LEGACY_AGENT_NAMES)) {
-    await prisma.ticket.updateMany({
-      where: { assignee: from, id: { startsWith: 'demo-' } },
-      data: { assignee: to },
-    });
   }
 
   // Projects BEFORE tickets: Ticket.projectId is a foreign key. Fixed ids
@@ -353,6 +349,22 @@ async function main(): Promise<void> {
     if (!before) counts.tickets++;
   }
 
+  // A demo ticket or run that still stores a crew name or a legacy name
+  // is rewritten to the agent id. Any other assignee stays.
+  for (const { from, to } of demoAssigneeRewrites(
+    AGENTS.map((agent) => agent.name),
+    LEGACY_AGENT_NAMES,
+  )) {
+    await prisma.ticket.updateMany({
+      where: { assignee: from, id: { startsWith: 'demo-' } },
+      data: { assignee: to },
+    });
+    await prisma.run.updateMany({
+      where: { agent: from, id: { startsWith: 'demo-' } },
+      data: { agent: to },
+    });
+  }
+
   const now = Date.now();
   for (const e of ACTIVITY) {
     const before = await prisma.activityEvent.findUnique({ where: { id: e.id }, select: { id: true } });
@@ -375,13 +387,13 @@ async function main(): Promise<void> {
     where: { id: 'demo-approval-1', desc: 'Demo: allow the preview deploy script to run' },
     data: { tag: 'Deploy preview build', desc: 'Aegis wants to run the preview deploy script for DEMO-4.' },
   });
-  // Link the demo decision to DEMO-4 by id, and to Aegis (the requester).
+  // Link the demo decision to DEMO-4 by id, and to Aegis by agent id.
   // Status is left alone (a decision already taken stays decided). Prose in
-  // `desc` is not the link. Ticket assignee Sentinel stays the fallback only
+  // `desc` is not the link. The ticket assignee id is the fallback only
   // when agentId is absent.
   await prisma.approval.updateMany({
     where: { id: 'demo-approval-1' },
-    data: { meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Aegis' } },
+    data: { meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: demoAgentId('Aegis') } },
   });
   await prisma.activityEvent.updateMany({
     where: { id: 'demo-act-08' },

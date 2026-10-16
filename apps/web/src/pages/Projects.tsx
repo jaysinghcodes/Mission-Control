@@ -4,8 +4,7 @@ import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import type { Agent, AgentsResp, Project, ProjectsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, EmptyState, Banner, Toast, FieldError } from '../components/shell'
-import { findByLabel, type NamingState } from '../lib/crew'
-import { useNaming } from '../lib/naming'
+import { findById } from '../lib/crew'
 import { ticketNeedsYou, type ApprovalLike } from '../lib/board'
 import { pluralize } from '../lib/pluralize'
 
@@ -53,13 +52,12 @@ function leadName(projectId: string, tickets: ProjectTicket[]): string | null {
   return null
 }
 
-function faceFor(name: string | null, roster: Agent[], state: NamingState): Agent | { id: string; name: string; role: string | null; status: string } | null {
-  if (!name) return null
-  return findByLabel(roster, name, state) ?? { id: name, name, role: null, status: 'idle' }
+function faceFor(agentId: string | null, roster: Agent[]): Agent | { id: string; name: string; role: string | null; status: string } | null {
+  if (!agentId) return null
+  return findById(roster, agentId) ?? { id: agentId, name: agentId, role: null, status: 'idle' }
 }
 
 export default function Projects() {
-  const naming = useNaming()
   const { data, loading, errorMessage: loadError, refetch } = useApi<ProjectsResp>('/projects?archived=all', { pollMs: 15000 })
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const ticketsQ = useApi<{ tickets: ProjectTicket[] }>('/tickets', { pollMs: 20000 })
@@ -200,7 +198,7 @@ export default function Projects() {
 
       <div className="space-y-3">
         {rows.map((p) => {
-          const who = faceFor(leadName(p.id, projectTickets), roster, naming)
+          const who = faceFor(leadName(p.id, projectTickets), roster)
           const frac = p.ticketCount ? p.doneCount / p.ticketCount : 0
           const finished = p.ticketCount > 0 && p.doneCount === p.ticketCount
           const needs = projectTickets.some((t) => t.projectId === p.id && ticketNeedsYou(t, pending))

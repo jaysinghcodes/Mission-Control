@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Kicker, Face, AgentName, EmptyState, FieldError } from '../components/shell'
-import { useNaming } from '../lib/naming'
+import { findById } from '../lib/crew'
 import type { Agent, AgentsResp } from '../types'
 import { OPERATOR_ASSIGNEE } from '../config'
 import { STAGES, stageCounts, stageIndexForStatus, ticketNeedsYou, type ApprovalLike } from '../lib/board'
@@ -59,7 +59,6 @@ export default function Pipeline() {
   const [range, setRange] = useState(0)
   const [showDone, setShowDone] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
-  const naming = useNaming()
   const roster = rosterQ.data?.agents ?? []
   const runs = runsQ.data?.runs ?? []
   const pending = approvalsQ.data?.approvals ?? []
@@ -101,13 +100,13 @@ export default function Pipeline() {
     : 'Loading the trail…'
 
   const faceFor = useMemo(() => {
-    return (agentName: string | null) => {
-      const key = (agentName ?? '').toLowerCase()
-      const hit = naming.find(roster, key)
+    return (agentId: string | null) => {
+      const hit = findById(roster, agentId)
       if (hit) return hit
-      return { id: agentName || 'ticket', name: agentName || OPERATOR_ASSIGNEE, role: null, status: 'working' } as Agent
+      const label = agentId?.trim() || ''
+      return { id: label || 'ticket', name: label || OPERATOR_ASSIGNEE, role: null, status: 'working' } as Agent
     }
-  }, [roster, naming])
+  }, [roster])
 
   return (
     <div>

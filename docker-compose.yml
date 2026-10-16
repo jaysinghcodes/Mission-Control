@@ -103,7 +103,8 @@ services:
       - ${DOCS_ROOT:-./data/docs}:/data/docs
       # Host log directory. The same path is OPENCLAW_LOG_DIR inside the container.
       - ${OPENCLAW_LOG_DIR:-/tmp/openclaw}:${OPENCLAW_LOG_DIR:-/tmp/openclaw}
-      # Price table. prices.local.json on the host overrides a model without a rebuild.
+      # Default config is baked into the image. This mount overrides it.
+      # prices.local.json on the host overrides a model price without a rebuild.
       - ./config:/app/config:ro
     ports:
       # Host port overridable (item 6); the api still listens on 3000 inside.

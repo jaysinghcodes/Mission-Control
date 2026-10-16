@@ -97,6 +97,19 @@ test('Dockerfiles copy files that exist and the web API url defaults to blank', 
   }
 })
 
+test('the runtime image copies crew.json with the default config', () => {
+  const api = read('apps/api/Dockerfile')
+  assert.match(api, /COPY --from=build \/app\/config\/crew\.json \/app\/config\/crew\.json/)
+  assert.match(api, /COPY --from=build \/app\/config\/prices\.json \/app\/config\/prices\.json/)
+  assert.match(api, /COPY --from=build \/app\/config\/timezones\.json \/app\/config\/timezones\.json/)
+  for (const rel of ['config/crew.json', 'config/prices.json', 'config/timezones.json']) {
+    assert.equal(existsSync(path.join(root, rel)), true, rel)
+  }
+  const compose = parseCompose()
+  const configMounts = compose.services.api.volumes.filter((spec) => String(spec).includes('/app/config'))
+  assert.deepEqual(configMounts, ['./config:/app/config:ro'])
+})
+
 test('same origin is the web default and cors origins are unchanged', () => {
   const apiBase = read('apps/web/src/lib/apiBase.ts')
   assert.match(apiBase, /EXPLICIT_ORIGIN \|\| '\/api'/)

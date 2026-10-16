@@ -23,8 +23,8 @@ const pending = [{
 }]
 
 const tickets = [
-  { id: 'demo-ticket-4', key: 'DEMO-4', assignee: 'Sentinel' },
-  { id: 'demo-ticket-6', key: 'DEMO-6', assignee: 'Aegis' },
+  { id: 'demo-ticket-4', key: 'DEMO-4', assignee: 'sentinel' },
+  { id: 'demo-ticket-6', key: 'DEMO-6', assignee: 'aegis' },
 ]
 
 test('needs-you follows the approval id, not a name in the text', () => {
@@ -33,6 +33,12 @@ test('needs-you follows the approval id, not a name in the text', () => {
   assert.equal(board.agentNeedsYou({ id: 'sentinel', name: 'Sentinel' }, pending, tickets), true)
   assert.equal(board.agentNeedsYou({ id: 'aegis', name: 'Aegis' }, pending, tickets), false)
   assert.equal(board.agentNeedsYou({ id: 'patch', name: 'Patch' }, pending, tickets), false)
+  assert.equal(board.agentNeedsYou({ id: 'reg_sentinel', name: 'Sentinel' }, pending, [
+    { id: 'demo-ticket-4', key: 'DEMO-4', assignee: 'Sentinel' },
+  ]), false)
+  assert.equal(board.agentNeedsYou({ id: 'sentinel', name: 'Sentinel' }, pending, [
+    { id: 'demo-ticket-4', key: 'DEMO-4', assignee: 'Sentinel' },
+  ]), false)
   assert.equal(board.activityNeedsYou({ ticket: 'DEMO-4' }, pending), true)
   assert.equal(board.activityNeedsYou({ ticket: 'DEMO-6' }, pending), false)
   assert.equal(board.activityNeedsYou({ name: 'security patch' }, pending), false)
@@ -40,9 +46,10 @@ test('needs-you follows the approval id, not a name in the text', () => {
 })
 
 test('agentId is the assignee link and the ticket assignee is only the fallback', () => {
-  const named = [{ meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'Aegis' } }]
+  const named = [{ meta: { ticketId: 'demo-ticket-4', ticketKey: 'DEMO-4', agentId: 'aegis' } }]
   assert.equal(board.agentNeedsYou({ id: 'aegis', name: 'Aegis' }, named, tickets), true)
   assert.equal(board.agentNeedsYou({ id: 'sentinel', name: 'Sentinel' }, named, tickets), false)
+  assert.equal(board.agentNeedsYou({ id: 'reg_aegis', name: 'Aegis' }, [{ meta: { agentId: 'Aegis' } }], tickets), false)
   assert.equal(board.ticketNeedsYou(tickets[0], named), true)
   const prose = [{ desc: 'Apply the security patch', meta: { agentId: 'patch-id' } }]
   assert.equal(board.agentNeedsYou({ id: 'patch-id', name: 'Patch' }, prose, tickets), true)

@@ -44,9 +44,11 @@ COPY --from=build /app/apps/api/git-sha.txt ./apps/api/git-sha.txt
 # is required" and the container crash-loops. URL still comes from the
 # compose-injected DATABASE_URL env — the file holds no secrets.
 COPY --from=build /app/apps/api/prisma.config.ts ./apps/api/prisma.config.ts
-# Starter price table. Compose mounts ./config over this path so a local override is live.
+# Default config. A plain docker run serves GET /settings from crew.json.
+# Compose mounts ./config over /app/config, and that mount overrides these files.
 COPY --from=build /app/config/prices.json /app/config/prices.json
 COPY --from=build /app/config/timezones.json /app/config/timezones.json
+COPY --from=build /app/config/crew.json /app/config/crew.json
 WORKDIR /app/apps/api
 EXPOSE 3000
 # Runtime env (DATABASE_URL, PORT, HOST, WEB_ORIGIN, INGEST_TOKEN,

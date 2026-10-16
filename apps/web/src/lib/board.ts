@@ -84,12 +84,15 @@ export function ticketNeedsYou(
   )
 }
 
-function sameAgent(agent: { id?: string; name: string }, id: string | null | undefined): boolean {
-  return !!id && (id === agent.id || id === agent.name)
+/** Agent id only. A display name does not take the flag. */
+function sameAgent(agent: { id?: string }, id: string | null | undefined): boolean {
+  const raw = (id ?? '').trim()
+  const agentId = (agent.id ?? '').trim()
+  return !!raw && !!agentId && raw === agentId
 }
 
 export function agentNeedsYou(
-  agent: { id?: string; name: string },
+  agent: { id?: string; name?: string },
   rows: ApprovalLike[],
   tickets: { id?: string | null; key?: string | null; assignee?: string | null }[],
 ): boolean {

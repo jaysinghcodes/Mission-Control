@@ -308,7 +308,7 @@ async function main() {
 
     const created = await apiSend('POST', '/tickets', {
       title,
-      assignee: agentName,
+      assignee: agentId,
       status: 'todo',
     })
     if (created.status !== 201) throw new Error(`create ticket returned ${created.status} ${created.text}`)
@@ -376,7 +376,7 @@ async function main() {
 
     const started = await apiSend('POST', '/runs', {
       name: 'Ship the live notes',
-      agent: agentName,
+      agent: agentId,
       status: 'running',
       ticketId: ticket.id,
     })
