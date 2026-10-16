@@ -1231,6 +1231,24 @@ def strip_private(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
 
 
+def stamp_path() -> Path:
+    """Unix timestamp file doctor reads. Override with MC_BRIDGE_STAMP_FILE."""
+    raw = os.environ.get("MC_BRIDGE_STAMP_FILE", "").strip()
+    if raw:
+        return Path(raw)
+    return BRIDGE_DIR / ".state" / "last-sync"
+
+
+def record_sync() -> None:
+    """Record a successful sync. A dry run does not call this."""
+    path = stamp_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{int(time.time())}\n", encoding="utf-8")
+    except OSError as exc:
+        log(f"could not record the sync time ({exc})")
+
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -1321,6 +1339,8 @@ def main() -> int:
 
     if not events:
         log("no OpenClaw sources available — nothing to post (dashboard data left untouched)")
+        if not args.dry_run:
+            record_sync()
         return 0
 
     if args.dry_run:
@@ -1355,6 +1375,8 @@ def main() -> int:
     posted = len(events) + len(register_bodies) - failures
     total = len(events) + len(register_bodies)
     log(f"posted {posted}/{total} events to {api_url}/events")
+    if event_failures == 0:
+        record_sync()
     return 1 if failures else 0
 
 

@@ -2,6 +2,9 @@
 # Mission Control installer.
 # One command writes random tokens, starts the stack, runs doctor, and prints the URL.
 # Docker is the default. If the docker command is missing, this uses Node.js 22 and Postgres 16.
+# When the openclaw command is on PATH, this installs a bridge schedule.
+# Linux uses a systemd user timer, or cron when that timer is not available.
+# macOS uses launchd. Remove it with: bash install.sh --uninstall-schedule
 # A second run keeps every value already in .env. Token values are not printed.
 
 set -euo pipefail
@@ -89,6 +92,33 @@ resolved_port() {
   port_or "$chosen" "$fallback"
 }
 
+# Same order as resolved_port, for values that are not port numbers.
+resolved_value() {
+  local key fallback chosen
+  key="$1"
+  fallback="$2"
+  chosen="${!key-}"
+  if [[ -z "$chosen" ]]; then
+    chosen="$(env_value "$key")"
+  fi
+  if [[ -z "$chosen" ]]; then
+    printf '%s' "$fallback"
+  else
+    printf '%s' "$chosen"
+  fi
+}
+
+positive_int() {
+  local value fallback
+  value="$1"
+  fallback="$2"
+  if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -ge 1 ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$fallback"
+  fi
+}
+
 web_port() {
   resolved_port MC_WEB_PORT "5173"
 }
@@ -138,6 +168,66 @@ apply_shell_ports() {
   fi
 }
 
+write_env_key() {
+  local file key value tmp2 line saw
+  file="$1"
+  key="$2"
+  value="$3"
+  saw=0
+  tmp2="$(mktemp "${TMPDIR:-/tmp}/mc-env.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "${key}="*|export\ "${key}="*|"# ${key}="*|"#${key}="*)
+        printf '%s=%s\n' "$key" "$value"
+        saw=1
+        ;;
+      *)
+        printf '%s\n' "$line"
+        ;;
+    esac
+  done < "$file" > "$tmp2"
+  if [[ "$saw" -eq 0 ]]; then
+    printf '%s=%s\n' "$key" "$value" >> "$tmp2"
+  fi
+  mv "$tmp2" "$file"
+}
+
+# Shell values for a new .env only. An existing .env is never rewritten.
+apply_shell_schedule() {
+  local file wrote value
+  file="$1"
+  wrote=0
+  value="${MC_BRIDGE_INTERVAL_SECONDS-}"
+  if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -ge 1 ]]; then
+    write_env_key "$file" MC_BRIDGE_INTERVAL_SECONDS "$value"
+    wrote=1
+  fi
+  value="${MC_BRIDGE_STALE_SECONDS-}"
+  if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -ge 1 ]]; then
+    write_env_key "$file" MC_BRIDGE_STALE_SECONDS "$value"
+    wrote=1
+  fi
+  value="${MC_BRIDGE_REGISTER-}"
+  if [[ "$value" =~ ^(0|1|true|false|yes|no)$ ]]; then
+    write_env_key "$file" MC_BRIDGE_REGISTER "$value"
+    wrote=1
+  fi
+  value="${MC_API_URL-}"
+  if [[ "$value" =~ ^https?://[^[:space:]]+$ ]]; then
+    write_env_key "$file" MC_API_URL "$value"
+    wrote=1
+  fi
+  value="${MC_BRIDGE_SCHEDULER-}"
+  if [[ "$value" == "systemd" || "$value" == "launchd" || "$value" == "cron" ]]; then
+    write_env_key "$file" MC_BRIDGE_SCHEDULER "$value"
+    wrote=1
+  fi
+  if [[ "$wrote" -eq 1 ]]; then
+    echo "Wrote bridge schedule values from the environment into .env."
+  fi
+  return 0
+}
+
 ensure_env() {
   local ingest socket tmp old_umask saw_ingest saw_socket line
   local got_ingest got_socket
@@ -181,6 +271,7 @@ ensure_env() {
     printf 'SOCKET_TOKEN=%s\n' "$socket" >> "$tmp"
   fi
   apply_shell_ports "$tmp"
+  apply_shell_schedule "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" .env
   umask "$old_umask"
@@ -324,6 +415,551 @@ start_native() {
   fi
 }
 
+bridge_interval() {
+  positive_int "$(resolved_value MC_BRIDGE_INTERVAL_SECONDS "")" "300"
+}
+
+bridge_register() {
+  local value
+  value="$(resolved_value MC_BRIDGE_REGISTER "")"
+  if [[ -z "$value" ]]; then
+    printf '1'
+    return 0
+  fi
+  printf '%s' "$value"
+}
+
+bridge_script() {
+  local configured
+  configured="$(resolved_value MC_BRIDGE_SCRIPT "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  printf '%s' "$(pwd)/bridge/mc-bridge-sync.py"
+}
+
+bridge_python() {
+  local configured found
+  configured="$(resolved_value MC_BRIDGE_PYTHON "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  found="$(command -v python3 2>/dev/null || true)"
+  printf '%s' "$found"
+}
+
+bridge_stamp_file() {
+  local configured
+  configured="$(resolved_value MC_BRIDGE_STAMP_FILE "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  printf '%s' "$(pwd)/bridge/.state/last-sync"
+}
+
+bridge_log_file() {
+  local configured
+  configured="$(resolved_value MC_BRIDGE_LOG "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  printf '%s' "$(pwd)/bridge/.state/sync.log"
+}
+
+bridge_api_url() {
+  local configured port
+  configured="$(resolved_value MC_API_URL "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+    port="$(docker_api_port)"
+  else
+    port="$(api_port)"
+  fi
+  printf 'http://127.0.0.1:%s' "$port"
+}
+
+safe_name() {
+  local value fallback
+  value="$1"
+  fallback="$2"
+  if [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$fallback"
+  fi
+}
+
+bridge_unit_name() {
+  safe_name "$(resolved_value MC_BRIDGE_UNIT_NAME "")" "mission-control-bridge"
+}
+
+cron_mark() {
+  safe_name "$(resolved_value MC_BRIDGE_CRON_MARK "")" "mission-control-bridge"
+}
+
+launchd_label() {
+  safe_name "$(resolved_value MC_BRIDGE_LAUNCHD_LABEL "")" "com.missioncontrol.bridge"
+}
+
+systemd_user_dir() {
+  local configured
+  configured="$(resolved_value MC_BRIDGE_SYSTEMD_DIR "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
+    printf '%s' "${XDG_CONFIG_HOME}/systemd/user"
+    return 0
+  fi
+  if [[ -z "${HOME:-}" ]]; then
+    printf '%s' ""
+    return 0
+  fi
+  printf '%s' "${HOME}/.config/systemd/user"
+}
+
+launchd_dir() {
+  local configured
+  configured="$(resolved_value MC_BRIDGE_LAUNCHD_DIR "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  if [[ -z "${HOME:-}" ]]; then
+    printf '%s' ""
+    return 0
+  fi
+  printf '%s' "${HOME}/Library/LaunchAgents"
+}
+
+systemd_user_ready() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl --user show-environment >/dev/null 2>&1
+}
+
+choose_scheduler() {
+  local forced os
+  forced="$(resolved_value MC_BRIDGE_SCHEDULER "")"
+  if [[ -n "$forced" ]]; then
+    printf '%s' "$forced"
+    return 0
+  fi
+  os="$(uname -s)"
+  if [[ "$os" == "Darwin" ]]; then
+    printf '%s' "launchd"
+    return 0
+  fi
+  if systemd_user_ready; then
+    printf '%s' "systemd"
+    return 0
+  fi
+  printf '%s' "cron"
+}
+
+sh_quote() {
+  local value
+  value="$1"
+  value="${value//\'/\'\\\'\'}"
+  printf "'%s'" "$value"
+}
+
+xml_escape() {
+  local value
+  value="$1"
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  printf '%s' "$value"
+}
+
+systemd_quote() {
+  local value
+  value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+cron_expr() {
+  local seconds minutes hours
+  seconds="$1"
+  if [[ "$seconds" -lt 60 ]]; then
+    printf '%s\n' "* * * * *"
+    return 0
+  fi
+  minutes=$(( (seconds + 59) / 60 ))
+  if [[ "$minutes" -le 1 ]]; then
+    printf '%s\n' "* * * * *"
+    return 0
+  fi
+  if [[ "$minutes" -lt 60 ]]; then
+    printf '*/%s * * * *\n' "$minutes"
+    return 0
+  fi
+  hours=$(( (minutes + 59) / 60 ))
+  if [[ "$hours" -le 1 ]]; then
+    printf '%s\n' "0 * * * *"
+    return 0
+  fi
+  if [[ "$hours" -lt 24 ]]; then
+    printf '0 */%s * * *\n' "$hours"
+    return 0
+  fi
+  printf '%s\n' "0 0 * * *"
+}
+
+strip_cron_block() {
+  local mark begin end
+  mark="$(cron_mark)"
+  begin="# BEGIN ${mark}"
+  end="# END ${mark}"
+  awk -v begin="$begin" -v end="$end" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    skip != 1 { print }
+  '
+}
+
+cron_command_line() {
+  local schedule
+  schedule="$(cron_expr "$(bridge_interval)")"
+  schedule="${schedule%$'\n'}"
+  printf '%s MC_BRIDGE_REGISTER=%s MC_API_URL=%s MC_BRIDGE_STAMP_FILE=%s %s %s >> %s 2>&1\n' \
+    "$schedule" \
+    "$(sh_quote "$(bridge_register)")" \
+    "$(sh_quote "$(bridge_api_url)")" \
+    "$(sh_quote "$(bridge_stamp_file)")" \
+    "$(sh_quote "$(bridge_python)")" \
+    "$(sh_quote "$(bridge_script)")" \
+    "$(sh_quote "$(bridge_log_file)")"
+}
+
+read_crontab() {
+  crontab -l 2>/dev/null || true
+}
+
+remove_cron_block() {
+  local current filtered tmp
+  if ! command -v crontab >/dev/null 2>&1; then
+    return 0
+  fi
+  current="$(read_crontab)"
+  if [[ -z "$current" ]]; then
+    return 0
+  fi
+  if ! printf '%s\n' "$current" | grep -F "# BEGIN $(cron_mark)" >/dev/null 2>&1; then
+    return 0
+  fi
+  filtered="$(printf '%s\n' "$current" | strip_cron_block)"
+  filtered="$(printf '%s\n' "$filtered" | sed -e '${/^$/d;}')"
+  if [[ -z "$(printf '%s' "$filtered" | tr -d '[:space:]')" ]]; then
+    crontab -r >/dev/null 2>&1 || true
+    return 0
+  fi
+  tmp="$(mktemp "${TMPDIR:-/tmp}/mc-cron.XXXXXX")"
+  printf '%s\n' "$filtered" > "$tmp"
+  crontab - < "$tmp"
+  rm -f "$tmp"
+}
+
+install_cron_schedule() {
+  local current filtered tmp mark
+  if ! command -v crontab >/dev/null 2>&1; then
+    echo "crontab was not found, so the bridge schedule was not installed."
+    return 0
+  fi
+  mark="$(cron_mark)"
+  current="$(read_crontab)"
+  if [[ -n "$current" ]]; then
+    filtered="$(printf '%s\n' "$current" | strip_cron_block)"
+    filtered="$(printf '%s\n' "$filtered" | sed -e '${/^$/d;}')"
+  else
+    filtered=""
+  fi
+  tmp="$(mktemp "${TMPDIR:-/tmp}/mc-cron.XXXXXX")"
+  if [[ -n "$(printf '%s' "$filtered" | tr -d '[:space:]')" ]]; then
+    printf '%s\n\n' "$filtered" > "$tmp"
+  else
+    : > "$tmp"
+  fi
+  {
+    printf '%s\n' "# BEGIN ${mark}"
+    cron_command_line
+    printf '%s\n' "# END ${mark}"
+  } >> "$tmp"
+  if ! crontab - < "$tmp"; then
+    rm -f "$tmp"
+    echo "crontab could not be updated, so the bridge schedule was not installed."
+    return 0
+  fi
+  rm -f "$tmp"
+  echo "Installed the bridge schedule with cron. It runs every $(bridge_interval) seconds, rounded up to whole minutes by cron. Remove it with: bash install.sh --uninstall-schedule"
+}
+
+remove_systemd_units() {
+  local dir unit removed
+  dir="$(systemd_user_dir)"
+  unit="$(bridge_unit_name)"
+  if [[ -z "$dir" ]]; then
+    return 0
+  fi
+  removed=0
+  if [[ -f "${dir}/${unit}.timer" || -f "${dir}/${unit}.service" ]]; then
+    removed=1
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl --user disable --now "${unit}.timer" >/dev/null 2>&1 || true
+      systemctl --user stop "${unit}.service" >/dev/null 2>&1 || true
+    fi
+    rm -f "${dir}/${unit}.timer" "${dir}/${unit}.service"
+  fi
+  if [[ "$removed" -eq 1 ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
+}
+
+write_systemd_units() {
+  local dir unit py script work api register stamp interval service timer
+  dir="$(systemd_user_dir)"
+  unit="$(bridge_unit_name)"
+  py="$(bridge_python)"
+  script="$(bridge_script)"
+  work="$(pwd)"
+  api="$(bridge_api_url)"
+  register="$(bridge_register)"
+  stamp="$(bridge_stamp_file)"
+  interval="$(bridge_interval)"
+  mkdir -p "$dir"
+  service="${dir}/${unit}.service"
+  timer="${dir}/${unit}.timer"
+  cat > "$service" <<EOF
+[Unit]
+Description=Mission Control OpenClaw bridge sync
+
+[Service]
+Type=oneshot
+WorkingDirectory=$(systemd_quote "$work")
+Environment="MC_BRIDGE_REGISTER=${register}"
+Environment="MC_API_URL=${api}"
+Environment="MC_BRIDGE_STAMP_FILE=${stamp}"
+ExecStart=$(systemd_quote "$py") $(systemd_quote "$script")
+EOF
+  cat > "$timer" <<EOF
+[Unit]
+Description=Mission Control OpenClaw bridge schedule
+
+[Timer]
+OnBootSec=${interval}s
+OnUnitActiveSec=${interval}s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
+install_systemd_schedule() {
+  local unit
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "systemctl was not found, so the systemd bridge schedule was not installed."
+    return 0
+  fi
+  unit="$(bridge_unit_name)"
+  write_systemd_units
+  if ! systemctl --user daemon-reload; then
+    echo "systemctl could not reload the user manager. The bridge schedule was not installed."
+    return 0
+  fi
+  if ! systemctl --user enable --now "${unit}.timer"; then
+    echo "systemctl could not enable the bridge timer. The bridge schedule was not installed."
+    return 0
+  fi
+  remove_cron_block
+  remove_launchd_agent
+  echo "Installed the bridge schedule with systemd. It runs every $(bridge_interval) seconds. Remove it with: bash install.sh --uninstall-schedule"
+}
+
+remove_launchd_agent() {
+  local dir label plist uid
+  dir="$(launchd_dir)"
+  label="$(launchd_label)"
+  if [[ -z "$dir" ]]; then
+    return 0
+  fi
+  plist="${dir}/${label}.plist"
+  if [[ ! -f "$plist" ]]; then
+    return 0
+  fi
+  if command -v launchctl >/dev/null 2>&1; then
+    uid="$(id -u)"
+    launchctl bootout "gui/${uid}/${label}" >/dev/null 2>&1 || true
+    launchctl unload "$plist" >/dev/null 2>&1 || true
+  fi
+  rm -f "$plist"
+}
+
+write_launchd_plist() {
+  local dir label plist py script work api register stamp log interval
+  dir="$(launchd_dir)"
+  label="$(launchd_label)"
+  py="$(bridge_python)"
+  script="$(bridge_script)"
+  work="$(pwd)"
+  api="$(bridge_api_url)"
+  register="$(bridge_register)"
+  stamp="$(bridge_stamp_file)"
+  log="$(bridge_log_file)"
+  interval="$(bridge_interval)"
+  mkdir -p "$dir"
+  plist="${dir}/${label}.plist"
+  cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$(xml_escape "$label")</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(xml_escape "$py")</string>
+    <string>$(xml_escape "$script")</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>$(xml_escape "$work")</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MC_BRIDGE_REGISTER</key>
+    <string>$(xml_escape "$register")</string>
+    <key>MC_API_URL</key>
+    <string>$(xml_escape "$api")</string>
+    <key>MC_BRIDGE_STAMP_FILE</key>
+    <string>$(xml_escape "$stamp")</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>${interval}</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>$(xml_escape "$log")</string>
+  <key>StandardErrorPath</key>
+  <string>$(xml_escape "${log}.err")</string>
+</dict>
+</plist>
+EOF
+}
+
+install_launchd_schedule() {
+  local dir label plist uid domain
+  if ! command -v launchctl >/dev/null 2>&1; then
+    echo "launchctl was not found, so the bridge schedule was not installed."
+    return 0
+  fi
+  dir="$(launchd_dir)"
+  label="$(launchd_label)"
+  plist="${dir}/${label}.plist"
+  write_launchd_plist
+  uid="$(id -u)"
+  domain="gui/${uid}"
+  launchctl bootout "${domain}/${label}" >/dev/null 2>&1 || true
+  if ! launchctl bootstrap "$domain" "$plist"; then
+    if ! launchctl load "$plist"; then
+      echo "launchctl could not load the bridge schedule."
+      return 0
+    fi
+  fi
+  launchctl enable "${domain}/${label}" >/dev/null 2>&1 || true
+  remove_cron_block
+  remove_systemd_units
+  echo "Installed the bridge schedule with launchd. It runs every $(bridge_interval) seconds. Remove it with: bash install.sh --uninstall-schedule"
+}
+
+offer_starter() {
+  local config
+  config="${HOME:-.}/.openclaw/openclaw.json"
+  echo "Optional: merge bridge/openclaw.starter.json into ${config}. Do not replace that file. The starter sets maxChildrenPerAgent to 3 and maxConcurrent to 4. This installer does not edit that file."
+}
+
+run_bridge_now() {
+  local flag py script code
+  flag="$(resolved_value MC_BRIDGE_RUN_NOW "")"
+  if [[ -z "$flag" ]]; then
+    flag="1"
+  fi
+  if [[ "$flag" == "0" || "$flag" == "false" || "$flag" == "no" ]]; then
+    return 0
+  fi
+  py="$(bridge_python)"
+  script="$(bridge_script)"
+  if [[ -z "$py" || ! -f "$script" ]]; then
+    return 0
+  fi
+  echo "Running the bridge once so a successful sync can record a timestamp before the next interval."
+  set +e
+  MC_BRIDGE_REGISTER="$(bridge_register)" \
+    MC_API_URL="$(bridge_api_url)" \
+    MC_BRIDGE_STAMP_FILE="$(bridge_stamp_file)" \
+    "$py" "$script" >> "$(bridge_log_file)" 2>&1
+  code=$?
+  set -e
+  if [[ "$code" -ne 0 ]]; then
+    echo "The first bridge run exited ${code}. The schedule is still installed."
+  fi
+}
+
+install_bridge_schedule() {
+  local script py scheduler
+  if ! command -v openclaw >/dev/null 2>&1; then
+    echo "OpenClaw was not found on PATH. Skipping the bridge schedule. npm run seed:demo still fills sample data."
+    return 0
+  fi
+  script="$(bridge_script)"
+  py="$(bridge_python)"
+  if [[ ! -f "$script" ]]; then
+    echo "The bridge script was not found, so the schedule was not installed. The rest of the install continues."
+    offer_starter
+    return 0
+  fi
+  if [[ -z "$py" ]]; then
+    echo "Python 3 was not found, so the bridge schedule was not installed. The rest of the install continues."
+    offer_starter
+    return 0
+  fi
+  mkdir -p "$(dirname "$(bridge_stamp_file)")" "$(dirname "$(bridge_log_file)")"
+  scheduler="$(choose_scheduler)"
+  case "$scheduler" in
+    systemd)
+      install_systemd_schedule
+      ;;
+    launchd)
+      install_launchd_schedule
+      ;;
+    cron)
+      install_cron_schedule
+      ;;
+    *)
+      echo "The bridge scheduler ${scheduler} is not supported. Use systemd, launchd, or cron."
+      offer_starter
+      return 0
+      ;;
+  esac
+  offer_starter
+  run_bridge_now
+}
+
+uninstall_schedule() {
+  remove_systemd_units
+  remove_launchd_agent
+  remove_cron_block
+  echo "The bridge schedule is uninstalled."
+}
+
 finish() {
   local doctor_code url
   doctor_code=0
@@ -344,13 +980,31 @@ finish() {
   url="http://localhost:$(web_port)/#/tasks"
   echo "Open ${url}"
   echo "INGEST_TOKEN and SOCKET_TOKEN are in .env"
-  echo "OpenClaw is optional. This install does not start it. npm run seed:demo fills sample data without OpenClaw."
+  echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
   exit "$doctor_code"
 }
 
 main() {
+  local action
+  action="install"
+  if [[ "${1:-}" == "--uninstall-schedule" ]]; then
+    action="uninstall"
+    shift
+  fi
+  if [[ $# -gt 0 ]]; then
+    echo "Unknown argument. Run bash install.sh to install, or bash install.sh --uninstall-schedule to remove the bridge schedule." >&2
+    exit 1
+  fi
   if ! enter_repo; then
+    if [[ "$action" == "uninstall" ]]; then
+      echo "Run bash install.sh --uninstall-schedule from a Mission Control checkout." >&2
+      exit 1
+    fi
     clone_and_reexec
+  fi
+  if [[ "$action" == "uninstall" ]]; then
+    uninstall_schedule
+    exit 0
   fi
   ensure_env
   USE_DOCKER=0
@@ -360,6 +1014,7 @@ main() {
   else
     start_native
   fi
+  install_bridge_schedule
   finish
 }
 

@@ -14,6 +14,8 @@ import {
   FIX_NODE,
   FIX_TOKEN,
   apiListenPort,
+  bridgeStaleSeconds,
+  bridgeSyncState,
   effectiveEnv,
   hasDashPunctuation,
   inspectApiPort,
@@ -39,6 +41,7 @@ function facts(overrides = {}) {
     },
     database: { state: 'ok', migrations: 'current', pending: [], detail: '127.0.0.1:5432' },
     openclaw: 'OpenClaw is optional. The openclaw command is not on PATH, so the bridge was not reached. Sample data does not need it.',
+    bridge: { state: 'missing', limit: 600 },
     ...overrides,
   }
 }
@@ -65,7 +68,7 @@ test('token rules match loopback, production, and off loopback', () => {
 test('a healthy report exits 0 and keeps OpenClaw informational', () => {
   const result = report(facts())
   assert.equal(result.code, 0)
-  assert.equal(result.lines.length, 8)
+  assert.equal(result.lines.length, 9)
   assert.ok(result.lines.every((line) => !hasDashPunctuation(line)))
   assert.match(result.lines[0], /^pass node:/)
   assert.match(result.lines[1], /^pass ports: Port 3000 is already running\.$/)
@@ -75,6 +78,7 @@ test('a healthy report exits 0 and keeps OpenClaw informational', () => {
   assert.match(result.lines[4], /^pass migrations:/)
   assert.match(result.lines[5], /^pass token:/)
   assert.match(result.lines[7], /^info openclaw: OpenClaw is optional/)
+  assert.match(result.lines[8], /^info bridge: No OpenClaw sync timestamp was found/)
 })
 
 test('each required failure names the next command and exits non zero', () => {
@@ -124,6 +128,11 @@ test('each required failure names the next command and exits non zero', () => {
       name: 'token',
       facts: facts({ env: { HOST: '127.0.0.1', NODE_ENV: 'production', PORT: '3000' } }),
       includes: FIX_TOKEN,
+    },
+    {
+      name: 'bridge',
+      facts: facts({ bridge: { state: 'stale', limit: 600 } }),
+      includes: 'The last OpenClaw sync is older than 600 seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.',
     },
     {
       name: 'health',
@@ -328,6 +337,19 @@ test('OpenClaw staying unreachable does not fail the command', () => {
   assert.equal(result.code, 0)
   assert.match(result.lines[7], /^info openclaw:/)
   assert.doesNotMatch(result.lines[7], /^fail /)
+  assert.match(result.lines[8], /^info bridge:/)
+})
+
+test('bridge sync age uses the limit and treats an equal age as recent', () => {
+  assert.equal(bridgeStaleSeconds({}), 600)
+  assert.equal(bridgeStaleSeconds({ MC_BRIDGE_STALE_SECONDS: '90' }), 90)
+  assert.equal(bridgeStaleSeconds({ MC_BRIDGE_STALE_SECONDS: '0' }), 600)
+  assert.equal(bridgeStaleSeconds({ MC_BRIDGE_STALE_SECONDS: 'nope' }), 600)
+  const now = 1_700_000_000_000
+  assert.equal(bridgeSyncState(String(now / 1000 - 600), 0, now, 600).state, 'fresh')
+  assert.equal(bridgeSyncState(String(now / 1000 - 601), 0, now, 600).state, 'stale')
+  assert.equal(bridgeSyncState('', now - 5000, now, 1).state, 'stale')
+  assert.equal(bridgeSyncState('', now - 500, now, 1).state, 'fresh')
 })
 
 test('MC port environment wins over .env and a blank shell value does not', () => {
@@ -337,6 +359,11 @@ test('MC port environment wins over .env and a blank shell value does not', () =
   assert.equal(over.MC_WEB_PORT, '5880')
   assert.equal(over.MC_DB_PORT, '55880')
   assert.equal(effectiveEnv(file, { MC_API_PORT: '  ' }).MC_API_PORT, '3881')
+  assert.equal(
+    effectiveEnv({ MC_BRIDGE_STALE_SECONDS: '90' }, { MC_BRIDGE_STALE_SECONDS: '  ' }).MC_BRIDGE_STALE_SECONDS,
+    '90',
+  )
+  assert.equal(effectiveEnv({ MC_BRIDGE_STALE_SECONDS: '90' }, { MC_BRIDGE_STALE_SECONDS: '120' }).MC_BRIDGE_STALE_SECONDS, '120')
   assert.equal(effectiveEnv(file, {}).MC_WEB_PORT, '5881')
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', ...over }), 3880)
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000' }), 3000)
@@ -408,6 +435,77 @@ test('docker doctor reports host database checks as info and checks the custom A
     assert.equal(result.lines[6], 'pass health: The health check says the database is up.')
     assert.equal(result.lines.some((line) => /Port 3000/.test(line)), false)
     for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('bridge sync: a stale timestamp fails doctor', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-stale-'))
+  const stamp = path.join(dir, 'last-sync')
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 5000}\n`)
+    writeFileSync(
+      path.join(dir, '.env'),
+      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
+    )
+    const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1', MC_BRIDGE_STAMP_FILE: stamp })
+    assert.equal(result.code, 1, result.lines.join('\n'))
+    const fails = result.lines.filter((line) => line.startsWith('fail '))
+    assert.deepEqual(fails, [
+      'fail bridge: The last OpenClaw sync is older than 600 seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.',
+    ])
+    assert.match(result.lines[7], /^info openclaw:/)
+    for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('bridge sync: a fresh timestamp passes and a missing timestamp stays informational', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-fresh-'))
+  const stamp = path.join(dir, 'last-sync')
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    writeFileSync(
+      path.join(dir, '.env'),
+      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'MC_BRIDGE_STALE_SECONDS=30', ''].join('\n'),
+    )
+    const missing = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
+    assert.equal(missing.code, 0, missing.lines.join('\n'))
+    assert.match(missing.lines[8], /^info bridge: No OpenClaw sync timestamp was found/)
+
+    writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 5}\n`)
+    const fresh = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_BRIDGE_STAMP_FILE: stamp,
+      MC_BRIDGE_STALE_SECONDS: '30',
+    })
+    assert.equal(fresh.code, 0, fresh.lines.join('\n'))
+    assert.match(fresh.lines[8], /^pass bridge: The last OpenClaw sync is recent\./)
+
+    writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 120}\n`)
+    const stale = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_BRIDGE_STAMP_FILE: stamp,
+      MC_BRIDGE_STALE_SECONDS: '30',
+    })
+    assert.equal(stale.code, 1, stale.lines.join('\n'))
+    assert.match(stale.lines[8], /^fail bridge: The last OpenClaw sync is older than 30 seconds\./)
+    for (const line of stale.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
     await new Promise((resolve) => server.close(resolve))
     rmSync(dir, { recursive: true, force: true })

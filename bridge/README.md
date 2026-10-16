@@ -1,37 +1,52 @@
-# bridge/ — OpenClaw → Mission Control
+# bridge/: OpenClaw to Mission Control
 
 A minimal, vendored bridge that pushes **real OpenClaw state** into Mission
 Control. It replaces the private, per-machine `~/.openclaw/.mc-bridge-sync.py`
 the root README used to point at, so a fresh clone ships with the integration.
 
-- **One file:** `mc-bridge-sync.py` — Python 3.8+, **stdlib only** (no pip install).
-- **One run = one sync.** Collect once, POST, exit. Schedule it every ~5 min.
+- **One file:** `mc-bridge-sync.py`. Python 3.8+, **stdlib only** (no pip install).
+- **One run = one sync.** Collect once, POST, exit. The default interval is 300 seconds.
 - **Optional.** Without OpenClaw, use `npm run seed:demo` for sample data instead.
 
 ## Quick start
 
+`bash install.sh` installs the schedule when the `openclaw` command is on PATH.
+Linux uses a systemd user timer, or cron when that user timer is not available.
+macOS uses launchd. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300).
+The job sets `MC_BRIDGE_REGISTER` (default 1). Cron rounds an interval up to whole
+minutes. Remove the schedule with:
+
 ```bash
-# Mission Control running (docker compose up / npm run dev), root .env has INGEST_TOKEN.
-python3 bridge/mc-bridge-sync.py --dry-run   # see what would be sent (token never printed)
-python3 bridge/mc-bridge-sync.py             # post it
+bash install.sh --uninstall-schedule
 ```
 
-Every 5 minutes via system cron (absolute paths; the script finds the repo-root
-`.env` relative to itself, so no `cd` is needed):
+That flag removes only this schedule. Other cron lines and other service units stay.
+If `openclaw` is not on PATH, the installer prints a skip line and continues.
+A second install replaces the same unit or cron block. It does not add another one.
 
-```cron
-*/5 * * * * /usr/bin/python3 /path/to/mission-control/bridge/mc-bridge-sync.py >> /tmp/mc-bridge.log 2>&1
+A manual run is the same script the schedule starts. The script finds the repo root
+`.env` relative to itself:
+
+```bash
+python3 bridge/mc-bridge-sync.py --dry-run
+python3 bridge/mc-bridge-sync.py
 ```
 
-…or create an OpenClaw cron job that runs the same command.
+A successful run writes a unix timestamp to `MC_BRIDGE_STAMP_FILE` (default
+`bridge/.state/last-sync`). `npm run doctor` fails when that file is older than
+`MC_BRIDGE_STALE_SECONDS` (default 600). A missing file is an info line.
 
 ### Configuration
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `INGEST_TOKEN` | — (**required**) | Must equal the api's `INGEST_TOKEN`. Read from the env, else the **repo-root `.env`** (the same file docker compose reads). |
-| `MC_API_URL` | `http://127.0.0.1:3000` | Mission Control api base URL. Loopback by default — change only deliberately. |
-| `MC_BRIDGE_APPROVALS_CMD` | unset | Optional command printing pending approvals as JSON (see below). Unset ⇒ approvals untouched. |
+| `INGEST_TOKEN` | required | Must equal the api's `INGEST_TOKEN`. Read from the env, else the **repo-root `.env`** (the same file docker compose reads). |
+| `MC_API_URL` | `http://127.0.0.1:3000` | Mission Control api base URL. Loopback by default. Change only deliberately. The installer resolves the shell, then `.env`, then the API port. |
+| `MC_BRIDGE_REGISTER` | `1` on the installed schedule | Also `POST /agents/register` for each mapped agent when this is `1`, `true`, or `yes`. `0` posts snapshots only. |
+| `MC_BRIDGE_INTERVAL_SECONDS` | `300` | Schedule interval in seconds. Cron rounds up to whole minutes. |
+| `MC_BRIDGE_STALE_SECONDS` | `600` | Doctor fails when the last successful sync is older than this. |
+| `MC_BRIDGE_STAMP_FILE` | `bridge/.state/last-sync` | Unix timestamp written after a successful sync. |
+| `MC_BRIDGE_APPROVALS_CMD` | unset | Optional command printing pending approvals as JSON (see below). Unset means approvals stay untouched. |
 | `MC_BRIDGE_STATE_FILE` | `bridge/.state/last-run.json` | Where run-diff state is kept (git-ignored). |
 
 > **Token gotcha:** if `INGEST_TOKEN` is blank in `.env`, compose silently falls
@@ -40,7 +55,7 @@ Every 5 minutes via system cron (absolute paths; the script finds the repo-root
 
 Flags: `--dry-run` (print events as JSON lines, post nothing, write no state),
 `--from-dir DIR` (read `DIR/{agents,sessions,cron,approvals}.json` instead of the
-CLI — `bridge/examples/` holds illustrative inputs for testing the mapping), and
+CLI. `bridge/examples/` holds illustrative inputs for testing the mapping), and
 `--memory-dir DIR` (read an OpenClaw memory tree: one workspace, or one
 subdirectory per agent). `bridge/examples/openclaw-memory/` is a sample.
 
@@ -61,7 +76,7 @@ also persisted to `ActivityEvent` and broadcast on the socket.**
 | --- | --- | --- | --- |
 | `agents.snapshot` | `{ agents: [{ id?, name, role?, color?, status?: "working"\|"idle", parent?: <name>, emoji?, personalityTags?, currentTask?, tasksCompleted?, totalCost?, recentActivity?, channel? }] }` | Merges by id. An entry with no id uses the slug of its name. Creates, updates, or removes snapshot rows only. A default or registered id changes status fields only, not parent. `parent` on a snapshot row is resolved by name | `openclaw agents list --json` (default agent = root; `working` if it has a session updated in the last 10 min). Set `MC_BRIDGE_REGISTER=1` to also `POST /agents/register` for each mapped agent. OpenClaw stays optional either way |
 | `sessions.snapshot` | `{ sessions: [{ name, agent, model?, ctx?: 0-100, lastActivity?: string, hot?: bool }] }` | **Replaces** the Session table | `openclaw sessions --all-agents --json` |
-| `calendar.snapshot` | `{ jobs: [{ name, schedule?, day?: 0=Mon…6=Sun\|null, time?: "HH:MM"\|null, color?, enabled? }] }` | **Replaces** the CronJob table | `openclaw cron list --all --json` (`day=null` ⇒ daily, `time=null` ⇒ all-day strip) |
+| `calendar.snapshot` | `{ jobs: [{ name, schedule?, day?: 0=Mon…6=Sun\|null, time?: "HH:MM"\|null, color?, enabled? }] }` | **Replaces** the CronJob table | `openclaw cron list --all --json` (`day=null` means daily, `time=null` means the all day strip) |
 | `usage.snapshot` | `{ points: [{ at: ISO timestamp, totalCost?, tokensIn?, tokensOut?, providers?: [{ name?, model?, cost?, tokensIn?, tokensOut? }] }] }` | Upserts one row per America/Chicago day of `at`, for the last 30 days through today. A future timestamp is dropped. Other days stay. A payload with no timestamp is ignored. | Daily points from session token/cost counters. First connect backfills up to 30 days when sessions have timestamps. Later runs add the increase for that sync day. No separate 7 day or month total. |
 | `approvals.snapshot` | `{ approvals: [{ kind, tag, desc, status?, meta? }] }` | Drops stale **pending** rows, keeps decided history, inserts new | `MC_BRIDGE_APPROVALS_CMD` (opt-in) |
 | `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term"\|"daily"\|"other", source?, ref? }] }` | Upserts by stable `id`. Deletes only rows with `source=bridge` (and legacy `openclaw`) for agents present in the payload. Demo rows are left alone. A payload with no `entries` array is ignored. An empty `entries` array clears bridge rows only | Each agent's workspace: `MEMORY.md` (long-term, `createdAt` is the file mtime) and `memory/YYYY-MM-DD.md` plus `memory/YYYY-MM-DD-<slug>.md` (daily). The daily calendar day is the filename in America/Chicago. The clock is the file mtime when that mtime falls on the same Chicago date; otherwise a standalone `Time: HH:MM CT` line, otherwise 12:00 CT. `id` is a hash of agent id + relative path. `source` is `bridge` |
@@ -101,14 +116,14 @@ Other accepted types (not sent by this bridge): `health.tick`, `hello`,
 `{jobs:[…]}`; see openclaw/openclaw#77943). The bridge accepts all of them, and
 reads field names defensively (`identityName`/`name`/`id`, `key`/`id`, cron
 `schedule` as `{kind:"cron",expr}` / `{kind:"every",everyMs}` / a plain string).
-If a future OpenClaw changes shapes, fix the `map_*` functions — the event
+If a future OpenClaw changes shapes, fix the `map_*` functions. The event
 contract above is what Mission Control depends on, not the CLI output.
 
 ## Starter OpenClaw defaults
 
 Mission Control ships a small starter for a fresh OpenClaw config. Merge
 [`openclaw.starter.json`](openclaw.starter.json) into `~/.openclaw/openclaw.json`
-(do not replace the rest of that file — this block only sets sub-agent limits):
+(do not replace the rest of that file. This block only sets sub-agent limits):
 
 | Key | Value | Why |
 | --- | --- | --- |
@@ -116,5 +131,6 @@ Mission Control ships a small starter for a fresh OpenClaw config. Merge
 | `agents.defaults.subagents.maxConcurrent` | **4** | At most 4 child runs execute at once for a spawning session (OpenClaw's own default is 8). |
 
 OpenClaw's defaults are 5 children and 8 concurrent. These two are the Mission
-Control starter — gentler fan-out for a local dashboard. They are not read by
-the api; they belong in the operator's OpenClaw config.
+Control starter. Gentler fan-out for a local dashboard. They are not read by
+the api; they belong in the operator's OpenClaw config. `bash install.sh` offers
+this merge and does not edit `~/.openclaw/openclaw.json`.

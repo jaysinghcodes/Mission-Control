@@ -12,7 +12,7 @@ import {
 } from '../components/ConnectSteps'
 
 /**
- * Setup — the 8 ONBOARDING.md steps as one Apple sheet. Live probes stay
+ * Setup: the 8 ONBOARDING.md steps as one Apple sheet. Live probes stay
  * live. Guidance steps are confirmed by the operator; confirmed is not verified.
  */
 
@@ -93,7 +93,7 @@ export default function Connect() {
     try {
       localStorage.setItem(PROGRESS_KEY, JSON.stringify(next))
     } catch {
-      // localStorage unavailable — the page still works
+      // localStorage unavailable. The page still works.
     }
   }
 
@@ -203,7 +203,7 @@ export default function Connect() {
                   <span className="text-[15.5px] font-semibold">Connect the bridge</span>
                   <span className="rounded-full bg-mc-bluebg px-2 py-0.5 text-[11px] font-semibold text-mc-bluetext">Recommended</span>
                 </div>
-                <p className="mt-1 text-[12.5px] text-mc-sub2">Runs bridge/mc-bridge-sync.py about every 5 minutes with the INGEST_TOKEN in your root .env.</p>
+                <p className="mt-1 text-[12.5px] text-mc-sub2">bash install.sh schedules bridge/mc-bridge-sync.py. The default interval is 300 seconds. The token stays in the root .env.</p>
                 {bridgeChoice === 'bridge' && step.commands?.map((c) => <CodeBlock key={c.cmd} cmd={c.cmd} label={c.label} />)}
               </button>
               <button

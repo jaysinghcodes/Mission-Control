@@ -101,6 +101,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       'One command writes random tokens, starts the stack, runs doctor, and prints the URL.',
       'A second run keeps the existing `.env`. It does not replace tokens or any other value.',
+      'When the openclaw command is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that timer is not available. macOS uses launchd. Remove it with `bash install.sh --uninstall-schedule`.',
     ],
     commands: [
       {
@@ -182,10 +183,12 @@ export const STEP_DATA: ConnectStep[] = [
     // Ticket 3: copy now points at the vendored `bridge/` (mc-bridge-sync.py)
     // instead of a private per-machine cron script. Text-only change.
     body: [
-      'Optional. Skip without OpenClaw. The bridge ships in this repo: `bridge/mc-bridge-sync.py` (Python 3, stdlib only) reads OpenClaw via the `openclaw` CLI and POSTs agents, sessions, calendar, usage, and approvals snapshots plus `run.*` events to `http://127.0.0.1:3000/events`.',
-      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events. Every other write route checks that same header. Set it explicitly. The bridge refuses a blank token.',
-      'Try `--dry-run` first, then a real sync, then schedule it every 5 min (system cron or an OpenClaw cron job, see `bridge/README.md`). A 401 means the bridge and the API disagree on the token. Read `INGEST_TOKEN` from the root `.env`. The installer stores it there and does not print it.',
-      'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). Mission Control’s starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these. They cap OpenClaw fan-out.',
+      'Optional. Skip this step when OpenClaw is not installed. `bash install.sh` skips the bridge schedule in that case and that step still exits 0. `npm run seed:demo` does not need OpenClaw.',
+      'When the openclaw command is on PATH, `bash install.sh` installs the schedule: a systemd user timer on Linux, cron if that timer is not available, or launchd on macOS. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The job runs `bridge/mc-bridge-sync.py` with `MC_BRIDGE_REGISTER` (default 1). Remove it with `bash install.sh --uninstall-schedule`.',
+      'The bridge is `bridge/mc-bridge-sync.py` (Python 3, stdlib only). It reads OpenClaw through the openclaw command and POSTs agents, sessions, calendar, usage, and approvals snapshots plus `run.*` events. The API URL comes from `MC_API_URL`, then the API port.',
+      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events. Every other write route checks that same header. Set it explicitly. The bridge refuses a blank token. `npm run doctor` fails when the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600).',
+      'Try `--dry-run` first, then a real sync. A 401 means the bridge and the API disagree on the token. Read `INGEST_TOKEN` from the root `.env`. The installer stores it there and does not print it.',
+      'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). The Mission Control starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these. They cap OpenClaw fan-out. The installer offers this merge and does not edit the file.',
     ],
     commands: [
       { label: 'Preview, then sync once', cmd: 'python3 bridge/mc-bridge-sync.py --dry-run\npython3 bridge/mc-bridge-sync.py' },

@@ -1,8 +1,9 @@
 /**
  * Setup diagnostics for Mission Control.
  *
- * One line per check. A required failure exits 1. OpenClaw is informational
- * and never changes the exit code. Run from the repo root: npm run doctor
+ * One line per check. A required failure exits 1. The OpenClaw command
+ * line is informational. A sync timestamp older than MC_BRIDGE_STALE_SECONDS
+ * fails the command. Run from the repo root: npm run doctor
  *
  * Token rules match apps/api/src/auth/write-token.ts.
  */
@@ -101,6 +102,12 @@ export function loadEnvFile(file) {
 }
 
 const MC_PORT_KEYS = ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT']
+const MC_BLANK_FALLTHROUGH = [
+  ...MC_PORT_KEYS,
+  'MC_BRIDGE_STALE_SECONDS',
+  'MC_BRIDGE_STAMP_FILE',
+  'MC_BRIDGE_INTERVAL_SECONDS',
+]
 
 /**
  * File values fill in first. A set process value wins, including a blank,
@@ -108,9 +115,9 @@ const MC_PORT_KEYS = ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT']
  */
 export function effectiveEnv(fileEnv, processEnv = process.env) {
   const env = { ...fileEnv }
-  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', ...MC_PORT_KEYS]) {
+  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', ...MC_BLANK_FALLTHROUGH]) {
     if (processEnv[key] === undefined) continue
-    if (MC_PORT_KEYS.includes(key) && String(processEnv[key]).trim() === '') continue
+    if (MC_BLANK_FALLTHROUGH.includes(key) && String(processEnv[key]).trim() === '') continue
     env[key] = processEnv[key]
   }
   return env
@@ -259,6 +266,46 @@ function which(command) {
     })
     child.on('error', () => resolve(''))
   })
+}
+
+export function bridgeStampPath(root, env) {
+  const raw = typeof env.MC_BRIDGE_STAMP_FILE === 'string' ? env.MC_BRIDGE_STAMP_FILE.trim() : ''
+  if (raw) return raw
+  return path.join(root, 'bridge', '.state', 'last-sync')
+}
+
+export function bridgeStaleSeconds(env) {
+  const raw = typeof env.MC_BRIDGE_STALE_SECONDS === 'string' ? env.MC_BRIDGE_STALE_SECONDS.trim() : ''
+  if (raw === '') return 600
+  const seconds = Number(raw)
+  if (!Number.isInteger(seconds) || seconds < 1) return 600
+  return seconds
+}
+
+/** age equal to the limit is still recent. Older than the limit is stale. */
+export function bridgeSyncState(text, mtimeMs, nowMs, limitSeconds) {
+  const trimmed = String(text ?? '').trim()
+  let then = Number(trimmed)
+  if (!Number.isFinite(then) || then <= 0) {
+    then = Number(mtimeMs) / 1000
+  }
+  if (!Number.isFinite(then)) return { state: 'unreadable', limit: limitSeconds }
+  const age = nowMs / 1000 - then
+  if (age > limitSeconds) return { state: 'stale', age, limit: limitSeconds }
+  return { state: 'fresh', age, limit: limitSeconds }
+}
+
+function bridgeFacts(root, env) {
+  const stamp = bridgeStampPath(root, env)
+  const limit = bridgeStaleSeconds(env)
+  if (!existsSync(stamp)) return { state: 'missing', limit, stamp }
+  try {
+    const text = readFileSync(stamp, 'utf8')
+    const mtimeMs = statSync(stamp).mtimeMs
+    return { ...bridgeSyncState(text, mtimeMs, Date.now(), limit), stamp }
+  } catch {
+    return { state: 'unreadable', limit, stamp }
+  }
 }
 
 async function openclawDetail() {
@@ -424,6 +471,7 @@ export async function gather(root, processEnv = process.env) {
     ports,
     database,
     openclaw,
+    bridge: bridgeFacts(root, env),
   }
 }
 
@@ -486,6 +534,19 @@ function tokenLine(env) {
   return `pass token: Token configuration is valid for ${state.host}.`
 }
 
+function bridgeLine(bridge) {
+  const item = bridge ?? { state: 'missing', limit: 600 }
+  if (item.state === 'fresh') return 'pass bridge: The last OpenClaw sync is recent.'
+  if (item.state === 'stale') {
+    const limit = item.limit ?? 600
+    return `fail bridge: The last OpenClaw sync is older than ${limit} seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.`
+  }
+  if (item.state === 'unreadable') {
+    return 'fail bridge: The OpenClaw sync timestamp could not be read. Check MC_BRIDGE_STAMP_FILE, then run python3 bridge/mc-bridge-sync.py.'
+  }
+  return 'info bridge: No OpenClaw sync timestamp was found. That is normal before the first successful bridge run.'
+}
+
 function healthLine(ports) {
   const url = ports.health?.url ?? 'http://127.0.0.1:3000/health'
   if (!ports.badPort && ports.apiState === 'busy') {
@@ -516,6 +577,7 @@ export function report(facts) {
     tokenLine(facts.env),
     healthLine(facts.ports),
     `info openclaw: ${facts.openclaw}`,
+    bridgeLine(facts.bridge),
   ]
   const code = lines.some((line) => line.startsWith('fail ')) ? 1 : 0
   return { lines, code }
