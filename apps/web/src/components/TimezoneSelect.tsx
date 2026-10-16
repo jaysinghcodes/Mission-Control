@@ -1,7 +1,7 @@
-import { timeZoneNames } from '../lib/zone-day'
+import { canonicalTimeZone, timeZoneNames } from '../lib/timezones'
 
 /**
- * IANA names from the runtime. The saved or server zone is selected.
+ * Current names from config/timezones.json. A legacy value selects its current name.
  */
 export function TimezoneSelect({
   value,
@@ -12,12 +12,13 @@ export function TimezoneSelect({
   onChange: (zone: string) => void
   id: string
 }) {
-  const names = timeZoneNames(value)
+  const names = timeZoneNames()
+  const selected = canonicalTimeZone(value) ?? value
   return (
     <select
       id={id}
       aria-label="Timezone"
-      value={value}
+      value={selected}
       onChange={(event) => onChange(event.target.value)}
       className="h-10 w-full max-w-md rounded-lg bg-mc-ctl px-3 text-[14px] text-mc-text"
     >

@@ -2,6 +2,7 @@ import { MemoryController } from '../memory/memory.controller';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TimezoneService } from './timezone.service';
 import { usageBucketsFromPayload } from '../usage/usage-points';
+import { canonicalTimeZone, timeZoneNames } from './timezones';
 import {
   isValidTimeZone,
   resolveTimeZone,
@@ -96,6 +97,34 @@ describe('TZ=Europe/Berlin', () => {
     expect(serverTimeZone()).not.toBe('CST');
     expect(isValidTimeZone(serverTimeZone())).toBe(true);
     expect(resolveTimeZone('CST')).toBe(serverTimeZone());
+  });
+
+  it('converts Asia/Calcutta and keeps Asia/Kolkata and Europe/Kyiv on the same day', () => {
+    const instant = new Date('2026-01-15T23:30:00.000Z');
+    expect(canonicalTimeZone('Asia/Calcutta')).toBe('Asia/Kolkata');
+    expect(canonicalTimeZone('Asia/Kolkata')).toBe('Asia/Kolkata');
+    expect(canonicalTimeZone('Europe/Kyiv')).toBe('Europe/Kyiv');
+    expect(canonicalTimeZone('Europe/Kiev')).toBe('Europe/Kyiv');
+    expect(zoneDay(instant, 'Asia/Kolkata')).toBe('2026-01-16');
+    expect(zoneDay(instant, 'Europe/Kyiv')).toBe('2026-01-16');
+    expect(zoneDay(instant, canonicalTimeZone('Asia/Calcutta')!)).toBe(
+      zoneDay(instant, 'Asia/Kolkata'),
+    );
+
+    process.env.TZ = 'Asia/Calcutta';
+    expect(serverTimeZone()).toBe('Asia/Kolkata');
+    expect(zoneDay(instant, serverTimeZone())).toBe('2026-01-16');
+    expect(resolveTimeZone('Europe/Kyiv')).toBe('Europe/Kyiv');
+    expect(zoneDay(instant, resolveTimeZone('Europe/Kyiv'))).toBe('2026-01-16');
+  });
+
+  it('formats every shipped zone in Intl', () => {
+    for (const name of timeZoneNames()) {
+      expect(isValidTimeZone(name)).toBe(true);
+      expect(() =>
+        Intl.DateTimeFormat('en-US', { timeZone: name }).format(0),
+      ).not.toThrow();
+    }
   });
 
   it('buckets a usage point on the Berlin day', () => {

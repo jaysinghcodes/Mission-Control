@@ -1,9 +1,12 @@
 """Daily usage points: backfill, two simulated days, no period totals."""
 import datetime
 import importlib.util
+import json
 import os
+import tempfile
 import unittest
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 DAY = 86_400_000
 # 2026-10-09 18:00 UTC is 13:00 CDT, clear of midnight and of the November DST end.
@@ -114,6 +117,70 @@ class UsagePointsTest(unittest.TestCase):
             zone,
         )
         self.assertEqual(list(state["days"]), ["2026-01-16"])
+
+    def test_calcutta_kolkata_and_kyiv_share_the_api_day(self):
+        instant = datetime.datetime(2026, 1, 15, 23, 30, tzinfo=datetime.timezone.utc)
+        cases = (
+            ("Asia/Calcutta", "Asia/Kolkata", "2026-01-16"),
+            ("Asia/Kolkata", "Asia/Kolkata", "2026-01-16"),
+            ("Europe/Kyiv", "Europe/Kyiv", "2026-01-16"),
+            ("Europe/Kiev", "Europe/Kyiv", "2026-01-16"),
+        )
+        for raw, canonical, day in cases:
+            self.assertEqual(self.mod.canonical_zone(raw), canonical)
+            zone = self.mod.iana_zone(raw)
+            self.assertIsNotNone(zone)
+            self.assertEqual(getattr(zone, "key", None), canonical)
+            self.assertEqual(self.mod.zone_day_of(instant, zone), day)
+        saved = os.environ.get("MC_TIMEZONE")
+        try:
+            os.environ["MC_TIMEZONE"] = "Asia/Calcutta"
+            zone = self.mod.resolve_tz(None)
+            self.assertEqual(getattr(zone, "key", None), "Asia/Kolkata")
+            self.assertEqual(self.mod.zone_day_of(instant, zone), "2026-01-16")
+        finally:
+            if saved is None:
+                os.environ.pop("MC_TIMEZONE", None)
+            else:
+                os.environ["MC_TIMEZONE"] = saved
+
+    def test_every_list_entry_loads_in_zoneinfo(self):
+        table = json.loads(self.mod.timezones_file().read_text(encoding="utf-8"))
+        zones = table["zones"]
+        self.assertIn("Asia/Kolkata", zones)
+        self.assertIn("Europe/Kyiv", zones)
+        self.assertNotIn("Asia/Calcutta", zones)
+        self.assertNotIn("Europe/Kiev", zones)
+        for name in zones:
+            ZoneInfo(name)
+        for src, dst in table["legacy"].items():
+            self.assertIn(dst, zones)
+            self.assertEqual(self.mod.canonical_zone(src), dst)
+
+    def test_host_fallback_reads_the_localtime_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            link = Path(tmp) / "localtime"
+            link.symlink_to("/usr/share/zoneinfo/Asia/Calcutta")
+            self.assertEqual(self.mod.host_zone_name(str(link)), "Asia/Kolkata")
+            link.unlink()
+            link.symlink_to("/usr/share/zoneinfo/Etc/UTC")
+            self.assertEqual(self.mod.host_zone_name(str(link)), "UTC")
+        saved = {key: os.environ.get(key) for key in ("MC_TIMEZONE", "TZ")}
+        try:
+            os.environ["MC_TIMEZONE"] = "CST"
+            os.environ["TZ"] = "+02:00"
+            zone = self.mod.resolve_tz(None)
+            host = self.mod.host_zone_name()
+            if host:
+                self.assertEqual(getattr(zone, "key", None), host)
+            else:
+                self.assertEqual(zone, datetime.timezone.utc)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     def test_offset_and_abbreviation_are_not_zones(self):
         self.assertIsNone(self.mod.iana_zone("+02:00"))

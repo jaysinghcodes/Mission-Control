@@ -77,12 +77,3 @@ export function formatZoneDayHeading(day: string, now: Date = new Date(), timeZo
   }).format(new Date(Date.UTC(year, month - 1, date)))
   return day === zoneDay(now, timeZone) ? `Today · ${label}` : label
 }
-
-export function timeZoneNames(current: string): string[] {
-  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: 'timeZone') => string[] }
-  const names = typeof intl.supportedValuesOf === 'function' ? intl.supportedValuesOf('timeZone') : []
-  const unique = new Set(names)
-  unique.add('UTC')
-  if (current) unique.add(current)
-  return [...unique].sort((a, b) => a.localeCompare(b))
-}

@@ -60,7 +60,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import time
@@ -944,7 +943,7 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
 # 30), when that timestamp exists. Later syncs post only the increase, on the
 # day of the sync. Sessions with no timestamp are collected on the sync day
 # only. The day uses the timezone from GET /settings, then MC_TIMEZONE, then
-# TZ, then the host zone. The payload is daily points. It does not include a
+# TZ, then the host zone named by the /etc/localtime symlink. The payload is daily points. It does not include a
 # 7d or month total.
 def usage_retention_days() -> int:
     """How many calendar days a usage payload may include. Default 30."""
@@ -988,11 +987,6 @@ def _iso_utc_ms(ms: int) -> str:
 def _zone_day_ms(ms: int, tz: datetime.tzinfo) -> str:
     dt = datetime.datetime.fromtimestamp(ms / 1000.0, datetime.timezone.utc).astimezone(tz)
     return dt.date().isoformat()
-
-
-def _local_tz() -> datetime.tzinfo:
-    tz = datetime.datetime.now().astimezone().tzinfo
-    return tz if tz is not None else datetime.timezone.utc
 
 
 def _shift_day(day: str, delta: int) -> str:
@@ -1096,12 +1090,12 @@ def usage_points_from_sessions(
 
     `prior` is the `_mcUsage` object from the bridge state file, or None on
     the first connect. The returned payload has no period total. Days follow
-    `tz` (the machine zone when omitted). costUsd is omitted when the session
+    `tz` (the resolved zone when omitted). costUsd is omitted when the session
     did not report one.
     """
     prior = prior if isinstance(prior, dict) else {}
     names = local_names if local_names is not None else {"ollama"}
-    zone = tz if tz is not None else _local_tz()
+    zone = tz if tz is not None else resolve_tz()
     seen: Dict[str, Dict[str, Any]] = {}
     for key, value in (prior.get("seen") or {}).items():
         if isinstance(value, dict):
@@ -1233,61 +1227,60 @@ def iso_z(dt: datetime.datetime) -> str:
     return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# Same allowlist as the API: Intl.supportedValuesOf('timeZone') plus UTC.
-# Offsets and abbreviations (+02:00, CST) format in Node and must still be refused.
-_IANA_NAMES: Optional[Set[str]] = None
-_IANA_LOADED = False
+# Same list as the API and the web app: config/timezones.json.
+# Legacy names convert to the current name. Offsets and abbreviations stay refused.
+_TIMEZONES: Optional[Dict[str, Any]] = None
 
 
-def _node_time_zones() -> Optional[Set[str]]:
-    """Names from `Intl.supportedValuesOf('timeZone')`, plus UTC. None when node is missing."""
-    global _IANA_NAMES, _IANA_LOADED
-    if _IANA_LOADED:
-        return _IANA_NAMES
-    _IANA_LOADED = True
-    node = shutil.which("node")
-    if not node:
+def timezones_file() -> Path:
+    """Shared zone list. Next to this script in the repo, or MC_TIMEZONES_FILE."""
+    override = os.environ.get("MC_TIMEZONES_FILE", "").strip()
+    if override:
+        return Path(override)
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "config" / "timezones.json"
+        if candidate.is_file():
+            return candidate
+    return here.parent.parent / "config" / "timezones.json"
+
+
+def load_timezones() -> Dict[str, Any]:
+    global _TIMEZONES
+    if _TIMEZONES is not None:
+        return _TIMEZONES
+    raw = json.loads(timezones_file().read_text(encoding="utf-8"))
+    zones = set(raw.get("zones") or [])
+    legacy = {
+        str(src): str(dst)
+        for src, dst in (raw.get("legacy") or {}).items()
+        if str(dst) in zones
+    }
+    _TIMEZONES = {"zones": zones, "legacy": legacy}
+    return _TIMEZONES
+
+
+def canonical_zone(name: str) -> Optional[str]:
+    """Current name from the shared list, or None."""
+    text = (name or "").strip()
+    if not text or len(text) > 80:
         return None
-    try:
-        proc = subprocess.run(
-            [
-                node,
-                "-e",
-                "process.stdout.write(Intl.supportedValuesOf('timeZone').join('\\n'))",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=8,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    names = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
-    names.add("UTC")
-    _IANA_NAMES = names
-    return names
+    table = load_timezones()
+    mapped = table["legacy"].get(text, text)
+    if mapped in table["zones"]:
+        return mapped
+    return None
 
 
 def zone_name_allowed(name: str) -> bool:
-    """True for UTC and for an IANA name the API would accept."""
-    text = (name or "").strip()
-    if not text or len(text) > 80:
-        return False
-    if text == "UTC":
-        return True
-    names = _node_time_zones()
-    if names is not None:
-        return text in names
-    # Node is not on PATH. Still refuse offsets, abbreviations, and Etc/*.
-    return "/" in text and not text.startswith("Etc/")
+    """True when the name is in the shared list, after a legacy conversion."""
+    return canonical_zone(name) is not None
 
 
 def iana_zone(name: str) -> Optional[datetime.tzinfo]:
-    """IANA zone from the stdlib. None when the name is blank or not allowed."""
-    text = (name or "").strip()
-    if not zone_name_allowed(text):
+    """Current IANA zone. None when the name is blank or not in the shared list."""
+    text = canonical_zone(name)
+    if not text:
         return None
     try:
         from zoneinfo import ZoneInfo
@@ -1299,23 +1292,25 @@ def iana_zone(name: str) -> Optional[datetime.tzinfo]:
         return datetime.timezone.utc if text == "UTC" else None
 
 
-def _allowed_local_tz() -> datetime.tzinfo:
-    """Host zone when its name is allowed. Otherwise UTC, never a raw offset."""
-    local = _local_tz()
-    key = getattr(local, "key", None)
-    if isinstance(key, str):
-        found = iana_zone(key)
-        if found is not None:
-            return found
-    return datetime.timezone.utc
+def host_zone_name(path: str = "/etc/localtime") -> Optional[str]:
+    """Zone named by the /etc/localtime symlink, converted to a current name."""
+    try:
+        target = os.readlink(path)
+    except OSError:
+        return None
+    text = target.replace("\\", "/")
+    marker = "zoneinfo/"
+    idx = text.rfind(marker)
+    named = text[idx + len(marker):] if idx != -1 else text
+    return canonical_zone(named.strip("/"))
 
 
 def resolve_tz(name: Optional[str] = None) -> datetime.tzinfo:
     """
     Timezone for daily notes and usage days.
 
-    A name from GET /settings wins. Then MC_TIMEZONE, then TZ, then the host zone.
-    Each candidate has to be UTC or an IANA name, the same rule as the API.
+    A name from GET /settings wins. Then MC_TIMEZONE, then TZ, then the
+    host zone from the /etc/localtime symlink. Legacy names convert first.
     """
     if name:
         found = iana_zone(name)
@@ -1325,7 +1320,12 @@ def resolve_tz(name: Optional[str] = None) -> datetime.tzinfo:
         found = iana_zone(os.environ.get(key, ""))
         if found is not None:
             return found
-    return _allowed_local_tz()
+    host = host_zone_name()
+    if host:
+        found = iana_zone(host)
+        if found is not None:
+            return found
+    return datetime.timezone.utc
 
 
 def fetch_api_timezone(api_url: str) -> Optional[str]:

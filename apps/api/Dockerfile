@@ -46,6 +46,7 @@ COPY --from=build /app/apps/api/git-sha.txt ./apps/api/git-sha.txt
 COPY --from=build /app/apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 # Starter price table. Compose mounts ./config over this path so a local override is live.
 COPY --from=build /app/config/prices.json /app/config/prices.json
+COPY --from=build /app/config/timezones.json /app/config/timezones.json
 WORKDIR /app/apps/api
 EXPOSE 3000
 # Runtime env (DATABASE_URL, PORT, HOST, WEB_ORIGIN, INGEST_TOKEN, SOCKET_TOKEN)

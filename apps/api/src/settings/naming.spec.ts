@@ -234,6 +234,43 @@ describe('SettingsController', () => {
     );
   });
 
+  it('PUT /settings stores a legacy zone as its current name', async () => {
+    let row: { timezone: string | null } | null = null;
+    const prisma = {
+      setting: {
+        findUnique: jest.fn(() => row),
+        upsert: jest.fn(
+          (args: {
+            create: { timezone: string | null };
+            update: { timezone?: string | null };
+          }) => {
+            const timezone =
+              args.update.timezone !== undefined
+                ? args.update.timezone
+                : (row?.timezone ?? args.create.timezone);
+            row = { timezone };
+            return {
+              namingMode: null,
+              crewMap: {},
+              timezone,
+              setupDone: false,
+            };
+          },
+        ),
+      },
+    };
+    const controller = new SettingsController(
+      prisma as unknown as PrismaService,
+    );
+    const kolkata = await controller.put({ timezone: 'Asia/Calcutta' });
+    expect(kolkata.timezone).toBe('Asia/Kolkata');
+    expect(kolkata.timezoneSaved).toBe(true);
+    const saved = await controller.put({ timezone: 'Asia/Kolkata' });
+    expect(saved.timezone).toBe('Asia/Kolkata');
+    const kyiv = await controller.put({ timezone: 'Europe/Kyiv' });
+    expect(kyiv.timezone).toBe('Europe/Kyiv');
+  });
+
   it('PUT /settings is a write and production without a token is 401', () => {
     // eslint-disable-next-line @typescript-eslint/unbound-method -- metadata lives on the original method
     const put = SettingsController.prototype.put;

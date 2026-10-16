@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { isValidTimeZone } from '../usage/zone-time';
+import { canonicalTimeZone } from '../time/timezones';
 import { readNamingBody, type CrewSeat, type NamingMode } from './naming';
 
 /**
@@ -66,8 +66,9 @@ function readTimezone(value: unknown): string | null {
   }
   const text = value.trim();
   if (!text) return null;
-  if (!isValidTimeZone(text)) {
+  const zone = canonicalTimeZone(text);
+  if (!zone) {
     throw new BadRequestException('timezone must be an IANA name');
   }
-  return text;
+  return zone;
 }

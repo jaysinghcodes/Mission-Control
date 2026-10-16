@@ -6,6 +6,7 @@ COPY package.json package-lock.json turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci --workspace web --include-workspace-root
 COPY apps/web ./apps/web
+COPY config/timezones.json /app/config/timezones.json
 # Blank means the browser calls this page. nginx proxies /api and /socket.io.
 ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL

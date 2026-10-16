@@ -1,57 +1,34 @@
 /**
  * Calendar helpers for whatever zone the caller names.
  * The stored settings timezone wins. When it is empty, the server
- * timezone is `TZ` if that name is an IANA zone or UTC, otherwise the host zone.
- *
- * `Intl.DateTimeFormat` also accepts offsets and abbreviations such as
- * `+02:00` and `CST`. Those are not names the bridge can load, so a zone
- * counts only when it is `UTC` or a member of `Intl.supportedValuesOf('timeZone')`.
+ * timezone is `TZ` if that name is in config/timezones.json, otherwise the host zone.
+ * Legacy names (Asia/Calcutta, Europe/Kiev) convert to the current name first.
+ * Offsets and abbreviations such as +02:00 and CST are not in that file.
  */
 
-let ianaNames: Set<string> | null = null;
-
-function ianaTimeZones(): Set<string> {
-  if (ianaNames) return ianaNames;
-  const intl = Intl as typeof Intl & {
-    supportedValuesOf?: (key: 'timeZone') => string[];
-  };
-  let names: string[] = [];
-  try {
-    if (typeof intl.supportedValuesOf === 'function') {
-      names = intl.supportedValuesOf('timeZone');
-    }
-  } catch {
-    names = [];
-  }
-  ianaNames = new Set(names);
-  ianaNames.add('UTC');
-  return ianaNames;
-}
+import { canonicalTimeZone } from '../time/timezones';
 
 export function isValidTimeZone(zone: string): boolean {
-  const text = zone.trim();
-  if (!text || text.length > 80) return false;
-  return ianaTimeZones().has(text);
+  return canonicalTimeZone(zone) !== null;
 }
 
-/** Process timezone. `TZ=Europe/Berlin` wins when that name is allowed. */
+/** Process timezone. `TZ=Europe/Berlin` wins when that name is in the list. */
 export function serverTimeZone(): string {
-  const fromEnv = (process.env.TZ ?? '').trim();
-  if (fromEnv && isValidTimeZone(fromEnv)) return fromEnv;
+  const fromEnv = canonicalTimeZone(process.env.TZ ?? '');
+  if (fromEnv) return fromEnv;
   try {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (zone && isValidTimeZone(zone)) return zone;
+    const host = zone ? canonicalTimeZone(zone) : null;
+    if (host) return host;
   } catch {
     // Intl can throw if the zone database is missing. UTC is the fallback.
   }
   return 'UTC';
 }
 
-/** Saved IANA name, or the server timezone when nothing is stored. */
+/** Saved name converted to the current zone, or the server timezone when nothing is stored. */
 export function resolveTimeZone(stored: string | null | undefined): string {
-  const text = (stored ?? '').trim();
-  if (text && isValidTimeZone(text)) return text;
-  return serverTimeZone();
+  return canonicalTimeZone(stored ?? '') ?? serverTimeZone();
 }
 
 export function usageTimeZone(): string {
