@@ -4,7 +4,7 @@
  * and doctor output use the real script.
  */
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   cpSync,
@@ -105,6 +105,84 @@ function runInstall(dir, env) {
     env: { ...process.env, ...env },
     encoding: 'utf8',
   })
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`
+}
+
+function writeNode22Report(bin) {
+  writeExe(
+    path.join(bin, 'node'),
+    `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  printf '%s\\n' "v22.14.0"
+  exit 0
+fi
+exec ${shellQuote(process.execPath)} "$@"
+`,
+  )
+}
+
+function setApiPort(repo, port) {
+  const file = path.join(repo, '.env.example')
+  const text = readFileSync(file, 'utf8').replace(/^PORT=\d+$/m, `PORT=${port}`)
+  if (!text.includes(`PORT=${port}`)) {
+    throw new Error('PORT was not updated in .env.example')
+  }
+  writeFileSync(file, text)
+}
+
+function startPlainOk(dir) {
+  const file = path.join(dir, 'plain-ok.mjs')
+  writeFileSync(
+    file,
+    [
+      "import { createServer } from 'node:http'",
+      'const server = createServer((req, res) => {',
+      "  res.writeHead(200, { 'content-type': 'application/json' })",
+      '  res.end(\'{"status":"ok"}\')',
+      '})',
+      "server.listen(0, '127.0.0.1', () => {",
+      '  process.stdout.write(String(server.address().port) + "\\n")',
+      '})',
+      '',
+    ].join('\n'),
+  )
+  const child = spawn(process.execPath, [file], { stdio: ['ignore', 'pipe', 'pipe'] })
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let buf = ''
+    child.stdout.on('data', (chunk) => {
+      if (settled) return
+      buf += chunk
+      const line = buf.split('\n')[0]
+      if (!line) return
+      settled = true
+      resolve({ child, port: Number(line) })
+    })
+    child.once('error', (err) => {
+      if (settled) return
+      settled = true
+      reject(err)
+    })
+    child.once('exit', (code) => {
+      if (settled) return
+      settled = true
+      reject(new Error(`plain server exited ${code}`))
+    })
+  })
+}
+
+function waitForLog(file, needle) {
+  const deadline = Date.now() + 2000
+  let text = ''
+  while (Date.now() < deadline) {
+    text = existsSync(file) ? readFileSync(file, 'utf8') : ''
+    if (text.includes(needle)) return text
+    spawnSync('/bin/sleep', ['0.05'])
+  }
+  return text
 }
 
 function freshDir() {
@@ -410,10 +488,14 @@ test('the native path names Node 22 and Postgres 16 when Docker is missing', () 
   }
 })
 
-test('the native path runs npm ci, migrate, and doctor when Docker is missing', () => {
+test('the native path runs npm ci, migrate, and doctor when Docker is missing', async () => {
   const fx = freshDir()
+  let plain
   try {
+    plain = await startPlainOk(fx.dir)
+    setApiPort(fx.repo, plain.port)
     writeExe(path.join(fx.bin, 'docker'), '#!/bin/sh\nexit 127\n')
+    writeNode22Report(fx.bin)
     const nativeLog = path.join(fx.dir, 'native.log')
     writeFileSync(nativeLog, '')
     writeExe(
@@ -433,8 +515,10 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
       MC_INSTALL_READY_SECONDS: '0',
     })
     const text = outputOf(result)
-    const log = readFileSync(nativeLog, 'utf8')
+    const log = waitForLog(nativeLog, 'npm run dev')
     assert.match(text, /Docker was not found\. Using the native path/)
+    assert.doesNotMatch(text, /is not a supported native runtime/)
+    assert.doesNotMatch(text, /The API is already up/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assertReadableDoctor(text)
     const ci = log.indexOf('npm ci')
@@ -444,6 +528,7 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     assert.ok(ci >= 0 && generate > ci && migrate > generate && dev > migrate, log)
     assert.equal(text.includes(assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8')).INGEST_TOKEN), false)
   } finally {
+    plain?.child.kill()
     rmSync(fx.dir, { recursive: true, force: true })
   }
 })

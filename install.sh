@@ -218,7 +218,8 @@ require_postgres_16() {
 health_ok() {
   local port
   port="$(api_port)"
-  node -e "fetch('http://127.0.0.1:' + process.argv[1] + '/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))" "$port" >/dev/null 2>&1
+  # Any HTTP 200 on this port is not enough. Only the Mission Control health body counts.
+  node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' "$port" >/dev/null 2>&1
 }
 
 wait_ready() {
