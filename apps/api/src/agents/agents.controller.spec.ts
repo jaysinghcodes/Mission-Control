@@ -186,7 +186,7 @@ describe('AgentsController register, heartbeat, delete', () => {
       expect.objectContaining({
         id: 'forge_helper',
         action: 'register',
-        agent: 'Forge Helper',
+        agent: 'forge_helper',
         name: 'Forge Helper registered',
       }),
     );
@@ -286,7 +286,8 @@ describe('AgentsController register, heartbeat, delete', () => {
     );
     expect(broadcast).toHaveBeenNthCalledWith(2, 'agent.status', {
       name: 'Forge Helper is now working',
-      agent: 'Forge Helper',
+      agent: 'forge_helper',
+      id: 'forge_helper',
       status: 'working',
     });
     broadcast.mockClear();
@@ -452,7 +453,7 @@ describe('AgentsController register, heartbeat, delete', () => {
       expect.objectContaining({
         id: 'forge_helper',
         action: 'delete',
-        agent: 'Forge Helper',
+        agent: 'forge_helper',
         name: 'Forge Helper went offline',
       }),
     );

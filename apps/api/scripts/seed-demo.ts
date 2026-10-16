@@ -65,7 +65,7 @@ import { writeDemoDocs } from '../src/docs/demo-docs';
 import { configuredDocsRoot } from '../src/docs/docs-path';
 import { DEMO_DEVICES, DEMO_MISSION } from '../src/team/demo-team';
 import { SETTING_ID } from '../src/team/mission';
-import { demoUsageBuckets, demoUsageId } from '../src/usage/demo-usage';
+import { demoUsageBuckets, demoUsageId, isUntouchedDemoUsage } from '../src/usage/demo-usage';
 import { slugFromName } from '../src/agents/agent-merge';
 import { demoAgentId, demoAssigneeRewrites } from '../src/seed/demo-assignees';
 
@@ -177,17 +177,18 @@ const TICKETS = [
 
 // Activity: `minsAgo` gives a believable spread on first insert. Types are
 // from the ingest KNOWN_TYPES union so pages color them like real events.
+// `agent` is the agent id. A display name does not pick the sticker.
 const ACTIVITY = [
-  { id: 'demo-act-01', minsAgo: 95, type: 'run.started', payload: { name: 'Run started', title: 'Morning Brief', agent: LEAD } },
-  { id: 'demo-act-02', minsAgo: 92, type: 'run.completed', payload: { name: 'Run finished', title: 'Morning Brief', agent: LEAD, status: 'done' } },
+  { id: 'demo-act-01', minsAgo: 95, type: 'run.started', payload: { name: 'Run started', title: 'Morning Brief', agent: demoAgentId(LEAD) } },
+  { id: 'demo-act-02', minsAgo: 92, type: 'run.completed', payload: { name: 'Run finished', title: 'Morning Brief', agent: demoAgentId(LEAD), status: 'done' } },
   { id: 'demo-act-03', minsAgo: 70, type: 'run.queued', payload: { name: 'DEMO-3 created', ticket: 'DEMO-3' } },
-  { id: 'demo-act-04', minsAgo: 64, type: 'run.running', payload: { name: 'DEMO-3 moved to Build', ticket: 'DEMO-3', agent: 'Forge' } },
-  { id: 'demo-act-05', minsAgo: 51, type: 'run.progress', payload: { name: 'DEMO-3 updated', ticket: 'DEMO-3', agent: 'Forge', progress: 60 } },
-  { id: 'demo-act-06', minsAgo: 40, type: 'run.running', payload: { name: 'DEMO-4 moved to QA', ticket: 'DEMO-4', agent: 'Sentinel' } },
-  { id: 'demo-act-07', minsAgo: 33, type: 'run.failed', payload: { name: 'Run failed', title: 'Trend Radar', agent: 'Scout', status: 'failed', summary: 'upstream timeout' } },
-  { id: 'demo-act-08', minsAgo: 21, type: 'approval.new', payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis', ticket: 'DEMO-4' } },
-  { id: 'demo-act-09', minsAgo: 12, type: 'run.done', payload: { name: 'DEMO-6 moved to Done', ticket: 'DEMO-6', agent: 'Aegis' } },
-  { id: 'demo-act-10', minsAgo: 4, type: 'run.completed', payload: { name: 'Run finished', title: 'Inbox Poll', agent: 'Patch', status: 'done' } },
+  { id: 'demo-act-04', minsAgo: 64, type: 'run.running', payload: { name: 'DEMO-3 moved to Build', ticket: 'DEMO-3', agent: demoAgentId('Forge') } },
+  { id: 'demo-act-05', minsAgo: 51, type: 'run.progress', payload: { name: 'DEMO-3 updated', ticket: 'DEMO-3', agent: demoAgentId('Forge'), progress: 60 } },
+  { id: 'demo-act-06', minsAgo: 40, type: 'run.running', payload: { name: 'DEMO-4 moved to QA', ticket: 'DEMO-4', agent: demoAgentId('Sentinel') } },
+  { id: 'demo-act-07', minsAgo: 33, type: 'run.failed', payload: { name: 'Run failed', title: 'Trend Radar', agent: demoAgentId('Scout'), status: 'failed', summary: 'upstream timeout' } },
+  { id: 'demo-act-08', minsAgo: 21, type: 'approval.new', payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: demoAgentId('Aegis'), ticket: 'DEMO-4' } },
+  { id: 'demo-act-09', minsAgo: 12, type: 'run.done', payload: { name: 'DEMO-6 moved to Done', ticket: 'DEMO-6', agent: demoAgentId('Aegis') } },
+  { id: 'demo-act-10', minsAgo: 4, type: 'run.completed', payload: { name: 'Run finished', title: 'Inbox Poll', agent: demoAgentId('Patch'), status: 'done' } },
 ];
 
 // One pending approval so the Approvals page (and the `approval.new` event
@@ -397,7 +398,7 @@ async function main(): Promise<void> {
   });
   await prisma.activityEvent.updateMany({
     where: { id: 'demo-act-08' },
-    data: { payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis', ticket: 'DEMO-4' } },
+    data: { payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: demoAgentId('Aegis'), ticket: 'DEMO-4' } },
   });
 
   // Thirty server timezone days of usage. update: {} so a bridge bucket
@@ -419,6 +420,41 @@ async function main(): Promise<void> {
       },
     });
     if (!before) counts.usage++;
+  }
+
+  // Demo rows that still store a crew name or a legacy name get the agent id.
+  // Any other string stays. Tickets and runs are rewritten earlier.
+  const agentRefRewrites = demoAssigneeRewrites(
+    AGENTS.map((agent) => agent.name),
+    LEGACY_AGENT_NAMES,
+  );
+
+  // Untouched sample days still listing a crew name in `agents` get the id.
+  // A bridge overwrite drops the demo flag and is left alone. `bot` stays
+  // the display name the Usage table prints.
+  for (const u of demoUsageBuckets(new Date())) {
+    const row = await prisma.usageBucket.findUnique({
+      where: { day: u.day },
+      select: { id: true, providers: true },
+    });
+    if (!row || !isUntouchedDemoUsage(row)) continue;
+    const providers = row.providers as { agents?: string[] }[];
+    let changed = false;
+    const next = providers.map((provider) => {
+      const agents = (provider.agents ?? []).map((name) => {
+        const id = agentRefRewrites.find((item) => item.from === name)?.to;
+        if (!id) return name;
+        changed = true;
+        return id;
+      });
+      return { ...provider, agents };
+    });
+    if (changed) {
+      await prisma.usageBucket.update({
+        where: { day: u.day },
+        data: { providers: next },
+      });
+    }
   }
 
   const runNow = Date.now();
@@ -533,17 +569,24 @@ async function main(): Promise<void> {
     if (!before) counts.devices++;
   }
 
-  // Demo activity that still names a retired agent gets the cool name.
   for (const e of ACTIVITY) {
     const row = await prisma.activityEvent.findUnique({ where: { id: e.id }, select: { payload: true } });
     const payload = row?.payload as { agent?: string } | null;
-    const next = payload?.agent ? LEGACY_AGENT_NAMES[payload.agent] : undefined;
+    const next = payload?.agent
+      ? agentRefRewrites.find((item) => item.from === payload.agent)?.to
+      : undefined;
     if (payload && next) {
       await prisma.activityEvent.update({
         where: { id: e.id },
         data: { payload: { ...payload, agent: next } },
       });
     }
+  }
+  for (const { from, to } of agentRefRewrites) {
+    await prisma.memoryEntry.updateMany({
+      where: { agent: from, id: { startsWith: 'demo-' } },
+      data: { agent: to },
+    });
   }
 
   // One sample tool. Fixed id + update: {} so a second seed inserts 0 and

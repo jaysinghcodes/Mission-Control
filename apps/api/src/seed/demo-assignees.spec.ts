@@ -37,6 +37,12 @@ describe('demo assignees', () => {
     expect(tickets).not.toContain("assignee: 'Forge'");
     expect(runs).toContain("agent: demoAgentId('Forge')");
     expect(runs).not.toContain("agent: 'Forge'");
+    const activity = seedSource.slice(
+      seedSource.indexOf('const ACTIVITY'),
+      seedSource.indexOf('const APPROVALS'),
+    );
+    expect(activity).toContain("agent: demoAgentId('Forge')");
+    expect(activity).not.toContain("agent: 'Forge'");
     expect(seedSource).toContain('demoAssigneeRewrites');
     expect(seedSource).toContain("agentId: demoAgentId('Aegis')");
     expect(seedSource).not.toContain("agentId: 'Aegis'");

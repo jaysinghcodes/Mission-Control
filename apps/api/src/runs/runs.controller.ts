@@ -17,6 +17,7 @@ import {
 } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { runActivityName } from '../activity/activity-text';
+import { loadAgentNames, resolveIngestAgent } from '../agents/agent-ref';
 import { operatorName } from '../config/operator';
 import { isRunStatus, RUN_STATUSES } from './run-status';
 
@@ -106,7 +107,7 @@ export class RunsController {
     });
     // A queued create keeps id, name, and ticketId, and names the agent.
     // Any other initial status carries status and progress, matching PATCH.
-    const event = this.activityPayload(run, status === 'queued');
+    const event = await this.activityPayload(run, status === 'queued');
     const eventType = this.eventType(status);
     await this.persist(eventType, event as Prisma.InputJsonValue);
     this.gateway.broadcast(eventType, event);
@@ -163,7 +164,7 @@ export class RunsController {
     });
     // Broadcast the transition so every open dashboard updates instantly.
     const eventType = this.eventType(nextStatus);
-    const event = this.activityPayload(run, false);
+    const event = await this.activityPayload(run, false);
     // Persist too. The Activity page and Office build log load history from
     // the DB, so a run that moves fast must still leave a visible trail.
     await this.persist(eventType, event as Prisma.InputJsonValue);
@@ -273,7 +274,7 @@ export class RunsController {
    * Office activity reads `agent`. Include it on every run event.
    * A queued create omits status and progress, matching the previous shape.
    */
-  private activityPayload(
+  private async activityPayload(
     run: {
       id: string;
       name: string;
@@ -283,12 +284,16 @@ export class RunsController {
       ticketId: string | null;
     },
     queued: boolean,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
+    const roster = await loadAgentNames(this.prisma);
+    const agent = run.agent
+      ? (resolveIngestAgent(run.agent, roster) ?? run.agent)
+      : '';
     return {
       id: run.id,
       name: runActivityName(queued ? 'queued' : run.status),
       title: run.name,
-      ...(run.agent ? { agent: run.agent } : {}),
+      ...(agent ? { agent } : {}),
       ...(queued ? {} : { status: run.status, progress: run.progress }),
       ...(run.ticketId ? { ticketId: run.ticketId } : {}),
     };

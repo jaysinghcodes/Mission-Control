@@ -189,10 +189,28 @@ export interface ActivityActor {
   role: string | null
 }
 
+function isSkippedLabel(value: string): boolean {
+  return !value || NOT_AN_AGENT.has(value.toLowerCase())
+}
+
+/** Roster hit by agent id. A display name does not match. */
+function actorById(
+  roster: readonly { id: string; name: string; role?: string | null }[],
+  id: string,
+): ActivityActor | null {
+  const key = id.trim()
+  if (!key) return null
+  const hit = roster.find((agent) => agent.id.trim() === key)
+  if (!hit) return null
+  return { id: hit.id, name: hit.name, role: hit.role ?? null }
+}
+
 /**
- * Who an activity row is about. Prefer payload.agent, then the ticket
- * assignee, then payload.id when it is a roster id, then the run's agent.
- * The word system is never a name.
+ * Who an activity row is about. Match the agent id only: payload.agent,
+ * then payload.id when that id is on the roster (register and status),
+ * then the ticket assignee, then the run's agent. A display name does
+ * not select a crew bot. The word system is never a name. An unresolved
+ * label stays on the actor so the sticker is generic.
  */
 export function activityActor(
   payload: ActivityPayload | null | undefined,
@@ -200,37 +218,33 @@ export function activityActor(
   tickets: readonly LiveTicket[],
   runs: readonly LiveRun[] = [],
 ): ActivityActor | null {
-  const named = (payload?.agent ?? '').trim()
-  let label = named && !NOT_AN_AGENT.has(named.toLowerCase()) ? named : ''
-  if (!label) {
-    const ref = (payload?.ticket ?? '').trim()
-    if (ref) {
-      const ticket = tickets.find((row) => row.key === ref || row.id === ref)
-      const assignee = ticket?.assignee?.trim() ?? ''
-      if (assignee && !NOT_AN_AGENT.has(assignee.toLowerCase())) label = assignee
-    }
+  const agentField = (payload?.agent ?? '').trim()
+  const idField = (payload?.id ?? '').trim()
+  const ticketRef = (payload?.ticket ?? '').trim()
+  const ticket = ticketRef
+    ? tickets.find((row) => row.key === ticketRef || row.id === ticketRef)
+    : undefined
+  const assignee = ticket?.assignee?.trim() ?? ''
+  const run = idField ? runs.find((row) => row.id === idField) : undefined
+  const runAgent = run?.agent?.trim() ?? ''
+
+  if (!isSkippedLabel(agentField)) {
+    const hit = actorById(roster, agentField)
+    if (hit) return hit
   }
-  if (!label) {
-    const id = (payload?.id ?? '').trim()
-    if (id) {
-      const agent = roster.find((row) => row.id.toLowerCase() === id.toLowerCase())
-      if (agent) label = agent.name
-    }
+  const fromId = actorById(roster, idField)
+  if (fromId) return fromId
+  if (!isSkippedLabel(assignee)) {
+    const hit = actorById(roster, assignee)
+    if (hit) return hit
   }
-  if (!label) {
-    const id = (payload?.id ?? '').trim()
-    if (id) {
-      const run = runs.find((row) => row.id === id)
-      const who = run?.agent?.trim() ?? ''
-      if (who && !NOT_AN_AGENT.has(who.toLowerCase())) label = who
-    }
+  if (!isSkippedLabel(runAgent)) {
+    const hit = actorById(roster, runAgent)
+    if (hit) return hit
   }
+
+  const label = [agentField, assignee, runAgent].find((value) => !isSkippedLabel(value)) ?? ''
   if (!label) return null
-  const key = label.toLowerCase()
-  const hit = roster.find(
-    (agent) => agent.id.toLowerCase() === key || agent.name.toLowerCase() === key,
-  )
-  if (hit) return { id: hit.id, name: hit.name, role: hit.role ?? null }
   return { id: label, name: label, role: null }
 }
 

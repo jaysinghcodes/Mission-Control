@@ -150,7 +150,7 @@ export class AgentsController {
     });
     await this.emit('heartbeat', id, 'registered', false);
     if (plan.row.status !== previousStatus && found) {
-      await this.persistStatus(found.name, plan.row.status);
+      await this.persistStatus(found.id, found.name, plan.row.status);
     }
   }
 
@@ -364,11 +364,16 @@ export class AgentsController {
     throw err;
   }
 
-  /** A real status change leaves a sentence on the activity rail. */
-  private async persistStatus(name: string, status: string): Promise<void> {
+  /** A real status change leaves a sentence on the activity rail. The agent field is the id. */
+  private async persistStatus(
+    id: string,
+    name: string,
+    status: string,
+  ): Promise<void> {
     const payload = {
       name: agentStatusName(name, status),
-      agent: name,
+      agent: id,
+      id,
       status,
     };
     try {
@@ -399,7 +404,7 @@ export class AgentsController {
       id,
       source,
       action,
-      ...(name ? { agent: name } : {}),
+      agent: id,
       ...(sentence ? { name: sentence } : {}),
     };
     if (persist) {

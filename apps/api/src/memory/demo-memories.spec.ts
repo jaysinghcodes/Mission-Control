@@ -1,22 +1,25 @@
+import { demoAgentId } from '../seed/demo-assignees';
 import { shiftZoneDay, zoneDay, zoneDayBounds } from '../usage/zone-time';
 import { buildDemoMemories } from './demo-memories';
 
 const ZONE = 'America/Chicago';
 
-const ROSTER = new Set([
-  'Speedy',
-  'Atlas',
-  'Forge',
-  'Sentinel',
-  'Echo',
-  'Pixel',
-  'Bolt',
-  'Ledger',
-  'Quill',
-  'Aegis',
-  'Patch',
-  'Scout',
-]);
+const ROSTER = new Set(
+  [
+    'Speedy',
+    'Atlas',
+    'Forge',
+    'Sentinel',
+    'Echo',
+    'Pixel',
+    'Bolt',
+    'Ledger',
+    'Quill',
+    'Aegis',
+    'Patch',
+    'Scout',
+  ].map((name) => demoAgentId(name)),
+);
 
 function chicagoClock(iso: string): string {
   return new Intl.DateTimeFormat('en-US', {
@@ -56,7 +59,7 @@ describe('demo memories', () => {
     expect([...days.values()].some((count) => count >= 50)).toBe(true);
 
     const long = rows.find((row) => row.id === 'demo-memory-long');
-    expect(long?.agent).toBe('Forge');
+    expect(long?.agent).toBe('forge');
     expect(long && long.body.length).toBeGreaterThan(2500);
     expect(long?.body.includes('\n')).toBe(true);
 
@@ -76,6 +79,6 @@ describe('demo memories', () => {
         ZONE,
       ),
     ).not.toBe(day);
-    expect(rows.some((row) => row.agent === 'Aegis')).toBe(true);
+    expect(rows.some((row) => row.agent === 'aegis')).toBe(true);
   });
 });

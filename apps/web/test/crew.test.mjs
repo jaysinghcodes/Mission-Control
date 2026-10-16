@@ -68,10 +68,42 @@ test('ticket, pipeline, and project faces match assignees by id', async () => {
   const tickets = await readFile(new URL('../src/pages/Tickets.tsx', import.meta.url), 'utf8')
   const pipeline = await readFile(new URL('../src/pages/Pipeline.tsx', import.meta.url), 'utf8')
   const projects = await readFile(new URL('../src/pages/Projects.tsx', import.meta.url), 'utf8')
+  assert.match(tickets, /resolveSticker/)
+  assert.match(pipeline, /findById/)
+  assert.match(projects, /findById/)
   for (const page of [tickets, pipeline, projects]) {
-    assert.match(page, /findById/)
     assert.equal(page.includes('findByLabel'), false)
   }
+})
+
+test('resolveSticker matches the agent id and a display name stays generic', () => {
+  const agents = [
+    { id: 'forge', name: 'Forge', role: 'engineer', status: 'working', color: '#9bd434' },
+    { id: 'rogue', name: 'Forge', role: 'helper', status: 'idle', color: '#112233' },
+  ]
+  const crewHit = crew.resolveSticker(agents, 'forge')
+  assert.equal(crewHit.matched, true)
+  assert.equal(crewHit.agent.id, 'forge')
+  assert.equal(crewHit.agent.status, 'working')
+  assert.equal(crewHit.agent.color, '#9bd434')
+  assert.ok(crewHit.agents)
+
+  const rogue = crew.resolveSticker(agents, 'rogue')
+  assert.equal(rogue.matched, true)
+  assert.equal(rogue.agent.id, 'rogue')
+  assert.equal(rogue.agent.status, 'idle')
+  assert.notEqual(rogue.agent.color, '#9bd434')
+
+  const named = crew.resolveSticker(agents, 'Forge')
+  assert.equal(named.matched, false)
+  assert.equal(named.agent.id, 'Forge')
+  assert.equal(named.agent.status, 'idle')
+  assert.equal(named.agent.color, '#58A6FF')
+  assert.equal(named.agents, undefined)
+
+  const blank = crew.resolveSticker(agents, '  ')
+  assert.equal(blank.matched, false)
+  assert.equal(blank.agent.id, 'agent')
 })
 
 test('assignSeatsInOrder follows position and ignores names', () => {

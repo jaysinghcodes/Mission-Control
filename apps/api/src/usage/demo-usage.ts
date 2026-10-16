@@ -1,3 +1,4 @@
+import { demoAgentId } from '../seed/demo-assignees';
 import { calendarDay, shiftCalendarDay } from './aggregate-usage';
 import { usageTimeZone, zoneClock, zoneWallTime } from './zone-time';
 
@@ -95,6 +96,26 @@ const LINES = [
   },
 ] as const;
 
+const CREW_BOTS = new Set([
+  'Speedy',
+  'Atlas',
+  'Forge',
+  'Sentinel',
+  'Echo',
+  'Pixel',
+  'Bolt',
+  'Ledger',
+  'Quill',
+  'Aegis',
+  'Patch',
+  'Scout',
+]);
+
+/** Sticker id for a crew bot. Other sample bots stay a label and draw generic. */
+function stickerAgent(bot: string): string {
+  return CREW_BOTS.has(bot) ? demoAgentId(bot) : bot;
+}
+
 /**
  * Place a past day at the same clock time as the seed.
  * If that clock time does not exist on the day, use one minute after midnight.
@@ -134,7 +155,7 @@ export function demoUsageBuckets(
       bot: line.bot,
       tokensIn: Math.round(line.tokensIn * scale),
       tokensOut: Math.round(line.tokensOut * scale),
-      agents: [line.bot],
+      agents: [stickerAgent(line.bot)],
       local: 'local' in line ? line.local : undefined,
       demo: true,
     }));

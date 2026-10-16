@@ -3,8 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { useApiStatus } from '../lib/apiStatus'
 import { PageHeader, Segmented, SoftCard, StatusChip, Face, Kicker, EmptyState } from '../components/shell'
-import { findByLabel, type NamingState } from '../lib/crew'
-import { useNaming } from '../lib/naming'
+import { resolveSticker } from '../lib/crew'
 import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
@@ -181,7 +180,6 @@ export default function System() {
   const sessions = useApi<{ sessions: { agent: string; model: string | null }[] }>('/sessions', { pollMs: 30000 })
   const activity = useApi<{ events: EventApi[] }>('/activity?limit=30', { pollMs: 20000 })
   const api = useApiStatus()
-  const naming = useNaming()
   const [showSampleBots, setShowSampleBots] = useShowSampleBots()
   const [period, setPeriod] = useState(2)
   const [modelOpen, setModelOpen] = useState<string | null>(null)
@@ -369,7 +367,7 @@ export default function System() {
               {models.map((model) => {
                 const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
                 const focus = cells[period]
-                const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [], naming)
+                const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
                 const open = modelOpen === model
                 return (
                   <div key={model} className="border-t border-mc-sep px-4 py-3">
@@ -378,7 +376,7 @@ export default function System() {
                       <div className="text-[12px] text-mc-sub">{focus?.name || 'session'}</div>
                     </button>
                     <div className="mt-1 flex items-center gap-1">
-                      {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
+                      {who.slice(0, 4).map((row) => <Face key={row.agent.id} agent={row.agent} agents={row.agents} px={28} />)}
                       <span className="text-[12px] text-mc-sub">{who.length ? pluralize(who.length, 'agent') : 'No agent tagged'}</span>
                     </div>
                     <div className="mt-3 space-y-1.5">
@@ -419,7 +417,7 @@ export default function System() {
                   {models.map((model) => {
                     const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
                     const focus = cells[period]
-                    const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [], naming)
+                    const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
                     const open = modelOpen === model
                     return (
                       <Fragment key={model}>
@@ -430,7 +428,7 @@ export default function System() {
                               <div className="text-[12px] text-mc-sub">{focus?.name || 'session'}</div>
                             </button>
                             <div className="mt-1 flex items-center gap-1">
-                              {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
+                              {who.slice(0, 4).map((row) => <Face key={row.agent.id} agent={row.agent} agents={row.agents} px={28} />)}
                               <span className="text-[12px] text-mc-sub">{who.length ? pluralize(who.length, 'agent') : 'No agent tagged'}</span>
                             </div>
                           </td>
@@ -465,11 +463,7 @@ export default function System() {
       <div className="mb-3 mt-8"><Kicker>Recent issues</Kicker></div>
       {issue?.line ? (
         <SoftCard className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <Face
-            agent={naming.find(roster, issue.line?.actor?.id) ?? naming.find(roster, issue.line?.actor?.name) ?? { id: 'issue', name: issue.line.actor?.name || 'Agent', role: null, status: 'idle' }}
-            agents={roster}
-            px={34}
-          />
+          <IssueFace roster={roster} actorId={issue.line?.actor?.id} />
           <div className="min-w-0 flex-1 text-[14px] font-semibold">{issue.line.text}</div>
           <StatusChip label="Retrying" tone="orange" />
         </SoftCard>
@@ -507,14 +501,20 @@ function Fact({ label, value, ok = true, wrap = false }: { label: string; value:
   )
 }
 
-function agentsFor(model: string, provider: Provider | undefined, roster: Agent[], sessions: { agent: string; model: string | null }[], state: NamingState): Agent[] {
+function IssueFace({ roster, actorId }: { roster: Agent[]; actorId: string | null | undefined }) {
+  const sticker = resolveSticker(roster, actorId)
+  return <Face agent={sticker.agent} agents={sticker.agents} px={34} />
+}
+
+function agentsFor(model: string, provider: Provider | undefined, roster: Agent[], sessions: { agent: string; model: string | null }[]) {
   const named = provider?.agents ?? []
   const fromSessions = sessions.filter((s) => s.model && (s.model === model || s.model.endsWith(`/${model}`) || model.endsWith(s.model))).map((s) => s.agent)
   const keys = [...named, ...fromSessions]
-  const out: Agent[] = []
+  const out: ReturnType<typeof resolveSticker<Agent>>[] = []
   for (const key of keys) {
-    const hit = findByLabel(roster, key, state)
-    if (hit && !out.some((a) => a.id === hit.id)) out.push(hit)
+    if (!key.trim()) continue
+    const sticker = resolveSticker(roster, key)
+    if (!out.some((row) => row.agent.id === sticker.agent.id)) out.push(sticker)
   }
   return out
 }

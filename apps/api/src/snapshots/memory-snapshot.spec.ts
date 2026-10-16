@@ -209,6 +209,29 @@ describe('SnapshotsService.applyMemory', () => {
     expect(rows.get('bridge-forge-2')?.source).toBe('bridge');
   });
 
+  it('stores a unique display name as the agent id and leaves two Forges unresolved', async () => {
+    const { client, rows } = makePrisma();
+    const withRoster = client as unknown as {
+      agent: { findMany: () => Promise<{ id: string; name: string }[]> };
+    };
+    withRoster.agent = {
+      findMany: () => Promise.resolve([{ id: 'forge', name: 'Forge' }]),
+    };
+    const service = new SnapshotsService(client);
+    await service.applyMemory({ entries: [entry('mem-1', 'named', 'Forge')] });
+    expect(rows.get('mem-1')?.agent).toBe('forge');
+
+    withRoster.agent = {
+      findMany: () =>
+        Promise.resolve([
+          { id: 'forge', name: 'Forge' },
+          { id: 'rogue', name: 'Forge' },
+        ]),
+    };
+    await service.applyMemory({ entries: [entry('mem-2', 'shared', 'Forge')] });
+    expect(rows.get('mem-2')?.agent).toBe('Forge');
+  });
+
   it('skips an entry that has no id and stores an unknown kind as other', async () => {
     const { client, rows } = makePrisma();
     const service = new SnapshotsService(client);

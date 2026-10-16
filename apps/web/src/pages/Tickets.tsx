@@ -4,7 +4,7 @@ import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, Banner, SearchInput, FieldError, EmptyState } from '../components/shell'
 import type { Agent, AgentsResp, ProjectsResp } from '../types'
-import { findById } from '../lib/crew'
+import { resolveSticker } from '../lib/crew'
 import { ticketCreateQueue } from '../lib/serialQueue'
 import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
 import { pluralize } from '../lib/pluralize'
@@ -46,9 +46,8 @@ interface RunsResp { runs: LinkedRun[] }
 function assigneeFace(assignee: string | null, roster: readonly Agent[]): { agent: Agent | { id: string; name: string; status: string }; agents?: readonly Agent[] } {
   const label = assignee?.trim() || ''
   if (!label) return { agent: { id: 'unassigned', name: 'unassigned', status: 'offline' } }
-  const hit = findById(roster, label)
-  if (hit) return { agent: hit, agents: roster }
-  return { agent: { id: label, name: label, status: 'idle' } }
+  const sticker = resolveSticker(roster, label)
+  return { agent: sticker.agent, agents: sticker.agents }
 }
 
 /** How long an inline notice stays up before fading on its own. */

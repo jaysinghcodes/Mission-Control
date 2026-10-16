@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useApi, apiPost } from '../hooks/useApi'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, Kicker, EmptyState } from '../components/shell'
-import { presentAgent, type NamingState } from '../lib/crew'
+import { presentAgent, resolveSticker } from '../lib/crew'
 import { useNaming } from '../lib/naming'
 import { countOnZoneDay } from '../lib/zone-day'
 import { pluralize } from '../lib/pluralize'
@@ -19,18 +19,28 @@ interface Approval {
   desc: string
   status: string
   createdAt: string
-  meta?: { number?: number; url?: string; repo?: string; branch?: string | null; state?: string } | null
+  meta?: { number?: number; url?: string; repo?: string; branch?: string | null; state?: string; agentId?: string | null } | null
 }
 interface ApprovalsResp { approvals: Approval[] }
 
-function guessAgent(row: Approval, roster: Agent[], state: NamingState): Agent | { id: string; name: string; role: string | null; status: string } {
-  const blob = `${row.tag} ${row.desc}`.toLowerCase()
-  const hit = roster.find((a) => {
-    const cap = presentAgent(a, state)
-    return blob.includes(a.name.toLowerCase()) || blob.includes(cap.name.toLowerCase())
-  })
-  if (hit) return hit
-  return { id: row.id, name: row.tag || 'Agent', role: null, status: row.status === 'pending' ? 'blocked' : 'idle' }
+function approvalFace(row: Approval, roster: Agent[]) {
+  const id = row.meta?.agentId?.trim() ?? ''
+  if (id) {
+    const sticker = resolveSticker(roster, id)
+    if (sticker.matched) {
+      const status = row.status === 'pending' ? 'blocked' : sticker.agent.status
+      return { agent: { ...sticker.agent, status }, agents: sticker.agents }
+    }
+  }
+  return {
+    agent: {
+      id: row.id,
+      name: row.tag || 'Agent',
+      role: null,
+      status: row.status === 'pending' ? 'blocked' : 'idle',
+      color: '#58A6FF',
+    },
+  }
 }
 
 export default function Approvals() {
@@ -75,8 +85,8 @@ export default function Approvals() {
           {pending.length > 0 && <Kicker tone="red">Needs you</Kicker>}
           <div className="mt-3 space-y-8">
             {pending.map((row, i) => {
-              const who = guessAgent(row, roster, naming)
-              const cap = presentAgent(who, naming)
+              const who = approvalFace(row, roster)
+              const cap = presentAgent(who.agent, naming)
               const meta = row.meta
               return (
                 <div key={row.id}>
@@ -84,7 +94,7 @@ export default function Approvals() {
                   <SoftCard className="px-5 py-5">
                     <div className="flex gap-4">
                       <span className="mt-1 w-1 self-stretch rounded-full bg-mc-red" aria-hidden />
-                      <Face agent={{ ...who, status: 'blocked' }} agents={roster} px={64} />
+                      <Face agent={who.agent} agents={who.agents} px={64} />
                       <div className="min-w-0 flex-1">
                         <div className="text-[20px] font-bold tracking-tight">{row.tag || row.desc}</div>
                         <p className="mt-1 text-[14px] text-mc-sub2">
@@ -133,10 +143,10 @@ export default function Approvals() {
             <SoftCard className="mt-3 divide-y divide-mc-sep">
               {decided.map((row) => {
                 const ok = row.status === 'approved'
-                const who = guessAgent(row, roster, naming)
+                const who = approvalFace(row, roster)
                 return (
                   <div key={row.id} className="flex items-center gap-3 px-4 py-3">
-                    <Face agent={who} agents={roster} px={36} />
+                    <Face agent={who.agent} agents={who.agents} px={36} />
                     <div className="min-w-0 flex-1">
                       <div className="text-[14px] font-semibold">{row.tag || row.desc}</div>
                       <div className="truncate text-[12.5px] text-mc-sub">{row.desc}</div>
