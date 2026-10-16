@@ -1,8 +1,8 @@
 # Mission Control. Postgres, API, and web UI.
 # Usage: bash install.sh
 # That writes random tokens, runs docker compose up -d --build, runs doctor,
-# and prints the URL. A second run keeps tokens and secrets.
-# DATABASE_URL in .env uses MC_DB_PORT. The api service below still uses db:5432.
+# and prints the URL. A plain second run leaves .env unchanged.
+# A new MC_DB_PORT updates a stock DATABASE_URL. The api service below still uses db:5432.
 # Then open http://localhost:5173/#/tasks
 # The browser uses that one port. nginx proxies /api and /socket.io.
 # No OpenClaw? `npm run seed:demo` (from the host) fills sample data.

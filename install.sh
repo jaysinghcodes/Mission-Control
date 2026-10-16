@@ -7,7 +7,9 @@
 # macOS uses launchd. The schedule PATH includes the openclaw directory and the python3 directory.
 # Remove it with: bash install.sh --uninstall-schedule. That also removes the sync timestamp.
 # A second run keeps tokens and secrets already in .env.
-# DATABASE_URL uses the resolved MC_DB_PORT. A later run can update that port.
+# A plain second run leaves .env unchanged.
+# A new shell MC_DB_PORT updates a stock DATABASE_URL and that port line.
+# A custom DATABASE_URL is left as is.
 # Token values are not printed.
 
 set -euo pipefail
@@ -253,6 +255,33 @@ write_env_key() {
   mv "$tmp2" "$file"
 }
 
+# The port already stored in the file, or 5432 when that line is missing.
+stored_db_port() {
+  local file value
+  file="$1"
+  value="$(file_env_value "$file" MC_DB_PORT)"
+  port_or "$value" "5432"
+}
+
+# A valid MC_DB_PORT from the shell, or empty when the shell did not set one.
+shell_db_port() {
+  local value
+  value="${MC_DB_PORT-}"
+  if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -ge 1 ]] && [[ "$value" -le 65535 ]]; then
+    printf '%s' "$value"
+  fi
+}
+
+# Stock means localhost or 127.0.0.1 with an explicit port equal to the previous port.
+# A URL with no port is not stock.
+database_url_is_stock() {
+  local url previous
+  url="$1"
+  previous="$2"
+  [[ "$url" =~ ^postgres(ql)?://([^@/]+@)?(localhost|127\.0\.0\.1):([0-9]+)([/?].*)?$ ]] || return 1
+  [[ "${BASH_REMATCH[4]}" == "$previous" ]]
+}
+
 # A shell MC_DB_PORT replaces the value in an existing file. Other keys stay.
 persist_shell_db_port() {
   local file value current
@@ -270,8 +299,34 @@ persist_shell_db_port() {
   MC_DB_PORT_UPDATED=1
 }
 
-# Point DATABASE_URL at the resolved port. A missing key is added only when
-# allow_create is 1 (a new .env). Tokens and other secrets are not touched.
+# A rerun rewrites DATABASE_URL only when a new shell MC_DB_PORT differs from
+# the stored port and the URL is the stock host and port. Otherwise a custom
+# URL is left as is. A plain rerun changes no line.
+rerun_env_ports() {
+  local file previous shell_port current next
+  file="$1"
+  previous="$(stored_db_port "$file")"
+  shell_port="$(shell_db_port)"
+  current="$(file_env_value "$file" DATABASE_URL)"
+  MC_DB_PORT_UPDATED=0
+  MC_DATABASE_URL_UPDATED=0
+  if [[ -n "$shell_port" && "$shell_port" != "$previous" ]] && database_url_is_stock "$current" "$previous"; then
+    persist_shell_db_port "$file"
+    next="$(database_url_with_port "$current" "$shell_port")"
+    if [[ "$next" != "$current" ]]; then
+      write_env_key "$file" DATABASE_URL "$next"
+      MC_DATABASE_URL_UPDATED=1
+      echo "Set DATABASE_URL to port ${shell_port}."
+    fi
+    return 0
+  fi
+  if [[ -n "$current" ]] && ! database_url_is_stock "$current" "$previous"; then
+    echo "DATABASE_URL is custom, so it was left as is. Update its port by hand if needed."
+  fi
+}
+
+# Point DATABASE_URL at the resolved port when creating .env. A missing key is
+# added only when allow_create is 1. Tokens and other secrets are not touched.
 sync_database_url() {
   local file port allow current next
   file="$1"
@@ -341,8 +396,7 @@ ensure_env() {
   local got_ingest got_socket mode
   if [[ -f .env ]]; then
     mode="$(env_file_mode .env)"
-    persist_shell_db_port .env
-    sync_database_url .env "$(db_port)" 0
+    rerun_env_ports .env
     if [[ "$MC_DB_PORT_UPDATED" -eq 1 || "$MC_DATABASE_URL_UPDATED" -eq 1 ]]; then
       if [[ -n "$mode" ]]; then
         chmod "$mode" .env || true
