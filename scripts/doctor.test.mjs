@@ -14,6 +14,7 @@ import {
   FIX_NODE,
   FIX_TOKEN,
   apiListenPort,
+  effectiveEnv,
   hasDashPunctuation,
   inspectApiPort,
   nodeSupported,
@@ -329,11 +330,46 @@ test('OpenClaw staying unreachable does not fail the command', () => {
   assert.doesNotMatch(result.lines[7], /^fail /)
 })
 
+test('MC port environment wins over .env and a blank shell value does not', () => {
+  const file = { MC_API_PORT: '3881', MC_WEB_PORT: '5881', MC_DB_PORT: '55881', PORT: '3000' }
+  const over = effectiveEnv(file, { MC_API_PORT: '3880', MC_WEB_PORT: '5880', MC_DB_PORT: '55880' })
+  assert.equal(over.MC_API_PORT, '3880')
+  assert.equal(over.MC_WEB_PORT, '5880')
+  assert.equal(over.MC_DB_PORT, '55880')
+  assert.equal(effectiveEnv(file, { MC_API_PORT: '  ' }).MC_API_PORT, '3881')
+  assert.equal(effectiveEnv(file, {}).MC_WEB_PORT, '5881')
+  assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', ...over }), 3880)
+  assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000' }), 3000)
+})
+
 test('docker mode uses MC_API_PORT and native mode keeps PORT', () => {
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000' }), 3000)
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000', MC_API_PORT: '3880' }), 3880)
   assert.equal(apiListenPort({ PORT: '3000', MC_API_PORT: '3880' }), 3000)
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', MC_API_PORT: 'nope' }), null)
+})
+
+test('docker doctor uses the shell MC_API_PORT when .env names a different port', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-env-'))
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    writeFileSync(
+      path.join(dir, '.env'),
+      ['PORT=3000', 'MC_API_PORT=3000', 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control', ''].join('\n'),
+    )
+    const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1', MC_API_PORT: String(port) })
+    assert.equal(result.code, 0, result.lines.join('\n'))
+    assert.match(result.lines[1], new RegExp(`^pass ports: Port ${port} is already running\\.$`))
+    assert.equal(result.lines.some((line) => /Port 3000/.test(line)), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('docker doctor reports host database checks as info and checks the custom API port', async () => {

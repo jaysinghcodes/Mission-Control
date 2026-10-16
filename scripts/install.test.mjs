@@ -100,9 +100,17 @@ exit 0
 }
 
 function runInstall(dir, env) {
+  const merged = { ...process.env }
+  for (const key of ['MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT']) {
+    if (!Object.prototype.hasOwnProperty.call(env, key)) delete merged[key]
+  }
+  Object.assign(merged, env)
+  for (const [key, value] of Object.entries(merged)) {
+    if (value === undefined) delete merged[key]
+  }
   return spawnSync('/bin/bash', ['install.sh'], {
     cwd: dir,
-    env: { ...process.env, ...env },
+    env: merged,
     encoding: 'utf8',
   })
 }
@@ -179,28 +187,43 @@ function startPlainOk(dir) {
   )
 }
 
-function startDelayedHealth(dir, delayMs) {
+function delayedHealthSource(port, delayMs) {
   const delay = Number(delayMs)
-  return spawnNodeUntilPort(
-    dir,
-    'delayed-health.mjs',
-    [
-      "import { createServer } from 'node:http'",
-      `const readyAt = Date.now() + ${delay}`,
-      'const healthy = JSON.stringify({ service: "mission-control", status: "ok", database: "connected", db: "up" })',
-      'const starting = JSON.stringify({ service: "mission-control", status: "degraded", database: "unavailable", db: "down" })',
-      'const server = createServer((req, res) => {',
-      '  const body = Date.now() < readyAt ? starting : healthy',
-      '  const status = Date.now() < readyAt ? 503 : 200',
-      "  res.writeHead(status, { 'content-type': 'application/json' })",
-      '  res.end(body)',
-      '})',
-      "server.listen(0, '127.0.0.1', () => {",
-      '  process.stdout.write(String(server.address().port) + "\\n")',
-      '})',
-      '',
-    ].join('\n'),
-  )
+  const bind = Number(port)
+  const listen =
+    bind === 0
+      ? [
+          "server.listen(0, '127.0.0.1', () => {",
+          '  process.stdout.write(String(server.address().port) + "\\n")',
+          '})',
+        ]
+      : [
+          `server.listen(${bind}, '127.0.0.1', () => {`,
+          `  process.stdout.write('${bind}\\n')`,
+          '})',
+        ]
+  return [
+    "import { createServer } from 'node:http'",
+    `const readyAt = Date.now() + ${delay}`,
+    'const healthy = JSON.stringify({ service: "mission-control", status: "ok", database: "connected", db: "up" })',
+    'const starting = JSON.stringify({ service: "mission-control", status: "degraded", database: "unavailable", db: "down" })',
+    'const server = createServer((req, res) => {',
+    '  const body = Date.now() < readyAt ? starting : healthy',
+    '  const status = Date.now() < readyAt ? 503 : 200',
+    "  res.writeHead(status, { 'content-type': 'application/json' })",
+    '  res.end(body)',
+    '})',
+    ...listen,
+    '',
+  ].join('\n')
+}
+
+function startDelayedHealth(dir, delayMs) {
+  return spawnNodeUntilPort(dir, 'delayed-health.mjs', delayedHealthSource(0, delayMs))
+}
+
+function startDelayedHealthOn(dir, port, delayMs) {
+  return spawnNodeUntilPort(dir, `delayed-health-${port}.mjs`, delayedHealthSource(port, delayMs))
 }
 
 function setExampleAssignment(repo, key, value) {
@@ -598,6 +621,106 @@ test('docker install waits for a custom MC_API_PORT and doctor exits 0 without h
     assert.equal(text.includes('npm ci'), false, text)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assert.equal(existsSync(path.join(fx.repo, 'node_modules')), false)
+  } finally {
+    health?.child.kill()
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+function keptEnv(repo, ports) {
+  let text = readFileSync(path.join(repo, '.env.example'), 'utf8')
+  text = text.replace(/^INGEST_TOKEN=.*$/m, `INGEST_TOKEN=${'ab'.repeat(24)}`)
+  text = text.replace(/^SOCKET_TOKEN=.*$/m, `SOCKET_TOKEN=${'cd'.repeat(24)}`)
+  for (const [key, value] of Object.entries(ports)) {
+    const re = new RegExp(`^#?\\s*${key}=.*$`, 'm')
+    text = re.test(text) ? text.replace(re, `${key}=${value}`) : `${text}${key}=${value}\n`
+  }
+  const file = path.join(repo, '.env')
+  writeFileSync(file, text, { mode: 0o600 })
+  return file
+}
+
+test('Run A: shell ports with no .env wait on that API port and print that web URL', async () => {
+  const fx = freshDir()
+  let health
+  try {
+    health = await startDelayedHealthOn(fx.dir, 3880, 1200)
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      MC_INSTALL_READY_SECONDS: '8',
+      MC_WEB_PORT: '5880',
+      MC_API_PORT: '3880',
+      MC_DB_PORT: '55880',
+    })
+    const text = outputOf(result)
+    const written = readFileSync(path.join(fx.repo, '.env'), 'utf8')
+    assert.equal(result.status, 0, text)
+    assert.match(text, /Waiting for the API health check on port 3880\./)
+    assert.doesNotMatch(text, /port 3000/)
+    assert.match(text, /pass ports: Port 3880 is already running\./)
+    assert.match(text, /Open http:\/\/localhost:5880\/#\/tasks/)
+    assert.doesNotMatch(text, /localhost:5173/)
+    assert.match(written, /^MC_API_PORT=3880$/m)
+    assert.match(written, /^MC_WEB_PORT=5880$/m)
+    assert.match(written, /^MC_DB_PORT=55880$/m)
+    assert.match(text, /Wrote host port values from the environment into \.env\./)
+    assert.equal(/\bfail /.test(text), false, text)
+  } finally {
+    health?.child.kill()
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('Run B: ports already in .env are kept and used', async () => {
+  const fx = freshDir()
+  let health
+  try {
+    health = await startDelayedHealthOn(fx.dir, 3881, 1200)
+    const envFile = keptEnv(fx.repo, {
+      MC_API_PORT: '3881',
+      MC_WEB_PORT: '5881',
+      MC_DB_PORT: '55881',
+    })
+    const before = readFileSync(envFile)
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      MC_INSTALL_READY_SECONDS: '8',
+    })
+    const text = outputOf(result)
+    assert.equal(result.status, 0, text)
+    assert.match(text, /Keeping the existing \.env/)
+    assert.deepEqual(readFileSync(envFile), before)
+    assert.match(text, /Waiting for the API health check on port 3881\./)
+    assert.match(text, /pass ports: Port 3881 is already running\./)
+    assert.match(text, /Open http:\/\/localhost:5881\/#\/tasks/)
+    assert.doesNotMatch(text, /localhost:5173/)
+    assert.doesNotMatch(text, /Wrote host port values/)
+    assert.equal(/\bfail /.test(text), false, text)
+  } finally {
+    health?.child.kill()
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('default ports wait on 3000 and print localhost:5173', async () => {
+  const fx = freshDir()
+  let health
+  try {
+    health = await startDelayedHealthOn(fx.dir, 3000, 1200)
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      MC_INSTALL_READY_SECONDS: '8',
+    })
+    const text = outputOf(result)
+    const written = readFileSync(path.join(fx.repo, '.env'), 'utf8')
+    assert.equal(result.status, 0, text)
+    assert.match(text, /Waiting for the API health check on port 3000\./)
+    assert.match(text, /pass ports: Port 3000 is already running\./)
+    assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
+    assert.doesNotMatch(written, /^MC_API_PORT=/m)
+    assert.doesNotMatch(written, /^MC_WEB_PORT=/m)
+    assert.doesNotMatch(written, /^MC_DB_PORT=/m)
+    assert.equal(/\bfail /.test(text), false, text)
   } finally {
     health?.child.kill()
     rmSync(fx.dir, { recursive: true, force: true })

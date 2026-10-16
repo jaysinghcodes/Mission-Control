@@ -55,7 +55,7 @@ Edit `.env` before you expose the machine. Rules for you:
 * `SOCKET_TOKEN`: `bash install.sh` writes a random value when `.env` is missing. If you set one yourself, set it before the first build because it is baked into the web bundle.
 * `GITHUB_TOKEN`: optional. Lets approving a `pr` approval merge the PR on GitHub.
 * `DEEPSEEK_API_KEY` and `ZAI_API_KEY` are in the template. The API does not read them. Spend on System comes from `usage.snapshot`, not a live provider call.
-* Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
+* Host ports can be moved with `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT` in the shell or in `.env`. The shell wins. A new `.env` keeps the shell values. An existing `.env` is not rewritten. The browser ignores `MC_API_PORT` unless `VITE_API_URL` is set.
 
 ### Advanced: Node and Postgres
 

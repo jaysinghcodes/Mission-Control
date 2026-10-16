@@ -77,8 +77,20 @@ port_or() {
   fi
 }
 
+# Shell, then .env, then the default. A blank shell value does not hide .env.
+resolved_port() {
+  local key fallback chosen
+  key="$1"
+  fallback="$2"
+  chosen="${!key-}"
+  if [[ -z "$chosen" ]]; then
+    chosen="$(env_value "$key")"
+  fi
+  port_or "$chosen" "$fallback"
+}
+
 web_port() {
-  port_or "$(env_value MC_WEB_PORT)" "5173"
+  resolved_port MC_WEB_PORT "5173"
 }
 
 api_port() {
@@ -86,11 +98,44 @@ api_port() {
 }
 
 docker_api_port() {
-  port_or "$(env_value MC_API_PORT)" "3000"
+  resolved_port MC_API_PORT "3000"
 }
 
 db_port() {
-  port_or "$(env_value MC_DB_PORT)" "5432"
+  resolved_port MC_DB_PORT "5432"
+}
+
+apply_shell_ports() {
+  local file key value tmp2 line saw wrote
+  file="$1"
+  wrote=0
+  for key in MC_DB_PORT MC_API_PORT MC_WEB_PORT; do
+    value="${!key-}"
+    if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt 1 ]] || [[ "$value" -gt 65535 ]]; then
+      continue
+    fi
+    saw=0
+    tmp2="$(mktemp "${TMPDIR:-/tmp}/mc-env.XXXXXX")"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      case "$line" in
+        "${key}="*|export\ "${key}="*|"# ${key}="*|"#${key}="*)
+          printf '%s=%s\n' "$key" "$value"
+          saw=1
+          ;;
+        *)
+          printf '%s\n' "$line"
+          ;;
+      esac
+    done < "$file" > "$tmp2"
+    if [[ "$saw" -eq 0 ]]; then
+      printf '%s=%s\n' "$key" "$value" >> "$tmp2"
+    fi
+    mv "$tmp2" "$file"
+    wrote=1
+  done
+  if [[ "$wrote" -eq 1 ]]; then
+    echo "Wrote host port values from the environment into .env."
+  fi
 }
 
 ensure_env() {
@@ -135,6 +180,7 @@ ensure_env() {
   if [[ "$saw_socket" -eq 0 ]]; then
     printf 'SOCKET_TOKEN=%s\n' "$socket" >> "$tmp"
   fi
+  apply_shell_ports "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" .env
   umask "$old_umask"

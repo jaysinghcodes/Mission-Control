@@ -100,19 +100,18 @@ export function loadEnvFile(file) {
   return out
 }
 
-/** File values, then the process environment wins when a key is set (including blank). */
+const MC_PORT_KEYS = ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT']
+
+/**
+ * File values fill in first. A set process value wins, including a blank,
+ * except MC_*_PORT: a blank there falls through to the file, then the default.
+ */
 export function effectiveEnv(fileEnv, processEnv = process.env) {
   const env = { ...fileEnv }
-  for (const key of [
-    'DATABASE_URL',
-    'PORT',
-    'HOST',
-    'INGEST_TOKEN',
-    'NODE_ENV',
-    'MC_API_PORT',
-    'MC_DOCTOR_DOCKER',
-  ]) {
-    if (processEnv[key] !== undefined) env[key] = processEnv[key]
+  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', ...MC_PORT_KEYS]) {
+    if (processEnv[key] === undefined) continue
+    if (MC_PORT_KEYS.includes(key) && String(processEnv[key]).trim() === '') continue
+    env[key] = processEnv[key]
   }
   return env
 }
