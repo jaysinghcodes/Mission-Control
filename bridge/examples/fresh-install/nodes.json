@@ -1,0 +1,12 @@
+{
+  "pending": [],
+  "paired": [
+    {
+      "nodeId": "fresh-node",
+      "displayName": "Fresh Node",
+      "platform": "linux",
+      "connected": true,
+      "lastConnectedAtMs": 1710000002000
+    }
+  ]
+}

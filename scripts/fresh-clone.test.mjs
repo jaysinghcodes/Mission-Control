@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { buildInstallScript, readComposeInstallCommands, readInstallCommands, runShell } from './fresh-clone.mjs'
+import { spawnSync } from 'node:child_process'
+import { buildInstallScript, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -74,6 +75,74 @@ test('a fresh install does not seed, and the clone job seeds later', () => {
   assert.match(clone, /run', 'seed:demo'/)
   const smoke = readFileSync(path.join(root, 'scripts/ui-smoke.mjs'), 'utf8')
   assert.match(smoke, /seed-demo\.ts/)
+})
+
+test('installer mode is compose, native, or the fresh clone default', () => {
+  assert.equal(installMode({}), '')
+  assert.equal(installMode({ FRESH_INSTALL_MODE: 'compose' }), 'compose')
+  assert.equal(installMode({ FRESH_INSTALL_MODE: 'native' }), 'native')
+  assert.throws(() => installMode({ FRESH_INSTALL_MODE: 'windows' }), /compose or native/)
+})
+
+test('the installer log yields the password and the dashboard URL', () => {
+  const log = 'Dashboard password, shown once: abc_DEF-123\nOpen http://localhost:5173/#/tasks\n'
+  assert.equal(parseDashboardPassword(log), 'abc_DEF-123')
+  assert.equal(parseInstallerUrl(log), 'http://127.0.0.1:5173/')
+  assert.equal(parseDashboardPassword('no password here'), '')
+  assert.equal(parseInstallerUrl('Open http://example.com/'), '')
+})
+
+test('CI runs Compose and native installs and the fixture bridge', () => {
+  const workflow = readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8')
+  assert.match(workflow, /mode: compose/)
+  assert.match(workflow, /os: ubuntu-latest[\s\S]*mode: native/)
+  assert.match(workflow, /os: macos-latest[\s\S]*mode: native/)
+  assert.match(workflow, /FRESH_INSTALL_MODE: \$\{\{ matrix\.mode \}\}/)
+  assert.doesNotMatch(workflow, /macos-latest[\s\S]{0,200}mode: compose/)
+  const clone = readFileSync(path.join(root, 'scripts/fresh-clone.mjs'), 'utf8')
+  assert.match(clone, /bridge-fixture\.mjs/)
+  assert.match(clone, /examples\/fresh-install/)
+  const readme = readFileSync(path.join(root, 'README.md'), 'utf8')
+  assert.match(readme, /Ubuntu runs the Docker Compose install and the native install/)
+  assert.match(readme, /macOS runs the native install only/)
+})
+
+test('the ticket auth table does not list a delete route', () => {
+  const api = readFileSync(path.join(root, 'docs/API.md'), 'utf8')
+  assert.doesNotMatch(api, /Ticket delete/)
+  assert.match(api, /There is no ticket delete route/)
+  const tickets = api.split('### 4.4 Tickets')[1].split('### 4.5')[0]
+  assert.match(tickets, /`POST \/tickets`/)
+  assert.match(tickets, /`PATCH \/tickets\/:id`/)
+  assert.doesNotMatch(tickets, /DELETE \/tickets/)
+})
+
+test('the fresh install fixture dry run maps devices, nodes, approvals, and the gateway', () => {
+  const proc = spawnSync(
+    'python3',
+    ['bridge/mc-bridge-sync.py', '--dry-run', '--from-dir', 'bridge/examples/fresh-install'],
+    { cwd: root, encoding: 'utf8' },
+  )
+  assert.equal(proc.status, 0, proc.stderr)
+  const events = proc.stdout
+    .split(/\n/)
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line))
+  const machines = events.find((event) => event.type === 'devices.snapshot').payload
+  const approvals = events.find((event) => event.type === 'approvals.snapshot').payload.approvals
+  const gateway = events.find((event) => event.type === 'gateway.snapshot').payload
+  assert.deepEqual(
+    machines.devices.map((row) => row.id),
+    ['fresh-studio', 'pending:req-fresh'],
+  )
+  assert.deepEqual(
+    machines.nodes.map((row) => row.id),
+    ['fresh-node'],
+  )
+  assert.equal(machines.nodes[0].online, true)
+  assert.equal(approvals[0].tag, 'FreshInstall')
+  assert.equal(gateway.host, '127.0.0.1')
+  assert.equal(typeof gateway.up, 'boolean')
 })
 
 test('a README without npm run dev is rejected', () => {

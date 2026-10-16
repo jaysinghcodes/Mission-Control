@@ -100,6 +100,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'ON THE HOST',
     body: [
       'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and prints the URL. The password is shown once.',
+      'CI runs this installer with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker.',
       'A second run keeps the existing `.env`. It fills a missing dashboard password or session secret and does not replace other values.',
       'When the openclaw command is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that timer is not available. macOS uses launchd. Remove it with `bash install.sh --uninstall-schedule`.',
     ],
@@ -250,7 +251,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'YOU ARE HERE',
     // Say what works with no OpenClaw, and what needs the step 6 bridge.
     body: [
-      '**No OpenClaw needed:** Tickets. Create one, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.',
+      '**No OpenClaw needed:** Tickets. There is no ticket delete route. Create one, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.',
       '**No OpenClaw needed:** after `npm run seed:demo`, Calendar / Team / Office / Live Activity show labelled sample data.',
       '**Needs the step-6 bridge:** your real cron jobs on Calendar, the real roster on Team, Office bots moving on real `run.*` events, and live agent activity.',
     ],

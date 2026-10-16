@@ -1,15 +1,20 @@
 /**
  * Prove a clean tree can follow the README install block.
  *
- * Docker Compose is the documented default. This job has no Docker, so it
- * runs the Advanced: Node and Postgres block. git clone is pointed at this
+ * The fresh clone job runs the Advanced: Node and Postgres block. It has
+ * Node and Postgres and does not need Docker. git clone is pointed at this
  * checkout so the job tests the commit under review, not whatever the public
  * default branch happens to be. .env is the example file with no edits.
  * OpenClaw is not started.
+ *
+ * FRESH_INSTALL_MODE=compose runs bash install.sh with Docker Compose.
+ * FRESH_INSTALL_MODE=native runs bash install.sh with Docker hidden, so the
+ * native path is what a machine without Docker runs. Both modes then post
+ * bridge/examples/fresh-install through the bridge and read it back.
  */
 
-import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, existsSync, rmSync, openSync, closeSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -44,7 +49,8 @@ export function readComposeInstallCommands(markdown) {
 }
 
 /**
- * CI runs this block. It needs Node and Postgres and does not need Docker.
+ * The fresh clone job runs this block. It needs Node and Postgres and does
+ * not need Docker. The installer jobs call freshInstall instead.
  */
 export function readInstallCommands(markdown) {
   const section = installSection(markdown)
@@ -399,15 +405,245 @@ export async function freshClone({
   }
 }
 
+export function installMode(env = process.env) {
+  const mode = String(env.FRESH_INSTALL_MODE || '').trim()
+  if (!mode) return ''
+  if (mode === 'compose' || mode === 'native') return mode
+  throw new Error('FRESH_INSTALL_MODE must be compose or native.')
+}
+
+export function parseDashboardPassword(text) {
+  const match = String(text).match(/^Dashboard password, shown once: ([^\r\n]+)$/m)
+  return match ? match[1] : ''
+}
+
+/** Host URL the installer told the operator to open, with localhost pinned to 127.0.0.1. */
+export function parseInstallerUrl(text) {
+  const match = String(text).match(/^Open http:\/\/localhost:(\d+)\/#\/tasks\s*$/m)
+  if (!match) return ''
+  return `http://127.0.0.1:${match[1]}/`
+}
+
+function ipv4First(env) {
+  const current = String(env.NODE_OPTIONS || '')
+  if (current.includes('ipv4first')) return env
+  return {
+    ...env,
+    NODE_OPTIONS: [current, '--dns-result-order=ipv4first'].filter(Boolean).join(' '),
+  }
+}
+
+function prependDockerStub(workParent, env) {
+  const bin = path.join(workParent, 'docker-stub')
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  return { ...env, PATH: `${bin}${path.delimiter}${env.PATH || ''}` }
+}
+
+function apiUrlFor(fileEnv, mode) {
+  const port = mode === 'compose' ? fileEnv.MC_API_PORT || '3000' : fileEnv.PORT || '3000'
+  return `http://127.0.0.1:${port}`
+}
+
+const DOCKER_HEALTH_JS =
+  'fetch("http://127.0.0.1:3000/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))'
+
+async function assertNativeDatabase(env) {
+  const check = await runShell(
+    'pg_isready -h 127.0.0.1 -p 5432 && psql "postgresql://postgres:postgres@127.0.0.1:5432/mission_control" -tAc "SELECT 1"',
+    { env },
+  )
+  if (check.code !== 0) {
+    throw new Error(
+      'Native install needs Postgres 16 on 127.0.0.1:5432, database mission_control, user postgres. The password is the local default from .env.example.',
+    )
+  }
+}
+
+async function waitForApi(apiUrl, mode, cloneDir, env) {
+  const start = Date.now()
+  while (Date.now() - start < 180000) {
+    const res = await httpGet(`${apiUrl}/health`)
+    if (mode === 'native' && res.ok) {
+      try {
+        const body = JSON.parse(res.text)
+        if (body.status === 'ok' && body.database === 'connected') return
+      } catch {
+        // Keep waiting until the body is the health document.
+      }
+    }
+    if (mode === 'compose' && res.status === 401) {
+      const inside = await runShell(`docker compose exec -T api node -e ${shellQuote(DOCKER_HEALTH_JS)}`, {
+        cwd: cloneDir,
+        env,
+      })
+      if (inside.code === 0) return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new Error(`The API did not become ready at ${apiUrl}.`)
+}
+
+async function assertInstallAuth({ apiUrl, token, mode }) {
+  const missing = await fetch(`${apiUrl}/events`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'hello', payload: {} }),
+  })
+  const missingBody = await missing.json().catch(() => null)
+  if (missing.status !== 401 || missingBody?.message !== 'unauthorized') {
+    throw new Error(`Ingest without a token returned ${missing.status}.`)
+  }
+  const authed = await fetch(`${apiUrl}/events`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-ingest-token': token },
+    body: JSON.stringify({ type: 'hello', payload: {} }),
+  })
+  const authedBody = await authed.json().catch(() => null)
+  if (authed.status !== 202 || authedBody?.accepted !== true) {
+    throw new Error(`Ingest with the installer token returned ${authed.status}.`)
+  }
+  const devices = await fetch(`${apiUrl}/devices`)
+  if (mode === 'compose') {
+    const body = await devices.json().catch(() => null)
+    if (devices.status !== 401 || body?.message !== 'unauthorized') {
+      throw new Error(`Compose dashboard read without a session returned ${devices.status}.`)
+    }
+    const tickets = await fetch(`${apiUrl}/tickets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const ticketBody = await tickets.json().catch(() => null)
+    if (tickets.status !== 401 || ticketBody?.message !== 'unauthorized') {
+      throw new Error(`Compose ticket write without a session or token returned ${tickets.status}.`)
+    }
+    console.log('Compose login is required and ingest without a token is 401')
+    return
+  }
+  if (devices.status !== 200) {
+    throw new Error(`Native loopback GET /devices returned ${devices.status}.`)
+  }
+  const tickets = await fetch(`${apiUrl}/tickets`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  const ticketBody = await tickets.json().catch(() => null)
+  if (tickets.status !== 400 || ticketBody?.message !== 'title is required') {
+    throw new Error(`Native loopback ticket write returned ${tickets.status}.`)
+  }
+  console.log('Native loopback reads stay open and ingest without a token is 401')
+}
+
+function killTree(pid) {
+  if (!pid) return
+  const listed = spawnSync('ps', ['-o', 'pid=', '--ppid', String(pid)], { encoding: 'utf8' })
+  for (const line of String(listed.stdout || '').split(/\n/)) {
+    const child = Number(line.trim())
+    if (child) killTree(child)
+  }
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch {
+    // Already gone.
+  }
+}
+
+async function stopInstall(cloneDir, mode, env) {
+  if (!existsSync(cloneDir)) return
+  if (mode === 'native') {
+    const pidFile = path.join(cloneDir, 'install-dev.pid')
+    if (existsSync(pidFile)) killTree(Number(readFileSync(pidFile, 'utf8').trim()))
+  }
+  if (mode === 'compose' && existsSync(path.join(cloneDir, 'docker-compose.yml'))) {
+    await runShell('docker compose down -v --remove-orphans', { cwd: cloneDir, env, inherit: true })
+  }
+}
+
+/**
+ * Prove bash install.sh on a clean clone of this checkout.
+ * mode compose uses Docker. mode native hides docker so install.sh takes the
+ * Node and Postgres path. The bridge then posts the fresh install fixture.
+ */
+export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
+  if (mode !== 'compose' && mode !== 'native') {
+    throw new Error('FRESH_INSTALL_MODE must be compose or native.')
+  }
+  const workParent = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
+  const cloneDir = path.join(workParent, 'mission-control')
+  const logPath = path.join(workParent, 'install.log')
+  let env = ipv4First({ ...process.env })
+  try {
+    const cloned = await runShell(`git clone --local ${shellQuote(source)} ${shellQuote(cloneDir)}`, {
+      inherit: true,
+    })
+    if (cloned.code !== 0) throw new Error('git clone of this checkout failed.')
+    if (mode === 'native') {
+      await assertNativeDatabase(env)
+      env = prependDockerStub(workParent, env)
+    } else {
+      const docker = await runShell('docker compose version', { cwd: cloneDir, env })
+      if (docker.code !== 0) throw new Error('Compose install needs Docker with the Compose plugin.')
+    }
+    console.log(`Installer mode ${mode} in ${cloneDir}`)
+    const install = await runShell(`set -o pipefail\nbash install.sh 2>&1 | tee ${shellQuote(logPath)}`, {
+      cwd: cloneDir,
+      env,
+      inherit: true,
+    })
+    const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
+    if (install.code !== 0) {
+      console.error(tail(logPath))
+      console.error(tail(path.join(cloneDir, 'install-dev.log')))
+      throw new Error(`bash install.sh failed (exit ${install.code}).`)
+    }
+    const password = parseDashboardPassword(log)
+    const webUrl = parseInstallerUrl(log)
+    if (!webUrl) throw new Error('The installer did not print the dashboard URL.')
+    const fileEnv = loadEnvFile(path.join(cloneDir, '.env'))
+    const token = fileEnv.INGEST_TOKEN || ''
+    if (!/^[0-9a-f]{48}$/.test(token)) {
+      throw new Error('The installer did not write a random INGEST_TOKEN.')
+    }
+    const apiUrl = apiUrlFor(fileEnv, mode)
+    await waitForApi(apiUrl, mode, cloneDir, env)
+    await assertInstallAuth({ apiUrl, token, mode })
+    await waitFor(webUrl, (res) => res.ok && res.text.includes('Mission Control'), 180000)
+    const bridgeEnv = {
+      ...env,
+      INGEST_TOKEN: token,
+      MC_API_URL: apiUrl,
+      MC_EXPECT_GATEWAY_SOURCE: mode === 'compose' ? 'bridge' : 'probe',
+      MC_BRIDGE_REGISTER: '0',
+    }
+    if (mode === 'compose') {
+      if (!password) throw new Error('The installer did not print a dashboard password.')
+      bridgeEnv.MC_DASHBOARD_PASSWORD = password
+    }
+    await runInherit('node', ['scripts/bridge-fixture.mjs'], { cwd: cloneDir, env: bridgeEnv })
+    console.log(`Fresh ${mode} install passed.`)
+  } finally {
+    await stopInstall(cloneDir, mode, env)
+    if (!keep) rmSync(workParent, { recursive: true, force: true })
+  }
+}
+
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
 if (isMain) {
-  const readmePath = process.env.FRESH_CLONE_README || path.join(ROOT, 'README.md')
-  freshClone({
-    source: ROOT,
-    readmePath,
-    keep: process.env.FRESH_CLONE_KEEP === '1',
-  }).catch((err) => {
-    console.error(err instanceof Error ? err.message : err)
-    process.exit(1)
-  })
+  const keep = process.env.FRESH_CLONE_KEEP === '1'
+  Promise.resolve()
+    .then(() => {
+      const mode = installMode()
+      if (mode) return freshInstall({ source: ROOT, mode, keep })
+      return freshClone({
+        source: ROOT,
+        readmePath: process.env.FRESH_CLONE_README || path.join(ROOT, 'README.md'),
+        keep,
+      })
+    })
+    .catch((err) => {
+      console.error(err instanceof Error ? err.message : err)
+      process.exit(1)
+    })
 }

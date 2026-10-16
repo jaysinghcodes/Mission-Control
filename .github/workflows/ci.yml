@@ -128,3 +128,45 @@ jobs:
 
       - name: Doctor stale bridge check
         run: node --test --test-name-pattern "bridge sync" scripts/doctor.test.mjs
+
+  # Free GitHub hosted runners. Ubuntu proves Compose and the native path.
+  # macOS proves the native path only. Docker on macOS runners is unreliable.
+  fresh-install:
+    name: Fresh install (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            mode: compose
+            label: ubuntu compose
+          - os: ubuntu-latest
+            mode: native
+            label: ubuntu native
+          - os: macos-latest
+            mode: native
+            label: macos native
+    env:
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      FRESH_INSTALL_MODE: ${{ matrix.mode }}
+      MC_INSTALL_READY_SECONDS: '180'
+    steps:
+      - name: Check out a clean tree
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Use npm 11.17.0
+        run: npm install -g npm@11.17.0
+
+      - name: Install Postgres 16
+        if: matrix.mode == 'native'
+        run: sh scripts/ci-native-postgres.sh
+
+      - name: Run bash install.sh and the fixture bridge
+        run: node scripts/fresh-clone.mjs

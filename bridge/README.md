@@ -60,7 +60,7 @@ file is an info line. A stale file is an info line when no schedule is installed
 
 Flags: `--dry-run` (print events as JSON lines, post nothing, write no state),
 `--from-dir DIR` (read `DIR/{agents,sessions,cron,approvals,devices,nodes}.json` instead of the
-CLI. `bridge/examples/` holds illustrative inputs for testing the mapping), and
+CLI. `bridge/examples/` holds illustrative inputs for testing the mapping. `bridge/examples/fresh-install/` is the fixture the installer CI posts to a running API), and
 `--memory-dir DIR` (read an OpenClaw memory tree: one workspace, or one
 subdirectory per agent). `bridge/examples/openclaw-memory/` is a sample.
 

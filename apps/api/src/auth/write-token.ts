@@ -7,8 +7,8 @@ import { timingSafeEqual } from 'crypto';
  * and run writes. Callers send it as x-ingest-token. POST /tickets and
  * PATCH /tickets/:id also accept that header when the caller is not
  * loopback and has no session. Those ticket routes are not ingest
- * writes, so loopback stays open without the header. Ticket delete and
- * every other dashboard write use the session cookie instead.
+ * writes, so loopback stays open without the header. There is no ticket
+ * delete route. Every other dashboard write uses the session cookie.
  *
  * A blank or whitespace-only value counts as unset so a fresh clone that
  * clears the placeholder still gets the loopback path.

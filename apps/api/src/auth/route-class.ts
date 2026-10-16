@@ -4,8 +4,8 @@
  * and ticket update, which also accept the ingest token.
  *
  * Ingest is register, heartbeat, run create and update, and bridge sync
- * (POST /events). Delete of an agent is a dashboard write. Ticket delete
- * is a dashboard write too.
+ * (POST /events). Delete of an agent is a dashboard write. There is no
+ * ticket delete route.
  */
 
 export function requestPath(url: string | undefined): string {
@@ -30,9 +30,9 @@ export function isIngestWrite(
 }
 
 /**
- * Ticket create and a single ticket update. Delete is not included, so a
- * token cannot remove a ticket. These are not ingest writes: loopback and
- * a session cookie still open them without the header.
+ * Ticket create and a single ticket update. There is no DELETE /tickets
+ * route. These are not ingest writes: loopback and a session cookie still
+ * open them without the header.
  */
 export function isAgentTicketWrite(
   method: string,

@@ -19,7 +19,7 @@ It is a turbo monorepo:
 Data reaches Mission Control two ways:
 
 1. **Snapshot and event intake:** `POST /events` with a shared token. This is how OpenClaw state (agents, sessions, cron, usage, approvals, memory) gets in. The bundled bridge does this for you.
-2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. Run writes use the same `x-ingest-token` header as `POST /events`. `POST /tickets` and `PATCH /tickets/:id` also accept that token. Project and model writes, ticket delete, and every other dashboard write stay open on loopback and need a session cookie off loopback.
+2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. Run writes use the same `x-ingest-token` header as `POST /events`. `POST /tickets` and `PATCH /tickets/:id` also accept that token. Project and model writes and every other dashboard write stay open on loopback and need a session cookie off loopback. There is no ticket delete route.
 
 Every event is stored in the `ActivityEvent` table and broadcast live over Socket.IO to open dashboards.
 
@@ -64,7 +64,7 @@ Edit `.env` before you expose the machine. Rules for you:
 
 ### Advanced: Node and Postgres
 
-CI has no Docker, so the fresh clone job runs this path. It needs Node.js 20.17+ or 22.9+, npm 11.17.0, and Postgres 16 on `127.0.0.1:5432`. Database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret.
+The fresh clone job runs this path on Node.js 20 and Node.js 22. It needs Node.js 20.17+ or 22.9+, npm 11.17.0, and Postgres 16 on `127.0.0.1:5432`. Database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret. A separate Ubuntu job runs `bash install.sh` with Docker Compose. Ubuntu and macOS jobs also run `bash install.sh` on the native path. The macOS job does not use Docker. Those installer jobs post `bridge/examples/fresh-install` and read devices, nodes, approvals, and gateway status back from the API.
 
 ```bash
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
@@ -177,7 +177,7 @@ Which check applies:
 | --- | --- |
 | `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, `PATCH /runs/:id` | `x-ingest-token` when `INGEST_TOKEN` is set. A session cookie does not replace it. |
 | `POST /tickets`, `PATCH /tickets/:id` | Loopback, a session cookie, or `x-ingest-token`. A token write also names a registered agent. |
-| Ticket delete, `POST /projects`, `PATCH /projects/:id`, `PUT /mission`, `PUT /settings`, `POST /models`, `DELETE /models/:id`, `POST /approvals/:id/decide`, custom tool writes, `DELETE /agents/:id`, and every other dashboard write | Loopback or a session cookie. A token does not open them. |
+| `POST /projects`, `PATCH /projects/:id`, `PUT /mission`, `PUT /settings`, `POST /models`, `DELETE /models/:id`, `POST /approvals/:id/decide`, custom tool writes, `DELETE /agents/:id`, and every other dashboard write | Loopback or a session cookie. A token does not open them. There is no ticket delete route. |
 | Dashboard reads, including `GET /sessions`, `GET /health`, `GET /tickets` | Loopback or a session cookie. |
 | `POST /auth/login`, `POST /auth/logout`, `POST /auth/login-reset`, `GET /auth/session` | Open, so a browser can sign in. |
 
@@ -250,7 +250,7 @@ Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merg
 | `POST /tickets` | `{ title, status?, priority?, assignee?, tags?: string[], projectId?, description?, actor? }` | 201. `title` required. `status` only `backlog` (default) or `todo`. `priority` defaults `med` (high, med, low). `description` defaults empty. Key auto assigned as `MC-150`, `MC-151`... |
 | `PATCH /tickets/:id` | `{ status?, assignee?, title?, description?, priority?, projectId? }` | `:id` is the ticket id, not the key. Status must be one of `backlog`, `todo`, `build`, `qa`, `review`, `done` (`inprogress` is a legacy alias of `build`). `projectId: null` unassigns. A token may send `status`, `assignee`, `title`, and `description` only |
 
-Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Loopback and a session cookie can call both routes. An ingest token can too, when `x-actor-id` or `actor` is a registered agent id, and Activity stores that id (section 4.1). A token cannot delete a ticket and cannot patch `priority`, `projectId`, or `tags`. A checked create with `{"title":"Onboarding check","status":"todo"}` on loopback returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
+Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Loopback and a session cookie can call both routes. An ingest token can too, when `x-actor-id` or `actor` is a registered agent id, and Activity stores that id (section 4.1). There is no ticket delete route. A token cannot patch `priority`, `projectId`, or `tags`. A checked create with `{"title":"Onboarding check","status":"todo"}` on loopback returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
 
 ### 4.5 Projects
 
@@ -415,6 +415,7 @@ That prints `204`.
 
 ## 6. Not implemented yet (do not rely on these)
 
+* Tickets have no delete route. `POST /tickets` creates one and `PATCH /tickets/:id` moves it.
 * Sessions, cron jobs, usage, and memory still have no REST write except `POST /events`. Agents do: `POST /agents/register`, `POST /agents/:id/heartbeat`, and `DELETE /agents/:id` (section 4.10). A snapshot cannot delete a registered or default bot.
 * Nothing in this repo fetches a provider account balance. Prices live in `config/prices.json`, with `config/prices.local.json` merged on top. `models.snapshot` is the provider and model list, including which providers are local.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
@@ -452,7 +453,7 @@ The operator paste is [PASTE_IN.md](PASTE_IN.md). It runs the installer, reports
    curl -s 'http://127.0.0.1:3000/activity?limit=5'
    ```
    Your event should be first. A checked call returned 200, and the first row was `run.completed` with name `onboarding check`. Ask your operator to open http://localhost:5173/#/office and look for that name in the activity list. The floor seats will not move because of this event.
-6. **File a test ticket and move it.** On loopback the calls below need no token. On Compose, add `x-ingest-token: $MC_TOKEN` and `x-actor-id: YOUR_AGENT_ID` (a registered agent id). A token may set status, assignee, title, and description. Activity stores that agent id. Ticket delete and every other dashboard write still need loopback or a session cookie. A 401 means the token is wrong, or that route is for the dashboard only.
+6. **File a test ticket and move it.** On loopback the calls below need no token. On Compose, add `x-ingest-token: $MC_TOKEN` and `x-actor-id: YOUR_AGENT_ID` (a registered agent id). A token may set status, assignee, title, and description. Activity stores that agent id. There is no ticket delete route. Every other dashboard write still needs loopback or a session cookie. A 401 means the token is wrong, or that route is for the dashboard only.
    ```bash
    curl -sS -X POST http://127.0.0.1:3000/tickets \
      -H 'content-type: application/json' \
