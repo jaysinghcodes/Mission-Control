@@ -6,7 +6,9 @@
 # Linux uses a systemd user timer, or cron when that timer is not available.
 # macOS uses launchd. The schedule PATH includes the openclaw directory and the python3 directory.
 # Remove it with: bash install.sh --uninstall-schedule. That also removes the sync timestamp.
-# A second run keeps every value already in .env. Token values are not printed.
+# A second run keeps tokens and secrets already in .env.
+# DATABASE_URL uses the resolved MC_DB_PORT. A later run can update that port.
+# Token values are not printed.
 
 set -euo pipefail
 
@@ -56,10 +58,11 @@ new_token() {
   printf '%s' "$token"
 }
 
-env_value() {
-  local key line value
-  key="$1"
-  line="$(grep -E "^[[:space:]]*${key}=" .env 2>/dev/null | tail -n 1 || true)"
+file_env_value() {
+  local file key line value
+  file="$1"
+  key="$2"
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" 2>/dev/null | tail -n 1 || true)"
   value="${line#*=}"
   value="${value#\"}"
   value="${value%\"}"
@@ -68,6 +71,17 @@ env_value() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+env_value() {
+  file_env_value .env "$1"
+}
+
+env_file_mode() {
+  local file mode
+  file="$1"
+  mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%OLp' "$file" 2>/dev/null || true)"
+  printf '%s' "$mode"
 }
 
 port_or() {
@@ -136,6 +150,52 @@ db_port() {
   resolved_port MC_DB_PORT "5432"
 }
 
+# Shell, then the named file, then the default. Used while .env is still a temp file.
+resolved_port_file() {
+  local key fallback file chosen
+  key="$1"
+  fallback="$2"
+  file="$3"
+  chosen="${!key-}"
+  if [[ -z "$chosen" ]]; then
+    chosen="$(file_env_value "$file" "$key")"
+  fi
+  port_or "$chosen" "$fallback"
+}
+
+# Keep the user, password, host, database, and query. Change only the port.
+database_url_with_port() {
+  local url port head explicit path
+  url="$1"
+  port="$2"
+  if [[ ! "$url" =~ ^postgres(ql)?:// ]]; then
+    printf '%s' "$url"
+    return 0
+  fi
+  if [[ "$url" =~ ^(postgres(ql)?://([^@/]+@)?(\[[^]]+\]|[^:/?#]+)):([0-9]+)([/?].*)?$ ]]; then
+    head="${BASH_REMATCH[1]}"
+    explicit="${BASH_REMATCH[5]}"
+    path="${BASH_REMATCH[6]-}"
+    if [[ "$explicit" == "$port" ]]; then
+      printf '%s' "$url"
+      return 0
+    fi
+    printf '%s:%s%s' "$head" "$port" "$path"
+    return 0
+  fi
+  if [[ "$url" =~ ^(postgres(ql)?://([^@/]+@)?(\[[^]]+\]|[^:/?#]+))([/?].*)?$ ]]; then
+    if [[ "$port" == "5432" ]]; then
+      printf '%s' "$url"
+      return 0
+    fi
+    head="${BASH_REMATCH[1]}"
+    path="${BASH_REMATCH[5]-}"
+    printf '%s:%s%s' "$head" "$port" "$path"
+    return 0
+  fi
+  printf '%s' "$url"
+}
+
 apply_shell_ports() {
   local file key value tmp2 line saw wrote
   file="$1"
@@ -193,6 +253,48 @@ write_env_key() {
   mv "$tmp2" "$file"
 }
 
+# A shell MC_DB_PORT replaces the value in an existing file. Other keys stay.
+persist_shell_db_port() {
+  local file value current
+  file="$1"
+  MC_DB_PORT_UPDATED=0
+  value="${MC_DB_PORT-}"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt 1 ]] || [[ "$value" -gt 65535 ]]; then
+    return 0
+  fi
+  current="$(file_env_value "$file" MC_DB_PORT)"
+  if [[ "$current" == "$value" ]]; then
+    return 0
+  fi
+  write_env_key "$file" MC_DB_PORT "$value"
+  MC_DB_PORT_UPDATED=1
+}
+
+# Point DATABASE_URL at the resolved port. A missing key is added only when
+# allow_create is 1 (a new .env). Tokens and other secrets are not touched.
+sync_database_url() {
+  local file port allow current next
+  file="$1"
+  port="$2"
+  allow="${3:-0}"
+  MC_DATABASE_URL_UPDATED=0
+  current="$(file_env_value "$file" DATABASE_URL)"
+  if [[ -z "$current" ]]; then
+    if [[ "$allow" != "1" ]]; then
+      return 0
+    fi
+    next="postgresql://postgres:postgres@localhost:${port}/mission_control"
+  else
+    next="$(database_url_with_port "$current" "$port")"
+    if [[ "$next" == "$current" ]]; then
+      return 0
+    fi
+  fi
+  write_env_key "$file" DATABASE_URL "$next"
+  MC_DATABASE_URL_UPDATED=1
+  echo "Set DATABASE_URL to port ${port}."
+}
+
 # Shell values for a new .env only. An existing .env is never rewritten.
 apply_shell_schedule() {
   local file wrote value
@@ -236,9 +338,19 @@ apply_shell_schedule() {
 
 ensure_env() {
   local ingest socket tmp old_umask saw_ingest saw_socket line
-  local got_ingest got_socket
+  local got_ingest got_socket mode
   if [[ -f .env ]]; then
-    echo "Keeping the existing .env. Tokens and other values were not changed."
+    mode="$(env_file_mode .env)"
+    persist_shell_db_port .env
+    sync_database_url .env "$(db_port)" 0
+    if [[ "$MC_DB_PORT_UPDATED" -eq 1 || "$MC_DATABASE_URL_UPDATED" -eq 1 ]]; then
+      if [[ -n "$mode" ]]; then
+        chmod "$mode" .env || true
+      fi
+      echo "Tokens and secrets were not changed."
+    else
+      echo "Keeping the existing .env. Tokens and other values were not changed."
+    fi
     return 0
   fi
   if [[ ! -f .env.example ]]; then
@@ -278,6 +390,7 @@ ensure_env() {
   fi
   apply_shell_ports "$tmp"
   apply_shell_schedule "$tmp"
+  sync_database_url "$tmp" "$(resolved_port_file MC_DB_PORT 5432 "$tmp")" 1
   chmod 600 "$tmp"
   mv "$tmp" .env
   umask "$old_umask"

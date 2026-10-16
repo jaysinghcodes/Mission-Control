@@ -12,7 +12,7 @@ Mission Control is the dashboard. The description is in [API.md](API.md#1-what-m
 
 ## 2. Install and run
 
-Run `bash install.sh`. Docker is first. If Docker is missing, the installer says so and uses Node.js 22 and Postgres 16. It writes random tokens to `.env` (mode 600), resolves ports from the shell, then `.env`, then the defaults, and installs a removable bridge schedule. Remove that schedule with `bash install.sh --uninstall-schedule`. Report the URL the installer prints. `npm run doctor` reads the bridge sync age. Details are in [API.md](API.md#2-install-and-run) and the README section Install and run.
+Run `bash install.sh`. Docker is first. If Docker is missing, the installer says so and uses Node.js 22 and Postgres 16. It writes random tokens to `.env` (mode 600), resolves ports from the shell, then `.env`, then the defaults, and writes `DATABASE_URL` with that `MC_DB_PORT`. A later run with a different port updates that URL and does not rotate tokens or secrets. It installs a removable bridge schedule. Remove that schedule with `bash install.sh --uninstall-schedule`. Report the URL the installer prints. `npm run doctor` reads the bridge sync age. Details are in [API.md](API.md#2-install-and-run) and the README section Install and run.
 
 ### Advanced: Node and Postgres
 

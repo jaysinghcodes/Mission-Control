@@ -708,8 +708,15 @@ test('Run B: ports already in .env are kept and used', async () => {
     })
     const text = outputOf(result)
     assert.equal(result.status, 0, text)
-    assert.match(text, /Keeping the existing \.env/)
-    assert.deepEqual(readFileSync(envFile), before)
+    const after = readFileSync(envFile, 'utf8')
+    const expected = before.toString('utf8').replace(
+      'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/mission_control',
+      'DATABASE_URL=postgresql://postgres:postgres@localhost:55881/mission_control',
+    )
+    assert.equal(after, expected)
+    assert.match(text, /Set DATABASE_URL to port 55881\./)
+    assert.match(text, /Tokens and secrets were not changed\./)
+    assert.doesNotMatch(text, /Keeping the existing \.env\. Tokens and other values were not changed\./)
     assert.match(text, /Waiting for the API health check on port 3881\./)
     assert.match(text, /pass ports: Port 3881 is already running\./)
     assert.match(text, /Open http:\/\/localhost:5881\/#\/tasks/)
@@ -718,6 +725,79 @@ test('Run B: ports already in .env are kept and used', async () => {
     assert.equal(/\bfail /.test(text), false, text)
   } finally {
     health?.child.kill()
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and updated on a rerun', () => {
+  const fx = freshDir()
+  try {
+    const first = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55432' })
+    const firstText = outputOf(first)
+    const firstFailed = assertReadableDoctor(firstText).some((line) => line.startsWith('fail '))
+    assert.equal(first.status, firstFailed ? 1 : 0, firstText)
+    const envPath = path.join(fx.repo, '.env')
+    const firstEnv = assignments(readFileSync(envPath, 'utf8'))
+    assert.equal(firstEnv.MC_DB_PORT, '55432')
+    assert.equal(firstEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:55432/mission_control')
+    assert.match(firstEnv.INGEST_TOKEN, /^[0-9a-f]{48}$/)
+    assert.match(firstEnv.SOCKET_TOKEN, /^[0-9a-f]{48}$/)
+    assert.notEqual(firstEnv.INGEST_TOKEN, firstEnv.SOCKET_TOKEN)
+    assert.match(firstText, /Set DATABASE_URL to port 55432\./)
+    assert.equal(firstText.includes(firstEnv.INGEST_TOKEN), false)
+    assert.equal(firstText.includes(firstEnv.SOCKET_TOKEN), false)
+    assert.equal(firstText.includes('postgres:postgres'), false)
+    assert.equal(PUNCT.test(firstText), false)
+
+    const custom = readFileSync(envPath, 'utf8').replace(
+      'DATABASE_URL=postgresql://postgres:postgres@localhost:55432/mission_control',
+      'DATABASE_URL=postgresql://kept:s3cret@127.0.0.1:5432/mission_control',
+    )
+    writeFileSync(envPath, custom)
+    chmodSync(envPath, 0o640)
+    const fromFile = runInstall(fx.repo, fx.env)
+    const fromFileText = outputOf(fromFile)
+    const fromFileEnv = assignments(readFileSync(envPath, 'utf8'))
+    const fromFileFailed = assertReadableDoctor(fromFileText).some((line) => line.startsWith('fail '))
+    assert.equal(fromFile.status, fromFileFailed ? 1 : 0, fromFileText)
+    assert.equal(fromFileEnv.DATABASE_URL, 'postgresql://kept:s3cret@127.0.0.1:55432/mission_control')
+    assert.equal(fromFileEnv.MC_DB_PORT, '55432')
+    assert.equal(fromFileEnv.INGEST_TOKEN, firstEnv.INGEST_TOKEN)
+    assert.equal(fromFileEnv.SOCKET_TOKEN, firstEnv.SOCKET_TOKEN)
+    assert.equal(statSync(envPath).mode & 0o777, 0o640)
+    assert.match(fromFileText, /Set DATABASE_URL to port 55432\./)
+    assert.match(fromFileText, /Tokens and secrets were not changed\./)
+    assert.equal(fromFileText.includes('s3cret'), false)
+    assert.equal(fromFileText.includes(firstEnv.INGEST_TOKEN), false)
+
+    const changed = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55499' })
+    const changedText = outputOf(changed)
+    const changedEnv = assignments(readFileSync(envPath, 'utf8'))
+    const changedFailed = assertReadableDoctor(changedText).some((line) => line.startsWith('fail '))
+    assert.equal(changed.status, changedFailed ? 1 : 0, changedText)
+    assert.equal(changedEnv.DATABASE_URL, 'postgresql://kept:s3cret@127.0.0.1:55499/mission_control')
+    assert.equal(changedEnv.MC_DB_PORT, '55499')
+    assert.equal(changedEnv.INGEST_TOKEN, firstEnv.INGEST_TOKEN)
+    assert.equal(changedEnv.SOCKET_TOKEN, firstEnv.SOCKET_TOKEN)
+    assert.equal(statSync(envPath).mode & 0o777, 0o640)
+    assert.match(changedText, /Set DATABASE_URL to port 55499\./)
+    assert.match(changedText, /Tokens and secrets were not changed\./)
+    assert.equal(changedText.includes('s3cret'), false)
+    assert.equal(changedText.includes(firstEnv.INGEST_TOKEN), false)
+    assert.equal(changedText.includes(firstEnv.SOCKET_TOKEN), false)
+    for (const key of Object.keys(firstEnv)) {
+      if (key === 'DATABASE_URL' || key === 'MC_DB_PORT') continue
+      assert.equal(changedEnv[key], firstEnv[key], key)
+    }
+
+    const before = readFileSync(envPath)
+    const again = runInstall(fx.repo, fx.env)
+    const againText = outputOf(again)
+    assert.deepEqual(readFileSync(envPath), before)
+    assert.match(againText, /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.doesNotMatch(againText, /Set DATABASE_URL to port/)
+    assert.equal(statSync(envPath).mode & 0o777, 0o640)
+  } finally {
     rmSync(fx.dir, { recursive: true, force: true })
   }
 })
