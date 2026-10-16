@@ -5,7 +5,7 @@ import type { Agent, AgentsResp } from '../types'
 import { PageHeader, Segmented, StatusChip, Kicker, EmptyState, SearchInput } from '../components/shell'
 import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
-import { agentCaption } from '../data/roster'
+import { useNaming } from '../lib/naming'
 import { agentNeedsYou, type ApprovalLike } from '../lib/board'
 import { pluralize } from '../lib/pluralize'
 import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
@@ -38,6 +38,7 @@ export default function Agents() {
   const runsQ = useApi<{ runs: LiveRun[] }>('/runs', { pollMs: 15000 })
   const { events, connected } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
+  const naming = useNaming()
   const agents = data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
   const pending = approvalsQ.data?.approvals ?? []
@@ -57,7 +58,7 @@ export default function Agents() {
   const trigger = useRef<HTMLButtonElement | null>(null)
 
   const rank = (a: Agent) => (shownTone(a) === 'red' ? 0 : shownTone(a) === 'green' ? 1 : 2)
-  const sorted = [...roster].sort((a, b) => rank(a) - rank(b) || agentCaption(a.name, a.role).name.localeCompare(agentCaption(b.name, b.role).name))
+  const sorted = [...roster].sort((a, b) => rank(a) - rank(b) || (a.position ?? 0) - (b.position ?? 0) || a.id.localeCompare(b.id))
 
   const visible = sorted.filter((a) => {
     const t = shownTone(a)
@@ -65,7 +66,7 @@ export default function Agents() {
     if (filter === 2 && t !== 'gray') return false
     const q = query.trim().toLowerCase()
     if (!q) return true
-    const cap = agentCaption(a.name, a.role)
+    const cap = naming.present(a)
     return `${cap.name} ${cap.role} ${liveFor(a).subtitle} ${a.recentActivity ?? ''}`.toLowerCase().includes(q)
   })
 
@@ -100,7 +101,7 @@ export default function Agents() {
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {visible.map((agent) => {
-          const cap = agentCaption(agent.name, agent.role)
+          const cap = naming.present(agent)
           const offline = isRegisteredOffline(agent, now)
           const live = liveFor(agent)
           const t = shownTone(agent)
@@ -136,10 +137,12 @@ export default function Agents() {
                 />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: cap.color }} />
                     <div className="text-[16px] font-semibold">{cap.name}</div>
                     {showSampleTag(agent) && <SampleTag />}
                   </div>
                   <div className="text-[12.5px] text-mc-sub">{cap.role}</div>
+                  {cap.desk && <div className="text-[11px] text-mc-sub">{cap.desk}</div>}
                   <div className="mt-2">
                     <StatusChip label={chip} tone={t === 'red' ? 'red' : t === 'green' ? 'green' : 'gray'} />
                   </div>

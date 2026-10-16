@@ -222,6 +222,10 @@ model Setting {
   mission          String   @default("")
   /// Reported by models.snapshot. Null until the bridge has read a version.
   openclawVersion  String?
+  /// crew or own. Null until the first run choice is saved.
+  namingMode       String?
+  /// Agent id to crew seat id. The screen applies it only when namingMode is crew.
+  crewMap          Json?
   updatedAt        DateTime @updatedAt
 }
 

@@ -101,10 +101,9 @@ const url = process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhos
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
 
 // ── Sample data ─────────────────────────────────────────────────────────────
-// Ticket 13: cool name · function, matching roster.ts and the 12 robots.
+// Ticket 13: these sample rows store the crew names themselves.
 // Roles are the lane keys robotAssign already understands, so each agent
-// wears the matching robot. Names are not generic placeholders, so the
-// cards show Speedy / Forge / Aegis rather than a mapped alias.
+// wears the matching robot. The screen does not rename these stored names.
 // Demo agents carry no `channel` (ticket 3 — no hardcoded chat server).
 //
 // LEGACY_AGENT_NAMES renames a previous seed ("Demo Builder" → Forge) when

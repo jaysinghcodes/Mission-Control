@@ -1,0 +1,16 @@
+{
+  "seats": [
+    { "id": "speedy", "name": "Speedy", "role": "Chief of Staff", "desk": "Lead table", "color": "#8d5bff" },
+    { "id": "atlas", "name": "Atlas", "role": "Product", "desk": "Product desk", "color": "#ffc531" },
+    { "id": "forge", "name": "Forge", "role": "Engineer", "desk": "Build desk", "color": "#9bd434" },
+    { "id": "sentinel", "name": "Sentinel", "role": "QA", "desk": "Test desk", "color": "#36b3f5" },
+    { "id": "echo", "name": "Echo", "role": "Research", "desk": "Research desk", "color": "#19c4b4" },
+    { "id": "pixel", "name": "Pixel", "role": "Designer", "desk": "Design desk", "color": "#ff5fa6" },
+    { "id": "bolt", "name": "Bolt", "role": "Ops", "desk": "Ops desk", "color": "#ff8a2b" },
+    { "id": "ledger", "name": "Ledger", "role": "Data", "desk": "Data desk", "color": "#4a6dff" },
+    { "id": "quill", "name": "Quill", "role": "Writer", "desk": "Writing desk", "color": "#d257ef" },
+    { "id": "aegis", "name": "Aegis", "role": "Security", "desk": "Watch desk", "color": "#ff4f5e" },
+    { "id": "patch", "name": "Patch", "role": "Support", "desk": "Help desk", "color": "#2fc56f" },
+    { "id": "scout", "name": "Scout", "role": "Trends", "desk": "Trends desk", "color": "#dfe5f0" }
+  ]
+}

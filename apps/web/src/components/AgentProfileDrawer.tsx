@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import type { Agent } from '../types'
 import { SectionLabel } from './ui'
 import { AgentAvatar } from './AgentAvatar'
-import { channelHref, rosterDisplayName, rosterIdentity } from '../data/roster'
+import { channelHref } from '../lib/channel'
+import { useNaming } from '../lib/naming'
 import { SampleTag } from './rosterMarks'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
 import { useNow } from '../lib/useSampleRoster'
@@ -20,7 +21,7 @@ const statusColor = (status: string) => (status === 'working' ? 'var(--mc-green)
  * display name + role title, live
  * status, personality tags, current task, tasks completed, total cost and
  * recent activity — every field nullable until the bridge pushes it, so all
- * values fall back to '—' and the personality/task rows collapse cleanly.
+ * values fall back to none and the personality and task rows collapse cleanly.
  *
  * Per-agent deep link (bottom): when `channelHref()` resolves a channel
  * (agent.channel from the bridge — a full URL, or a Discord id expanded with
@@ -44,10 +45,10 @@ export function AgentProfileDrawer({
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null)
 
-  // Identity display mirrors the Team cards (roster map, not guessed).
-  const identity = rosterIdentity(agent.name, agent.role)
-  const name = rosterDisplayName(agent.name, agent.role)
-  const roleTitle = identity?.role ?? agent.role ?? 'agent'
+  const naming = useNaming()
+  const presented = naming.present(agent)
+  const name = presented.name
+  const roleTitle = presented.role
   const now = useNow()
   const offline = isRegisteredOffline(agent, now)
   const working = !offline && agent.status === 'working'
@@ -105,12 +106,14 @@ export function AgentProfileDrawer({
           <AgentAvatar agent={offline ? { ...agent, status: 'idle' } : agent} agents={agents} size={1.8} dim={offline} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
+              <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: presented.color }} />
               <div className="truncate text-[16px] font-semibold leading-tight text-mc-text">{name}</div>
               {showSampleTag(agent) && <SampleTag />}
             </div>
             <div className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${chief ? 'text-mc-accent-text' : 'text-mc-sub'}`}>
               {roleTitle}
             </div>
+            {presented.desk && <div className="mt-1 text-[11px] text-mc-sub">{presented.desk}</div>}
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="inline-block h-[6px] w-[6px] rounded-full" style={{ backgroundColor: offline ? 'var(--mc-gray)' : statusColor(agent.status) }} />
               <span className="text-[11px] text-mc-sub">{offline ? OFFLINE_LABEL : working ? 'working' : 'idle'}</span>

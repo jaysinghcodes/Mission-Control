@@ -9,10 +9,10 @@ import type { AgentsResp } from '../types'
 import { PageHeader, SoftCard, Btn, AgentName, Kicker, EmptyState, FieldError } from '../components/shell'
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { OPERATOR_NAME } from '../config'
-import { ROSTER, agentCaption } from '../data/roster'
 import { formatChicagoSaved } from '../lib/chicago-day'
+import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
-import { OFFLINE_LABEL, isRegisteredOffline, orderedPeople, showSampleTag } from '../lib/sample-roster'
+import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
 import { useRosterView } from '../lib/useSampleRoster'
 
 /**
@@ -57,9 +57,10 @@ export default function Team() {
   useWorkLive(events, ticketsQ.refetch, runsQ.refetch)
   const agents = agentsQ.data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
+  const naming = useNaming()
   const tickets = ticketsQ.data?.tickets ?? []
   const runs = runsQ.data?.runs ?? []
-  const people = orderedPeople(roster, ROSTER.map((entry) => entry.name), (agent) => agentCaption(agent.name, agent.role).name)
+  const people = naming.order(roster)
   const liveFor = (agent: (typeof roster)[number]) => deriveLiveWork(agent, tickets, runs)
   const working = roster.filter((a) => liveFor(a).working && !isRegisteredOffline(a, now)).length
   const devices = devicesQ.data?.devices ?? []
@@ -156,7 +157,7 @@ export default function Team() {
           ) : (
             <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-3">
               {people.map((agent) => {
-                const cap = agentCaption(agent.name, agent.role)
+                const cap = naming.present(agent)
                 const offline = isRegisteredOffline(agent, now)
                 const live = liveFor(agent)
                 const line = offline ? OFFLINE_LABEL : live.subtitle
@@ -166,7 +167,7 @@ export default function Team() {
                       <RosterRobot agent={agent} agents={agents} px={36} now={now} status={live.working ? 'working' : 'idle'} />
                       <span className="min-w-0">
                         <span className="flex flex-wrap items-center gap-1">
-                          <AgentName name={agent.name} role={agent.role} size="md" />
+                          <AgentName agent={agent} size="md" />
                           {showSampleTag(agent) && <SampleTag />}
                         </span>
                         {offline ? (
@@ -198,7 +199,7 @@ export default function Team() {
           ) : (
             <div className="mt-3 flex flex-wrap gap-2">
               {people.map((agent) => {
-                const cap = agentCaption(agent.name, agent.role)
+                const cap = naming.present(agent)
                 const offline = isRegisteredOffline(agent, now)
                 const live = liveFor(agent)
                 const line = offline ? OFFLINE_LABEL : live.subtitle

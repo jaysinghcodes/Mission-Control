@@ -3,7 +3,8 @@ import { useLiveActivity } from '../hooks/useLiveActivity'
 import { Card, Chip, PillButton, SectionLabel } from '../components/ui'
 import { AgentAvatar } from '../components/AgentAvatar'
 import { activityRailLine } from '../lib/activity-rail'
-import { rosterDisplayName } from '../data/roster'
+import { findByLabel, presentAgent, type NamingState } from '../lib/crew'
+import { useNaming } from '../lib/naming'
 
 /**
  * Live Activity — real event stream: persisted history on load + live
@@ -29,19 +30,14 @@ function eventSubject(payload: { name?: string; agent?: string; title?: string }
 /** Sticker for a stream row. A roster hit uses the live list (so a numbered
  *  child stays a numbered child). Anything else is a one-off sticker hashed
  *  from the label — not folded into the roster, which would burn a seat. */
-function streamFace(label: string | null, roster: readonly Agent[]): {
+function streamFace(label: string | null, roster: readonly Agent[], state: NamingState): {
   agent: Agent | { id: string; name: string; status: string }
   agents?: readonly Agent[]
   text: string
 } {
   const fallback = label?.trim() || 'openclaw'
-  const key = fallback.toLowerCase()
-  const hit = roster.find((a) =>
-    a.id.toLowerCase() === key ||
-    a.name.toLowerCase() === key ||
-    rosterDisplayName(a.name, a.role).toLowerCase() === key,
-  )
-  if (hit) return { agent: hit, agents: roster, text: rosterDisplayName(hit.name, hit.role) }
+  const hit = findByLabel(roster, fallback, state)
+  if (hit) return { agent: hit, agents: roster, text: presentAgent(hit, state).name }
   return { agent: { id: fallback, name: fallback, status: 'idle' }, text: fallback }
 }
 
@@ -50,12 +46,13 @@ export default function Activity() {
   const history = useApi<ActivityResp>('/activity?limit=40', { pollMs: 10000 })
   const { events, connected } = useLiveActivity()
 
+  const naming = useNaming()
   const roster = agents.data?.agents ?? []
   const stream = [
     ...(history.data?.events ?? []).map((e) => {
       const line = activityRailLine(e, roster)
       if (!line) return null
-      const face = streamFace(line.actor?.name ?? eventSubject(e.payload), roster)
+      const face = streamFace(line.actor?.name ?? eventSubject(e.payload), roster, naming)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
@@ -67,7 +64,7 @@ export default function Activity() {
     ...events.map((e, i) => {
       const line = activityRailLine(e, roster)
       if (!line) return null
-      const face = streamFace(line.actor?.name ?? null, roster)
+      const face = streamFace(line.actor?.name ?? null, roster, naming)
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
