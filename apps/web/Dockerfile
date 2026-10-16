@@ -6,7 +6,8 @@ COPY package.json package-lock.json turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci --workspace web --include-workspace-root
 COPY apps/web ./apps/web
-ARG VITE_API_URL=http://localhost:3000
+# Blank means the browser calls this page. nginx proxies /api and /socket.io.
+ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL
 # Socket handshake token — must match the api's SOCKET_TOKEN (compose passes the
 # same root .env value as a build arg; default dev-socket-token matches compose).

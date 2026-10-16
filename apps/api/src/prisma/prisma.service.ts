@@ -10,12 +10,13 @@ import { PrismaPg } from '@prisma/adapter-pg';
  * that's `postgresql://postgres:postgres@localhost:5432/mission_control`
  * (see prisma.config.ts fallback).
  *
- * Failure policy (fixes GLM review 🔴): if the DB is unreachable at boot we do
- * NOT crash — instead `dbReady` flips to false and /health reports "degraded",
- * so the dashboard shows honest state instead of a silent half-alive app.
+ * If `prisma migrate deploy` cannot reach the database, the process exits.
+ * After migrations apply, a connect failure sets `dbReady` to false and
+ * /health reports degraded, so the dashboard shows that state.
  *
  * Database schema is a security red line (vibe-dev-workflow): migrations are
- * human-reviewed, never auto-applied by the app.
+ * human reviewed. boot.ts runs `prisma migrate deploy` before listen. It
+ * applies those reviewed files. It does not create new migrations.
  */
 @Injectable()
 export class PrismaService

@@ -8,10 +8,13 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
  * Same origin `/api` forwards to the API. The token is read here, on the
  * server, and attached only to writes. It is not defined into the bundle.
  */
+function apiTarget(): string {
+  return (process.env.VITE_API_URL || `http://127.0.0.1:${process.env.PORT || 3000}`).replace(/\/+$/, '')
+}
+
 function apiProxy(): ProxyOptions {
-  const target = (process.env.VITE_API_URL || `http://127.0.0.1:${process.env.PORT || 3000}`).replace(/\/+$/, '')
   return {
-    target,
+    target: apiTarget(),
     changeOrigin: true,
     rewrite: (path) => path.replace(/^\/api/, '') || '/',
     configure: (proxy) => {
@@ -26,7 +29,16 @@ function apiProxy(): ProxyOptions {
   }
 }
 
-const proxy = { '/api': apiProxy() }
+// Same origin. /api is REST (the prefix is stripped). /socket.io is the live
+// feed. The browser does not need VITE_API_URL for `npm run dev`.
+const proxy = {
+  '/api': apiProxy(),
+  '/socket.io': {
+    target: apiTarget(),
+    changeOrigin: true,
+    ws: true,
+  },
+}
 
 // https://vite.dev/config/
 export default defineConfig({

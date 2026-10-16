@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { useApi } from '../hooks/useApi'
 import { OPERATOR_NAME } from '../config'
-import { API_URL } from '../lib/apiBase'
+import { API_URL, apiLabel } from '../lib/apiBase'
 import { isMissionControlHealth, reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
 
 /**
@@ -225,10 +225,10 @@ export default function AppLayout() {
     api.state === 'offline'
       ? { dot: 'var(--mc-red)', label: 'Offline', title: api.lastError ?? 'API unreachable' }
       : api.state === 'unknown'
-        ? { dot: 'var(--mc-gray)', label: 'Connecting…', title: `Contacting ${API_URL}` }
+        ? { dot: 'var(--mc-gray)', label: 'Connecting…', title: `Contacting ${apiLabel()}` }
         : connected
-          ? { dot: 'var(--mc-green)', label: `Connected${ms}`, title: `API ${API_URL} · live feed connected` }
-          : { dot: 'var(--mc-green)', label: `API only${ms}`, title: `API ${API_URL} · live feed reconnecting (pages refresh by polling)` }
+          ? { dot: 'var(--mc-green)', label: `Connected${ms}`, title: `API ${apiLabel()} · live feed connected` }
+          : { dot: 'var(--mc-green)', label: `API only${ms}`, title: `API ${apiLabel()} · live feed reconnecting (pages refresh by polling)` }
 
   const account = OPERATOR_NAME || 'Operator'
   const onTasks = pathname === '/tasks' || pathname === '/tickets' || pathname === '/backlog'
@@ -382,7 +382,7 @@ export default function AppLayout() {
           )}
           {api.state === 'offline' && (
             <div role="alert" className="mx-6 mt-4 shrink-0 rounded-[10px] bg-mc-orangebg px-4 py-2 text-[12.5px] text-mc-orangetext">
-              Can't reach the API at {API_URL} ({api.lastError ?? 'no response'}). Data on this page may be out of date
+              Can't reach the API at {apiLabel()} ({api.lastError ?? 'no response'}). Data on this page may be out of date
               {api.lastOkAt ? ` (last update ${new Date(api.lastOkAt).toLocaleTimeString()})` : ''}; retrying automatically.
             </div>
           )}
