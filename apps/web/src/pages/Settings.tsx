@@ -13,7 +13,7 @@ import type { AgentsResp } from '../types'
 
 /**
  * Settings. Timezone, agent names, and the detected provider.
- * Connection state comes from /health. Log out returns to the setup sheet.
+ * Connection state comes from /health. Log out revokes every session.
  */
 
 interface HealthResp { status: string; uptimeSeconds: number; connectedClients: number; database: string }
@@ -136,9 +136,16 @@ export default function Settings() {
         <div className="mt-3 flex items-center justify-between">
           <div>
             <div className="text-[13.5px] font-medium">Log out</div>
-            <div className="text-[11.5px] text-mc-sub">Disconnect this browser. A remote session returns to the sign in form.</div>
+            <div className="text-[11.5px] text-mc-sub">End this browser and every other session. A remote browser returns to the sign in form.</div>
           </div>
           <PillButton label="Log out" onClick={logout} />
+        </div>
+        <div className="mt-4 flex items-center justify-between border-t border-mc-border pt-4" data-settings-revoke="true">
+          <div>
+            <div className="text-[13.5px] font-medium">Revoke sessions</div>
+            <div className="text-[11.5px] text-mc-sub">End every signed in browser. A copied cookie stops working, including after a restart.</div>
+          </div>
+          <PillButton label="Revoke sessions" onClick={logout} />
         </div>
         </div>
       </Card>

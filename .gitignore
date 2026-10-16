@@ -23,6 +23,9 @@ __pycache__/
 # Demo docs written by npm run seed:demo (DOCS_ROOT). Not source.
 data/docs/
 
+# Session version written at runtime. Not source.
+apps/api/data/session-state.json
+
 # Operator price overrides. config/prices.json is the shipped table.
 config/prices.local.json
 

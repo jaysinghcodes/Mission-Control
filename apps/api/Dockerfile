@@ -52,7 +52,7 @@ COPY --from=build /app/config/crew.json /app/config/crew.json
 WORKDIR /app/apps/api
 EXPOSE 3000
 # Runtime env (DATABASE_URL, PORT, HOST, WEB_ORIGIN, INGEST_TOKEN,
-# DASHBOARD_PASSWORD_HASH, SESSION_SECRET) is injected by docker-compose
+# DASHBOARD_PASSWORD_HASH, SESSION_SECRET, SESSION_STATE_PATH) is injected by docker-compose
 # `environment:`. The image contains no .env file.
 # dist/main.js loads a .env when one is present, then runs prisma migrate deploy.
 CMD ["node", "dist/main.js"]

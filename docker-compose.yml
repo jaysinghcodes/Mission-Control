@@ -70,6 +70,17 @@ services:
       # start because HOST is 0.0.0.0.
       DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
+      # Session version. Logout and a password change bump it here so a
+      # copied cookie stays invalid after a restart. The mc-auth volume
+      # keeps the file when the container is recreated. A stored hash
+      # overrides DASHBOARD_PASSWORD_HASH on startup.
+      SESSION_STATE_PATH: /data/auth/session-state.json
+      # Failed logins per client IP. Blank uses the default in the API:
+      # 5 failures, a 60 second window, then a wait that doubles up to
+      # 900 seconds. Loopback is not limited.
+      LOGIN_FAIL_LIMIT: ${LOGIN_FAIL_LIMIT:-5}
+      LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-60}
+      LOGIN_BACKOFF_MAX_SECONDS: ${LOGIN_BACKOFF_MAX_SECONDS:-900}
       # Leave this empty. The API decides loopback from the socket address.
       # Trusting the Docker bridge would let a browser skip the password.
       TRUSTED_PROXY: ${TRUSTED_PROXY:-}
@@ -108,6 +119,8 @@ services:
       # interpolation), not the container path set just above. `:-` keeps
       # ./data/docs when that variable is unset or empty.
       - ${DOCS_ROOT:-./data/docs}:/data/docs
+      # Session version and a changed password hash. Survives recreate.
+      - mc-auth:/data/auth
       # Host log directory. The same path is OPENCLAW_LOG_DIR inside the container.
       - ${OPENCLAW_LOG_DIR:-/tmp/openclaw}:${OPENCLAW_LOG_DIR:-/tmp/openclaw}
       # Default config is baked into the image. This mount overrides it.
@@ -140,3 +153,4 @@ services:
 
 volumes:
   mc-db:
+  mc-auth:

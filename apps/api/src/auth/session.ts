@@ -5,11 +5,8 @@ import {
   isTrustedProxyPeer,
   requestIsLoopback,
 } from './client-address';
-import {
-  configuredPasswordHash,
-  configuredSessionSecret,
-  passwordMatches,
-} from './password';
+import { configuredSessionSecret, passwordMatches } from './password';
+import { currentSessionVersion, effectivePasswordHash } from './session-state';
 
 export const SESSION_COOKIE = 'mc_session';
 const DEFAULT_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
@@ -71,11 +68,16 @@ export function loginWithPassword(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
   if (typeof password !== 'string') return null;
-  const hash = configuredPasswordHash(env);
+  const hash = effectivePasswordHash(env);
   const secret = configuredSessionSecret(env);
   if (!hash || !secret) return null;
   if (!passwordMatches(password, hash)) return null;
-  return signSession(secret, sessionMaxAgeSeconds(env));
+  return signSession(
+    secret,
+    sessionMaxAgeSeconds(env),
+    Date.now(),
+    currentSessionVersion(env),
+  );
 }
 
 export function validSession(
@@ -83,14 +85,14 @@ export function validSession(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const secret = configuredSessionSecret(env);
-  const hash = configuredPasswordHash(env);
+  const hash = effectivePasswordHash(env);
   if (!secret || !hash) return false;
   const header = Array.isArray(cookieHeader)
     ? cookieHeader.join('; ')
     : cookieHeader;
   const token = readCookie(header, SESSION_COOKIE);
   if (!token) return false;
-  return verifySession(token, secret);
+  return verifySession(token, secret, Date.now(), currentSessionVersion(env));
 }
 
 export function applySessionCookie(
@@ -115,9 +117,14 @@ export function signSession(
   secret: string,
   maxAgeSeconds: number,
   now = Date.now(),
+  version = currentSessionVersion(),
 ): string {
+  // `v` is the session version. Logout and a password change bump it.
   const payload = Buffer.from(
-    JSON.stringify({ exp: Math.floor(now / 1000) + maxAgeSeconds, v: 1 }),
+    JSON.stringify({
+      exp: Math.floor(now / 1000) + maxAgeSeconds,
+      v: version,
+    }),
   ).toString('base64url');
   const sig = createHmac('sha256', secret).update(payload).digest('base64url');
   return `${payload}.${sig}`;
@@ -127,6 +134,7 @@ export function verifySession(
   token: string,
   secret: string,
   now = Date.now(),
+  version = currentSessionVersion(),
 ): boolean {
   const dot = token.indexOf('.');
   if (dot <= 0 || dot !== token.lastIndexOf('.')) return false;
@@ -147,7 +155,10 @@ export function verifySession(
       Buffer.from(payload, 'base64url').toString('utf8'),
     ) as {
       exp?: unknown;
+      v?: unknown;
     };
+    if (typeof body.v !== 'number' || !Number.isInteger(body.v)) return false;
+    if (body.v !== version) return false;
     if (typeof body.exp !== 'number' || !Number.isFinite(body.exp))
       return false;
     return body.exp * 1000 > now;

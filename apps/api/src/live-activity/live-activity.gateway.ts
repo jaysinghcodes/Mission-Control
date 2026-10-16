@@ -83,17 +83,7 @@ export class LiveActivityGateway
    * @param client the connecting socket
    */
   handleConnection(client: Socket): void {
-    const headers = client.handshake.headers ?? {};
-    const cookie = headerValue(headers.cookie);
-    const forwarded = headers['x-forwarded-for'];
-    const allowed = requestLoopback({
-      socket: { remoteAddress: client.handshake.address },
-      headers: {
-        cookie,
-        'x-forwarded-for': forwarded,
-      },
-    });
-    if (!allowed && !validSession(cookie)) {
+    if (!socketAllowed(client)) {
       console.warn('[socket] rejected unauthenticated connection');
       client.disconnect(true);
       return;
@@ -131,14 +121,41 @@ export class LiveActivityGateway
     }
   }
 
+  /**
+   * Drop sockets whose cookie no longer matches the session version.
+   * Loopback stays connected. A revoked remote socket is closed the same
+   * way as a handshake with no cookie.
+   */
+  dropRevokedSockets(): void {
+    const sockets = this.server?.sockets?.sockets;
+    if (!sockets) return;
+    for (const client of sockets.values()) {
+      if (socketAllowed(client)) continue;
+      client.disconnect(true);
+      this.connectedClients.delete(client.id);
+    }
+  }
+
   /** Number of currently connected dashboard clients (for /health). */
   get clientCount(): number {
     return this.connectedClients.size;
   }
 }
 
-function headerValue(value: string | string[] | undefined): string | undefined {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value[0];
-  return undefined;
+function socketAllowed(client: Socket): boolean {
+  const headers = client.handshake?.headers ?? {};
+  const cookie = headers.cookie;
+  const forwarded = headers['x-forwarded-for'];
+  if (
+    requestLoopback({
+      socket: { remoteAddress: client.handshake?.address },
+      headers: {
+        cookie,
+        'x-forwarded-for': forwarded,
+      },
+    })
+  ) {
+    return true;
+  }
+  return validSession(cookie);
 }

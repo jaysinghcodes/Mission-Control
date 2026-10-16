@@ -136,7 +136,21 @@ There are two checks. Dashboard login replaced the old rule that every write use
 
 Loopback is the real socket address (`127.0.0.1`, `::1`, or `127.0.0.0/8`, including IPv4 mapped IPv6). A missing socket address is not loopback. `X-Forwarded-For` is ignored unless the peer address is listed in `TRUSTED_PROXY` (comma separated IPs or IPv4 CIDRs). When that proxy is trusted, the client is the rightmost hop that is not itself trusted. Do not trust the leftmost hop. A client can spoof it.
 
-`POST /auth/login` with JSON `{ "password": "..." }` returns 204 and sets an HttpOnly `mc_session` cookie, or 401 with the body below. `GET /auth/session` returns 200 `{ "authenticated": true or false, "loginRequired": true or false }`. On loopback, `loginRequired` is false and `authenticated` is true. `POST /auth/logout` returns 204 and clears the cookie.
+`POST /auth/login` with JSON `{ "password": "..." }` returns 204 and sets an HttpOnly `mc_session` cookie, or 401 `{"statusCode":401,"message":"unauthorized"}`. After 5 wrong passwords from the same client IP inside 60 seconds, the next attempt returns 429 with a `Retry-After` header, even when the password is right. The first wait is 60 seconds. Each later lockout doubles, up to 15 minutes. Those three numbers are `LOGIN_FAIL_LIMIT`, `LOGIN_WINDOW_SECONDS`, and `LOGIN_BACKOFF_MAX_SECONDS`. A blank or invalid value uses the default. Loopback is not limited. The sign in page says `Too many tries. Try again in a minute.`
+
+`GET /auth/session` returns 200 `{ "authenticated": true or false, "loginRequired": true or false }`. On loopback, `loginRequired` is false and `authenticated` is true. `POST /auth/logout` returns 204 and clears the cookie. When the caller is loopback or sends a valid cookie, it also bumps the session version. A copied cookie then returns 401, including after a restart. A remote logout without a cookie only clears that cookie. It does not bump the version. Open sockets that are not loopback and still present the old cookie are disconnected.
+
+`POST /auth/password` with JSON `{ "currentPassword": "...", "newPassword": "..." }` returns 204 when the current password matches. The new password is 1 to 1024 characters. The route stores the new hash, bumps the session version, and clears the cookie. Every existing session returns 401. Off loopback this route needs a valid session. Loopback does not. A wrong current password is 401 and does not revoke. A missing password is 400 `{ "statusCode": 400, "message": "password required" }`.
+
+The session version and a changed password hash live in `SESSION_STATE_PATH`. The default is `apps/api/data/session-state.json`. Compose sets `/data/auth/session-state.json` on the `mc-auth` volume so a new container keeps the revocation. When that file has a password hash, it overrides `DASHBOARD_PASSWORD_HASH` on startup. Delete the file before you replace the hash in `.env` by hand. The login counters are in memory. A restart clears the wait and keeps the session version.
+
+The 429 body is:
+
+```json
+{"statusCode":429,"message":"Too many tries. Try again in a minute."}
+```
+
+Agent ingest is unchanged. `x-ingest-token` is not counted by the login limit.
 
 `bash install.sh` stores the password as `DASHBOARD_PASSWORD_HASH` (`scrypt:N:r:p:saltHex:keyHex`) and stores `SESSION_SECRET`. It prints the password once. A second run does not replace an existing hash or secret. With no hash, loopback stays open and the process logs one warning. With no hash, or no session secret, on any other bind, the process refuses to start.
 

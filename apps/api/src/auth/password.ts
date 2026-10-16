@@ -8,7 +8,7 @@ export const SCRYPT_P = 1;
 export const SCRYPT_KEY_LEN = 32;
 
 const MAX_N = 262144;
-const MAX_PASSWORD = 1024;
+export const MAX_PASSWORD = 1024;
 
 /**
  * Stored form: scrypt:N:r:p:saltHex:keyHex
