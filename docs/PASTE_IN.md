@@ -12,6 +12,8 @@ When the `openclaw` command is on PATH, the same command installs the bridge sch
 
 The bridge posts each agent provider and model from `~/.openclaw/openclaw.json`. When that file has no model, it runs `openclaw models list`. System shows those rows. With no bridge, the page says "No providers found yet. Run the bridge to detect them."
 
+Usage prices session tokens from `config/prices.json`. Copy a model into `config/prices.local.json` to change that price without a rebuild. A provider `costUsd` wins when OpenClaw reports one. Ollama costs $0.00. A model with no price shows `Price not set`.
+
 ## Report the URL
 
 Tell your operator the URL the installer printed. Say that `INGEST_TOKEN` and `SOCKET_TOKEN` live in `.env`. If doctor prints a failing line, include that line. A missing OpenClaw command is an info line. When a schedule is installed, a sync older than `MC_BRIDGE_STALE_SECONDS` fails doctor.

@@ -1,12 +1,12 @@
 import { wireText } from '../wire-text';
 import {
-  USAGE_DISPLAY_TZ,
   calendarDay,
   mergeProviders,
   providerList,
   shiftCalendarDay,
   type UsageProvider,
 } from './aggregate-usage';
+import { usageTimeZone } from './zone-time';
 
 /** How many days a first connect may write. Older points in one payload are dropped. */
 export const USAGE_BACKFILL_DAYS = 30;
@@ -70,20 +70,21 @@ export function pointsFromPayload(payload: Record<string, unknown>) {
 }
 
 /**
- * Group points onto America/Chicago days.
+ * Group points onto calendar days in `timeZone` (the API process zone by default).
  * Only the last 30 days through today are kept. A point after `now` is dropped.
  */
 export function usageBucketsFromPayload(
   payload: Record<string, unknown>,
   now: Date = new Date(),
+  timeZone: string = usageTimeZone(),
 ): UsageBucketWrite[] {
   const nowMs = now.getTime();
-  const today = calendarDay(now, USAGE_DISPLAY_TZ);
+  const today = calendarDay(now, timeZone);
   const oldest = shiftCalendarDay(today, -(USAGE_BACKFILL_DAYS - 1));
   const byDay = new Map<string, UsageBucketWrite>();
   for (const point of pointsFromPayload(payload)) {
     if (point.at.getTime() > nowMs) continue;
-    const day = calendarDay(point.at, USAGE_DISPLAY_TZ);
+    const day = calendarDay(point.at, timeZone);
     if (day < oldest || day > today) continue;
     const prev = byDay.get(day);
     if (!prev) {

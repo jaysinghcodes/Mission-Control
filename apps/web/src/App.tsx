@@ -13,6 +13,7 @@ import Memory from './pages/Memory'
 import Docs from './pages/Docs'
 import Team from './pages/Team'
 import System from './pages/System'
+import Usage from './pages/Usage'
 
 /**
  * Ticket 13 routes. Old paths redirect to the page that replaced them so a
@@ -50,8 +51,8 @@ function App() {
           <Route path="/team" element={<Team />} />
           <Route path="/system" element={<System />} />
           <Route path="/system/:panel" element={<System />} />
+          <Route path="/usage" element={<Usage />} />
           <Route path="/health" element={<Navigate to="/system" replace />} />
-          <Route path="/usage" element={<Navigate to="/system" replace />} />
           <Route path="/logs" element={<Navigate to="/system/logs" replace />} />
           <Route path="/sessions" element={<Navigate to="/system/sessions" replace />} />
           <Route path="/settings" element={<Navigate to="/system/settings" replace />} />

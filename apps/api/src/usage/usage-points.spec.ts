@@ -26,6 +26,27 @@ describe('usageBucketsFromPayload', () => {
     expect(rows[0].totalCost).toBe(1.5);
   });
 
+  it('buckets the same instant on the server zone, not America/Chicago', () => {
+    const payload = {
+      points: [
+        {
+          at: '2026-10-10T03:30:00.000Z',
+          totalCost: 1,
+          tokensIn: 2,
+          tokensOut: 3,
+          providers: [],
+        },
+      ],
+    };
+    const now = new Date('2026-10-10T12:00:00.000Z');
+    expect(usageBucketsFromPayload(payload, now, 'UTC')[0].day).toBe(
+      '2026-10-10',
+    );
+    expect(
+      usageBucketsFromPayload(payload, now, 'America/Chicago')[0].day,
+    ).toBe('2026-10-09');
+  });
+
   it('keeps only the last 30 days through today', () => {
     const points = [];
     for (let i = 0; i < 40; i++) {

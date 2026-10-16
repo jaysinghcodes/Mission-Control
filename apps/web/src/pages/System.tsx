@@ -19,8 +19,9 @@ import CustomTools from './CustomTools'
  * System. Health, models and spend, and the old observe pages behind a click.
  * Today / last 7 days / month to date read GET /usage?period=24h|7d|month.
  * Those windows are sums of daily points. Today is the calendar day in
- * Central Time. A short range shows the API note (for example
+ * the API process timezone. A short range shows the API note (for example
  * "Showing 3 days of data so far") and only the days that were collected.
+ * Dollars come from the price table unless OpenClaw reported a cost.
  */
 
 interface HealthResp {
@@ -56,7 +57,8 @@ interface ModelsResp { models?: ModelRow[] }
 interface Provider {
   name?: string
   model?: string
-  cost?: number
+  cost?: number | null
+  priceLabel?: string | null
   tokensIn?: number
   tokensOut?: number
   agents?: string[]
@@ -64,6 +66,7 @@ interface Provider {
 interface Usage {
   period: string
   totalCost: number
+  priceLabel?: string | null
   tokensIn: number
   tokensOut: number
   providers: Provider[] | Record<string, Provider> | null
@@ -98,7 +101,8 @@ function ingestFact(iso: string | null | undefined): { value: string; ok: boolea
   return { value: `Last ingest ${when}`, ok: age < STALE_MS }
 }
 
-function money(n: number | undefined): string {
+function money(n: number | null | undefined, label?: string | null): string {
+  if (label === 'Price not set') return 'Price not set'
   if (typeof n !== 'number' || !Number.isFinite(n)) return 'No data'
   if (n === 0) return '$0'
   return `$${n.toFixed(2)}`
@@ -333,7 +337,7 @@ export default function System() {
       {!any && (day.data || week.data || month.data) && (
         <EmptyState
           title="No model spend yet"
-          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. Today, the last 7 days, and the month to date stay empty until a daily point exists. A per model price override is not part of this build."
+          body="The bridge is not posting usage. Connect OpenClaw (bridge/mc-bridge-sync.py) or run npm run seed:demo. Today, the last 7 days, and the month to date stay empty until a daily point exists."
         />
       )}
       {!day.data && !week.data && !month.data && (
@@ -350,7 +354,7 @@ export default function System() {
               return (
                 <button key={p.id} type="button" onClick={() => setPeriod(i)} className={`rounded-xl px-3 py-2 text-left ${on ? 'bg-mc-sel' : ''}`}>
                   <div className="text-[12.5px] font-semibold text-mc-sub">{p.label}</div>
-                  <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost) : 'No data'}</div>
+                  <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost, snap.priceLabel) : 'No data'}</div>
                   <div className="text-[12.5px] text-mc-sub">{tok === null ? 'No data yet' : tokenWords(tok)}</div>
                 </button>
               )
@@ -371,7 +375,7 @@ export default function System() {
                   <div key={model} className="border-t border-mc-sep px-4 py-3">
                     <button type="button" onClick={() => setModelOpen(open ? null : model)} className="text-left">
                       <div className="text-[14.5px] font-semibold break-words">{model}</div>
-                      <div className="text-[12px] text-mc-sub">{focus?.name || 'session'} · OpenClaw cost</div>
+                      <div className="text-[12px] text-mc-sub">{focus?.name || 'session'}</div>
                     </button>
                     <div className="mt-1 flex items-center gap-1">
                       {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
@@ -382,7 +386,7 @@ export default function System() {
                         <div key={p.id} className="flex items-baseline justify-between gap-4 text-[13px]">
                           <span className="shrink-0">{p.label}</span>
                           <span className={`shrink-0 whitespace-nowrap tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
-                            {cells[i] ? money(cells[i]?.cost) : 'No data'}
+                            {cells[i] ? money(cells[i]?.cost, cells[i]?.priceLabel) : 'No data'}
                           </span>
                         </div>
                       ))}
@@ -393,7 +397,7 @@ export default function System() {
                     </div>
                     {open && (
                       <p className="mt-3 text-[13px] text-mc-sub">
-                        Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Today is the calendar day in Central Time. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
+                        Cost is tokens times the price table, unless OpenClaw reports a cost. Ollama and any local provider are $0. Days follow the server clock. Open Usage for each day, bot, and model.
                       </p>
                     )}
                   </div>
@@ -423,7 +427,7 @@ export default function System() {
                           <td className="px-4 py-3">
                             <button type="button" onClick={() => setModelOpen(open ? null : model)} className="text-left">
                               <div className="whitespace-nowrap text-[14.5px] font-semibold">{model}</div>
-                              <div className="text-[12px] text-mc-sub">{focus?.name || 'session'} · OpenClaw cost</div>
+                              <div className="text-[12px] text-mc-sub">{focus?.name || 'session'}</div>
                             </button>
                             <div className="mt-1 flex items-center gap-1">
                               {who.slice(0, 4).map((a) => <Face key={a.id} agent={a} agents={roster} px={28} />)}
@@ -433,14 +437,14 @@ export default function System() {
                           <td className="whitespace-nowrap px-4 py-3 text-right text-[14px]">{tokens((focus?.tokensIn ?? 0) + (focus?.tokensOut ?? 0))}</td>
                           {cells.map((c, i) => (
                             <td key={PERIODS[i].id} className={`whitespace-nowrap px-4 py-3 text-right text-[14px] tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
-                              {c ? money(c.cost) : 'No data'}
+                              {c ? money(c.cost, c.priceLabel) : 'No data'}
                             </td>
                           ))}
                         </tr>
                         {open && (
                           <tr className="border-t border-mc-sep bg-mc-bg">
                             <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
-                              Estimated from session counters in the {PERIODS[period].label.toLowerCase()} window. Today is the calendar day in Central Time. Month to date is the calendar month in Central Time. A long session counts on the day of its last activity. This build does not store a per token price.
+                              Cost is tokens times the price table, unless OpenClaw reports a cost. Ollama and any local provider are $0. Days follow the server clock. Open Usage for each day, bot, and model.
                             </td>
                           </tr>
                         )}
@@ -452,8 +456,8 @@ export default function System() {
             </div>
           </div>
           <p className="px-4 py-3 text-[12.5px] text-mc-sub">
-            Estimates use the cost OpenClaw reports for each session. Showing <span className="font-semibold text-mc-text">{PERIODS[period].label}</span>
-            {selected ? ` · ${money(selected.totalCost)}` : ''}.
+            Costs use the price table unless OpenClaw reports one. Showing <span className="font-semibold text-mc-text">{PERIODS[period].label}</span>
+            {selected ? ` · ${money(selected.totalCost, selected.priceLabel)}` : ''}.
           </p>
         </SoftCard>
       )}

@@ -1,17 +1,18 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  USAGE_DISPLAY_TZ,
-  aggregateUsage,
-  type UsageProvider,
-} from './aggregate-usage';
+import { aggregateUsage, type UsageProvider } from './aggregate-usage';
+import { applyUsagePrices } from './price-usage';
+import { loadPriceTable, type PriceTable } from './prices';
 import { usagePeriodLabel } from './period-window';
+import { usageTimeZone } from './zone-time';
 
 /**
- * UsageController — spend for System.
+ * UsageController: cost so far.
  *
  * Rows are daily buckets. Today (`24h`), `7d`, and `month` are summed here.
- * Today is the calendar day in America/Chicago. The bridge does not post those totals.
+ * The day is the calendar day in the API process timezone until Launch 8.
+ * Dollars are tokens times config/prices.json, unless the provider sent costUsd.
+ * The price files are read on each request.
  */
 @Controller('usage')
 export class UsageController {
@@ -22,7 +23,16 @@ export class UsageController {
     return this.read(period, Date.now());
   }
 
-  async read(period: string, now: number) {
+  async read(
+    period: string,
+    now: number,
+    opts?: {
+      timeZone?: string;
+      prices?: PriceTable;
+      localProviders?: ReadonlySet<string>;
+    },
+  ) {
+    const timeZone = opts?.timeZone ?? usageTimeZone();
     const rows = await this.prisma.usageBucket.findMany();
     const agg = aggregateUsage(
       rows.map((row) => ({
@@ -34,17 +44,37 @@ export class UsageController {
       })),
       period,
       now,
-      USAGE_DISPLAY_TZ,
+      timeZone,
     );
+    const priced =
+      agg.rawLines.length === 0
+        ? agg
+        : applyUsagePrices(
+            agg,
+            opts?.prices ?? loadPriceTable(),
+            opts?.localProviders ?? (await this.localProviders()),
+          );
     return {
-      usage: agg.usage,
-      days: agg.days,
-      note: agg.note,
-      daysCovered: agg.daysCovered,
-      daysExpected: agg.daysExpected,
+      usage: priced.usage,
+      days: priced.days,
+      note: priced.note,
+      daysCovered: priced.daysCovered,
+      daysExpected: priced.daysExpected,
       ts: now,
       label: usagePeriodLabel(period),
-      windowStart: agg.windowStart,
+      windowStart: priced.windowStart,
+      timeZone,
     };
+  }
+
+  private async localProviders(): Promise<Set<string>> {
+    const rows = await this.prisma.modelConfig.findMany({
+      select: { provider: true, local: true },
+    });
+    const names = new Set<string>();
+    for (const row of rows) {
+      if (row.local) names.add(row.provider.trim().toLowerCase());
+    }
+    return names;
   }
 }

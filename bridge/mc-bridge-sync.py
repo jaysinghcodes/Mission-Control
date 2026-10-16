@@ -305,7 +305,8 @@ def map_sessions(rows: List[Dict[str, Any]], now_ms: int) -> List[Dict[str, Any]
             "_updatedMs": updated,
             "_in": first(s, "inputTokens") or 0,
             "_out": first(s, "outputTokens") or 0,
-            "_cost": first(s, "costUsd", "estimatedCostUsd", "cost") or 0,
+            # None when the session did not report a cost. Zero is a real report.
+            "_cost": _optional_cost(first(s, "costUsd", "estimatedCostUsd", "cost")),
         })
     return out
 
@@ -422,6 +423,34 @@ def read_openclaw_config(path: Path) -> Optional[Dict[str, Any]]:
     return raw
 
 
+def local_provider_names(cfg: Optional[Dict[str, Any]]) -> Set[str]:
+    """Ollama, plus any provider the config marks local or talks to with the ollama API."""
+    names = {"ollama"}
+    if not isinstance(cfg, dict):
+        return names
+    models = cfg.get("models") if isinstance(cfg.get("models"), dict) else {}
+    providers = models.get("providers") if isinstance(models.get("providers"), dict) else None
+    if providers is None and isinstance(cfg.get("providers"), dict):
+        providers = cfg["providers"]
+    if not isinstance(providers, dict):
+        return names
+    for name, body in providers.items():
+        key = str(name).strip().lower()
+        if not key or not isinstance(body, dict):
+            continue
+        if body.get("local") is True:
+            names.add(key)
+        api = body.get("api")
+        if isinstance(api, str) and api.strip().lower() == "ollama":
+            names.add(key)
+    return names
+
+
+def _flag_local(row: Dict[str, Any], names: Set[str]) -> None:
+    provider = str(row.get("provider") or "").strip().lower()
+    row["local"] = provider in names
+
+
 def split_model_ref(ref: str) -> Optional[Tuple[str, str]]:
     """`provider/model`. The model id may itself contain slashes."""
     text = ref.strip()
@@ -506,6 +535,9 @@ def models_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         row = _agent_model_row("main", {}, default_ref, used)
         if row:
             rows.append(row)
+    names = local_provider_names(cfg)
+    for row in rows:
+        _flag_local(row, names)
     version = None
     meta = cfg.get("meta")
     if isinstance(meta, dict):
@@ -607,6 +639,7 @@ def collect_models(src: Sources, from_dir: Optional[Path]) -> Optional[Dict[str,
     """
     path = config_path_for(from_dir)
     file_ok = False
+    cfg: Optional[Dict[str, Any]] = None
     payload: Dict[str, Any]
     if path is not None and path.is_file():
         cfg = read_openclaw_config(path)
@@ -631,6 +664,10 @@ def collect_models(src: Sources, from_dir: Optional[Path]) -> Optional[Dict[str,
     if not payload.get("openclawVersion"):
         payload.pop("openclawVersion", None)
     payload["models"] = payload.get("models") or []
+    names = local_provider_names(cfg) if file_ok else {"ollama"}
+    for row in list(payload["agents"]) + list(payload["models"]):
+        if isinstance(row, dict):
+            _flag_local(row, names)
     return {
         "agents": payload["agents"],
         "models": payload["models"],
@@ -902,10 +939,11 @@ def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[T
 
 
 # Session counters are cumulative. The first sync places each session on the
-# America/Chicago day of its last activity, up to 30 days back, when that
+# local calendar day of its last activity, up to 30 days back, when that
 # timestamp exists. Later syncs post only the increase, on the day of the
 # sync. Sessions with no timestamp are collected on the sync day only.
-# The payload is daily points. It does not include a 7d or month total.
+# The API stores the day again in the server timezone. The payload is daily
+# points. It does not include a 7d or month total.
 USAGE_BACKFILL_DAYS = 30
 
 
@@ -916,14 +954,32 @@ def _usage_num(v: Any) -> float:
         return 0.0
 
 
+def _optional_cost(v: Any) -> Optional[float]:
+    """A reported dollar amount, including zero. Missing and non numbers stay None."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if n != n:
+        return None
+    return n
+
+
 def _iso_utc_ms(ms: int) -> str:
     dt = datetime.datetime.fromtimestamp(ms / 1000.0, datetime.timezone.utc).replace(microsecond=0)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _chicago_day_ms(ms: int) -> str:
-    dt = datetime.datetime.fromtimestamp(ms / 1000.0, datetime.timezone.utc)
-    return chicago_day_of(dt)
+def _zone_day_ms(ms: int, tz: datetime.tzinfo) -> str:
+    dt = datetime.datetime.fromtimestamp(ms / 1000.0, datetime.timezone.utc).astimezone(tz)
+    return dt.date().isoformat()
+
+
+def _local_tz() -> datetime.tzinfo:
+    tz = datetime.datetime.now().astimezone().tzinfo
+    return tz if tz is not None else datetime.timezone.utc
 
 
 def _shift_day(day: str, delta: int) -> str:
@@ -931,7 +987,7 @@ def _shift_day(day: str, delta: int) -> str:
     return (datetime.date(year, month, date) + datetime.timedelta(days=delta)).isoformat()
 
 
-def _recent_chicago_days(today: str, n: int = USAGE_BACKFILL_DAYS) -> set:
+def _recent_days(today: str, n: int = USAGE_BACKFILL_DAYS) -> set:
     return {_shift_day(today, -i) for i in range(n)}
 
 
@@ -939,41 +995,105 @@ def _blank_usage_day(at_ms: int) -> Dict[str, Any]:
     return {"at": _iso_utc_ms(at_ms), "totalCost": 0.0, "tokensIn": 0, "tokensOut": 0, "providers": []}
 
 
-def _add_usage_provider(providers: List[Dict[str, Any]], model: str, cost: float, tin: float, tout: float) -> None:
+def _split_model(model: str) -> Tuple[str, str]:
+    text = model.strip()
+    if "/" in text:
+        provider, rest = text.split("/", 1)
+        provider = provider.strip()
+        rest = rest.strip()
+        if provider and rest:
+            return provider, text
+    return text, text
+
+
+def _line_has_cost(row: Dict[str, Any]) -> bool:
+    value = row.get("costUsd")
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _add_usage_line(
+    providers: List[Dict[str, Any]],
+    bot: str,
+    model: str,
+    cost: Optional[float],
+    tin: float,
+    tout: float,
+    local_names: Set[str],
+) -> None:
+    """Add one run.
+
+    Rows merge only when both reported a cost or neither did. A costUsd
+    covers that run alone. Tokens with no cost stay on their own row so the
+    API can price them from the table and then add the reported cost.
+    """
+    if cost is None and tin == 0 and tout == 0:
+        return
     if cost == 0 and tin == 0 and tout == 0:
         return
-    name = model.split("/", 1)[0] if "/" in model else model
+    provider, full_model = _split_model(model)
+    local = provider.lower() in local_names
+    incoming_has_cost = cost is not None
     for row in providers:
-        if row.get("model") == model:
-            row["cost"] = round(float(row.get("cost") or 0) + cost, 4)
+        if (
+            row.get("model") == full_model
+            and row.get("bot") == bot
+            and _line_has_cost(row) == incoming_has_cost
+        ):
             row["tokensIn"] = int(row.get("tokensIn") or 0) + int(tin)
             row["tokensOut"] = int(row.get("tokensOut") or 0) + int(tout)
+            if cost is not None:
+                prev = row.get("costUsd")
+                base = float(prev) if isinstance(prev, (int, float)) and not isinstance(prev, bool) else 0.0
+                row["costUsd"] = round(base + cost, 6)
+            if local:
+                row["local"] = True
             return
-    providers.append({
-        "name": name,
-        "model": model,
-        "cost": round(cost, 4),
+    line: Dict[str, Any] = {
+        "name": provider,
+        "provider": provider,
+        "model": full_model,
+        "bot": bot,
         "tokensIn": int(tin),
         "tokensOut": int(tout),
-    })
+        "agents": [bot] if bot else [],
+    }
+    if cost is not None:
+        line["costUsd"] = round(cost, 6)
+    if local:
+        line["local"] = True
+    providers.append(line)
+
+
+def _cost_delta(current: Optional[float], previous: Any) -> Optional[float]:
+    if current is None:
+        return None
+    base = previous if isinstance(previous, (int, float)) and not isinstance(previous, bool) else 0.0
+    return max(0.0, current - float(base))
 
 
 def usage_points_from_sessions(
     sessions: List[Dict[str, Any]],
     now_ms: int,
     prior: Optional[Dict[str, Any]] = None,
+    local_names: Optional[Set[str]] = None,
+    tz: Optional[datetime.tzinfo] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Build `{points: [...]}` and the usage state to keep for the next run.
 
     `prior` is the `_mcUsage` object from the bridge state file, or None on
-    the first connect. The returned payload has no period total.
+    the first connect. The returned payload has no period total. Days follow
+    `tz` (the machine zone when omitted). costUsd is omitted when the session
+    did not report one.
     """
     prior = prior if isinstance(prior, dict) else {}
-    seen: Dict[str, Dict[str, float]] = {}
+    names = local_names if local_names is not None else {"ollama"}
+    zone = tz if tz is not None else _local_tz()
+    seen: Dict[str, Dict[str, Any]] = {}
     for key, value in (prior.get("seen") or {}).items():
         if isinstance(value, dict):
+            raw_cost = value.get("cost")
             seen[str(key)] = {
-                "cost": _usage_num(value.get("cost")),
+                "cost": None if raw_cost is None else _usage_num(raw_cost),
                 "in": _usage_num(value.get("in")),
                 "out": _usage_num(value.get("out")),
             }
@@ -989,8 +1109,8 @@ def usage_points_from_sessions(
             "providers": [dict(p) for p in (value.get("providers") or []) if isinstance(p, dict)],
         }
     started = bool(prior.get("started"))
-    today = _chicago_day_ms(now_ms)
-    allowed = _recent_chicago_days(today)
+    today = _zone_day_ms(now_ms, zone)
+    allowed = _recent_days(today)
 
     def ensure(day: str, at_ms: int) -> Optional[Dict[str, Any]]:
         if day not in allowed:
@@ -1004,38 +1124,41 @@ def usage_points_from_sessions(
             bucket["at"] = stamp
         return bucket
 
-    def add(day: str, at_ms: int, model: str, cost: float, tin: float, tout: float) -> None:
+    def add(day: str, at_ms: int, bot: str, model: str, cost: Optional[float], tin: float, tout: float) -> None:
         bucket = ensure(day, at_ms)
         if bucket is None:
             return
-        bucket["totalCost"] = round(float(bucket["totalCost"]) + cost, 4)
+        if cost is not None:
+            bucket["totalCost"] = round(float(bucket["totalCost"]) + cost, 6)
         bucket["tokensIn"] = int(bucket["tokensIn"]) + int(tin)
         bucket["tokensOut"] = int(bucket["tokensOut"]) + int(tout)
-        _add_usage_provider(bucket["providers"], model, cost, tin, tout)
+        _add_usage_line(bucket["providers"], bot, model, cost, tin, tout, names)
 
     for s in sessions:
         name = str(s.get("name") or s.get("model") or "session")
         model = str(s.get("model") or "unknown")
-        cost = _usage_num(s.get("_cost"))
+        bot = str(s.get("agent") or "No bot")
+        cost = _optional_cost(s.get("_cost"))
         tin = _usage_num(s.get("_in"))
         tout = _usage_num(s.get("_out"))
         updated = s.get("_updatedMs")
         prev = seen.get(name)
         if not started or prev is None:
             if isinstance(updated, (int, float)) and not isinstance(updated, bool) and updated > 0:
-                day = _chicago_day_ms(int(updated))
+                day = _zone_day_ms(int(updated), zone)
                 at_ms = int(updated)
             else:
                 day = today
                 at_ms = now_ms
             if day in allowed:
-                add(day, at_ms, model, cost, tin, tout)
+                add(day, at_ms, bot, model, cost, tin, tout)
         else:
             add(
                 today,
                 now_ms,
+                bot,
                 model,
-                max(0.0, cost - prev["cost"]),
+                _cost_delta(cost, prev.get("cost")),
                 max(0.0, tin - prev["in"]),
                 max(0.0, tout - prev["out"]),
             )
@@ -1051,7 +1174,10 @@ def usage_points_from_sessions(
             "totalCost": round(float(bucket["totalCost"]), 4),
             "tokensIn": int(bucket["tokensIn"]),
             "tokensOut": int(bucket["tokensOut"]),
-            "providers": sorted(bucket["providers"], key=lambda row: str(row.get("model") or "")),
+            "providers": sorted(
+                bucket["providers"],
+                key=lambda row: (str(row.get("bot") or ""), str(row.get("model") or "")),
+            ),
         })
     return {"points": points}, {"started": True, "seen": seen, "days": days}
 
@@ -1650,7 +1776,15 @@ def main() -> int:
         events.extend(run_events)
 
     if sessions is not None:
-        usage_payload, usage_state = usage_points_from_sessions(sessions, now_ms, state.get("_mcUsage"))
+        local_names = {"ollama"}
+        cfg_path = config_path_for(args.from_dir)
+        if cfg_path is not None and cfg_path.is_file():
+            usage_cfg = read_openclaw_config(cfg_path)
+            if isinstance(usage_cfg, dict):
+                local_names = local_provider_names(usage_cfg)
+        usage_payload, usage_state = usage_points_from_sessions(
+            sessions, now_ms, state.get("_mcUsage"), local_names
+        )
         state["_mcUsage"] = usage_state
         if usage_payload["points"]:
             events.append(("usage.snapshot", usage_payload))

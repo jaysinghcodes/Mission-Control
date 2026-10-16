@@ -15,9 +15,9 @@
  *   - a sample mission statement and 3 devices (ticket 7)
  *   - 1 experimental custom tool (ticket 10; a prompt template only — the
  *     seed does not run it, and a test run never calls out of the app)
- *   - 30 America/Chicago days of usage so System Today, 7 day, and month
- *     views are populated on a fresh database. Today's row is stamped at
- *     seed time. The amounts depend on the date.
+ *   - 30 server timezone days of usage so Usage, and System Today, 7 day,
+ *     and month views are populated on a fresh database. Today's row is
+ *     stamped at seed time. Dollars come from config/prices.json on read.
  *
  * IDEMPOTENT — safe to run any number of times:
  *   - Every row has a FIXED id (prefix `demo-`) or a unique natural key
@@ -389,8 +389,9 @@ async function main(): Promise<void> {
     data: { payload: { name: 'Deploy preview DEMO-4', kind: 'exec', agent: 'Aegis', ticket: 'DEMO-4' } },
   });
 
-  // Thirty Chicago days of usage. update: {} so a bridge bucket already
-  // stored for that day is left alone. A fresh database gets every day.
+  // Thirty server timezone days of usage. update: {} so a bridge bucket
+  // already stored for that day is left alone. A fresh database gets every day.
+  // Dollars are not stored. GET /usage prices the tokens.
   for (const u of demoUsageBuckets(new Date())) {
     const before = await prisma.usageBucket.findUnique({ where: { day: u.day }, select: { id: true } });
     await prisma.usageBucket.upsert({

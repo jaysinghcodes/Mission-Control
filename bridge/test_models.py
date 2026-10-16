@@ -35,6 +35,9 @@ class ModelsSnapshotTest(unittest.TestCase):
         self.assertEqual(router["model"], "anthropic/claude-sonnet-4-6")
         self.assertEqual(payload["openclawVersion"], "2026.10.15")
         self.assertEqual(payload["models"], [])
+        flags = {row["provider"]: row["local"] for row in payload["agents"]}
+        self.assertTrue(flags["ollama"])
+        self.assertFalse(flags["openai"])
 
     def test_json5_comments_and_trailing_commas(self):
         mod = load()

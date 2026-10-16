@@ -69,6 +69,7 @@ const NAV: { label: string; items: { label: string; path: string }[] }[] = [
       { label: 'Memory', path: '/memory' },
       { label: 'Docs', path: '/docs' },
       { label: 'Team', path: '/team' },
+      { label: 'Usage', path: '/usage' },
       { label: 'System', path: '/system' },
     ],
   },
