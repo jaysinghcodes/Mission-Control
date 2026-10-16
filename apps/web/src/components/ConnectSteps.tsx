@@ -184,6 +184,7 @@ export const STEP_DATA: ConnectStep[] = [
     // instead of a private per-machine cron script. Text-only change.
     body: [
       'Optional. Skip this step when OpenClaw is not installed. `bash install.sh` skips the bridge schedule in that case and that step still exits 0. `npm run seed:demo` does not need OpenClaw.',
+      'Paste `docs/PASTE_IN.md` into OpenClaw and say yes. That file runs `bash install.sh`, reports the URL the installer prints, then registers and sends a heartbeat. It does not start the OpenClaw gateway. The 401 line is in `docs/API.md`.',
       'When the openclaw command is on PATH, `bash install.sh` installs the schedule: a systemd user timer on Linux, cron if that timer is not available, or launchd on macOS. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The job runs `bridge/mc-bridge-sync.py` with `MC_BRIDGE_REGISTER` (default 1). Remove it with `bash install.sh --uninstall-schedule`.',
       'The bridge is `bridge/mc-bridge-sync.py` (Python 3, stdlib only). It reads OpenClaw through the openclaw command and POSTs agents, sessions, calendar, usage, and approvals snapshots plus `run.*` events. The API URL comes from `MC_API_URL`, then the API port.',
       'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events. Every other write route checks that same header. Set it explicitly. The bridge refuses a blank token. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). With no schedule, that age is an info line.',
@@ -193,7 +194,11 @@ export const STEP_DATA: ConnectStep[] = [
     commands: [
       { label: 'Preview, then sync once', cmd: 'python3 bridge/mc-bridge-sync.py --dry-run\npython3 bridge/mc-bridge-sync.py' },
     ],
-    links: [{ label: 'bridge/README.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/bridge/README.md', external: true }],
+    links: [
+      { label: 'docs/PASTE_IN.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/docs/PASTE_IN.md', external: true },
+      { label: 'docs/API.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/docs/API.md#41-auth', external: true },
+      { label: 'bridge/README.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/bridge/README.md', external: true },
+    ],
     confirmable: true,
   },
   {
