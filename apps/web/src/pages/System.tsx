@@ -3,7 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { useApiStatus } from '../lib/apiStatus'
 import { PageHeader, Segmented, SoftCard, StatusChip, Face, Kicker, EmptyState } from '../components/shell'
-import { agentCaption } from '../data/roster'
+import { findByLabel, type NamingState } from '../lib/crew'
+import { useNaming } from '../lib/naming'
 import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
@@ -188,6 +189,7 @@ export default function System() {
   const sessions = useApi<{ sessions: { agent: string; model: string | null }[] }>('/sessions', { pollMs: 30000 })
   const activity = useApi<{ events: EventApi[] }>('/activity?limit=30', { pollMs: 20000 })
   const api = useApiStatus()
+  const naming = useNaming()
   const [showSampleBots, setShowSampleBots] = useShowSampleBots()
   const [period, setPeriod] = useState(2)
   const [modelOpen, setModelOpen] = useState<string | null>(null)
@@ -369,7 +371,7 @@ export default function System() {
               {models.map((model) => {
                 const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
                 const focus = cells[period]
-                const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
+                const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [], naming)
                 const open = modelOpen === model
                 return (
                   <div key={model} className="border-t border-mc-sep px-4 py-3">
@@ -419,7 +421,7 @@ export default function System() {
                   {models.map((model) => {
                     const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
                     const focus = cells[period]
-                    const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
+                    const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [], naming)
                     const open = modelOpen === model
                     return (
                       <Fragment key={model}>
@@ -466,7 +468,7 @@ export default function System() {
       {issue?.line ? (
         <SoftCard className="flex flex-wrap items-center gap-3 px-4 py-3">
           <Face
-            agent={roster.find((a) => a.id === issue.line?.actor?.id || a.name === issue.line?.actor?.name) ?? { id: 'issue', name: issue.line.actor?.name || 'Scout', role: null, status: 'idle' }}
+            agent={naming.find(roster, issue.line?.actor?.id) ?? naming.find(roster, issue.line?.actor?.name) ?? { id: 'issue', name: issue.line.actor?.name || 'Agent', role: null, status: 'idle' }}
             agents={roster}
             px={34}
           />
@@ -507,13 +509,13 @@ function Fact({ label, value, ok = true, wrap = false }: { label: string; value:
   )
 }
 
-function agentsFor(model: string, provider: Provider | undefined, roster: Agent[], sessions: { agent: string; model: string | null }[]): Agent[] {
+function agentsFor(model: string, provider: Provider | undefined, roster: Agent[], sessions: { agent: string; model: string | null }[], state: NamingState): Agent[] {
   const named = provider?.agents ?? []
   const fromSessions = sessions.filter((s) => s.model && (s.model === model || s.model.endsWith(`/${model}`) || model.endsWith(s.model))).map((s) => s.agent)
   const keys = [...named, ...fromSessions]
   const out: Agent[] = []
   for (const key of keys) {
-    const hit = roster.find((a) => a.name === key || agentCaption(a.name, a.role).name === key)
+    const hit = findByLabel(roster, key, state)
     if (hit && !out.some((a) => a.id === hit.id)) out.push(hit)
   }
   return out

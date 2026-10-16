@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Kicker, Face, AgentName, EmptyState, FieldError } from '../components/shell'
-import { agentCaption } from '../data/roster'
+import { useNaming } from '../lib/naming'
 import type { Agent, AgentsResp } from '../types'
 import { OPERATOR_ASSIGNEE } from '../config'
 import { STAGES, stageCounts, stageIndexForStatus, ticketNeedsYou, type ApprovalLike } from '../lib/board'
@@ -59,6 +59,7 @@ export default function Pipeline() {
   const [range, setRange] = useState(0)
   const [showDone, setShowDone] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+  const naming = useNaming()
   const roster = rosterQ.data?.agents ?? []
   const runs = runsQ.data?.runs ?? []
   const pending = approvalsQ.data?.approvals ?? []
@@ -102,11 +103,11 @@ export default function Pipeline() {
   const faceFor = useMemo(() => {
     return (agentName: string | null) => {
       const key = (agentName ?? '').toLowerCase()
-      const hit = roster.find((a) => a.name.toLowerCase() === key || agentCaption(a.name, a.role).name.toLowerCase() === key)
+      const hit = naming.find(roster, key)
       if (hit) return hit
       return { id: agentName || 'ticket', name: agentName || OPERATOR_ASSIGNEE, role: null, status: 'working' } as Agent
     }
-  }, [roster])
+  }, [roster, naming])
 
   return (
     <div>
@@ -177,7 +178,7 @@ export default function Pipeline() {
                       <Face agent={{ ...who, status: blocked ? 'blocked' : 'working' }} agents={roster} px={46} />
                       <div className="min-w-0 flex-1">
                         <div className="text-[15px] font-semibold">{ticket.title}</div>
-                        <AgentName name={who.name} role={who.role} />
+                        <AgentName agent={who} />
                         <div className="text-[12.5px] text-mc-sub">Started · {fmt(startedIso(ticket, runs))}</div>
                       </div>
                       <div className="hidden min-w-[280px] items-center md:flex">

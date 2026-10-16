@@ -1,7 +1,10 @@
 import { useNavigate } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { Card, PillButton, SectionLabel } from '../components/ui'
+import { NamingChoice } from '../components/NamingChoice'
+import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
+import type { AgentsResp } from '../types'
 
 /**
  * Settings — account & app controls (review fix: avatar menu → Settings).
@@ -14,6 +17,8 @@ interface HealthResp { status: string; uptimeSeconds: number; connectedClients: 
 export default function Settings() {
   const nav = useNavigate()
   const health = useApi<HealthResp>('/health', { pollMs: 15000 })
+  const agentsQ = useApi<AgentsResp>('/agents')
+  const naming = useNaming()
   const h = health.data
 
   const logout = () => {
@@ -41,6 +46,23 @@ export default function Settings() {
               {h ? `uptime ${Math.floor(h.uptimeSeconds / 60)}m · database ${h.database} · ${pluralize(h.connectedClients, 'client')}` : 'check your SSH tunnel'}
             </div>
           </div>
+        </div>
+      </Card>
+
+      <Card className="mt-4 px-5 py-4">
+        <SectionLabel>Agent names</SectionLabel>
+        <p className="mt-2 text-[13px] text-mc-sub">
+          Crew seats come from the saved crew file and apply by agent id. Own names shows each agent as registered.
+        </p>
+        <div className="mt-4">
+          <NamingChoice
+            key={`${naming.mode ?? 'unset'}:${JSON.stringify(naming.map)}`}
+            agents={agentsQ.data?.agents ?? []}
+            initialMode={naming.mode}
+            initialMap={naming.map}
+            intro={false}
+            submitLabel="Save names"
+          />
         </div>
       </Card>
 

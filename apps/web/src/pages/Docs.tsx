@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import type { Agent, AgentsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, SearchInput, Face, StatusChip, EmptyState, Banner } from '../components/shell'
-import { agentCaption } from '../data/roster'
+import { useNaming } from '../lib/naming'
 import { API_URL } from '../lib/apiBase'
 import { pluralize } from '../lib/pluralize'
 import { formatDocWhen } from '../lib/when'
@@ -45,6 +45,7 @@ function toneFor(type: string): 'blue' | 'orange' | 'green' {
 export default function Docs() {
   const { data: roster } = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const agents = roster?.agents ?? []
+  const naming = useNaming()
   const { data, loading, errorMessage } = useApi<DocList>('/docs')
   const [tab, setTab] = useState(0)
   const [query, setQuery] = useState('')
@@ -94,10 +95,9 @@ export default function Docs() {
   }, [openId])
 
   function author(name: string): Agent | { id: string; name: string; role: string | null; status: string } {
-    const found = agents.find((a) => agentCaption(a.name, a.role).name === name || a.name === name)
+    const found = naming.find(agents, name)
     if (found) return found
-    const cap = agentCaption(name, null)
-    return { id: name, name: cap.name, role: cap.role, status: 'idle' }
+    return { id: name, name, role: null, status: 'idle' }
   }
 
   const summary = !data
@@ -163,6 +163,7 @@ export default function Docs() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {visible.map((doc) => {
             const who = author(doc.author)
+            const cap = naming.present({ id: who.id, name: who.name, role: who.role, color: 'color' in who ? who.color : null })
             const tone = toneFor(doc.type)
             return (
               <button key={doc.id} type="button" onClick={() => setOpenId(doc.id)} className="mc-card px-4 py-4 text-left">
@@ -187,8 +188,8 @@ export default function Docs() {
                   <div className="flex min-w-0 items-center gap-2">
                     <Face agent={who} agents={agents} px={24} />
                     <div className="flex min-w-0 flex-1 items-baseline gap-1">
-                      <span className="shrink-0 font-semibold text-mc-text">{agentCaption(who.name, who.role).name}</span>
-                      <span className="min-w-0 truncate font-normal text-mc-sub">· {agentCaption(who.name, who.role).role}</span>
+                      <span className="shrink-0 font-semibold text-mc-text">{cap.name}</span>
+                      <span className="min-w-0 truncate font-normal text-mc-sub">· {cap.role}</span>
                     </div>
                   </div>
                   <div className="mt-0.5 text-right text-mc-sub">{formatDocWhen(doc.updatedAt)}</div>

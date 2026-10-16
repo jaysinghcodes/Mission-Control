@@ -54,7 +54,7 @@ export interface RobotFace {
   childNumber: number | null
 }
 
-/** Lowercase, collapse separators — same idea as data/roster.ts. */
+/** Lowercase and collapse separators. */
 const norm = (s: string | null | undefined): string =>
   (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 

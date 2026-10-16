@@ -5,7 +5,7 @@ import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, Face, AgentName, SearchInput, EmptyState } from '../components/shell'
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { AgentProfileDrawer } from '../components/AgentProfileDrawer'
-import { agentCaption } from '../data/roster'
+import { useNaming } from '../lib/naming'
 import type { Agent, AgentsResp } from '../types'
 import { activityNeedsYou, agentNeedsYou, stageCounts, stageIndexForStatus, type ApprovalLike } from '../lib/board'
 import { activityRailLine } from '../lib/activity-rail'
@@ -50,10 +50,10 @@ const ROOMS: { id: DeskRoom; label: string; color: string }[] = [
 
 const ROOM_IDS = new Set<string>([...DESK_ROOMS, 'commons'])
 
-function Desk() {
+function Desk({ accent }: { accent?: string | null }) {
   return (
     <div className="pointer-events-none mx-auto -mt-3 w-[120px]" aria-hidden>
-      <div className="mc-desk-screen mx-auto h-8 w-14 rounded-md p-1">
+      <div className="mc-desk-screen mx-auto h-8 w-14 rounded-md p-1" style={accent ? { outline: `2px solid ${accent}` } : undefined}>
         <div className="mc-desk-glass h-full w-full rounded-sm">
           <div className="ml-1 mt-1 h-0.5 w-6 rounded bg-mc-accent" />
           <div className="ml-1 mt-1 h-0.5 w-8 rounded bg-[#636366]" />
@@ -87,6 +87,7 @@ export default function Office() {
   const approvalsQ = useApi<ApprovalsResp>('/approvals', { pollMs: 15000 })
   const { events: liveEvents, connected } = useLiveActivity()
   const refetchApprovals = approvalsQ.refetch
+  const naming = useNaming()
   const agents = agentsQ.data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
   const pending = approvalsQ.data?.approvals ?? []
@@ -119,7 +120,7 @@ export default function Office() {
     const q = query.trim().toLowerCase()
     const visible = q
       ? roster.filter((agent) => {
-          const cap = agentCaption(agent.name, agent.role)
+          const cap = naming.present(agent)
           const subtitle = live.get(agent.id)?.subtitle ?? ''
           return `${cap.name} ${cap.role} ${subtitle}`.toLowerCase().includes(q)
         })
@@ -134,7 +135,7 @@ export default function Office() {
       }
     })
     return { blocked, live, placed: placeFloor(seated, mode, blocked) }
-  }, [roster, mode, query, pending, ticketRows, runRows, now])
+  }, [roster, mode, query, pending, ticketRows, runRows, now, naming])
   const placed = floor.placed
   const blockedIds = floor.blocked
 
@@ -220,7 +221,7 @@ export default function Office() {
                   </button>
                   {crew.length === 0 && <p className="mt-8 text-center text-[12px] text-mc-sub">Empty</p>}
                   {crew.map((agent) => {
-                    const cap = agentCaption(agent.name, agent.role)
+                    const cap = naming.present(agent)
                     const offline = isRegisteredOffline(agent, now)
                     const work = floor.live.get(agent.id)
                     const line = shownLine(work?.subtitle ?? 'Idle', blockedIds.has(agent.id), offline)
@@ -246,14 +247,16 @@ export default function Office() {
                             status={blockedIds.has(agent.id) ? 'blocked' : agent.status}
                           />
                         </div>
-                        <Desk />
+                        <Desk accent={cap.desk ? cap.color : null} />
                         <div className="relative z-10 mt-2">
                           <div className="flex flex-wrap items-center justify-center gap-1">
+                            <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: cap.color }} />
                             <div className="text-[13px] font-semibold leading-tight">
                               {cap.name} <span className="whitespace-nowrap text-[11px] font-normal text-mc-sub">· {cap.role}</span>
                             </div>
                             {showSampleTag(agent) && <SampleTag />}
                           </div>
+                          {cap.desk && <div className="text-[11px] leading-tight text-mc-sub">{cap.desk}</div>}
                           <div className={`text-[12px] leading-snug ${!offline && blockedIds.has(agent.id) ? 'text-mc-redtext' : 'text-mc-sub'}`}>{line}</div>
                         </div>
                       </button>
@@ -327,7 +330,7 @@ export default function Office() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-4">
                     {placed.commons.map((agent) => {
-                      const cap = agentCaption(agent.name, agent.role)
+                      const cap = naming.present(agent)
                       const offline = isRegisteredOffline(agent, now)
                       const work = floor.live.get(agent.id)
                       const line = shownLine(work?.subtitle ?? 'Idle', blockedIds.has(agent.id), offline)
@@ -354,10 +357,12 @@ export default function Office() {
                             />
                           </div>
                           <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[12px] font-semibold leading-tight">
+                            <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: cap.color }} />
                             {cap.name}
                             {showSampleTag(agent) && <SampleTag />}
                           </div>
                           <div className="text-[11px] leading-tight text-mc-sub">{cap.role}</div>
+                          {cap.desk && <div className="text-[11px] leading-tight text-mc-sub">{cap.desk}</div>}
                           {!offline && line !== 'Idle' && <div className="text-[11px] leading-tight text-mc-sub">{line}</div>}
                           {offline && <div className="text-[11px] leading-tight text-mc-sub">{OFFLINE_LABEL}</div>}
                         </button>
@@ -386,6 +391,7 @@ export default function Office() {
             {events.map(({ event: e, index, actor, text }) => {
               const hit = actor ? agents.find((a) => a.id === actor.id) : undefined
               const who = hit ?? (actor ? { id: actor.id, name: actor.name, role: actor.role, status: 'idle' } : null)
+              const shown = who ? naming.present(who) : null
               const waiting = activityNeedsYou(e.payload, pending)
               const failed = /fail/i.test(text)
               const age = activityAge(e.ts, Date.now())
@@ -394,7 +400,7 @@ export default function Office() {
                   {who ? <Face agent={who} agents={agents} px={36} /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-mc-fill" aria-hidden />}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
-                      {who ? <AgentName name={who.name} role={who.role} /> : <span className="text-[12px] font-semibold">{text}</span>}
+                      {who ? <AgentName agent={who} /> : <span className="text-[12px] font-semibold">{text}</span>}
                       <span className="shrink-0 whitespace-nowrap text-[11px] text-mc-sub">{age}</span>
                     </div>
                     {who && <div className={`truncate text-[12px] ${waiting ? 'text-mc-redtext' : failed ? 'text-mc-orangetext' : 'text-mc-sub2'}`}>{text}</div>}
@@ -403,10 +409,10 @@ export default function Office() {
               )
               const cls = 'flex w-full gap-2 border-b border-mc-sep px-3 py-3 text-left last:border-0'
               if (!hit) {
-                return <div key={`${e.ts}-${index}`} data-activity-agent={who?.name ?? ''} className={cls}>{row}</div>
+                return <div key={`${e.ts}-${index}`} data-activity-agent={shown?.name ?? ''} className={cls}>{row}</div>
               }
               return (
-                <button key={`${e.ts}-${index}`} type="button" data-activity-agent={hit.name} onClick={() => setOpen(hit)} className={cls} aria-label={`${hit.name}, ${text}`}>
+                <button key={`${e.ts}-${index}`} type="button" data-activity-agent={shown?.name ?? hit.name} onClick={() => setOpen(hit)} className={cls} aria-label={`${shown?.name ?? hit.name}, ${text}`}>
                   {row}
                 </button>
               )

@@ -120,13 +120,15 @@ Role text is not a seat. A stored status does not pick a room. To Do and Backlog
 
 Activity names the real agent. Ticket events include `agent` (the assignee). Run events include `agent` (the run agent). A row with no agent falls back to the ticket assignee, then the run agent. The word system is not a name.
 
+The first open asks the operator to use the Mission Control crew or keep each agent's own name. That choice is `GET /settings` and `PUT /settings`. Crew names live in `config/crew.json`. The screen applies a seat only when the saved mode is crew and the map names that agent id. A role word does not rename anyone. Own names shows the stored name, role, and color, and the desk stays generic.
+
 ## 4. How you report into Mission Control
 
 API base URL: `http://127.0.0.1:3000` unless your operator moved it. All bodies are JSON.
 
 ### 4.1 Auth
 
-Every mutating route (`POST`, `PUT`, `PATCH`, `DELETE`) uses one check. When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>`. That includes `POST /events` and the REST writes (tickets, projects, runs, models, mission, approvals, custom tools, and `POST /agents/register`, `POST /agents/:id/heartbeat`, `DELETE /agents/:id`). `GET` and the other reads do not require the header.
+Every mutating route (`POST`, `PUT`, `PATCH`, `DELETE`) uses one check. When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>`. That includes `POST /events` and the REST writes (tickets, projects, runs, models, mission, approvals, custom tools, `PUT /settings`, and `POST /agents/register`, `POST /agents/:id/heartbeat`, `DELETE /agents/:id`). `GET` and the other reads do not require the header.
 
 A missing or wrong token is HTTP 401 and this JSON body:
 
@@ -260,7 +262,11 @@ Read only routes: `GET /memory?day=YYYY-MM-DD&kind=&q=&limit=&offset=` and `GET 
 
 ### 4.9 Other read routes
 
-`GET /health`, `/system`, `/agents`, `/agents/:id` (id or name), `/sessions`, `/calendar`, `/activity?limit=`, `/logs`, `/search?q=`, `/approvals?status=pending|decided|all`, `/mission`, `/devices`, `/docs`, `/custom-tools`. `GET /health` includes `version` (the `version` field in `apps/api/package.json`), `gitSha`, and `openclawVersion` (null until `models.snapshot` reports one). `GET /system` includes `gateway` with `host`, `port`, `up`, and `latencyMs` from a TCP connect. Writes: `PUT /mission` with `{ mission }`, `POST /approvals/:id/decide` with `{ action: "approve" or "reject" }` (only on your operator's say so; a `pr` approve merges on GitHub). Custom tools also have their own create and update routes under `/custom-tools`. Devices have no write route.
+`GET /health`, `/system`, `/agents`, `/agents/:id` (id or name), `/sessions`, `/calendar`, `/activity?limit=`, `/logs`, `/search?q=`, `/approvals?status=pending|decided|all`, `/mission`, `/devices`, `/docs`, `/custom-tools`, `/settings`. `GET /health` includes `version` (the `version` field in `apps/api/package.json`), `gitSha`, and `openclawVersion` (null until `models.snapshot` reports one). `GET /system` includes `gateway` with `host`, `port`, `up`, and `latencyMs` from a TCP connect. Writes: `PUT /mission` with `{ mission }`, `PUT /settings`, `POST /approvals/:id/decide` with `{ action: "approve" or "reject" }` (only on your operator's say so; a `pr` approve merges on GitHub). Custom tools also have their own create and update routes under `/custom-tools`. Devices have no write route.
+
+`GET /settings` returns `{ namingMode, crewMap, seats, ts }`. `namingMode` is `crew`, `own`, or null until the first choice is saved. `crewMap` maps an agent id to a seat id. `seats` always lists `config/crew.json` (id, name, role, desk, color). The screen applies a seat only when `namingMode` is `crew` and the map names that agent id. A missing map entry, or a seat id the file does not contain, keeps the stored name, role, and color, and the desk label stays empty.
+
+`PUT /settings` is a write, so section 4.1 applies. The body is `{ namingMode: "crew" or "own", crewMap? }`. Omit `crewMap`, or send null, and the stored map is empty. `own` also stores an empty map. Each value must be a seat id from the crew file. The same seat cannot be used twice. At most 200 agents. Unknown fields are 400 (`unknown field <name>`). A bad mode, an unknown seat, or a duplicate seat is 400. The row is the same settings row as the mission. Saving names does not clear the mission text. `npm run seed:demo` does not set `namingMode`.
 
 These reads returned 200 on a running API: `/health`, `/system`, `/agents`, `/sessions`, `/calendar`, `/logs`, `/search?q=a`, `/approvals?status=pending`, `/mission`, `/devices`, `/docs`, `/projects`, `/tickets`, `/runs`, `/models`, `/memory`, `/usage`, `/custom-tools`.
 

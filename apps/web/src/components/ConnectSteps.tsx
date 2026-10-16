@@ -169,6 +169,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'VERIFY',
     body: [
       'Open `http://localhost:5173/#/tasks`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.',
+      'The first open asks you to use the Mission Control crew or keep each agent\'s own name. You make that choice. Change it later under System, then Settings.',
       'Health on this same origin shows uptime, client count, and database state. Empty states show actions.',
       'Dot stays red? The API is down, or `SOCKET_TOKEN` in the web build does not match the API. Set it in `.env` and run `docker compose up -d --build` again.',
     ],

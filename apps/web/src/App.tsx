@@ -14,6 +14,7 @@ import Docs from './pages/Docs'
 import Team from './pages/Team'
 import System from './pages/System'
 import Usage from './pages/Usage'
+import { NamingProvider } from './lib/naming'
 
 /**
  * Ticket 13 routes. Old paths redirect to the page that replaced them so a
@@ -32,7 +33,7 @@ function App() {
     <HashRouter>
       <Routes>
         <Route path="/connect" element={<Connect />} />
-        <Route element={<AppLayout />}>
+        <Route element={<NamingProvider><AppLayout /></NamingProvider>}>
           <Route path="/" element={<Navigate to="/tasks" replace />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/tickets" element={<Keep to="/tasks" />} />

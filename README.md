@@ -91,7 +91,7 @@ npm run dev
 
 Then open **http://localhost:5173/#/tasks**. The dev server proxies `/api` and `/socket.io`, so the browser still uses port 5173. Leave `VITE_API_URL` unset here too.
 
-`npm ci` prints an `allow-scripts` warning for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. The following `npx prisma generate` still completed, and migrate deployed 10 migrations.
+`npm ci` prints an `allow-scripts` warning for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. The following `npx prisma generate` still completed. `npx prisma migrate deploy` applies every folder in `apps/api/prisma/migrations`.
 
 What each step is doing:
 
@@ -124,6 +124,7 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. Do
 3. If the first health probe fails, the shell sends the browser to `/#/connect`. Later failures do not keep redirecting.
 4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, SSH tunnel, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks.
 5. `/#/` goes to Tasks. `/#/health` goes to System. Trust the sidebar chip and `/#/system`.
+6. The first open of the dashboard asks you to name agents. Choose the Mission Control crew, or keep each agent's own name. The choice is saved on the settings row. Change it later under System, then Settings. `npm run seed:demo` does not make that choice. Crew names come from `config/crew.json` and apply only by the agent id you save.
 
 A fresh setup does not load sample data. `npm run dev` after migrate shows empty states. That is a valid first run, not a crash.
 

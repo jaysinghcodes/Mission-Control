@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useApi, apiPost } from '../hooks/useApi'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, Kicker, EmptyState } from '../components/shell'
-import { agentCaption } from '../data/roster'
+import { presentAgent, type NamingState } from '../lib/crew'
+import { useNaming } from '../lib/naming'
 import { countOnChicagoDay } from '../lib/chicago-day'
 import { pluralize } from '../lib/pluralize'
 import type { Agent, AgentsResp } from '../types'
@@ -22,10 +23,10 @@ interface Approval {
 }
 interface ApprovalsResp { approvals: Approval[] }
 
-function guessAgent(row: Approval, roster: Agent[]): Agent | { id: string; name: string; role: string | null; status: string } {
+function guessAgent(row: Approval, roster: Agent[], state: NamingState): Agent | { id: string; name: string; role: string | null; status: string } {
   const blob = `${row.tag} ${row.desc}`.toLowerCase()
   const hit = roster.find((a) => {
-    const cap = agentCaption(a.name, a.role)
+    const cap = presentAgent(a, state)
     return blob.includes(a.name.toLowerCase()) || blob.includes(cap.name.toLowerCase())
   })
   if (hit) return hit
@@ -33,6 +34,7 @@ function guessAgent(row: Approval, roster: Agent[]): Agent | { id: string; name:
 }
 
 export default function Approvals() {
+  const naming = useNaming()
   const [tab, setTab] = useState(0)
   const pendingQ = useApi<ApprovalsResp>('/approvals', { pollMs: 10000 })
   const decidedQ = useApi<ApprovalsResp>('/approvals?status=decided', { pollMs: 15000 })
@@ -73,8 +75,8 @@ export default function Approvals() {
           {pending.length > 0 && <Kicker tone="red">Needs you</Kicker>}
           <div className="mt-3 space-y-8">
             {pending.map((row, i) => {
-              const who = guessAgent(row, roster)
-              const cap = agentCaption(who.name, who.role)
+              const who = guessAgent(row, roster, naming)
+              const cap = presentAgent(who, naming)
               const meta = row.meta
               return (
                 <div key={row.id}>
@@ -131,7 +133,7 @@ export default function Approvals() {
             <SoftCard className="mt-3 divide-y divide-mc-sep">
               {decided.map((row) => {
                 const ok = row.status === 'approved'
-                const who = guessAgent(row, roster)
+                const who = guessAgent(row, roster, naming)
                 return (
                   <div key={row.id} className="flex items-center gap-3 px-4 py-3">
                     <Face agent={who} agents={roster} px={36} />

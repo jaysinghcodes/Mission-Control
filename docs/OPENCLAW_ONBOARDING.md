@@ -20,7 +20,7 @@ The native path is in [API.md](API.md#advanced-node-and-postgres) and the README
 
 ## 3. What each screen shows
 
-Screen notes are in [API.md](API.md#3-what-each-screen-shows).
+Screen notes are in [API.md](API.md#3-what-each-screen-shows). The first open asks the operator to use the Mission Control crew or keep each agent's own name. The operator makes that choice.
 
 ## 4. How you report into Mission Control
 

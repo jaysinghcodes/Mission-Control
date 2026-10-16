@@ -4,7 +4,8 @@ import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import type { Agent, AgentsResp, Project, ProjectsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, EmptyState, Banner, Toast, FieldError } from '../components/shell'
-import { agentCaption } from '../data/roster'
+import { findByLabel, type NamingState } from '../lib/crew'
+import { useNaming } from '../lib/naming'
 import { ticketNeedsYou, type ApprovalLike } from '../lib/board'
 import { pluralize } from '../lib/pluralize'
 
@@ -15,13 +16,6 @@ import { pluralize } from '../lib/pluralize'
  */
 
 const TOAST_MS = 4000
-
-/** Demo projects with no open assignee still get the sample lead. User projects do not. */
-const DEMO_LEAD: Record<string, string> = {
-  'demo-project-onboarding': 'Atlas',
-  'demo-project-pipeline': 'Forge',
-  'demo-project-ideas': 'Echo',
-}
 
 interface ProjectTicket {
   projectId: string | null
@@ -56,17 +50,16 @@ function leadName(projectId: string, tickets: ProjectTicket[]): string | null {
     }
     return [...counts.entries()].sort((a, b) => b[1].n - a[1].n || a[1].best - b[1].best)[0][0]
   }
-  return DEMO_LEAD[projectId] ?? null
+  return null
 }
 
-function faceFor(name: string | null, roster: Agent[]): Agent | { id: string; name: string; role: string | null; status: string } | null {
+function faceFor(name: string | null, roster: Agent[], state: NamingState): Agent | { id: string; name: string; role: string | null; status: string } | null {
   if (!name) return null
-  const key = name.toLowerCase()
-  return roster.find((a) => a.name.toLowerCase() === key || agentCaption(a.name, a.role).name.toLowerCase() === key)
-    ?? { id: name, name, role: null, status: 'idle' }
+  return findByLabel(roster, name, state) ?? { id: name, name, role: null, status: 'idle' }
 }
 
 export default function Projects() {
+  const naming = useNaming()
   const { data, loading, errorMessage: loadError, refetch } = useApi<ProjectsResp>('/projects?archived=all', { pollMs: 15000 })
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const ticketsQ = useApi<{ tickets: ProjectTicket[] }>('/tickets', { pollMs: 20000 })
@@ -207,7 +200,7 @@ export default function Projects() {
 
       <div className="space-y-3">
         {rows.map((p) => {
-          const who = faceFor(leadName(p.id, projectTickets), roster)
+          const who = faceFor(leadName(p.id, projectTickets), roster, naming)
           const frac = p.ticketCount ? p.doneCount / p.ticketCount : 0
           const finished = p.ticketCount > 0 && p.doneCount === p.ticketCount
           const needs = projectTickets.some((t) => t.projectId === p.id && ticketNeedsYou(t, pending))
@@ -267,7 +260,7 @@ export default function Projects() {
                       >
                         {busyId === p.id ? 'Saving…' : 'Archive'}
                       </button>
-                      {!needs && who && <AgentName name={who.name} role={who.role} />}
+                      {!needs && who && <AgentName agent={who} />}
                     </>
                   )}
                 </div>

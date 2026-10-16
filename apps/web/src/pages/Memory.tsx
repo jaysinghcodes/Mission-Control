@@ -4,7 +4,8 @@ import { useApi } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import type { Agent, AgentsResp } from '../types'
 import { PageHeader, Segmented, SoftCard, SearchInput, Face, AgentName, StatusChip, Kicker, EmptyState, Banner } from '../components/shell'
-import { agentCaption } from '../data/roster'
+import { findByLabel, type NamingState } from '../lib/crew'
+import { useNaming } from '../lib/naming'
 import { API_URL } from '../lib/apiBase'
 import { formatChicagoClock, formatChicagoDayHeading, formatChicagoSaved } from '../lib/chicago-day'
 import { groupMemoryByDay } from '../lib/memory-groups'
@@ -61,6 +62,7 @@ function emptyFilterCopy(day: string, query: string, tab: number): string {
 export default function Memory() {
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const agents = rosterQ.data?.agents ?? []
+  const naming = useNaming()
   const [tab, setTab] = useState(0)
   const [query, setQuery] = useState('')
   const [day, setDay] = useState('')
@@ -196,8 +198,8 @@ export default function Memory() {
                 </button>
                 {group.entries.map((row) => {
                   const on = current?.id === row.id
-                  const who = faceFor(row.agent, agents)
-                  const cap = agentCaption(who.name, who.role)
+                  const who = faceFor(row.agent, agents, naming)
+                  const cap = naming.present(who)
                   return (
                     <button
                       key={row.id}
@@ -243,15 +245,16 @@ function MemoryReader({
   body: string
   agents: Agent[]
 }) {
-  const who = faceFor(entry.agent, agents)
-  const cap = agentCaption(who.name, who.role)
+  const naming = useNaming()
+  const who = faceFor(entry.agent, agents, naming)
+  const cap = naming.present(who)
   return (
     <>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <Face agent={who} agents={agents} px={44} />
           <div>
-            <AgentName name={who.name} role={who.role} size="md" />
+            <AgentName agent={who} size="md" />
             <div className="text-[12.5px] text-mc-sub">Saved {formatChicagoSaved(entry.createdAt)}</div>
           </div>
         </div>
@@ -269,12 +272,8 @@ function MemoryReader({
   )
 }
 
-function faceFor(name: string, roster: Agent[]): Agent {
-  const key = name.toLowerCase()
-  const hit = roster.find((agent) => {
-    const cap = agentCaption(agent.name, agent.role)
-    return agent.name.toLowerCase() === key || cap.name.toLowerCase() === key
-  })
+function faceFor(name: string, roster: Agent[], state: NamingState): Agent {
+  const hit = findByLabel(roster, name, state)
   if (hit) return hit
   return {
     id: name,

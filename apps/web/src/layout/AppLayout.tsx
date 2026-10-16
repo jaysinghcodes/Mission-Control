@@ -5,6 +5,8 @@ import { useApi } from '../hooks/useApi'
 import { OPERATOR_NAME } from '../config'
 import { API_URL, apiLabel } from '../lib/apiBase'
 import { isMissionControlHealth, reportLatency, reportOutcome, reportUnreachable, useApiStatus } from '../lib/apiStatus'
+import { useNaming } from '../lib/naming'
+import FirstRun from '../pages/FirstRun'
 
 /**
  * Full bleed shell. The sidebar and the page fill the viewport.
@@ -221,6 +223,7 @@ export default function AppLayout() {
   }, [])
 
   const api = useApiStatus()
+  const naming = useNaming()
   const ms = api.latencyMs !== null ? ` · ${api.latencyMs}ms` : ''
   const status =
     api.state === 'offline'
@@ -233,6 +236,23 @@ export default function AppLayout() {
 
   const account = OPERATOR_NAME || 'Operator'
   const onTasks = pathname === '/tasks' || pathname === '/tickets' || pathname === '/backlog'
+
+  if (!naming.ready) {
+    return (
+      <div className="grid h-dvh place-items-center bg-mc-bg px-6 text-center">
+        <div>
+          <p className="text-[15px] text-mc-sub">{naming.error ? 'Could not load naming settings.' : 'Loading'}</p>
+          {naming.error && (
+            <button type="button" onClick={naming.reload} className="mt-3 text-[13px] font-semibold text-mc-accent-text">
+              Retry
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (naming.mode == null) return <FirstRun />
 
   return (
       <div className="mc-window relative flex h-dvh w-screen overflow-hidden">

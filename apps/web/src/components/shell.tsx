@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { AgentAvatar, type AvatarAgentShape } from './AgentAvatar'
-import { agentCaption } from '../data/roster'
+import { useNaming } from '../lib/naming'
 
 /** Soft white card — the mock's rounded shadow card. */
 export function SoftCard({
@@ -165,21 +165,26 @@ export function PageHeader({
 }
 
 export function AgentName({
-  name,
-  role,
+  agent,
   size = 'sm',
   className = '',
 }: {
-  name: string | null | undefined
-  role: string | null | undefined
+  agent: { id?: string | null; name?: string | null; role?: string | null; color?: string | null }
   size?: 'sm' | 'md'
   className?: string
 }) {
-  const cap = agentCaption(name, role)
+  const naming = useNaming()
+  const cap = naming.present({
+    id: agent.id ?? '',
+    name: agent.name,
+    role: agent.role,
+    color: agent.color,
+  })
   const nameCls = size === 'md' ? 'text-[14px]' : 'text-[12px]'
   return (
-    <span className={`min-w-0 truncate ${className}`}>
-      <span className={`font-semibold text-mc-text ${nameCls}`}>{cap.name}</span>
+    <span className={`inline-flex min-w-0 items-center gap-1 truncate ${className}`}>
+      <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: cap.color }} />
+      <span className={`truncate font-semibold text-mc-text ${nameCls}`}>{cap.name}</span>
       <span className="text-[11px] font-normal text-mc-sub"> · {cap.role}</span>
     </span>
   )
