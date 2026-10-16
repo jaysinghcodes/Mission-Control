@@ -1,6 +1,8 @@
 /**
  * Browser check for a database that has not been seeded.
  * Run this before `npm run seed:demo`. Sample cards mean the check failed.
+ * A fresh database also has no naming choice yet, so this check makes one
+ * before it looks for the empty pages.
  */
 
 import { existsSync } from 'node:fs'
@@ -34,6 +36,14 @@ async function assertNoWindowDots(page) {
   if (hits > 0) throw new Error('The sidebar still shows window dots.')
 }
 
+async function chooseOwnNames(page) {
+  await page.goto(`${web}/#/tasks`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('heading', { level: 1, name: 'Name your agents' }).waitFor({ timeout: 30000 })
+  await page.getByRole('button', { name: 'Keep my own names' }).click()
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await page.getByRole('heading', { level: 1, name: 'Tasks' }).waitFor({ timeout: 30000 })
+}
+
 async function main() {
   const browser = await chromium.launch(launchOptions())
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
@@ -51,6 +61,7 @@ async function main() {
   ]
 
   try {
+    await chooseOwnNames(page)
     for (const [hash, heading, empty] of pages) {
       await page.goto(`${web}/${hash}`, { waitUntil: 'domcontentloaded' })
       await page.getByRole('heading', { level: 1, name: heading }).waitFor({ timeout: 30000 })
