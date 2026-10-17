@@ -751,9 +751,22 @@ require_postgres_16() {
   esac
 }
 
+# MC_INSTALL_HEALTH_PORT is a test seam. The probe connects there.
+# Wait text, doctor text, and the printed URL still use the resolved port.
+health_connect_port() {
+  local logical override
+  logical="$1"
+  override="${MC_INSTALL_HEALTH_PORT:-}"
+  if [[ "$override" =~ ^[0-9]+$ ]] && [[ "$override" -ge 1 ]] && [[ "$override" -le 65535 ]]; then
+    printf '%s' "$override"
+    return 0
+  fi
+  printf '%s' "$logical"
+}
+
 health_probe_host() {
   local port
-  port="$1"
+  port="$(health_connect_port "$1")"
   # 0 is a healthy Mission Control body. 2 is HTTP 401. Anything else is 1.
   node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/health").then(async (res) => { if (res.status === 401) process.exit(2); if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' "$port" >/dev/null 2>&1
 }

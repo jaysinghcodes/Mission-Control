@@ -40,7 +40,7 @@ test('dev and preview bind MC_WEB_PORT and the proxy uses PORT', async () => {
   let dev
   let viewed
   try {
-    const config = await resolveConfig({ configFile }, 'serve')
+    const config = await resolveConfig({ configFile, root }, 'serve')
     assert.equal(config.server.port, webPort)
     assert.equal(config.server.strictPort, true)
     assert.equal(config.preview.port, webPort)
@@ -48,7 +48,7 @@ test('dev and preview bind MC_WEB_PORT and the proxy uses PORT', async () => {
     assert.equal(config.server.proxy['/api'].target, `http://127.0.0.1:${apiPort}`)
     assert.equal(config.preview.proxy['/api'].target, `http://127.0.0.1:${apiPort}`)
 
-    dev = await createViteServer({ configFile })
+    dev = await createViteServer({ configFile, root })
     await dev.listen()
     assert.equal(dev.httpServer.address().port, webPort)
     const page = await fetch(`http://127.0.0.1:${webPort}/`)
@@ -67,6 +67,7 @@ test('dev and preview bind MC_WEB_PORT and the proxy uses PORT', async () => {
     )
     viewed = await preview({
       configFile,
+      root,
       build: { outDir },
     })
     assert.equal(viewed.httpServer.address().port, webPort)

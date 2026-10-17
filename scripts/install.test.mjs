@@ -122,7 +122,7 @@ const SCHEDULE_ENV_KEYS = [
 
 function runInstall(dir, env, args = []) {
   const merged = { ...process.env }
-  for (const key of ['PORT', 'MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT', ...SCHEDULE_ENV_KEYS]) {
+  for (const key of ['PORT', 'MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT', 'MC_INSTALL_HEALTH_PORT', ...SCHEDULE_ENV_KEYS]) {
     if (!Object.prototype.hasOwnProperty.call(env, key)) delete merged[key]
   }
   Object.assign(merged, env)
@@ -208,7 +208,7 @@ function startPlainOk(dir) {
   )
 }
 
-function delayedHealthSource(port, delayMs) {
+function delayedHealthSource(port, delayMs, logFile) {
   const delay = Number(delayMs)
   const bind = Number(port)
   const listen =
@@ -223,12 +223,17 @@ function delayedHealthSource(port, delayMs) {
           `  process.stdout.write('${bind}\\n')`,
           '})',
         ]
+  const record = logFile
+    ? `  appendFileSync(${JSON.stringify(logFile)}, String(req.url || '') + '\\n')`
+    : ''
   return [
     "import { createServer } from 'node:http'",
+    "import { appendFileSync } from 'node:fs'",
     `const readyAt = Date.now() + ${delay}`,
     'const healthy = JSON.stringify({ service: "mission-control", status: "ok", database: "connected", db: "up" })',
     'const starting = JSON.stringify({ service: "mission-control", status: "degraded", database: "unavailable", db: "down" })',
     'const server = createServer((req, res) => {',
+    record,
     '  const body = Date.now() < readyAt ? starting : healthy',
     '  const status = Date.now() < readyAt ? 503 : 200',
     "  res.writeHead(status, { 'content-type': 'application/json' })",
@@ -239,8 +244,8 @@ function delayedHealthSource(port, delayMs) {
   ].join('\n')
 }
 
-function startDelayedHealth(dir, delayMs) {
-  return spawnNodeUntilPort(dir, 'delayed-health.mjs', delayedHealthSource(0, delayMs))
+function startDelayedHealth(dir, delayMs, logFile) {
+  return spawnNodeUntilPort(dir, 'delayed-health.mjs', delayedHealthSource(0, delayMs, logFile))
 }
 
 function startDelayedHealthOn(dir, port, delayMs) {
@@ -1042,14 +1047,19 @@ test('default ports wait on 3000 and print localhost:5173', async () => {
   const fx = freshDir()
   let health
   try {
-    health = await startDelayedHealthOn(fx.dir, 3000, 1200)
+    const hits = path.join(fx.dir, 'health-hits.log')
+    health = await startDelayedHealth(fx.dir, 1200, hits)
+    assert.notEqual(health.port, 3000)
     const result = runInstall(fx.repo, {
       ...fx.env,
       MC_INSTALL_READY_SECONDS: '8',
+      MC_INSTALL_HEALTH_PORT: String(health.port),
     })
     const text = outputOf(result)
     const written = readFileSync(path.join(fx.repo, '.env'), 'utf8')
+    const probed = existsSync(hits) ? readFileSync(hits, 'utf8') : ''
     assert.equal(result.status, 0, text)
+    assert.match(probed, /\/health/)
     assert.match(text, /Waiting for the API health check on port 3000\./)
     assert.match(text, /pass ports: Port 3000 is already running\./)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
