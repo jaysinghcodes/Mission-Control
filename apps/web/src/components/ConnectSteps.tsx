@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { API_PORT, WEB_PORT } from '../lib/ports'
 import { Chip, PillButton, SectionLabel } from './ui'
 
 /**
@@ -42,29 +43,39 @@ export interface ConnectStep {
   confirmable: boolean // static steps get the "Mark done. I did this" chip
 }
 
-/** Per-OS tunnel commands (existing record shape, labels kept). */
-export const OS_STEPS: Record<OsKey, { name: string; cmd: string; note: string }> = {
-  mac: {
-    name: 'macOS',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
-    note: 'Open Terminal. Replace <your-server-ip> with your host. If the installer printed another web port, use that port.',
-  },
-  windows: {
-    name: 'Windows',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
-    note: 'Open PowerShell. OpenSSH is built in. Replace <your-server-ip> with your host. If the installer printed another web port, use that port.',
-  },
-  linux: {
-    name: 'Linux',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
-    note: 'Open a terminal. Replace <your-server-ip> with your host. If the installer printed another web port, use that port.',
-  },
-  other: {
-    name: 'Other',
-    cmd: 'ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>',
-    note: 'Open your terminal and run the command below. If the installer printed another web port, use that port.',
-  },
+/** SSH to the configured owner port. The browser stays on that port. */
+export function sshTunnel(port: string): string {
+  return `ssh -L ${port}:127.0.0.1:${port} ubuntu@<your-server-ip>`
 }
+
+/** Per-OS tunnel commands (existing record shape, labels kept). */
+export function osSteps(port: string = WEB_PORT): Record<OsKey, { name: string; cmd: string; note: string }> {
+  const cmd = sshTunnel(port)
+  return {
+    mac: {
+      name: 'macOS',
+      cmd,
+      note: 'Open Terminal. Replace <your-server-ip> with your host. The port in the command is the configured web port.',
+    },
+    windows: {
+      name: 'Windows',
+      cmd,
+      note: 'Open PowerShell. OpenSSH is built in. Replace <your-server-ip> with your host. The port in the command is the configured web port.',
+    },
+    linux: {
+      name: 'Linux',
+      cmd,
+      note: 'Open a terminal. Replace <your-server-ip> with your host. The port in the command is the configured web port.',
+    },
+    other: {
+      name: 'Other',
+      cmd,
+      note: 'Open your terminal and run the command below. The port in the command is the configured web port.',
+    },
+  }
+}
+
+export const OS_STEPS: Record<OsKey, { name: string; cmd: string; note: string }> = osSteps()
 
 export const OS_KEYS = Object.keys(OS_STEPS) as OsKey[]
 
@@ -180,8 +191,8 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      '`bash install.sh` already starts Postgres, the API, and the web UI. The browser uses port 5173 only. Leave `VITE_API_URL` unset. nginx proxies `/api` and `/socket.io` to the API.',
-      'The API loads the root `.env` and runs `prisma migrate deploy` before it listens. `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`.',
+      `\`bash install.sh\` already starts Postgres, the API, and the web UI. The browser uses port ${WEB_PORT} (\`MC_WEB_PORT\`). Leave \`VITE_API_URL\` unset. nginx proxies \`/api\` and \`/socket.io\` to the API.`,
+      `The API loads the root \`.env\` and runs \`prisma migrate deploy\` before it listens. A native install listens on port ${API_PORT} (\`PORT\`, or \`MC_API_PORT\` when \`PORT\` is unset). Inside Compose the log line stays \`mission-control api listening on 0.0.0.0:3000\`. The host API port is \`MC_API_PORT\`.`,
       'No Docker? The installer says so and uses Node.js 22 and Postgres 16. The advanced path is also in the README. No OpenClaw? `npm run seed:demo` fills sample data.',
     ],
     commands: [
@@ -196,7 +207,7 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'verify',
     phaseLabel: 'VERIFY',
     body: [
-      'Open `http://localhost:5173/#/tasks`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.',
+      `Open \`http://localhost:${WEB_PORT}/#/tasks\`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.`,
       'The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent\'s own name, then confirms the detected provider. Skip finishes that open. Change each one later under System, then Settings. Open Tasks for the board and System for health.',
       'Health on this same origin shows uptime, client count, and database state. Empty states show actions.',
       'Dot stays red? The API is down, or this browser has no session. On Compose, sign in with the password the installer printed.',
@@ -215,7 +226,7 @@ export const STEP_DATA: ConnectStep[] = [
       'Optional. Skip this step when OpenClaw is not installed. `bash install.sh` skips the bridge schedule in that case and that step still exits 0. `npm run seed:demo` does not need OpenClaw.',
       'Paste `docs/PASTE_IN.md` into OpenClaw and say yes. That file runs `bash install.sh`, reports the URL the installer prints, then registers and sends a heartbeat. It also shows the POST /tickets and POST /runs calls. It does not start the OpenClaw gateway. The 401 line is in `docs/API.md`.',
       'When the openclaw command is on PATH, `bash install.sh` installs the schedule: a systemd user timer on Linux, cron if that timer is not available, or launchd on macOS. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The job runs `bridge/mc-bridge-sync.py` with `MC_BRIDGE_REGISTER` (default 1). Remove it with `bash install.sh --uninstall-schedule`.',
-      'The bridge is `bridge/mc-bridge-sync.py` (Python 3, stdlib only). It reads OpenClaw through the openclaw command and POSTs agents, sessions, calendar, usage, approvals, models, and devices snapshots plus `run.*` events. Devices come from `openclaw devices list` and nodes from `openclaw nodes list`. Approvals stay empty until `MC_BRIDGE_APPROVALS_CMD` prints them. Models come from `~/.openclaw/openclaw.json`. When that file has no model, the bridge runs `openclaw models list`. Usage prices tokens from `config/prices.json`. A reported costUsd wins. The API URL comes from `MC_API_URL`, then the API port.',
+      'The bridge is `bridge/mc-bridge-sync.py` (Python 3, stdlib only). It reads OpenClaw through the openclaw command and POSTs agents, sessions, calendar, usage, approvals, models, and devices snapshots plus `run.*` events. Devices come from `openclaw devices list` and nodes from `openclaw nodes list`. Approvals stay empty until `MC_BRIDGE_APPROVALS_CMD` prints them. Models come from `~/.openclaw/openclaw.json`. When that file has no model, the bridge runs `openclaw models list`. Usage prices tokens from `config/prices.json`. A reported costUsd wins. The API URL comes from `MC_API_URL`, then `MC_API_PORT`, then `PORT`.',
       'Under Compose the bridge checks the gateway at 127.0.0.1 on the configured port and posts gateway.snapshot with x-ingest-token. System shows Unknown when that report is missing or older than GATEWAY_STATUS_MAX_AGE_MS (default 600000). A future checkedAt is counted from the time the API stored the report. A native install, or an explicit OPENCLAW_GATEWAY_HOST, probes that host directly on OPENCLAW_GATEWAY_PORT (default 18789). Gateway logs are read from `OPENCLAW_LOG_DIR`. The default is `/tmp/openclaw`.',
       'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events, register, heartbeat, and run writes. Dashboard routes use the session cookie instead. Set the token explicitly. The bridge refuses a blank token. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). With no schedule, that age is an info line. If doctor says this user lacks permission to use the Docker socket, add the user to the docker group and start a new login session.',
       'Try `--dry-run` first, then a real sync. A 401 means the bridge and the API disagree on the token. Read `INGEST_TOKEN` from the root `.env`. The installer stores it there and does not print it.',
@@ -238,7 +249,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'YOU ARE HERE',
     body: [
       'Three free ways from a laptop are in the remote access guide: SSH to the owner port, Tailscale Serve, and Cloudflare Tunnel. Login is required on a Compose install.',
-      'Run the SSH command for the OS you are on, replacing `<your-server-ip>` with your host. The default owner port is 5173. If the installer printed another web port, use that port. Keep the SSH session open. The page calls the API on that same origin.',
+      `Run the SSH command for the OS you are on, replacing \`<your-server-ip>\` with your host. The owner port is ${WEB_PORT} (\`MC_WEB_PORT\`). Keep the SSH session open. The page calls the API on that same origin.`,
       'Tailscale Serve and Cloudflare Tunnel point at `127.0.0.1` on the tunnel port. `MC_REMOTE_PORT` defaults to 3011. Leave `TRUSTED_PROXY` unset.',
     ],
     links: [

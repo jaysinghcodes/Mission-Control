@@ -642,6 +642,10 @@ test('docker mode uses MC_API_PORT and native mode keeps PORT', () => {
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000' }), 3000)
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', PORT: '3000', MC_API_PORT: '3880' }), 3880)
   assert.equal(apiListenPort({ PORT: '3000', MC_API_PORT: '3880' }), 3000)
+  assert.equal(apiListenPort({ MC_API_PORT: '3880' }), 3880)
+  assert.equal(apiListenPort({ PORT: '  ', MC_API_PORT: '3880' }), 3880)
+  assert.equal(apiListenPort({}), 3000)
+  assert.equal(apiListenPort({ PORT: 'nope', MC_API_PORT: '3880' }), null)
   assert.equal(apiListenPort({ MC_DOCTOR_DOCKER: '1', MC_API_PORT: 'nope' }), null)
 })
 

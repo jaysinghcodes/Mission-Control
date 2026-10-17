@@ -12,7 +12,7 @@ OpenClaw is optional, and one command starts the dashboard.
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
 ```
 
-Then open the URL the script prints. The default is **http://localhost:5173/#/tasks**.
+Then open the URL the script prints. The default is **http://localhost:5173/#/tasks**. That URL uses `MC_WEB_PORT` (default 5173). A native install listens for the API on `PORT` (default 3000). `MC_API_PORT` is the Compose host port for the API (default 3000) and is also accepted on the native path when `PORT` is unset. When both are set, `PORT` is the native listen port. The container still listens on 3000.
 
 The clip above is five frames from one local run of the API and the web app. `bridge/mc-bridge-sync.py` read fixture JSON, because this machine has no OpenClaw install. The stills and the captions are in [Screenshots](#screenshots).
 
@@ -92,7 +92,7 @@ Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When 
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
 ```
 
-Then open **http://localhost:5173/#/tasks**. Leave `VITE_API_URL` unset. The dev server and nginx proxy `/api` and `/socket.io`, so the browser stays on port 5173.
+Then open the URL the script prints. The default is **http://localhost:5173/#/tasks** (`MC_WEB_PORT`). Leave `VITE_API_URL` unset. The dev server and nginx proxy `/api` and `/socket.io`, so the browser stays on that web port. A native API listens on `PORT`. Compose publishes `MC_API_PORT` and the container log stays on port 3000.
 
 OpenClaw is optional. The command above does not start the OpenClaw gateway. A fresh setup does not load sample data. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. After `npm ci`, `npm run seed:demo` writes the sample bots, tickets, and usage in the sample shots above, and it does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. `npm run doctor` checks the local setup. A missing OpenClaw command does not fail that command.
 
@@ -102,7 +102,7 @@ When the `openclaw` command is on PATH, the installer adds a bridge schedule and
 
 CI runs `bash install.sh` on the free GitHub hosted runners. Ubuntu runs the Docker Compose install and the native install. macOS runs the native install only, because Docker on that runner is unreliable. Each of those jobs posts `bridge/examples/fresh-install` with `bridge/mc-bridge-sync.py`. The fresh clone job runs the advanced path below on Node.js 20 and Node.js 22.
 
-Host ports, the env file, doctor, and the bridge schedule are written out in [docs/INSTALL.md](docs/INSTALL.md).
+Host ports are `MC_WEB_PORT`, `PORT` (native API listen), `MC_API_PORT` (Compose host API port, and the native listen port when `PORT` is unset), `MC_DB_PORT`, and `MC_REMOTE_PORT`. The shell wins, then `.env`, then the default. The env file, doctor, and the bridge schedule are written out in [docs/INSTALL.md](docs/INSTALL.md).
 
 ### Advanced: Node and Postgres
 

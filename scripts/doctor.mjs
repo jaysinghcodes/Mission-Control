@@ -174,10 +174,15 @@ function parsePort(raw, fallback) {
   return port
 }
 
-/** Native dev listens on PORT. Compose publishes the API on MC_API_PORT. */
+/**
+ * Compose publishes the API on MC_API_PORT.
+ * Native listens on PORT. MC_API_PORT is accepted when PORT is unset.
+ * When both are set, PORT wins.
+ */
 export function apiListenPort(env) {
   if (dockerRequested(env)) return parsePort(env.MC_API_PORT, 3000)
-  return parsePort(env.PORT, 3000)
+  if (typeof env.PORT === 'string' && env.PORT.trim() !== '') return parsePort(env.PORT, 3000)
+  return parsePort(env.MC_API_PORT, 3000)
 }
 
 function composeServices(root) {

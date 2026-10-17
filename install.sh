@@ -145,8 +145,26 @@ remote_port() {
   resolved_port MC_REMOTE_PORT "3011"
 }
 
+# Native listen port. Shell PORT, then shell MC_API_PORT, then .env PORT,
+# then .env MC_API_PORT, then 3000. When both names are set, PORT wins.
+# MC_API_PORT stays the Compose host port. The container still listens on 3000.
+native_api_port() {
+  local chosen
+  chosen="${PORT-}"
+  if [[ -z "$chosen" ]]; then
+    chosen="${MC_API_PORT-}"
+  fi
+  if [[ -z "$chosen" ]]; then
+    chosen="$(env_value PORT)"
+  fi
+  if [[ -z "$chosen" ]]; then
+    chosen="$(env_value MC_API_PORT)"
+  fi
+  port_or "$chosen" "3000"
+}
+
 api_port() {
-  port_or "$(env_value PORT)" "3000"
+  native_api_port
 }
 
 docker_api_port() {
@@ -355,6 +373,21 @@ sync_database_url() {
   echo "Set DATABASE_URL to port ${port}."
 }
 
+# Shell PORT, or shell MC_API_PORT when PORT was not set, on a new .env only.
+apply_shell_listen_port() {
+  local file value
+  file="$1"
+  value="${PORT-}"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt 1 ]] || [[ "$value" -gt 65535 ]]; then
+    value="${MC_API_PORT-}"
+  fi
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt 1 ]] || [[ "$value" -gt 65535 ]]; then
+    return 0
+  fi
+  write_env_key "$file" PORT "$value"
+  echo "Wrote the API listen port from the environment into .env."
+}
+
 # Shell values for a new .env only. An existing .env is never rewritten.
 apply_shell_schedule() {
   local file wrote value
@@ -544,6 +577,7 @@ ensure_env() {
   tmp="$(mktemp "${TMPDIR:-/tmp}/mc-env.XXXXXX")"
   write_env_assignments .env.example "$tmp" "$ingest" "$MC_NEW_HASH" "$MC_NEW_SECRET"
   apply_shell_ports "$tmp"
+  apply_shell_listen_port "$tmp"
   apply_shell_schedule "$tmp"
   sync_database_url "$tmp" "$(resolved_port_file MC_DB_PORT 5432 "$tmp")" 1
   chmod 600 "$tmp"
@@ -773,15 +807,30 @@ wait_ready() {
 }
 
 start_native() {
+  local shell_port shell_web shell_api
   echo "Docker was not found. Using the native path. This needs Node.js 22 and Postgres 16."
   require_node_22
   require_postgres_16
   echo "Installing dependencies and starting the API and the web app."
   npm ci
+  # Resolve before sourcing .env. A file PORT=3000 must not hide a shell port.
+  shell_port="${PORT-}"
+  shell_web="${MC_WEB_PORT-}"
+  shell_api="${MC_API_PORT-}"
+  shell_port="$(native_api_port)"
+  shell_web="$(web_port)"
   set -a
   # shellcheck disable=SC1091
   . ./.env
   set +a
+  PORT="$shell_port"
+  export PORT
+  MC_WEB_PORT="$shell_web"
+  export MC_WEB_PORT
+  if [[ -n "$shell_api" ]]; then
+    MC_API_PORT="$shell_api"
+    export MC_API_PORT
+  fi
   (cd apps/api && npx prisma generate)
   (cd apps/api && npx prisma migrate deploy)
   if health_ok; then

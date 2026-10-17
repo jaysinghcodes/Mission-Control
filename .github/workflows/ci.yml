@@ -145,13 +145,20 @@ jobs:
           - os: ubuntu-latest
             mode: native
             label: ubuntu native
+            api_port: '3405'
+            web_port: '5405'
           - os: macos-latest
             mode: native
             label: macos native
+            api_port: '3405'
+            web_port: '5405'
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
       FRESH_INSTALL_MODE: ${{ matrix.mode }}
       MC_INSTALL_READY_SECONDS: '180'
+      # Native jobs prove a custom PORT and MC_WEB_PORT. Compose leaves these empty.
+      PORT: ${{ matrix.api_port }}
+      MC_WEB_PORT: ${{ matrix.web_port }}
     steps:
       - name: Check out a clean tree
         uses: actions/checkout@v4

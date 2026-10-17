@@ -21,6 +21,8 @@
       "passThroughEnv": [
         "DATABASE_URL",
         "PORT",
+        "MC_API_PORT",
+        "MC_WEB_PORT",
         "HOST",
         "WEB_ORIGIN",
         "INGEST_TOKEN",

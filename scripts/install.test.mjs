@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import {
   chmodSync,
   cpSync,
@@ -121,7 +122,7 @@ const SCHEDULE_ENV_KEYS = [
 
 function runInstall(dir, env, args = []) {
   const merged = { ...process.env }
-  for (const key of ['MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT', ...SCHEDULE_ENV_KEYS]) {
+  for (const key of ['PORT', 'MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT', ...SCHEDULE_ENV_KEYS]) {
     if (!Object.prototype.hasOwnProperty.call(env, key)) delete merged[key]
   }
   Object.assign(merged, env)
@@ -699,6 +700,98 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     assert.equal(text.includes(assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8')).INGEST_TOKEN), false)
   } finally {
     plain?.child.kill()
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('native install binds shell PORT and MC_WEB_PORT and the printed URL answers', async () => {
+  const fx = freshDir()
+  const apiHold = createServer()
+  const webHold = createServer()
+  const apiPort = await new Promise((resolve, reject) => {
+    apiHold.once('error', reject)
+    apiHold.listen(0, '127.0.0.1', () => resolve(apiHold.address().port))
+  })
+  const webPort = await new Promise((resolve, reject) => {
+    webHold.once('error', reject)
+    webHold.listen(0, '127.0.0.1', () => resolve(webHold.address().port))
+  })
+  await new Promise((resolve) => apiHold.close(() => webHold.close(resolve)))
+  const bindScript = path.join(fx.dir, 'bind.mjs')
+  writeFileSync(
+    bindScript,
+    [
+      "import { createServer } from 'node:http'",
+      'const apiPort = Number(process.env.PORT)',
+      'const webPort = Number(process.env.MC_WEB_PORT)',
+      'function listen(port, respond) {',
+      '  return new Promise((resolve, reject) => {',
+      '    const server = createServer(respond)',
+      '    server.once("error", reject)',
+      '    server.listen(port, "127.0.0.1", () => resolve(server))',
+      '  })',
+      '}',
+      'await listen(apiPort, (req, res) => {',
+      '  if (!req.url || !req.url.startsWith("/health")) { res.writeHead(404); res.end(); return }',
+      '  res.writeHead(200, { "content-type": "application/json" })',
+      '  res.end(JSON.stringify({ service: "mission-control", status: "ok", database: "connected" }))',
+      '})',
+      'await listen(webPort, (req, res) => {',
+      '  res.writeHead(200, { "content-type": "text/html; charset=utf-8" })',
+      '  res.end("<!doctype html><title>Mission Control</title>")',
+      '})',
+      'setInterval(() => {}, 1000)',
+      '',
+    ].join('\n'),
+  )
+  try {
+    writeExe(path.join(fx.bin, 'docker'), '#!/bin/sh\nexit 127\n')
+    writeNode22Report(fx.bin)
+    const nativeLog = path.join(fx.dir, 'native.log')
+    writeFileSync(nativeLog, '')
+    writeExe(
+      path.join(fx.bin, 'npm'),
+      '#!/bin/sh\nprintf \'npm %s\\n\' "$*" >> "$NATIVE_LOG"\nif [ "$1" = "run" ] && [ "$2" = "dev" ]; then\n  exec node "$BIND_SCRIPT"\nfi\nexit 0\n',
+    )
+    writeExe(path.join(fx.bin, 'npx'), '#!/bin/sh\nexit 0\n')
+    writeExe(path.join(fx.bin, 'pg_isready'), '#!/bin/sh\nexit 0\n')
+    writeExe(path.join(fx.bin, 'psql'), '#!/bin/sh\nprintf \'16.4\\n\'\nexit 0\n')
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      PORT: String(apiPort),
+      MC_WEB_PORT: String(webPort),
+      NATIVE_LOG: nativeLog,
+      BIND_SCRIPT: bindScript,
+      MC_INSTALL_READY_SECONDS: '8',
+    })
+    const text = outputOf(result)
+    assert.match(text, new RegExp(`Open http://localhost:${webPort}/#/tasks`))
+    assert.match(text, /Wrote the API listen port from the environment into \.env\./)
+    assert.doesNotMatch(text, /localhost:5173/)
+    const written = assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8'))
+    assert.equal(written.PORT, String(apiPort))
+    assert.equal(written.MC_WEB_PORT, String(webPort))
+    const page = await fetch(`http://127.0.0.1:${webPort}/`)
+    assert.equal(page.status, 200, text)
+    assert.match(await page.text(), /Mission Control/)
+    const health = await fetch(`http://127.0.0.1:${apiPort}/health`)
+    const body = await health.json()
+    assert.equal(health.status, 200)
+    assert.equal(body.service, 'mission-control')
+    assert.equal(body.database, 'connected')
+    assert.match(text, new RegExp(`pass ports: Port ${apiPort} is already running\\.`))
+  } finally {
+    const pidFile = path.join(fx.repo, 'install-dev.pid')
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, 'utf8').trim())
+      if (pid) {
+        try {
+          process.kill(pid, 'SIGTERM')
+        } catch {
+          // The dev process already exited.
+        }
+      }
+    }
     rmSync(fx.dir, { recursive: true, force: true })
   }
 })

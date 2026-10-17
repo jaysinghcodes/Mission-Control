@@ -8,6 +8,7 @@ import {
 import { bindHost, evaluateWriteBind } from './auth/write-token';
 import { evaluateDashboardBind } from './auth/password';
 import { bootApi } from './boot';
+import { apiListenPort } from './config/ports';
 import { webOrigins } from './cors-origins';
 
 /**
@@ -65,10 +66,9 @@ async function bootstrap() {
   await refreshBundledPeers();
   scheduleBundledPeerRefresh();
 
-  await app.listen(process.env.PORT ?? 3000, host);
+  const port = apiListenPort();
+  await app.listen(port, host);
 
-  console.log(
-    `mission-control api listening on ${host}:${process.env.PORT ?? 3000}`,
-  );
+  console.log(`mission-control api listening on ${host}:${port}`);
 }
 bootstrap();

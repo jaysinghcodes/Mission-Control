@@ -79,7 +79,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 BRIDGE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BRIDGE_DIR.parent
 
-# Loopback by default — same posture as the api (binds 127.0.0.1).
+# Loopback by default. Same posture as the api (binds 127.0.0.1).
 DEFAULT_API_URL = "http://127.0.0.1:3000"
 
 # Where we remember last-seen cron job state between runs (for run.* diffs).
@@ -97,6 +97,34 @@ HOT_WINDOW_MS = 10 * 60 * 1000
 def log(msg: str) -> None:
     """All diagnostics go to stderr so stdout stays clean for --dry-run JSON."""
     print(f"[mc-bridge] {msg}", file=sys.stderr)
+
+
+def _valid_port(raw: str) -> Optional[int]:
+    text = raw.strip()
+    if not text.isdigit():
+        return None
+    port = int(text)
+    if port < 1 or port > 65535:
+        return None
+    return port
+
+
+def default_api_url() -> str:
+    """API base used when MC_API_URL is unset.
+
+    MC_API_PORT is the Compose host port, so it wins when it is set.
+    Otherwise PORT is the native listen port. The last resort is port 3000.
+    """
+    explicit = os.environ.get("MC_API_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    published = _valid_port(os.environ.get("MC_API_PORT", ""))
+    if published is not None:
+        return f"http://127.0.0.1:{published}"
+    listen = _valid_port(os.environ.get("PORT", ""))
+    if listen is not None:
+        return f"http://127.0.0.1:{listen}"
+    return DEFAULT_API_URL
 
 
 # ── .env loading (no python-dotenv dependency) ──────────────────────────────
@@ -2136,7 +2164,7 @@ def main() -> int:
     # Repo-root .env is the single source of truth for INGEST_TOKEN (same file
     # docker compose reads). Real env vars override it.
     load_dotenv(REPO_ROOT / ".env")
-    api_url = os.environ.get("MC_API_URL", DEFAULT_API_URL)
+    api_url = default_api_url()
     token = os.environ.get("INGEST_TOKEN", "")
     if not token and not args.dry_run:
         # Compose falls back to `dev-ingest-token` when .env leaves it blank;

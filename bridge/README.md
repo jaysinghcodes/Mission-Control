@@ -45,7 +45,7 @@ file is an info line. A stale file is an info line when no schedule is installed
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `INGEST_TOKEN` | required | Must equal the api's `INGEST_TOKEN`. Read from the env, else the **repo-root `.env`** (the same file docker compose reads). |
-| `MC_API_URL` | `http://127.0.0.1:3000` | Mission Control api base URL. Loopback by default. Change only deliberately. The installer resolves the shell, then `.env`, then the API port. |
+| `MC_API_URL` | `http://127.0.0.1:3000` | Mission Control api base URL. Loopback by default. Change only deliberately. When this is unset the bridge uses `MC_API_PORT` if that is set, then `PORT`, then port 3000. The installer resolves the shell, then `.env`, then the API port, and sets `MC_API_URL` on the schedule. |
 | `MC_BRIDGE_REGISTER` | `1` on the installed schedule | Also `POST /agents/register` for each mapped agent when this is `1`, `true`, or `yes`. `0` posts snapshots only. |
 | `MC_BRIDGE_INTERVAL_SECONDS` | `300` | Schedule interval in seconds. Cron rounds up to whole minutes. |
 | `MC_BRIDGE_STALE_SECONDS` | `600` | Doctor fails when a schedule is installed and the last successful sync is older than this. With no schedule, that age is an info line. |
