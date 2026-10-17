@@ -14,7 +14,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, openSync, closeSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, openSync, closeSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -441,8 +441,22 @@ function prependDockerStub(workParent, env) {
 }
 
 function apiUrlFor(fileEnv, mode) {
-  const port = mode === 'compose' ? fileEnv.MC_API_PORT || '3000' : fileEnv.PORT || '3000'
+  const port = mode === 'compose' ? fileEnv.MC_API_PORT || '3000' : fileEnv.PORT || fileEnv.MC_API_PORT || '3000'
   return `http://127.0.0.1:${port}`
+}
+
+/**
+ * data/docs must belong to the user running the installer. A root owned
+ * directory would make a later cleanup need sudo, and that fallback would
+ * hide the regression.
+ */
+export function docsOwnerError(cloneDir, uid = typeof process.getuid === 'function' ? process.getuid() : null) {
+  const docs = path.join(cloneDir, 'data', 'docs')
+  if (!existsSync(docs)) return 'data/docs is missing before cleanup.'
+  const owner = statSync(docs).uid
+  if (uid === null) return ''
+  if (owner !== uid) return `data/docs is owned by uid ${owner}, not the runner uid ${uid}.`
+  return ''
 }
 
 const DOCKER_HEALTH_JS =
@@ -688,6 +702,10 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
       bridgeEnv.MC_DASHBOARD_PASSWORD = password
     }
     await runInherit('node', ['scripts/bridge-fixture.mjs'], { cwd: cloneDir, env: bridgeEnv })
+    if (mode === 'compose') {
+      const ownerError = docsOwnerError(cloneDir)
+      if (ownerError) throw new Error(ownerError)
+    }
     console.log(`Fresh ${mode} install passed.`)
   } catch (err) {
     installError = err

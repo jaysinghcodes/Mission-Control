@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { buildInstallScript, finishFreshInstall, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
+import { buildInstallScript, docsOwnerError, finishFreshInstall, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -143,6 +143,22 @@ test('the fresh install fixture dry run maps devices, nodes, approvals, and the 
   assert.equal(approvals[0].tag, 'FreshInstall')
   assert.equal(gateway.host, '127.0.0.1')
   assert.equal(typeof gateway.up, 'boolean')
+})
+
+test('compose cleanup checks that data/docs is owned by the runner', () => {
+  const owned = mkdtempSync(path.join(tmpdir(), 'mc-docs-'))
+  mkdirSync(path.join(owned, 'data', 'docs'), { recursive: true })
+  try {
+    assert.equal(docsOwnerError(owned), '')
+    assert.equal(docsOwnerError(owned, 0), `data/docs is owned by uid ${process.getuid()}, not the runner uid 0.`)
+    assert.match(docsOwnerError(path.join(owned, 'missing')), /data\/docs is missing before cleanup/)
+  } finally {
+    rmSync(owned, { recursive: true, force: true })
+  }
+  const clone = readFileSync(path.join(root, 'scripts/fresh-clone.mjs'), 'utf8')
+  const checkAt = clone.indexOf('docsOwnerError(cloneDir)')
+  const cleanupAt = clone.indexOf('finishFreshInstall({ workParent, cloneDir, mode, env, keep, installError })')
+  assert.ok(checkAt > 0 && cleanupAt > checkAt)
 })
 
 test('cleanup removes a user owned checkout and does not hide an install failure', async () => {

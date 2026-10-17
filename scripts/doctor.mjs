@@ -144,7 +144,7 @@ const MC_BLANK_FALLTHROUGH = [
  */
 export function effectiveEnv(fileEnv, processEnv = process.env) {
   const env = { ...fileEnv }
-  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET', 'TRUSTED_PROXY', ...MC_BLANK_FALLTHROUGH]) {
+  for (const key of ['DATABASE_URL', 'PORT', 'HOST', 'INGEST_TOKEN', 'NODE_ENV', 'MC_DOCTOR_DOCKER', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET', 'TRUSTED_PROXY', 'MC_INSTALL_HEALTH_PORT', ...MC_BLANK_FALLTHROUGH]) {
     if (processEnv[key] === undefined) continue
     if (MC_BLANK_FALLTHROUGH.includes(key) && String(processEnv[key]).trim() === '') continue
     env[key] = processEnv[key]
@@ -174,10 +174,26 @@ function parsePort(raw, fallback) {
   return port
 }
 
-/** Native dev listens on PORT. Compose publishes the API on MC_API_PORT. */
+/**
+ * Compose publishes the API on MC_API_PORT.
+ * Native listens on PORT. MC_API_PORT is accepted when PORT is unset.
+ * When both are set, PORT wins.
+ */
 export function apiListenPort(env) {
   if (dockerRequested(env)) return parsePort(env.MC_API_PORT, 3000)
-  return parsePort(env.PORT, 3000)
+  if (typeof env.PORT === 'string' && env.PORT.trim() !== '') return parsePort(env.PORT, 3000)
+  return parsePort(env.MC_API_PORT, 3000)
+}
+
+/**
+ * Test seam. MC_INSTALL_HEALTH_PORT is the socket to probe.
+ * The reported port stays the resolved listen port.
+ */
+export function healthProbePort(logical, env) {
+  const raw = env.MC_INSTALL_HEALTH_PORT
+  if (typeof raw !== 'string' || raw.trim() === '') return logical
+  const port = parsePort(raw, logical)
+  return port == null ? logical : port
 }
 
 function composeServices(root) {
@@ -539,7 +555,7 @@ async function portFacts(env, root) {
   if (port == null) {
     return { badPort: true, api: null, apiState: 'busy', health: null }
   }
-  const seen = await inspectApiPort(port, bind, { docker: dockerRequested(env), root })
+  const seen = await inspectApiPort(healthProbePort(port, env), bind, { docker: dockerRequested(env), root })
   return {
     badPort: false,
     api: port,

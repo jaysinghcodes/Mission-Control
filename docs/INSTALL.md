@@ -12,11 +12,11 @@ curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/
 
 From a checkout you already have, run `bash install.sh` in the repo root. That is the same installer. It clones into `./mission-control` when you use the one line above.
 
-Then open the URL the script prints. The default is **http://localhost:5173/#/tasks**.
+Then open the URL the script prints. The default is **http://localhost:5173/#/tasks** (`MC_WEB_PORT`). A native API listens on `PORT` (default 3000). `MC_API_PORT` is the Compose host port (default 3000). On a native install it is accepted when `PORT` is unset. When both are set, `PORT` wins. The api container still listens on 3000.
 
 `bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes `INGEST_TOKEN` as a random value, and it writes `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. The password is printed once. The file stores only the hash. A second run keeps every value already in `.env`. If the hash or the session secret is missing, that run fills only the missing one and does not change other keys. The script does not print the ingest token or the session secret.
 
-Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`, and `MC_REMOTE_PORT` from the environment are written into a new `.env`. `MC_REMOTE_PORT` defaults to 3011. A plain second run leaves `.env` unchanged. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL uses `localhost` or `127.0.0.1` and its port is the previous `MC_DB_PORT`, or 5432 when none was stored. That same run updates the `MC_DB_PORT` line. A custom URL, including another host or a URL with no port, is left as is and the installer says so. Tokens and secrets are not rotated. A shell value still wins for that run.
+Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`, and `MC_REMOTE_PORT` from the environment are written into a new `.env`. A shell `PORT`, or a shell `MC_API_PORT` when `PORT` is unset, is written into `PORT` on that new file so a native process listens there. `MC_REMOTE_PORT` defaults to 3011. A plain second run leaves `.env` unchanged. A shell `PORT` or `MC_WEB_PORT` still wins for that run. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL uses `localhost` or `127.0.0.1` and its port is the previous `MC_DB_PORT`, or 5432 when none was stored. That same run updates the `MC_DB_PORT` line. A custom URL, including another host or a URL with no port, is left as is and the installer says so. Tokens and secrets are not rotated. A shell value still wins for that run.
 
 OpenClaw is optional. The command above does not start the OpenClaw gateway. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. After `npm ci`, `npm run seed:demo` writes sample bots, tickets, and usage. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
 
@@ -30,9 +30,9 @@ Doctor reads the sync timestamp at `MC_BRIDGE_STAMP_FILE` (default `bridge/.stat
 
 The API loads the root `.env` when that file is on disk, and it runs `prisma migrate deploy` before it listens. Compose injects `DATABASE_URL` for the `db` service, so the image does not contain a `.env` file. A variable that is already set wins over the file, including a blank value. The host `DATABASE_URL` is what `npm run seed:demo` uses. On a new `.env` its port is the resolved `MC_DB_PORT`.
 
-nginx on the web port proxies `/api` and `/socket.io` to the API. The page and the live socket stay on port 5173. That port is the owner port. SSH tunnels use it. Cloudflare Tunnel and Tailscale Serve use port 3011 (`MC_REMOTE_PORT`). Leave `VITE_API_URL` unset. Set it only when the browser should call a different API origin, then rebuild the web image. The laptop steps are in [REMOTE.md](REMOTE.md).
+nginx on the web port proxies `/api` and `/socket.io` to the API. The page and the live socket stay on `MC_WEB_PORT` (default 5173). That port is the owner port. SSH tunnels use it. Cloudflare Tunnel and Tailscale Serve use `MC_REMOTE_PORT` (default 3011). Leave `VITE_API_URL` unset. Set it only when the browser should call a different API origin, then rebuild the web image. The laptop steps are in [REMOTE.md](REMOTE.md).
 
-`docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
+`docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. That is the port inside the container. The host port is `MC_API_PORT`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
 
 Before Compose starts, `bash install.sh` creates the host docs directory as the user running the installer. The path is `DOCS_ROOT` from the shell, then `.env`, then `data/docs`. That user can delete the checkout, including `data/docs`. `npm run seed:demo` on the host writes sample markdown as that same user. The api container runs as root, so a seed command started inside that container writes root-owned files in `data/docs`. Session files stay in the named volume `mc-auth`.
 
@@ -63,7 +63,7 @@ set -a; . ./.env; set +a
 npm run dev
 ```
 
-Then open **http://localhost:5173/#/tasks**. The dev server proxies `/api` and `/socket.io`, so the browser still uses port 5173. Leave `VITE_API_URL` unset here too.
+Then open **http://localhost:5173/#/tasks** unless `MC_WEB_PORT` names another port. The dev server and the preview server listen on `MC_WEB_PORT` and do not move to a free port if that port is taken. They proxy `/api` and `/socket.io` to `PORT` (or `MC_API_PORT` when `PORT` is unset). The browser stays on the web port. Leave `VITE_API_URL` unset here too.
 
 `npm ci` prints an `allow-scripts` warning for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. The following `npx prisma generate` still completes. `npx prisma migrate deploy` applies every folder in `apps/api/prisma/migrations`.
 
@@ -83,19 +83,22 @@ Leave `GITHUB_TOKEN` empty unless you want pull request merge from Approvals. Do
 
 ## Ports
 
-| Service | Where it listened |
-| --- | --- |
-| Web | `http://127.0.0.1:5173`. This is the owner UI port. `http://localhost:5173` also works when localhost resolves to that address. SSH tunnels use this port. |
-| Tunnel | `http://127.0.0.1:3011`. Cloudflare Tunnel and Tailscale Serve use this port. `MC_REMOTE_PORT` defaults to 3011. |
-| API | Direct clients use `http://127.0.0.1:3000`. The browser does not. It calls `/api` on the web port. |
-| Postgres | `127.0.0.1:5432`, database `mission_control` |
+| Service | Name | Default |
+| --- | --- | --- |
+| Web, native dev and preview, and the Compose host port | `MC_WEB_PORT` | 5173 |
+| API listen on a native install | `PORT` | 3000 |
+| API host port on Compose. Also the native listen port when `PORT` is unset | `MC_API_PORT` | 3000 |
+| Tunnel host port | `MC_REMOTE_PORT` | 3011 |
+| Postgres host port | `MC_DB_PORT` | 5432 |
 
-`docker-compose.yml` publishes those ports on `127.0.0.1` only (`MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`, and `MC_REMOTE_PORT` override the host side). Inside Compose the API binds `0.0.0.0:3000` and nginx listens on `5173` and `3011`. Moving `MC_API_PORT` does not change the browser unless you also set `VITE_API_URL`. `bash install.sh` writes the resolved `MC_DB_PORT` into a new `DATABASE_URL` for commands on the host. A later run updates that URL only when it is still the stock host and port. Compose still connects the API to `db:5432`. The installer prints the local URL and the tunnel port. [REMOTE.md](REMOTE.md) is the laptop guide for SSH, Tailscale Serve, and Cloudflare Tunnel.
+The web address is `http://127.0.0.1:<MC_WEB_PORT>`. `http://localhost:<MC_WEB_PORT>` also works when localhost resolves to that address. SSH tunnels use that owner port. Direct API clients use `http://127.0.0.1:<PORT>` on a native install and `http://127.0.0.1:<MC_API_PORT>` when Compose published the API. The browser does not call that port. It calls `/api` on the web port. The bridge default target is `MC_API_URL`, then `MC_API_PORT` when that is set, then `PORT`, then port 3000. Doctor checks the native listen port, and `MC_API_PORT` when the Compose API service is running.
+
+`docker-compose.yml` publishes the host ports on `127.0.0.1` only. Inside Compose the API binds `0.0.0.0:3000` and nginx listens on `5173` and `3011`. Moving `MC_API_PORT` does not change the browser unless you also set `VITE_API_URL`. `bash install.sh` writes the resolved `MC_DB_PORT` into a new `DATABASE_URL` for commands on the host. A later run updates that URL only when it is still the stock host and port. Compose still connects the API to `db:5432`. The installer prints the local URL and the tunnel port. [REMOTE.md](REMOTE.md) is the laptop guide for SSH, Tailscale Serve, and Cloudflare Tunnel.
 
 ## First run
 
 1. `bash install.sh` starts Postgres, the API, and the web UI. `docker compose up -d --build` is the same Docker start when the tokens are already in `.env`. `npm run dev` is the advanced path and starts the API and the web app without Docker.
-2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar account chip says **Connected** plus the health latency when `GET /health` succeeds and the Socket.IO feed is up. **API only** means health is up and the socket is still reconnecting. **Offline** means the health probe failed.
+2. Open the URL the installer printed (`http://localhost:<MC_WEB_PORT>/#/tasks`, default port 5173). `/` redirects to `/tasks`. The sidebar account chip says **Connected** plus the health latency when `GET /health` succeeds and the Socket.IO feed is up. **API only** means health is up and the socket is still reconnecting. **Offline** means the health probe failed.
 3. If the first health probe fails, the shell sends the browser to `/#/connect`. Later failures do not keep redirecting.
 4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, remote access, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks. Step 7 links to [REMOTE.md](REMOTE.md).
 5. `/#/` goes to Tasks. Health lives on `/#/system`. Trust the sidebar chip.

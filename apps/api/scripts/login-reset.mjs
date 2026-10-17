@@ -7,7 +7,9 @@
  */
 import { request } from 'node:http'
 
-const port = listenPort(process.env.PORT)
+const port = listenPort(
+  process.env.PORT && process.env.PORT.trim() !== '' ? process.env.PORT : process.env.MC_API_PORT,
+)
 const req = request(
   {
     host: '127.0.0.1',
