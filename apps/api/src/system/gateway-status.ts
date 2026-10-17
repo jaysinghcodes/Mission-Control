@@ -10,6 +10,8 @@
  * always checks 127.0.0.1 on that port.
  *
  * A missing report, or one older than GATEWAY_STATUS_MAX_AGE_MS, is unknown.
+ * A future checkedAt is limited to the time the API stored the row, so a
+ * fast bridge clock cannot keep the gateway up past the max age.
  * Unknown is not down. Down is only a real check.
  */
 
@@ -39,6 +41,11 @@ export interface GatewayReport {
   checkedAt?: unknown;
   latencyMs?: unknown;
   version?: unknown;
+  /**
+   * Unix ms when the API stored the row. Not part of the posted payload.
+   * A future checkedAt is limited to this instant.
+   */
+  receivedAt?: unknown;
 }
 
 export function gatewayMaxAgeMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -90,6 +97,8 @@ export function gatewayStatusFromProbe(
 /**
  * Bridge report. No report, a report that is not a real check, or a report
  * older than maxAgeMs is unknown. Age equal to maxAgeMs is still fresh.
+ * A future checkedAt is limited to receivedAt. An earlier checkedAt still
+ * ages from that earlier time.
  */
 export function gatewayStatusFromReport(
   report: GatewayReport | null,
@@ -108,14 +117,13 @@ export function gatewayStatusFromReport(
     source: 'bridge',
   });
   if (!report || typeof report.up !== 'boolean') return unknown(null);
-  if (
-    typeof report.checkedAt !== 'number' ||
-    !Number.isFinite(report.checkedAt)
-  ) {
-    return unknown(null);
-  }
-  const age = now - report.checkedAt;
-  if (age > maxAgeMs) return unknown(report.checkedAt);
+  const checkedAt = finiteTimestamp(report.checkedAt);
+  if (checkedAt == null) return unknown(null);
+  const receivedAt = finiteTimestamp(report.receivedAt);
+  const basis =
+    receivedAt == null ? checkedAt : Math.min(checkedAt, receivedAt);
+  const age = now - basis;
+  if (age > maxAgeMs) return unknown(checkedAt);
   const host =
     typeof report.host === 'string' && isGatewayHost(report.host)
       ? report.host
@@ -136,10 +144,15 @@ export function gatewayStatusFromReport(
     state: report.up ? 'up' : 'down',
     up: report.up,
     latencyMs: latency,
-    checkedAt: report.checkedAt,
+    checkedAt,
     source: 'bridge',
     ...(version ? { version } : {}),
   };
+}
+
+function finiteTimestamp(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return value;
 }
 
 export function isGatewayHost(value: string): boolean {

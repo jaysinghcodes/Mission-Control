@@ -46,7 +46,7 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `GITHUB_TOKEN` | empty | Optional pull request merge from Approvals |
 | `OPENCLAW_GATEWAY_HOST` | blank, then `127.0.0.1` | Direct probe host. Under Compose a blank host uses the bridge report instead of a probe from the container |
 | `OPENCLAW_GATEWAY_PORT` | `18789` | Port for a direct probe. Under Compose the bridge checks `127.0.0.1` on this port |
-| `GATEWAY_STATUS_MAX_AGE_MS` | `600000` | Compose bridge report older than this is Unknown. Blank, 0, or invalid uses 600000 |
+| `GATEWAY_STATUS_MAX_AGE_MS` | `600000` | Compose bridge report older than this is Unknown. A future checkedAt is counted from the time the API stored the report. Blank, 0, or invalid uses 600000 |
 | `MC_COMPOSE` | unset | `docker-compose.yml` sets `1`. That selects the bridge report when the gateway host is blank |
 | `OPENCLAW_LOG_DIR` | `/tmp/openclaw` | Directory of `openclaw-*.log` |
 | `GIT_SHA` | git, or `git-sha.txt` in the image | Commit shown by `GET /health` |

@@ -93,6 +93,7 @@ describe('gateway probe', () => {
     delete process.env.OPENCLAW_GATEWAY_HOST;
     const checkedAt = Date.now();
     const findFirst = jest.fn().mockResolvedValue({
+      ts: new Date(checkedAt),
       payload: {
         up: true,
         host: '127.0.0.1',
@@ -105,7 +106,11 @@ describe('gateway probe', () => {
     const body = await new SystemController({
       activityEvent: { findFirst },
     } as unknown as PrismaService).system();
-    expect(findFirst).toHaveBeenCalled();
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { payload: true, ts: true },
+      }),
+    );
     expect(body.gateway).toMatchObject({
       state: 'up',
       source: 'bridge',
