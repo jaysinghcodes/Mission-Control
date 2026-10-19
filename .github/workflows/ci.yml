@@ -89,7 +89,7 @@ jobs:
         run: npm install -g npm@11.17.0
 
       - name: Install nginx
-        run: sudo apt-get update && sudo apt-get install -y nginx
+        run: sudo apt-get update && sudo apt-get install -y nginx ripgrep
 
       - name: Run the README install and prove the app
         run: node scripts/fresh-clone.mjs
