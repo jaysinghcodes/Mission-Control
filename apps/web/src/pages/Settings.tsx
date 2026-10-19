@@ -156,7 +156,7 @@ export default function Settings() {
       <Card className="mt-4 px-5 py-4">
         <SectionLabel>Agent names</SectionLabel>
         <p className="mt-2 text-[13px] text-mc-sub">
-          Crew seats come from the saved crew file. An agent whose id matches a seat takes that seat when the seat is free. A saved seat stays with that agent. Everyone else with no saved choice takes the next free seat in the order they first registered. When a seat opens, the earliest agent with no saved choice takes it. Own name is a saved choice and it stays until you change it. A save changes only the agents it names. The map is saved by agent id. A display name does not pick a seat.
+          Each agent gets a crew name and desk. Seats are saved by agent id, and you can change any seat here.
         </p>
         <div className="mt-4">
           <NamingChoice

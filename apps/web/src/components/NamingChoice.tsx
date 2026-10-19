@@ -88,7 +88,7 @@ export function NamingChoice({
           selected={mode === 'crew'}
           title="Use the Mission Control crew"
           badge="Recommended"
-          body="An agent whose id matches a crew seat takes that seat when the seat is free. A saved seat stays with that agent. Everyone else with no saved choice takes the next free seat in the order they first registered. When a seat opens, the earliest agent with no saved choice takes it. Own name is a saved choice and it stays until you change it. You can change any seat. A display name does not pick a seat."
+          body="An agent whose id matches a crew seat takes it. Everyone else fills open seats in the order they joined. You can change any seat."
           onSelect={() => choose('crew')}
         />
         <Choice
@@ -103,7 +103,7 @@ export function NamingChoice({
         <div className="mt-5">
           {ordered.length === 0 ? (
             <p className="text-[13px] text-mc-sub">
-              No agents yet. You can still continue. An agent that registers later takes the next free seat. A saved seat stays with that agent.
+              No agents yet. You can still continue. An agent that registers later takes the next free seat. Seats already saved stay put.
             </p>
           ) : (
             <ul className="divide-y divide-mc-sep rounded-[14px] bg-mc-inner">
