@@ -13,10 +13,11 @@ import {
 } from './test-db-file';
 
 /**
- * npm test connects with TEST_DATABASE_URL only.
- * DATABASE_URL is read for the server (user, password, host, port) and for
- * the live database name we must not open. No connection string passed to
- * pg or to prisma migrate deploy is the live URL.
+ * npm test writes with TEST_DATABASE_URL only.
+ * DATABASE_URL supplies the server for a throwaway database and, when both
+ * URLs are set, a read-only identity comparison. prisma migrate deploy never
+ * receives the live URL. If DATABASE_URL is unset or cannot be reached, that
+ * comparison is skipped.
  */
 
 export const LIVE_DB_REFUSAL =
@@ -115,72 +116,139 @@ export function sameDatabase(
 }
 
 export interface DbFingerprint {
+  /** Empty when pg_control_system() is not permitted. */
   systemIdentifier: string;
-  database: string;
+  /** pg_postmaster_start_time(), used when system_identifier is unavailable. */
+  startedAt: string;
+  /** inet_server_port(), used with startedAt. Empty on a Unix socket. */
   port: string;
+  database: string;
 }
 
+/**
+ * Superuser identity is system_identifier plus the database name.
+ * Without that reading, identity is the postmaster start time, the server
+ * port, and the database name.
+ */
 export function sameFingerprint(
   left: DbFingerprint,
   right: DbFingerprint,
 ): boolean {
-  return (
-    left.systemIdentifier === right.systemIdentifier &&
-    left.database === right.database &&
-    left.port === right.port
-  );
+  if (left.database !== right.database) return false;
+  if (left.systemIdentifier && right.systemIdentifier) {
+    return left.systemIdentifier === right.systemIdentifier;
+  }
+  if (!left.startedAt || !right.startedAt || !left.port || !right.port) {
+    return false;
+  }
+  return left.startedAt === right.startedAt && left.port === right.port;
 }
 
 function scalar(value: unknown): string {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (value instanceof Date) return String(value.getTime());
   return '';
 }
 
-const FINGERPRINT_SQL =
-  'SELECT system_identifier::text AS system_identifier, current_database() AS database, inet_server_port()::text AS port FROM pg_control_system()';
+const SYSTEM_SQL =
+  'SELECT system_identifier::text AS system_identifier, current_database() AS database FROM pg_control_system()';
+const FALLBACK_SQL =
+  'SELECT pg_postmaster_start_time() AS started_at, inet_server_port()::text AS port, current_database() AS database';
+
+function rowRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  return value as Record<string, unknown>;
+}
+
+const UNREACHABLE = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+]);
+
+function unreachable(err: unknown): boolean {
+  const seen = new Set<unknown>();
+  const walk = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object' || seen.has(value)) return false;
+    seen.add(value);
+    const record = value as { code?: unknown; errors?: unknown };
+    if (UNREACHABLE.has(String(record.code))) return true;
+    if (Array.isArray(record.errors)) {
+      return record.errors.some((item) => walk(item));
+    }
+    return false;
+  };
+  return walk(err);
+}
+
+async function readFallback(client: SqlClient): Promise<DbFingerprint> {
+  const result = await client.query(FALLBACK_SQL);
+  const record = rowRecord(result.rows[0]);
+  const startedAt = scalar(record?.started_at);
+  const port = scalar(record?.port);
+  const database = scalar(record?.database).toLowerCase();
+  if (!startedAt || !database) {
+    throw new Error('Could not read the database identity.');
+  }
+  return { systemIdentifier: '', startedAt, port, database };
+}
 
 export async function readFingerprint(
   url: string,
   opener: (url: string) => Promise<SqlClient>,
+  forceFallback = false,
 ): Promise<DbFingerprint> {
   const client = await opener(url);
   try {
-    const result = await client.query(FINGERPRINT_SQL);
-    const row: unknown = result.rows[0];
-    if (!row || typeof row !== 'object') {
-      throw new Error('Could not read the database identity.');
+    if (!forceFallback) {
+      try {
+        const result = await client.query(SYSTEM_SQL);
+        const record = rowRecord(result.rows[0]);
+        const systemIdentifier = scalar(record?.system_identifier);
+        const database = scalar(record?.database).toLowerCase();
+        if (!systemIdentifier || !database) {
+          throw new Error('Could not read the database identity.');
+        }
+        return { systemIdentifier, startedAt: '', port: '', database };
+      } catch (err) {
+        if (!permissionDenied(err)) throw err;
+      }
     }
-    const record = row as Record<string, unknown>;
-    const systemIdentifier = scalar(record.system_identifier);
-    const database = scalar(record.database);
-    const port = scalar(record.port);
-    if (!systemIdentifier || !database || !port) {
-      throw new Error('Could not read the database identity.');
-    }
-    return {
-      systemIdentifier,
-      database: database.toLowerCase(),
-      port,
-    };
+    return await readFallback(client);
   } finally {
     await client.end();
   }
 }
 
-async function refuseIfSameServer(
+export type LiveCompare = 'match' | 'different' | 'skipped';
+
+/** Read both URLs. Skip when DATABASE_URL cannot be reached. */
+export async function compareLiveDatabase(
   testUrl: string,
   liveUrl: string,
-  opener: (url: string) => Promise<SqlClient>,
-): Promise<void> {
-  const [testFp, liveFp] = await Promise.all([
-    readFingerprint(testUrl, opener),
-    readFingerprint(liveUrl, opener),
-  ]);
-  if (sameFingerprint(testFp, liveFp)) {
-    console.error(LIVE_DB_REFUSAL);
-    process.exit(1);
+  opener: (url: string) => Promise<SqlClient> = openPg,
+): Promise<LiveCompare> {
+  let liveFp: DbFingerprint;
+  try {
+    liveFp = await readFingerprint(liveUrl, opener);
+  } catch (err) {
+    if (unreachable(err)) return 'skipped';
+    throw err;
   }
+  let testFp = await readFingerprint(testUrl, opener);
+  if (!testFp.systemIdentifier || !liveFp.systemIdentifier) {
+    if (testFp.systemIdentifier) {
+      testFp = await readFingerprint(testUrl, opener, true);
+    }
+    if (liveFp.systemIdentifier) {
+      liveFp = await readFingerprint(liveUrl, opener, true);
+    }
+  }
+  return sameFingerprint(testFp, liveFp) ? 'match' : 'different';
 }
 
 /** Keep the host and port. Optionally set the libpq `host` query parameter. */
@@ -493,10 +561,19 @@ export async function prepareJestDatabase(
     process.exit(1);
   }
 
-  // String comparison is the fast check. Aliases that still name this
-  // database are refused after a read of both connections, before any write.
+  // String comparison is only the fast first check. A URL that still reaches
+  // the live database is refused after reading both connections, before any
+  // write. An unreachable DATABASE_URL skips that read.
   if (decision.action === 'use' && liveUrl) {
-    await refuseIfSameServer(decision.url, liveUrl, opener ?? openPg);
+    const verdict = await compareLiveDatabase(
+      decision.url,
+      liveUrl,
+      opener ?? openPg,
+    );
+    if (verdict === 'match') {
+      console.error(LIVE_DB_REFUSAL);
+      process.exit(1);
+    }
   }
 
   const file = allocateStateFile();

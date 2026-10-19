@@ -1,16 +1,18 @@
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
-import { mkdtempSync, writeFileSync } from 'fs';
-import { hostname, tmpdir } from 'os';
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { hostname, tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import { Client } from 'pg';
 import { findApiDir } from './boot';
-import { stateFileForRun } from './test-db-file';
+import { currentStateFile, stateFileForRun } from './test-db-file';
 import {
   LIVE_DB_REFUSAL,
+  compareLiveDatabase,
   createThrowaway,
   databaseIdentity,
   decideTestDatabase,
+  sameFingerprint,
   dropStateFile,
   pidAlive,
   prepareJestDatabase,
@@ -148,6 +150,7 @@ describe('test database isolation', () => {
       'postgresql://postgres:postgres@0.0.0.0:5432/mission_control',
       'postgresql://postgres:postgres@cursor:5432/mission_control',
       'postgresql://postgres:postgres@db.invalid:5432/mission_control?host=127.0.0.1',
+      'postgresql:///mission_control?host=/var/run/postgresql',
     ];
     for (const alias of aliases) {
       seen.length = 0;
@@ -167,6 +170,93 @@ describe('test database isolation', () => {
       exit.mockRestore();
       error.mockRestore();
     }
+  });
+
+  it('falls back when system_identifier is not permitted', async () => {
+    const opener = () =>
+      Promise.resolve({
+        query: (sql: string) => {
+          if (sql.includes('pg_control_system')) {
+            const err = new Error(
+              'permission denied for function pg_control_system',
+            ) as Error & { code: string };
+            err.code = '42501';
+            return Promise.reject(err);
+          }
+          if (sql.includes('pg_postmaster_start_time')) {
+            return Promise.resolve({
+              rows: [
+                {
+                  started_at: new Date('2026-01-01T00:00:00.000Z'),
+                  port: '5432',
+                  database: 'mission_control',
+                },
+              ],
+              rowCount: 1,
+            });
+          }
+          return Promise.reject(new Error(`unexpected ${sql}`));
+        },
+        end: () => Promise.resolve(undefined),
+      });
+    const exit = exitSpy();
+    const error = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    await expect(
+      prepareJestDatabase(
+        {
+          DATABASE_URL: LIVE,
+          TEST_DATABASE_URL:
+            'postgresql://postgres:postgres@0.0.0.0:5432/mission_control',
+        },
+        opener,
+      ),
+    ).rejects.toThrow('exit 1');
+    expect(error).toHaveBeenCalledWith(LIVE_DB_REFUSAL);
+    exit.mockRestore();
+    error.mockRestore();
+  });
+
+  it('treats a different database name on the same server as safe', () => {
+    expect(
+      sameFingerprint(
+        {
+          systemIdentifier: '99',
+          startedAt: '',
+          port: '',
+          database: 'mission_control',
+        },
+        {
+          systemIdentifier: '99',
+          startedAt: '',
+          port: '',
+          database: 'mc_test_abc',
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it('skips the identity check when DATABASE_URL cannot be reached', async () => {
+    const testUrl =
+      'postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test';
+    const liveUrl =
+      'postgresql://postgres:postgres@127.0.0.1:1/mission_control';
+    const opener = jest.fn((url: string) => {
+      if (url === liveUrl) {
+        const err = new Error('connect ECONNREFUSED 127.0.0.1:1') as Error & {
+          code: string;
+        };
+        err.code = 'ECONNREFUSED';
+        return Promise.reject(err);
+      }
+      return Promise.reject(new Error(`unexpected connect ${url}`));
+    });
+    await expect(compareLiveDatabase(testUrl, liveUrl, opener)).resolves.toBe(
+      'skipped',
+    );
+    expect(opener).toHaveBeenCalledTimes(1);
+    expect(opener).toHaveBeenCalledWith(liveUrl);
   });
 
   it('builds a throwaway database without opening the live database', async () => {
@@ -487,10 +577,16 @@ describe('throwaway database lifecycle', () => {
     const direct = replaceDatabase(server, 'mc_alias_guard');
     const connectHost = new URL(server.replace(/^postgres(ql)?:/i, 'http:'))
       .hostname;
+    const port = databaseIdentity(server)?.port || '5432';
+    const socket =
+      port === '5432'
+        ? 'postgresql:///mc_alias_guard?host=/var/run/postgresql'
+        : `postgresql:///mc_alias_guard?host=/var/run/postgresql&port=${port}`;
     const aliases = [
       rewriteHost(direct, '0.0.0.0'),
       rewriteHost(direct, hostname()),
       rewriteHost(direct, 'db.invalid', connectHost),
+      socket,
     ];
     const admin = new Client({ connectionString: server });
     await admin.connect();
@@ -499,6 +595,8 @@ describe('throwaway database lifecycle', () => {
       await client.connect();
       return client;
     };
+    let createdOsRole = false;
+    let osUser = '';
     try {
       await admin.query(
         'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
@@ -506,8 +604,24 @@ describe('throwaway database lifecycle', () => {
       );
       await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
       await admin.query('CREATE DATABASE mc_alias_guard');
+      osUser = userInfo().username;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(osUser)) {
+        throw new Error('refusing an unsafe operating system user name');
+      }
+      const roleExists = await admin.query(
+        'SELECT 1 FROM pg_roles WHERE rolname = $1',
+        [osUser],
+      );
+      createdOsRole = (roleExists.rowCount ?? 0) === 0;
+      if (createdOsRole) await admin.query(`CREATE ROLE "${osUser}" LOGIN`);
+      await admin.query(
+        `GRANT CONNECT ON DATABASE mc_alias_guard TO "${osUser}"`,
+      );
       const seed = await openGuard();
       try {
+        await seed.query(
+          'GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC',
+        );
         await seed.query('CREATE TABLE qa_sentinel (id int primary key)');
         await seed.query('INSERT INTO qa_sentinel (id) VALUES (1)');
       } finally {
@@ -550,6 +664,134 @@ describe('throwaway database lifecycle', () => {
         ['mc_alias_guard'],
       );
       await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
+      if (createdOsRole) await admin.query(`DROP ROLE "${osUser}"`);
+      await admin.end();
+    }
+  });
+
+  it('a login without superuser still refuses an alias', async () => {
+    const server = serverUrl();
+    const direct = replaceDatabase(server, 'mc_alias_guard');
+    const role = `mc_nofinger_${randomBytes(3).toString('hex')}`;
+    const password = 'mc_test_pw';
+    const admin = new Client({ connectionString: server });
+    await admin.connect();
+    const guard = new Client({ connectionString: direct });
+    let guardConnected = false;
+    let roleReady = false;
+    try {
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        ['mc_alias_guard'],
+      );
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
+      await admin.query('CREATE DATABASE mc_alias_guard');
+      await admin.query(
+        `CREATE ROLE "${role}" LOGIN PASSWORD '${password}' NOSUPERUSER`,
+      );
+      roleReady = true;
+      await admin.query(
+        `GRANT CONNECT ON DATABASE mc_alias_guard TO "${role}"`,
+      );
+      // Function privileges live in the database being opened, not the maintenance database.
+      await guard.connect();
+      guardConnected = true;
+      await guard.query(
+        'REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC',
+      );
+      const limited = retargetConnection(direct, {
+        user: role,
+        password,
+        database: 'mc_alias_guard',
+      });
+      const denied = new Client({ connectionString: limited });
+      await denied.connect();
+      try {
+        const who = await denied.query<{ u: string }>(
+          'SELECT current_user AS u',
+        );
+        expect(who.rows[0]?.u).toBe(role);
+        await expect(
+          denied.query('SELECT system_identifier FROM pg_control_system()'),
+        ).rejects.toMatchObject({ code: '42501' });
+      } finally {
+        await denied.end();
+      }
+      await guard.query('CREATE TABLE qa_sentinel (id int primary key)');
+      await guard.query('INSERT INTO qa_sentinel (id) VALUES (1)');
+
+      const exit = exitSpy();
+      const error = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      await expect(
+        prepareJestDatabase({
+          DATABASE_URL: limited,
+          TEST_DATABASE_URL: rewriteHost(limited, '0.0.0.0'),
+        }),
+      ).rejects.toThrow('exit 1');
+      expect(error).toHaveBeenCalledWith(LIVE_DB_REFUSAL);
+      exit.mockRestore();
+      error.mockRestore();
+
+      const count = await guard.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM qa_sentinel',
+      );
+      expect(count.rows[0]?.n).toBe(1);
+    } finally {
+      if (guardConnected) {
+        await guard.query(
+          'GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC',
+        );
+        await guard.end();
+      }
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        ['mc_alias_guard'],
+      );
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
+      if (roleReady) await admin.query(`DROP ROLE IF EXISTS "${role}"`);
+      await admin.end();
+    }
+  });
+
+  it('migrates the test database when DATABASE_URL is unreachable', async () => {
+    const server = serverUrl();
+    const skipUrl = replaceDatabase(server, 'mc_alias_skip');
+    const stateFile = currentStateFile();
+    const saved = readFileSync(stateFile, 'utf8');
+    const admin = new Client({ connectionString: server });
+    await admin.connect();
+    try {
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_skip');
+      await admin.query('CREATE DATABASE mc_alias_skip');
+      const error = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      await prepareJestDatabase({
+        DATABASE_URL:
+          'postgresql://postgres:postgres@127.0.0.1:1/mission_control',
+        TEST_DATABASE_URL: skipUrl,
+      });
+      expect(error).not.toHaveBeenCalledWith(LIVE_DB_REFUSAL);
+      error.mockRestore();
+      const check = new Client({ connectionString: skipUrl });
+      await check.connect();
+      try {
+        const table = await check.query<{ reg: string | null }>(
+          `SELECT to_regclass('public."Agent"') AS reg`,
+        );
+        expect(table.rows[0]?.reg).toBeTruthy();
+      } finally {
+        await check.end();
+      }
+    } finally {
+      writeFileSync(stateFile, saved);
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        ['mc_alias_skip'],
+      );
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_skip');
       await admin.end();
     }
   });
