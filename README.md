@@ -86,7 +86,7 @@ Empty Office is the floor after `npm run seed:clear` on that database. The comma
 
 Docker Compose is the default. One command writes random tokens, starts Postgres, the API, and the web UI, runs doctor, and prints the URL. The browser uses one port. From a checkout you already have, run `bash install.sh` in the repo root. That is the same installer.
 
-Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 20.17 or later and Postgres 16 instead. Docker installs do not need Node on the host. The Compose health wait polls /health with curl. If curl is missing, it uses docker compose exec against the api container. That wait does not call host Node, npm, or npx. No paid service is required. OpenClaw can run this for you. Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) and say yes. The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
+Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 20.17 or later and Postgres 16 instead. Docker installs do not need Node on the host. The Compose health wait polls /health with curl. If curl is missing on the host, it runs curl inside the api container with docker compose exec. That wait does not call host Node, npm, or npx. No paid service is required. OpenClaw can run this for you. Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) and say yes. The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash

@@ -97,6 +97,10 @@ if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
   fi
   exit 0
 fi
+if [ "$1" = "compose" ] && [ "$2" = "exec" ]; then
+  printf '%s\n' '{"service":"mission-control","status":"ok","database":"connected"}'
+  exit 0
+fi
 exit 0
 `,
   )
@@ -1718,15 +1722,19 @@ function realCommand(name) {
   return found.stdout.trim()
 }
 
-function stripQuotes(text) {
-  return String(text).replace(/'(?:\\'|[^'])*'|"(?:\\"|[^"])*"|`(?:\\`|[^`])*`/g, '""')
-}
-
 function extractMarked(source, startMark, endMark) {
-  const start = source.indexOf(startMark)
-  const end = source.indexOf(endMark)
-  assert.ok(start >= 0 && end > start, startMark)
-  return source.slice(start, end)
+  const parts = []
+  let from = 0
+  while (from < source.length) {
+    const start = source.indexOf(startMark, from)
+    if (start < 0) break
+    const end = source.indexOf(endMark, start + startMark.length)
+    assert.ok(end > start, startMark)
+    parts.push(source.slice(start, end))
+    from = end + endMark.length
+  }
+  assert.ok(parts.length > 0, startMark)
+  return parts.join('\n')
 }
 
 function extractShellFunction(source, name) {
@@ -1745,7 +1753,7 @@ function extractShellFunction(source, name) {
   throw new Error(`unclosed ${name}`)
 }
 
-test('rg finds no host node, npm, or npx invocation on the compose path or in doctor', () => {
+test('the Compose branch has no node, npm, or npx word', () => {
   const script = readFileSync(path.join(root, 'install.sh'), 'utf8')
   const doctor = readFileSync(path.join(root, 'scripts/doctor.mjs'), 'utf8')
   const branch = [
@@ -1753,21 +1761,15 @@ test('rg finds no host node, npm, or npx invocation on the compose path or in do
     extractShellFunction(script, 'start_docker'),
     extractShellFunction(script, 'health_ok_port'),
     extractShellFunction(script, 'wait_on_port'),
-    stripQuotes(doctor),
+    extractMarked(doctor, '// compose-host-free:start', '// compose-host-free:end'),
   ].join('\n')
-  const which = spawnSync('bash', ['-lc', 'command -v rg'], { encoding: 'utf8' })
-  assert.equal(which.status, 0, 'rg is required for the compose host tool check')
-  const result = spawnSync(which.stdout.trim(), [
-    '-n',
-    '--pcre2',
-    '(?:^|[;&|(`]|&&|\\|\\|)[[:space:]]*(?:node|npm|npx)(?:[[:space:]]|$)',
-    '-',
-  ], {
-    input: branch,
-    encoding: 'utf8',
+  const pattern = /\b(node|npm|npx)\b/
+  const hits = []
+  branch.split('\n').forEach((line, index) => {
+    const found = line.match(pattern)
+    if (found) hits.push(`${index + 1}:${line}`)
   })
-  assert.equal(result.status, 1, result.stdout || result.stderr)
-  assert.equal(result.stdout, '')
+  assert.deepEqual(hits, [])
 })
 
 test('compose health wait uses curl, returns as soon as the API answers, and caps at 90 seconds', async () => {

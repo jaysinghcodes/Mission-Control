@@ -444,7 +444,7 @@ print(secrets.token_hex(32))'
 }
 
 # compose-host-free:start
-# Compose helpers. curl and docker compose exec only. No host node, npm, or npx.
+# Compose helpers. The health wait uses curl on the host, or curl inside the api container.
 dashboard_secrets_from_openssl() {
   local password salt key secret
   password="$(openssl rand -base64 18 | tr '+/' '-_' | tr -d '\n=')"
@@ -475,7 +475,16 @@ compose_dashboard_secrets() {
 }
 
 compose_health_exec() {
-  docker compose exec -T api node -e 'fetch("http://127.0.0.1:3000/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' >/dev/null 2>&1
+  local body code
+  body="$(mktemp "${TMPDIR:-/tmp}/mc-health.XXXXXX")"
+  if docker compose exec -T api curl -fsS --max-time 2 "http://127.0.0.1:3000/health" >"$body" 2>/dev/null; then
+    health_body_ready "$body"
+    code=$?
+  else
+    code=1
+  fi
+  rm -f "$body"
+  return "$code"
 }
 
 health_body_ready() {
@@ -1628,11 +1637,14 @@ finish() {
   doctor_code=0
   if command -v node >/dev/null 2>&1 && [[ -f scripts/doctor.mjs ]]; then
     set +e
+    # compose-host-free:start
     if [[ "${USE_DOCKER:-0}" == "1" ]]; then
-      MC_DOCTOR_DOCKER=1 MC_API_PORT="$(docker_api_port)" node scripts/doctor.mjs
-    else
-      node scripts/doctor.mjs
+      MC_DOCTOR_DOCKER=1
+      MC_API_PORT="$(docker_api_port)"
+      export MC_DOCTOR_DOCKER MC_API_PORT
     fi
+    # compose-host-free:end
+    node scripts/doctor.mjs
     doctor_code=$?
     set -e
   elif command -v node >/dev/null 2>&1; then

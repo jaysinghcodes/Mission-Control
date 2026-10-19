@@ -531,9 +531,6 @@ async function databaseFacts(root, env) {
   }
 }
 
-const DOCKER_HEALTH_JS =
-  'fetch("http://127.0.0.1:3000/health").then(async (res) => { const text = await res.text(); process.stdout.write(text); process.exit(res.ok ? 0 : 1); }).catch(() => process.exit(1))'
-
 export const STARTING_NOTE = 'The API is still starting. Run doctor again in a minute.'
 
 /** Blank or invalid stays at 60 seconds. 0 is one probe, for tests. */
@@ -711,23 +708,49 @@ async function defaultPortOwner(port, options) {
   })
 }
 
-function dockerLoopbackHealth(root, options = {}) {
+// compose-host-free:start
+function splitCurlStatus(stdout) {
+  const text = String(stdout || '')
+  const match = /^(.*)\n(\d{3})\s*$/s.exec(text)
+  if (!match) return { status: 0, text: '' }
+  const status = Number(match[2])
+  if (!Number.isInteger(status)) return { status: 0, text: '' }
+  return { status, text: match[1] }
+}
+
+function readContainerCurl(root, urlPath, options = {}) {
   const timeout = options.execTimeoutMs ?? 2000
   const run = options.execFile || spawnSync
+  const env = options.env ? { ...process.env, ...options.env } : process.env
   try {
-    const result = run('docker', ['compose', 'exec', '-T', 'api', 'node', '-e', DOCKER_HEALTH_JS], {
-      cwd: root,
-      encoding: 'utf8',
-      timeout,
-      env: options.env ? { ...process.env, ...options.env } : process.env,
-    })
-    return readHealthIdentity({
-      status: result.status === 0 ? 200 : 503,
-      text: result.stdout || '',
-    })
-  } catch {
-    return { ours: false, db: null }
+    const result = run(
+      'docker',
+      ['compose', 'exec', '-T', 'api', 'curl', '-sS', '--max-time', '2', '-w', '\n%{http_code}', `http://127.0.0.1:3000${urlPath}`],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        timeout,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    )
+    const parsed = splitCurlStatus(result && result.stdout)
+    const detail = `${(result && result.stderr) || ''}\n${result && result.error ? result.error.message : ''}`
+    return {
+      status: parsed.status,
+      text: parsed.text,
+      detail,
+      dockerDenied: dockerPermissionDenied(detail),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { status: 0, text: '', detail: message, dockerDenied: dockerPermissionDenied(message) }
   }
+}
+// compose-host-free:end
+
+function dockerLoopbackHealth(root, options = {}) {
+  return readHealthIdentity(readContainerCurl(root, '/health', options))
 }
 
 async function probeApiOnce(port, host, options) {
@@ -993,27 +1016,12 @@ function parseGatewayBody(text) {
   }
 }
 
-const DOCKER_SYSTEM_JS =
-  'fetch("http://127.0.0.1:3000/system").then(async (res) => { const text = await res.text(); process.stdout.write(text); process.exit(res.ok ? 0 : 1); }).catch(() => process.exit(1))'
-
 function dockerLoopbackSystem(root, processEnv = process.env) {
-  try {
-    const result = spawnSync('docker', ['compose', 'exec', '-T', 'api', 'node', '-e', DOCKER_SYSTEM_JS], {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 8000,
-      env: { ...process.env, ...processEnv },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    const detail = `${result.stdout || ''}\n${result.stderr || ''}\n${result.error ? result.error.message : ''}`
-    return {
-      status: result.status === 0 ? 200 : 0,
-      text: result.stdout || '',
-      dockerDenied: dockerPermissionDenied(detail),
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return { status: 0, text: '', dockerDenied: dockerPermissionDenied(message) }
+  const result = readContainerCurl(root, '/system', { env: processEnv, execTimeoutMs: 8000 })
+  return {
+    status: result.status,
+    text: result.text,
+    dockerDenied: result.dockerDenied,
   }
 }
 

@@ -89,7 +89,7 @@ jobs:
         run: npm install -g npm@11.17.0
 
       - name: Install nginx
-        run: sudo apt-get update && sudo apt-get install -y nginx ripgrep
+        run: sudo apt-get update && sudo apt-get install -y nginx
 
       - name: Run the README install and prove the app
         run: node scripts/fresh-clone.mjs
@@ -120,11 +120,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck ripgrep
-
-      - name: Install ripgrep
-        if: runner.os == 'macOS'
-        run: brew install ripgrep
+          sudo apt-get install -y shellcheck
 
       - name: Run install.sh with a docker stub
         run: node --test scripts/install.test.mjs

@@ -30,6 +30,8 @@ RUN npx prisma generate --schema apps/api/prisma/schema.prisma
 RUN cd apps/api && npx prisma generate && npm run build
 
 FROM base AS runtime
+# Compose runs this client inside the api container when the host has no curl.
+RUN apk add --no-cache curl
 ARG GIT_SHA=
 ENV NODE_ENV=production
 ENV GIT_SHA=${GIT_SHA}
