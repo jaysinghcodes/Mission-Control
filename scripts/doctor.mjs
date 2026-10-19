@@ -11,8 +11,10 @@
  * counts as exposed even when .env HOST is loopback, because the container
  * peer is the Docker bridge. Compose does not check the host Node version
  * and prints no node line. The health probe retries for up to 60 seconds.
- * Compose mode is a compose file, any project container, or MC_DOCTOR_DOCKER=1.
- * MC_DOCTOR_DOCKER=0 keeps the native check. In Compose mode the order is
+ * Compose mode is any project container, MC_DOCTOR_DOCKER=1, or a compose
+ * file whose native API is not already answering. MC_DOCTOR_DOCKER=0 keeps
+ * the native check. A checkout that is already serving mission-control, with
+ * no Compose container, stays native too. In Compose mode the order is
  * fixed: an outside holder of the API, web, or database port, then a
  * missing, stopped, or paused service, then a slow start. The port line
  * names MC_API_PORT, MC_WEB_PORT, or MC_DB_PORT, including when no container
@@ -281,14 +283,29 @@ function composeFilePresent(root) {
   return COMPOSE_FILE_NAMES.some((name) => existsSync(path.join(root, name)))
 }
 
+async function nativeApiIsUp(env, processEnv) {
+  const merged = { ...processEnv, ...env, MC_DOCTOR_DOCKER: '0' }
+  const port = apiListenPort(merged)
+  if (port == null) return false
+  const host = probeHost(bindHost(merged))
+  const probe = healthProbePort(port, merged)
+  const res = await httpGet(`http://${host}:${probe}/health`, 1500)
+  return readHealthIdentity(res).ours
+}
+
 async function usingDocker(root, env, processEnv = process.env) {
   if (env.MC_DOCTOR_DOCKER === '1') return true
   if (env.MC_DOCTOR_DOCKER === '0') return false
-  // A compose file selects Compose with zero containers. Any project
-  // container does too: created, exited, paused, running, or removed.
-  if (composeFilePresent(root)) return true
+  // Any project container selects Compose: created, exited, paused, running, or removed.
   const listed = await composeServices(root, { ...processEnv, ...env })
-  return listed.split(/\r?\n/).some((line) => line.trim() !== '')
+  if (listed.split(/\r?\n/).some((line) => line.trim() !== '')) return true
+  // A compose file with no containers still selects Compose, so an outside
+  // holder is named with MC_*_PORT. The native API already answering means
+  // this checkout is the native stack, and Vite or host Postgres is not
+  // another program.
+  if (!composeFilePresent(root)) return false
+  if (await nativeApiIsUp(env, processEnv)) return false
+  return true
 }
 
 function probeHost(host) {

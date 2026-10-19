@@ -1474,6 +1474,50 @@ test('no containers with a compose file name MC_API_PORT in auto mode', async ()
   }
 })
 
+test('a compose file keeps the native check when the native API is already answering', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-native-up-'))
+  const bin = path.join(dir, 'bin')
+  const api = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  const web = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<!doctype html><title>Mission Control</title><div id="root"></div>')
+  })
+  const db = net.createServer((socket) => socket.destroy())
+  await listen(api)
+  await listen(web)
+  await listen(db)
+  const apiPort = api.address().port
+  const webPort = web.address().port
+  const dbPort = db.address().port
+  writeDockerStub(bin, { portLine: '', json: '', services: '' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(apiPort, { web: webPort, db: dbPort }))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PORT: String(apiPort),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.match(text, /^pass node:/m)
+    assert.match(text, new RegExp(`^pass ports: Port ${apiPort} is already running\\.$`, 'm'))
+    assert.match(text, /^pass login: A dashboard password is configured\.$/m)
+    assert.doesNotMatch(text, /another program/)
+    assert.doesNotMatch(text, /set MC_WEB_PORT in/)
+    assert.doesNotMatch(text, /set MC_DB_PORT in/)
+    assert.doesNotMatch(text, /Docker runs Postgres inside Compose/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await close(api)
+    await close(web)
+    await close(db)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('MC_DOCTOR_DOCKER=0 keeps the native PORT line when a compose file exists', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-native-force-'))
   const bin = path.join(dir, 'bin')
