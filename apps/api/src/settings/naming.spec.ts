@@ -85,6 +85,18 @@ describe('naming body', () => {
     expect(() =>
       readNamingBody({ namingMode: 'crew', crewMap: { main: 'dev' } }, seats),
     ).toThrow(/unknown crew seat/);
+    expect(() =>
+      readNamingBody(
+        { namingMode: 'crew', crewMap: { main: '', other: '' } },
+        seats,
+      ),
+    ).not.toThrow();
+    expect(
+      readNamingBody(
+        { namingMode: 'crew', crewMap: { main: '', other: '' } },
+        seats,
+      ).crewMap,
+    ).toEqual({ main: '', other: '' });
     expect(() => readNamingBody({ namingMode: 'alias' }, seats)).toThrow(
       /namingMode must be crew or own/,
     );

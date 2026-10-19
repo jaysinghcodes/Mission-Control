@@ -73,6 +73,16 @@ function payloadOf(event: RailEvent): RailPayload | null {
   }
 }
 
+/** The registered name baked into a stored register, delete, or status sentence. */
+function storedRegisteredName(stored: string): string {
+  if (stored.endsWith(' registered')) return stored.slice(0, -' registered'.length).trim()
+  if (stored.endsWith(' went offline')) return stored.slice(0, -' went offline'.length).trim()
+  const mark = ' is now '
+  const at = stored.lastIndexOf(mark)
+  if (at > 0) return stored.slice(0, at).trim()
+  return ''
+}
+
 function sentenceFor(payload: RailPayload, actorName: string): string {
   const action = textOf(payload.action)
   if (action === 'register') return `${actorName} registered`
@@ -96,8 +106,8 @@ function seatedName(actor: ActivityActor, naming?: NamingState | null): string {
  * nothing to say. payload.id is read as a roster id by activityActor.
  * A living agent, or an id that still has a seat, uses the current name,
  * so a seat change in Settings relabels the row. An id that has left the
- * roster and has no seat keeps the stored sentence. The raw id does not
- * replace the registered name.
+ * roster and has no seat keeps the stored sentence. The row header uses
+ * that same registered name, not the raw id.
  */
 export function activityRailLine(
   event: RailEvent,
@@ -120,5 +130,7 @@ export function activityRailLine(
   const rebuilt = relabel ? sentenceFor(payload ?? {}, presented) : ''
   const text = rebuilt || stored
   if (!text || isEventType(text) || text === event.type) return null
-  return { actor: actor ? { ...actor, name: relabel ? presented : actor.name } : null, text }
+  const remembered = !relabel && stored ? storedRegisteredName(stored) : ''
+  const actorName = relabel ? presented : remembered || actor?.name || ''
+  return { actor: actor ? { ...actor, name: actorName } : null, text }
 }

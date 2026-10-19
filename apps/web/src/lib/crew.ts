@@ -129,10 +129,10 @@ export function orderByPosition<T extends { id: string; position?: number | null
 /**
  * Crew seats by agent id.
  *
- * An agent whose id equals a seat id takes that seat.
- * Everyone else takes the next free seat in registration order.
- * A saved seat for an agent id stays. Agents in `decided` without a
- * seat stay on their own name. Display names are not read.
+ * An agent whose id equals a free seat id takes that seat.
+ * Everyone else with no saved choice takes the next free seat in
+ * registration order. A saved seat for an agent id stays. Agents in
+ * `decided` stay on their own name. Display names are not read.
  * The same function lives in apps/api/src/settings/naming.ts.
  */
 export function assignCrewSeats(

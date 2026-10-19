@@ -393,7 +393,11 @@ export default function Office() {
             {events.length === 0 && <p className="px-4 py-6 text-[12.5px] text-mc-sub">No activity yet. Seed or the bridge fills this list.</p>}
             {events.map(({ event: e, index, actor, text }) => {
               const sticker = actor ? resolveSticker(agents, actor.id) : null
-              const who = sticker?.agent ?? null
+              const who = sticker?.agent
+                ? sticker.matched
+                  ? sticker.agent
+                  : { ...sticker.agent, name: actor?.name || sticker.agent.name }
+                : null
               const shown = who ? naming.present(who) : null
               const waiting = activityNeedsYou(e.payload, pending)
               const failed = /fail/i.test(text)

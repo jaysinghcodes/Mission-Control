@@ -120,8 +120,8 @@ export function registrationOrder<T extends SeatAgent>(
  * An agent whose id equals a free seat id takes that seat.
  * A saved seat stays, so a later id match cannot take it.
  * Everyone else takes the next free seat in registration order.
- * Agents in `decided` without a seat stay on their own name.
- * Display names are not read.
+ * Agents in `decided` stay on their own name.
+ * Display names are not read. An empty string in a stored map is Own name.
  * The same function lives in apps/web/src/lib/crew.ts.
  */
 export function assignCrewSeats(
@@ -223,6 +223,11 @@ export function readNamingBody(
       throw new BadRequestException('crewMap values must be seat ids');
     }
     const seat = rawSeat.trim();
+    // Empty string is Own name, a saved choice, not a seat id.
+    if (!seat) {
+      crewMap[key] = '';
+      continue;
+    }
     if (!known.has(seat)) {
       throw new BadRequestException(`unknown crew seat ${seat}`);
     }

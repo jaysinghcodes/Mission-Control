@@ -80,6 +80,10 @@ test('activity text uses the seated crew name from the current map', async () =>
   }
   const search = await readFile(new URL('../src/components/SearchBox.tsx', import.meta.url), 'utf8')
   assert.match(search, /activityRailLine\(hit, \[\], \[\], \[\], naming\)/)
+  const office = await readFile(new URL('../src/pages/Office.tsx', import.meta.url), 'utf8')
+  assert.match(office, /actor\?\.name/)
+  const activityPage = await readFile(new URL('../src/pages/Activity.tsx', import.meta.url), 'utf8')
+  assert.match(activityPage, /line\.actor\?\.name/)
 
   const roster = [
     { id: 'helper', name: 'Pixel', role: 'helper' },
@@ -137,7 +141,7 @@ test('activity text uses the seated crew name from the current map', async () =>
     crew,
   )
   assert.equal(departed.text, 'Rail Quill went offline')
-  assert.equal(departed.actor.name, 'rail_quill')
+  assert.equal(departed.actor.name, 'Rail Quill')
 
   const stillSeated = rail.activityRailLine(
     {

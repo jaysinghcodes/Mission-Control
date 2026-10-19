@@ -58,12 +58,8 @@ export function NamingChoice({
   }
 
   function setSeat(agentId: string, seatId: string) {
-    setMap((prev) => {
-      const next = { ...prev }
-      if (!seatId) delete next[agentId]
-      else next[agentId] = seatId
-      return next
-    })
+    // Empty string is Own name. The key stays so this save names that agent.
+    setMap((prev) => ({ ...prev, [agentId]: seatId }))
   }
 
   async function save() {
@@ -92,7 +88,7 @@ export function NamingChoice({
           selected={mode === 'crew'}
           title="Use the Mission Control crew"
           badge="Recommended"
-          body="An agent whose id matches a crew seat takes that seat when the seat is free. A saved seat stays with that agent. Everyone else takes the next free seat in the order they first registered. When a seat opens, the earliest agent without a seat takes it. You can change any seat. A display name does not pick a seat."
+          body="An agent whose id matches a crew seat takes that seat when the seat is free. A saved seat stays with that agent. Everyone else with no saved choice takes the next free seat in the order they first registered. When a seat opens, the earliest agent with no saved choice takes it. Own name is a saved choice and it stays until you change it. You can change any seat. A display name does not pick a seat."
           onSelect={() => choose('crew')}
         />
         <Choice

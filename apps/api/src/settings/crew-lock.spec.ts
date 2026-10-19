@@ -248,4 +248,103 @@ describe('crew seat lock', () => {
       await prisma.setting.findUnique({ where: { id: SETTING_ID } }),
     ).toBeNull();
   });
+
+  async function chooseOwnName(): Promise<string> {
+    await parkOthers();
+    const id = `${stamp}own`;
+    const res = statusResponse();
+    await agents.register({ id, name: 'Quill' }, res);
+    expect(res.statusCode).toBe(201);
+    const before = await map();
+    expect(before[id]).toBeTruthy();
+    await settings.put({
+      namingMode: 'crew',
+      crewMap: { ...before, [id]: '' },
+    });
+    expect((await map())[id]).toBe('');
+    return id;
+  }
+
+  it('keeps Own name when another agent registers', async () => {
+    const own = await chooseOwnName();
+    const zed = `${stamp}zed`;
+    const res = statusResponse();
+    await agents.register({ id: zed, name: 'Zed' }, res);
+    expect(res.statusCode).toBe(201);
+    const after = await map();
+    expect(after[own]).toBe('');
+    expect(after[zed]).toBeTruthy();
+  });
+
+  it('keeps Own name when another agent is deleted', async () => {
+    const own = await chooseOwnName();
+    const seated = `${stamp}seat`;
+    await agents.register({ id: seated, name: 'Seat' }, statusResponse());
+    const held = (await map())[seated];
+    expect(held).toBeTruthy();
+    const waiter = `${stamp}wait`;
+    const max = await prisma.agent.aggregate({ _max: { position: true } });
+    await prisma.agent.create({
+      data: {
+        id: waiter,
+        name: 'Wait',
+        source: 'registered',
+        position: (max._max.position ?? 0) + 1,
+      },
+    });
+    await agents.remove(seated);
+    const after = await map();
+    expect(after[own]).toBe('');
+    expect(after[seated]).toBeUndefined();
+    expect(after[waiter]).toBeTruthy();
+    expect(after[waiter]).not.toBe('');
+  });
+
+  it('keeps Own name when a new client syncs after a restart', async () => {
+    const own = await chooseOwnName();
+    const fresh = new PrismaService();
+    await fresh.$connect();
+    try {
+      const row = await fresh.setting.findUnique({
+        where: { id: SETTING_ID },
+      });
+      const stored = row?.crewMap;
+      expect(
+        stored && typeof stored === 'object' && !Array.isArray(stored),
+      ).toBe(true);
+      expect((stored as Record<string, string>)[own]).toBe('');
+      const restarted = new AgentsController(fresh, gateway);
+      const res = statusResponse();
+      await restarted.register({ id: `${stamp}boot`, name: 'Boot' }, res);
+      expect(res.statusCode).toBe(201);
+      const again = await fresh.setting.findUnique({
+        where: { id: SETTING_ID },
+      });
+      expect((again?.crewMap as Record<string, string>)[own]).toBe('');
+    } finally {
+      await fresh.$disconnect();
+    }
+  });
+
+  it('keeps a seat that a stale save does not name', async () => {
+    await parkOthers();
+    const first = `${stamp}first`;
+    await agents.register({ id: first, name: 'First' }, statusResponse());
+    const loaded = await map();
+    const newcomer = `${stamp}new`;
+    await agents.register({ id: newcomer, name: 'New' }, statusResponse());
+    const seated = await map();
+    expect(seated[newcomer]).toBeTruthy();
+    const stale = { ...loaded };
+    const destination = readCrew().find(
+      (seat) =>
+        seat.id !== loaded[first] &&
+        seat.id !== seated[newcomer] &&
+        !Object.values(loaded).includes(seat.id),
+    );
+    if (destination) stale[first] = destination.id;
+    await settings.put({ namingMode: 'crew', crewMap: stale });
+    expect((await map())[newcomer]).toBe(seated[newcomer]);
+    expect((await map())[first]).toBe(stale[first]);
+  });
 });

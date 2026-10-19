@@ -22,16 +22,21 @@ interface ActivityResp { events: EventApi[] }
  * agent's status. Anything else is a one-off sticker hashed from the
  * label, not folded into the roster, which would burn a seat.
  */
-function streamFace(id: string | null, roster: readonly Agent[], state: NamingState): {
+function streamFace(
+  id: string | null,
+  roster: readonly Agent[],
+  state: NamingState,
+  registeredName = '',
+): {
   agent: Agent | { id: string; name: string; role: null; status: 'idle'; color: string }
   agents?: readonly Agent[]
   text: string
 } {
   const sticker = resolveSticker(roster, id || 'openclaw')
-  const text = sticker.matched
-    ? presentAgent(sticker.agent, state).name
-    : sticker.agent.name
-  return { agent: sticker.agent, agents: sticker.agents, text }
+  const agent = sticker.matched
+    ? sticker.agent
+    : { ...sticker.agent, name: registeredName || sticker.agent.name }
+  return { agent, agents: sticker.agents, text: presentAgent(agent, state).name }
 }
 
 export default function Activity() {
@@ -45,7 +50,7 @@ export default function Activity() {
     ...(history.data?.events ?? []).map((e) => {
       const line = activityRailLine(e, roster, [], [], naming)
       if (!line) return null
-      const face = streamFace(line.actor?.id ?? e.payload?.agent ?? null, roster, naming)
+      const face = streamFace(line.actor?.id ?? e.payload?.agent ?? null, roster, naming, line.actor?.name ?? '')
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
@@ -57,7 +62,7 @@ export default function Activity() {
     ...events.map((e, i) => {
       const line = activityRailLine(e, roster, [], [], naming)
       if (!line) return null
-      const face = streamFace(line.actor?.id ?? null, roster, naming)
+      const face = streamFace(line.actor?.id ?? null, roster, naming, line.actor?.name ?? '')
       return {
         tm: new Date(e.ts).toLocaleTimeString([], { hour12: false }),
         face,
