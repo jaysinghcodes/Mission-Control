@@ -7,9 +7,10 @@ import { dirname, join } from 'path';
  *
  * config/crew.json is the shipped crew (name, role, desk, color).
  * A saved map points an agent id at a seat id. An id that equals a
- * seat id takes that seat. Other agents take the next free seat in
- * the order they first registered. Nothing here matches a display
- * name or a role keyword. Own names mode ignores the map.
+ * free seat id takes that seat. A saved seat stays with that agent.
+ * Other agents take the next free seat in the order they first
+ * registered. Nothing here matches a display name or a role keyword.
+ * Own names mode ignores the map.
  */
 
 export interface CrewSeat {
@@ -116,10 +117,11 @@ export function registrationOrder<T extends SeatAgent>(
 /**
  * Crew seats by agent id.
  *
- * An agent whose id equals a seat id takes that seat.
+ * An agent whose id equals a free seat id takes that seat.
+ * A saved seat stays, so a later id match cannot take it.
  * Everyone else takes the next free seat in registration order.
- * A saved seat for an agent id stays. Agents in `decided` without a
- * seat stay on their own name. Display names are not read.
+ * Agents in `decided` without a seat stay on their own name.
+ * Display names are not read.
  * The same function lives in apps/web/src/lib/crew.ts.
  */
 export function assignCrewSeats(

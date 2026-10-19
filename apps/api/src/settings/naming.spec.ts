@@ -105,6 +105,9 @@ describe('SettingsController', () => {
   it('GET is unset until PUT saves an agent id map', async () => {
     let row: { namingMode: string | null; crewMap: unknown } | null = null;
     const prisma = {
+      agent: {
+        findMany: jest.fn(() => [{ id: 'main' }]),
+      },
       setting: {
         findUnique: jest.fn(() => row),
         upsert: jest.fn(
@@ -144,6 +147,40 @@ describe('SettingsController', () => {
     );
     expect(first.setupDone).toBe(false);
     expect(first.timezoneSaved).toBe(false);
+  });
+
+  it('rejects an unknown crewMap agent and writes nothing', async () => {
+    const row = {
+      namingMode: 'crew' as string | null,
+      crewMap: { main: 'speedy' } as unknown,
+      timezone: 'Europe/Berlin' as string | null,
+      setupDone: true,
+    };
+    const prisma = {
+      agent: {
+        findMany: jest.fn(() => [{ id: 'main' }]),
+      },
+      setting: {
+        findUnique: jest.fn(() => row),
+        upsert: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    const controller = new SettingsController(
+      prisma as unknown as PrismaService,
+    );
+    await expect(
+      controller.put({
+        namingMode: 'crew',
+        crewMap: { ghost: 'speedy', missing: 'forge' },
+      }),
+    ).rejects.toThrow(/unknown agent ghost, missing/);
+    expect(prisma.setting.upsert).not.toHaveBeenCalled();
+    expect(prisma.setting.update).not.toHaveBeenCalled();
+    expect(row.crewMap).toEqual({ main: 'speedy' });
+    expect(row.namingMode).toBe('crew');
+    expect(row.timezone).toBe('Europe/Berlin');
+    expect(row.setupDone).toBe(true);
   });
 
   it('saves a timezone and setup flag without clearing names', async () => {

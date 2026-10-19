@@ -4,6 +4,7 @@ import { useApi } from '../hooks/useApi'
 import { useApiStatus } from '../lib/apiStatus'
 import { PageHeader, Segmented, SoftCard, StatusChip, Face, Kicker, EmptyState } from '../components/shell'
 import { resolveSticker } from '../lib/crew'
+import { useNaming } from '../lib/naming'
 import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
@@ -180,6 +181,7 @@ export default function System() {
   const sessions = useApi<{ sessions: { agent: string; model: string | null }[] }>('/sessions', { pollMs: 30000 })
   const activity = useApi<{ events: EventApi[] }>('/activity?limit=30', { pollMs: 20000 })
   const api = useApiStatus()
+  const naming = useNaming()
   const [showSampleBots, setShowSampleBots] = useShowSampleBots()
   const [period, setPeriod] = useState(2)
   const [modelOpen, setModelOpen] = useState<string | null>(null)
@@ -209,7 +211,7 @@ export default function System() {
   const bridge = ingestFact(health.data?.lastIngestAt)
 
   const issue = (activity.data?.events ?? [])
-    .map((event) => ({ event, line: activityRailLine(event, roster) }))
+    .map((event) => ({ event, line: activityRailLine(event, roster, [], [], naming) }))
     .find((row) => row.line && /fail|error|timeout/i.test(row.line.text))
 
   if (panel === 'logs' || panel === 'sessions' || panel === 'settings' || panel === 'connection' || panel === 'tools') {

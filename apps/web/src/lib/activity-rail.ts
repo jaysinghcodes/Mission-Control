@@ -4,6 +4,7 @@
  * a sentence.
  */
 import { activityText } from './activity-text'
+import { presentAgent, type NamingState } from './crew'
 import {
   activityActor,
   type ActivityActor,
@@ -82,14 +83,27 @@ function sentenceFor(payload: RailPayload, actorName: string): string {
 }
 
 /**
+ * Seated crew name for this agent id. Own names mode, or an agent with
+ * no seat, keeps the registered name. A display name is not a map key.
+ */
+function seatedName(actor: ActivityActor, naming?: NamingState | null): string {
+  if (!naming) return actor.name
+  return presentAgent({ id: actor.id, name: actor.name, role: actor.role }, naming).name
+}
+
+/**
  * The line to show, or null when the row is a snapshot refresh or has
  * nothing to say. payload.id is read as a roster id by activityActor.
+ * Register, delete, and status sentences use the current crew map, so a
+ * seat change in Settings relabels rows that were stored under the
+ * registered name.
  */
 export function activityRailLine(
   event: RailEvent,
   roster: readonly { id: string; name: string; role?: string | null }[],
   tickets: readonly LiveTicket[] = [],
   runs: readonly LiveRun[] = [],
+  naming?: NamingState | null,
 ): RailLine | null {
   const payload = payloadOf(event)
   const storedRaw = activityText(payload)
@@ -98,7 +112,9 @@ export function activityRailLine(
   const refresh = Array.isArray(payload?.agents) || action === 'heartbeat'
   if (refresh && !stored) return null
   const actor = activityActor(payload, roster, tickets, runs)
-  const text = stored || (actor ? sentenceFor(payload ?? {}, actor.name) : '')
+  const name = actor ? seatedName(actor, naming) : ''
+  const rebuilt = actor ? sentenceFor(payload ?? {}, name) : ''
+  const text = rebuilt || stored
   if (!text || isEventType(text) || text === event.type) return null
-  return { actor, text }
+  return { actor: actor ? { ...actor, name } : null, text }
 }

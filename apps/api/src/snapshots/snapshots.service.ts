@@ -10,7 +10,7 @@ import {
 import { wireText } from '../wire-text';
 import { PrismaService } from '../prisma/prisma.service';
 import { loadAgentNames, resolveIngestAgent } from '../agents/agent-ref';
-import { syncCrewSeats } from '../settings/crew-map';
+import { syncCrewSeats, withCrewLock } from '../settings/crew-map';
 import { SETTING_ID } from '../team/mission';
 import { TimezoneService } from '../time/timezone.service';
 import { usageBucketsFromPayload } from '../usage/usage-points';
@@ -47,9 +47,10 @@ export class SnapshotsService {
    * and parent.
    */
   async applyAgents(payload: Record<string, unknown>): Promise<void> {
-    const existing = (await this.prisma.agent.findMany()).map(asRosterAgent);
-    const plan = planSnapshot(existing, normalizeSnapshotAgents(payload));
-    await this.prisma.$transaction(async (tx) => {
+    const incoming = normalizeSnapshotAgents(payload);
+    await withCrewLock(this.prisma, async (tx) => {
+      const existing = (await tx.agent.findMany()).map(asRosterAgent);
+      const plan = planSnapshot(existing, incoming);
       if (plan.deleteIds.length > 0) {
         await tx.agent.deleteMany({ where: { id: { in: plan.deleteIds } } });
       }
@@ -74,10 +75,10 @@ export class SnapshotsService {
           data: { parentId: link.parentId },
         });
       }
-    });
-    await syncCrewSeats(this.prisma, {
-      arrived: plan.creates.map((row) => row.id),
-      removed: plan.deleteIds,
+      await syncCrewSeats(tx, {
+        arrived: plan.creates.map((row) => row.id),
+        removed: plan.deleteIds,
+      });
     });
   }
 

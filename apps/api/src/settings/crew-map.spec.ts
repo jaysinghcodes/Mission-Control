@@ -68,6 +68,19 @@ describe('assignCrewSeats', () => {
     expect(map).toEqual(saved);
   });
 
+  it('does not give a taken seat to a later agent with that id', () => {
+    const map = assignCrewSeats(
+      [
+        { id: 'early', position: 0 },
+        { id: 'pixel', position: 1 },
+      ],
+      seats,
+      { early: 'pixel' },
+    );
+    expect(map.early).toBe('pixel');
+    expect(map.pixel).toBe('speedy');
+  });
+
   it('a manual seat wins over an id match', () => {
     const map = assignCrewSeats(
       [
@@ -173,5 +186,29 @@ describe('syncCrewSeats', () => {
     await syncCrewSeats(prisma, { arrived: ['helper'] });
     expect(state.crewMap.pixel).toBe('forge');
     expect(state.crewMap.helper).toBe('speedy');
+  });
+
+  it('gives a living agent missing from the map the next free seat', async () => {
+    const { state, prisma } = db([{ id: 'helper', position: 3 }]);
+    state.crewMap = {};
+    expect(await syncCrewSeats(prisma, {})).toBe(true);
+    expect(state.crewMap).toEqual({ helper: 'speedy' });
+  });
+
+  it('gives a released seat to the earliest agent who was already without one', async () => {
+    const { state, prisma } = db([
+      { id: 'helper', position: 2 },
+      { id: 'nova', position: 0 },
+      { id: 'later', position: 4 },
+      { id: 'pixel', position: 1 },
+    ]);
+    state.crewMap = { pixel: 'pixel' };
+    expect(
+      await syncCrewSeats(prisma, {
+        releasedOnly: true,
+        previousMap: { helper: 'speedy', pixel: 'pixel' },
+      }),
+    ).toBe(true);
+    expect(state.crewMap).toEqual({ pixel: 'pixel', nova: 'speedy' });
   });
 });

@@ -346,7 +346,7 @@ export default function Calendar() {
           <div className="mt-3 text-[12px] font-semibold text-mc-sub">Recent history</div>
           {history.length === 0 && <p className="mt-1 text-[13px] text-mc-sub">No matching activity yet.</p>}
           {history.map((e, i) => {
-            const line = activityRailLine(e, agents)
+            const line = activityRailLine(e, agents, [], [], naming)
             if (!line) return null
             return <p key={i} className="mt-1 text-[13px] text-mc-text">{line.text} · {new Date(e.ts).toLocaleString()}</p>
           })}

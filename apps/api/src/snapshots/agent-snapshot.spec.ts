@@ -48,20 +48,25 @@ function memory(seed: RosterAgent[]) {
   const settings: {
     row: { namingMode: string | null; crewMap: unknown } | null;
   } = { row: null };
+  const setting = {
+    findUnique: () => Promise.resolve(settings.row),
+    update: ({ data }: { data: { crewMap: Record<string, string> } }) => {
+      settings.row = {
+        namingMode: settings.row?.namingMode ?? 'crew',
+        crewMap: data.crewMap,
+      };
+      return Promise.resolve(settings.row);
+    },
+  };
   const prisma = {
     agent,
-    setting: {
-      findUnique: () => Promise.resolve(settings.row),
-      update: ({ data }: { data: { crewMap: Record<string, string> } }) => {
-        settings.row = {
-          namingMode: settings.row?.namingMode ?? 'crew',
-          crewMap: data.crewMap,
-        };
-        return Promise.resolve(settings.row);
-      },
-    },
-    $transaction: (fn: (tx: { agent: typeof agent }) => Promise<void>) =>
-      fn({ agent }),
+    setting,
+    $transaction: (
+      fn: (tx: {
+        agent: typeof agent;
+        setting: typeof setting;
+      }) => Promise<unknown>,
+    ) => fn({ agent, setting }),
   };
   return {
     rows,

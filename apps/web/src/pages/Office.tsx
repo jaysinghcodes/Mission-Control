@@ -154,7 +154,7 @@ export default function Office() {
   const pipe = stageCounts(ticketRows)
   const events = (activityQ.data?.events ?? [])
     .map((event, index) => {
-      const line = activityRailLine(event, agents, ticketRows, runRows)
+      const line = activityRailLine(event, agents, ticketRows, runRows, naming)
       return line ? { event, index, ...line } : null
     })
     .filter((row): row is NonNullable<typeof row> => row != null)
@@ -402,7 +402,7 @@ export default function Office() {
                 <>
                   {who ? <Face agent={who} agents={sticker?.agents} px={36} /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-mc-fill" aria-hidden />}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline justify-between gap-2">
+                    <div className="flex min-w-0 items-baseline justify-between gap-2">
                       {who ? <AgentName agent={who} /> : <span className="text-[12px] font-semibold">{text}</span>}
                       <span className="shrink-0 whitespace-nowrap text-[11px] text-mc-sub">{age}</span>
                     </div>

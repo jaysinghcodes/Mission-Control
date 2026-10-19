@@ -43,7 +43,7 @@ export default function Activity() {
   const roster = agents.data?.agents ?? []
   const stream = [
     ...(history.data?.events ?? []).map((e) => {
-      const line = activityRailLine(e, roster)
+      const line = activityRailLine(e, roster, [], [], naming)
       if (!line) return null
       const face = streamFace(line.actor?.id ?? e.payload?.agent ?? null, roster, naming)
       return {
@@ -55,7 +55,7 @@ export default function Activity() {
       }
     }),
     ...events.map((e, i) => {
-      const line = activityRailLine(e, roster)
+      const line = activityRailLine(e, roster, [], [], naming)
       if (!line) return null
       const face = streamFace(line.actor?.id ?? null, roster, naming)
       return {
@@ -113,7 +113,7 @@ export default function Activity() {
             <span className="font-mono text-[11.5px] text-mc-faint w-[70px] shrink-0">{ev.tm}</span>
             {/* Same sticker robots as the agent cards above — not the generic bot. */}
             <AgentAvatar agent={ev.face.agent} agents={ev.face.agents} size={0.75} />
-            <span className="text-[12px] font-semibold w-[120px] shrink-0 truncate">{ev.face.text}</span>
+            <span className="w-[120px] shrink-0 break-words text-[12px] font-semibold">{ev.face.text}</span>
             <Chip label={ev.zone} bg="var(--mc-inner)" fg="var(--mc-sub)" h={17} fs="text-[9.5px]" />
             <span className="text-[12px] text-mc-sub truncate">{ev.desc}</span>
           </div>

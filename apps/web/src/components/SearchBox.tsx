@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { activityRailLine } from '../lib/activity-rail'
 import { API_URL } from '../lib/apiBase'
+import { useNaming } from '../lib/naming'
 
 /**
  * SearchBox — the topbar search. Debounced query → GET /search → grouped
@@ -36,6 +37,7 @@ const GROUPS: { key: keyof SearchResults; label: string; path: string; field: (h
 ]
 
 export default function SearchBox({ w = 220 }: { w?: number }) {
+  const naming = useNaming()
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchResults | null>(null)
   // True only when the API explicitly says there is no log source on this box.
@@ -87,8 +89,14 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
     }
   }, [])
 
+  const groups = GROUPS.map((group) =>
+    group.key === 'activity'
+      ? { ...group, field: (hit: Hit) => activityRailLine(hit, [], [], [], naming)?.text ?? '' }
+      : group,
+  )
+
   const total = results
-    ? GROUPS.reduce((n, g) => n + (results[g.key]?.length ?? 0), 0)
+    ? groups.reduce((n, g) => n + (results[g.key]?.length ?? 0), 0)
     : 0
 
   function go(path: string) {
@@ -99,7 +107,7 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
   }
 
   function goFirst() {
-    for (const g of GROUPS) {
+    for (const g of groups) {
       const first = results?.[g.key]?.[0]
       if (first) {
         go(g.path)
@@ -136,7 +144,7 @@ export default function SearchBox({ w = 220 }: { w?: number }) {
           {total === 0 && !loading && (
             <div className="px-4 py-6 text-[12.5px] text-mc-faint">No results for “{q.trim()}”.</div>
           )}
-          {GROUPS.map((g) => {
+          {groups.map((g) => {
             const hits = ((results?.[g.key] ?? []) as Hit[]).filter((h) => g.field(h).trim() !== '')
             if (hits.length === 0) return null
             return (
