@@ -4,7 +4,7 @@ The README is the short path. This file is the rest of the installer: env keys, 
 
 Docker Compose is the default. One command writes random tokens, starts Postgres, the API, and the web UI, runs doctor, and prints the URL. The browser uses one port.
 
-Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 22 and Postgres 16 instead. OpenClaw can run this for you. Paste [PASTE_IN.md](PASTE_IN.md) and say yes.
+Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 20.17 or later and Postgres 16 instead. Docker installs do not need Node on the host. OpenClaw can run this for you. Paste [PASTE_IN.md](PASTE_IN.md) and say yes.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
@@ -42,13 +42,13 @@ The script ends by running doctor (`node scripts/doctor.mjs`). On the Docker pat
 
 Compose does not invent an ingest token or a dashboard password. A blank `INGEST_TOKEN` stays blank. A blank `DASHBOARD_PASSWORD_HASH` makes the API refuse to start, because Compose sets `HOST=0.0.0.0` inside the api container. `bash install.sh` writes both before Compose starts.
 
-CI runs `bash install.sh` on the free GitHub hosted runners. Ubuntu runs the Docker Compose install and the native install. macOS runs the native install only, because Docker on that runner is unreliable. Each of those jobs posts `bridge/examples/fresh-install` with `bridge/mc-bridge-sync.py` and checks devices, nodes, approvals, and gateway status through the API. The fresh clone job still runs the advanced path below on Node.js 20 and Node.js 22. A separate job still checks `bash install.sh` with a docker stub on Ubuntu and macOS. The compose file, the nginx config, and the Dockerfiles are checked as text.
+CI runs `bash install.sh` on the free GitHub hosted runners. Ubuntu runs the Docker Compose install and the native install. macOS runs the native install only, because Docker on that runner is unreliable. Each of those jobs posts `bridge/examples/fresh-install` with `bridge/mc-bridge-sync.py` and checks devices, nodes, approvals, and gateway status through the API. The fresh clone job still runs the advanced path below on Node.js 20, Node.js 22, and Node.js 24. A separate job still checks `bash install.sh` with a docker stub on Ubuntu and macOS. The compose file, the nginx config, and the Dockerfiles are checked as text.
 
 ## Advanced: Node and Postgres
 
-Use this path when Docker is not installed. The fresh clone CI job runs these commands on Node.js 20 and Node.js 22. `bash install.sh` follows this path when Docker is missing, which is what the native installer jobs do.
+Use this path when Docker is not installed. The fresh clone CI job runs these commands on Node.js 20, Node.js 22, and Node.js 24. `bash install.sh` follows this path when Docker is missing, which is what the native installer jobs do.
 
-Prerequisites that a local run used: git, Node.js 22 (Node 20.17+ or 22.9+ satisfies the npm 11.17.0 engines range), npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`.
+Prerequisites that a local run used: git, Node.js 20.17 or later, npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`. Node 20, 22, 24, and 26 pass, and there is no upper bound.
 
 Create the database the template expects if it is not there yet: database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret. Change it before you expose the machine.
 

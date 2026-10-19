@@ -86,7 +86,7 @@ Empty Office is the floor after `npm run seed:clear` on that database. The comma
 
 Docker Compose is the default. One command writes random tokens, starts Postgres, the API, and the web UI, runs doctor, and prints the URL. The browser uses one port. From a checkout you already have, run `bash install.sh` in the repo root. That is the same installer.
 
-Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 22 and Postgres 16 instead. No paid service is required. OpenClaw can run this for you. Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) and say yes. The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
+Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When Docker is missing, the same command says so and uses Node.js 20.17 or later and Postgres 16 instead. Docker installs do not need Node on the host. No paid service is required. OpenClaw can run this for you. Paste [docs/PASTE_IN.md](docs/PASTE_IN.md) and say yes. The short guide is [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
@@ -100,15 +100,15 @@ OpenClaw is optional. The command above does not start the OpenClaw gateway. A f
 
 When the `openclaw` command is on PATH, the installer adds a bridge schedule and names the scheduler it used. Remove only that schedule with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer prints a skip line and continues.
 
-CI runs `bash install.sh` on the free GitHub hosted runners. Ubuntu runs the Docker Compose install and the native install. macOS runs the native install only, because Docker on that runner is unreliable. Each of those jobs posts `bridge/examples/fresh-install` with `bridge/mc-bridge-sync.py`. The fresh clone job runs the advanced path below on Node.js 20 and Node.js 22.
+CI runs `bash install.sh` on the free GitHub hosted runners. Ubuntu runs the Docker Compose install and the native install. macOS runs the native install only, because Docker on that runner is unreliable. Each of those jobs posts `bridge/examples/fresh-install` with `bridge/mc-bridge-sync.py`. The fresh clone job runs the advanced path below on Node.js 20, Node.js 22, and Node.js 24.
 
 Host ports are `MC_WEB_PORT`, `PORT` (native API listen), `MC_API_PORT` (Compose host API port, and the native listen port when `PORT` is unset), `MC_DB_PORT`, and `MC_REMOTE_PORT`. The shell wins, then `.env`, then the default. The env file, doctor, and the bridge schedule are written out in [docs/INSTALL.md](docs/INSTALL.md).
 
 ### Advanced: Node and Postgres
 
-Use this path when Docker is not installed. The fresh clone CI job runs these commands on Node.js 20 and Node.js 22. `bash install.sh` follows this path when Docker is missing.
+Use this path when Docker is not installed. The fresh clone CI job runs these commands on Node.js 20, Node.js 22, and Node.js 24. `bash install.sh` follows this path when Docker is missing.
 
-Prerequisites: git, npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`. The installer accepts Node.js 22.9 or newer on the 22 release for this path. Doctor accepts Node.js 20.17 or newer on the 20 release, and Node.js 22.9 or newer on the 22 release. Create database `mission_control`, user `postgres`, password `postgres`, if it is not there yet. That password is the local default in `.env.example`, not a production secret. Change it before you expose the machine.
+Prerequisites: git, Node.js 20.17 or later, npm 11.17.0, and Postgres 16 listening on `127.0.0.1:5432`. Node 20, 22, 24, and 26 pass, and there is no upper bound. Create database `mission_control`, user `postgres`, password `postgres`, if it is not there yet. That password is the local default in `.env.example`, not a production secret. Change it before you expose the machine.
 
 ```bash
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control

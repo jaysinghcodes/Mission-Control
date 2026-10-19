@@ -27,7 +27,7 @@ Every event is stored in the `ActivityEvent` table and broadcast live over Socke
 
 Docker Compose is the default. One command writes random tokens, starts the stack, runs doctor, and prints the URL. The browser uses one port. OpenClaw is optional. The dashboard runs with no bridge and no OpenClaw CLI.
 
-Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. Python 3 only if you will run the bridge. When Docker is missing, the installer says so and uses Node.js 22 and Postgres 16.
+Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. Python 3 only if you will run the bridge. When Docker is missing, the installer says so and uses Node.js 20.17 or later and Postgres 16. Docker installs do not need Node on the host.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
@@ -66,7 +66,7 @@ Edit `.env` before you expose the machine. Rules for you:
 
 ### Advanced: Node and Postgres
 
-The fresh clone job runs this path on Node.js 20 and Node.js 22. It needs Node.js 20.17+ or 22.9+, npm 11.17.0, and Postgres 16 on `127.0.0.1:5432`. Database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret. A separate Ubuntu job runs `bash install.sh` with Docker Compose. Ubuntu and macOS jobs also run `bash install.sh` on the native path. The macOS job does not use Docker. Those installer jobs post `bridge/examples/fresh-install` and read devices, nodes, approvals, and gateway status back from the API.
+The fresh clone job runs this path on Node.js 20, Node.js 22, and Node.js 24. It needs Node.js 20.17 or later, npm 11.17.0, and Postgres 16 on `127.0.0.1:5432`. Node 20, 22, 24, and 26 pass, and there is no upper bound. Docker installs do not need Node on the host. Database `mission_control`, user `postgres`, password `postgres`. That password is the local default in `.env.example`, not a production secret. A separate Ubuntu job runs `bash install.sh` with Docker Compose. Ubuntu and macOS jobs also run `bash install.sh` on the native path. The macOS job does not use Docker. Those installer jobs post `bridge/examples/fresh-install` and read devices, nodes, approvals, and gateway status back from the API.
 
 ```bash
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control

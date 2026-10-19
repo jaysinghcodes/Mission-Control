@@ -53,14 +53,35 @@ function facts(overrides = {}) {
   }
 }
 
-test('supported Node ranges are 20.17+ and 22.9+', () => {
+test('native Node 20.17 or later passes, compared as numbers, with no upper bound', () => {
+  for (const version of ['18.20', 'v18.20.0', 'v18.20.8', '20.16', 'v20.16.0', 'v20.16.9', 'v20.9.0']) {
+    assert.equal(nodeSupported(version), false, version)
+  }
+  for (const version of ['20.17', 'v20.17.0', 'v20.17.1', '22', 'v22.0.0', 'v22.8.9', '24', 'v24.0.0', '26.5.1', 'v26.5.1']) {
+    assert.equal(nodeSupported(version), true, version)
+  }
+  assert.equal(nodeSupported('v20.9.0'), false)
   assert.equal(nodeSupported('v20.17.0'), true)
-  assert.equal(nodeSupported('v20.16.9'), false)
-  assert.equal(nodeSupported('v22.9.0'), true)
-  assert.equal(nodeSupported('v22.8.9'), false)
-  assert.equal(nodeSupported('v18.20.8'), false)
-  assert.equal(nodeSupported('v21.7.3'), false)
-  assert.equal(nodeSupported('v24.0.0'), false)
+})
+
+test('compose mode emits no node line', () => {
+  const env = {
+    HOST: '127.0.0.1',
+    INGEST_TOKEN: 'change-me',
+    PORT: '3000',
+    MC_DOCTOR_DOCKER: '1',
+    DASHBOARD_PASSWORD_HASH: 'scrypt:1',
+    SESSION_SECRET: 'ab',
+  }
+  for (const nodeVersion of ['v18.20.0', 'v20.16.0', 'v26.5.1']) {
+    const result = report(facts({ nodeVersion, env }))
+    assert.equal(result.code, 0, result.lines.join('\n'))
+    assert.equal(
+      result.lines.some((line) => /^(pass|fail|info|skip) node:/.test(line)),
+      false,
+      result.lines.join('\n'),
+    )
+  }
 })
 
 test('login is open on loopback and required when Compose or a public bind has no password', () => {
@@ -110,6 +131,7 @@ test('each required failure names the next command and exits non zero', () => {
       name: 'node',
       facts: facts({ nodeVersion: 'v18.20.8' }),
       includes: FIX_NODE,
+      exact: `fail node: ${FIX_NODE}`,
     },
     {
       name: 'ports',
@@ -175,6 +197,7 @@ test('each required failure names the next command and exits non zero', () => {
     assert.equal(result.code, 1, item.name)
     const line = result.lines.find((entry) => entry.startsWith(`fail ${item.name}:`))
     assert.ok(line, item.name)
+    if (item.exact) assert.equal(line, item.exact)
     assert.match(line, new RegExp(item.includes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false, item.name)
     if (item.name === 'ports') {
@@ -421,9 +444,10 @@ test('gateway status comes from the bridge under Compose and from a direct probe
     },
   }))
   assert.equal(compose.code, 0)
-  assert.match(compose.lines[10], /Gateway status is unknown/)
-  assert.match(compose.lines[10], /Gateway status comes from the bridge\. Run the bridge to check it\./)
-  assert.doesNotMatch(compose.lines[10], /^fail /)
+  assert.match(compose.lines[9], /Gateway status is unknown/)
+  assert.match(compose.lines[9], /Gateway status comes from the bridge\. Run the bridge to check it\./)
+  assert.doesNotMatch(compose.lines[9], /^fail /)
+  assert.equal(compose.lines.some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
   const reported = report(facts({
     env: {
       HOST: '127.0.0.1',
@@ -436,7 +460,7 @@ test('gateway status comes from the bridge under Compose and from a direct probe
     gateway: { state: 'down', host: '127.0.0.1', port: 18789 },
   }))
   assert.equal(reported.code, 0)
-  assert.match(reported.lines[10], /The bridge reported the gateway down at 127\.0\.0\.1 port 18789/)
+  assert.match(reported.lines[9], /The bridge reported the gateway down at 127\.0\.0\.1 port 18789/)
   assert.equal(hasDashPunctuation(compose.lines.join('\n')), false)
   assert.equal(hasDashPunctuation(reported.lines.join('\n')), false)
 
@@ -496,14 +520,15 @@ test('docker doctor reads gateway state from /system and an override probes dire
     writeFileSync(path.join(dir, '.env'), envFile)
     const fromReport = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
     assert.equal(fromReport.code, 0, fromReport.lines.join('\n'))
-    assert.match(fromReport.lines[10], /The bridge reported the gateway down at 127\.0\.0\.1 port 18789/)
+    assert.match(fromReport.lines[9], /The bridge reported the gateway down at 127\.0\.0\.1 port 18789/)
+    assert.equal(fromReport.lines.some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
     const direct = await runDoctor(dir, {
       MC_DOCTOR_DOCKER: '1',
       OPENCLAW_GATEWAY_HOST: '127.0.0.1',
       OPENCLAW_GATEWAY_PORT: String(gatewayPort),
     })
     assert.equal(direct.code, 0, direct.lines.join('\n'))
-    assert.match(direct.lines[10], new RegExp(`The gateway probe at 127\\.0\\.0\\.1 port ${gatewayPort} is up`))
+    assert.match(direct.lines[9], new RegExp(`The gateway probe at 127\\.0\\.0\\.1 port ${gatewayPort} is up`))
     for (const line of [...fromReport.lines, ...direct.lines]) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
     await new Promise((resolve) => server.close(resolve))
@@ -664,7 +689,8 @@ test('docker doctor uses the shell MC_API_PORT when .env names a different port'
     )
     const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1', MC_API_PORT: String(port) })
     assert.equal(result.code, 0, result.lines.join('\n'))
-    assert.match(result.lines[1], new RegExp(`^pass ports: Port ${port} is already running\\.$`))
+    assert.match(result.lines[0], new RegExp(`^pass ports: Port ${port} is already running\\.$`))
+    assert.equal(result.lines.some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
     assert.equal(result.lines.some((line) => /Port 3000/.test(line)), false)
   } finally {
     await new Promise((resolve) => server.close(resolve))
@@ -704,10 +730,11 @@ test('docker doctor reports host database checks as info and checks the custom A
     const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
     assert.equal(result.code, 0, result.lines.join('\n'))
     assert.equal(result.lines.some((line) => line.startsWith('fail ')), false)
-    assert.match(result.lines[1], new RegExp(`^pass ports: Port ${port} is already running\\.$`))
-    assert.match(result.lines[3], /^info database: /)
-    assert.match(result.lines[4], /^info migrations: /)
-    assert.equal(result.lines[7], 'pass health: The health check says the database is up.')
+    assert.match(result.lines[0], new RegExp(`^pass ports: Port ${port} is already running\\.$`))
+    assert.match(result.lines[2], /^info database: /)
+    assert.match(result.lines[3], /^info migrations: /)
+    assert.equal(result.lines[6], 'pass health: The health check says the database is up.')
+    assert.equal(result.lines.some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
     assert.equal(result.lines.some((line) => /Port 3000/.test(line)), false)
     for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
@@ -756,7 +783,7 @@ test('bridge sync: a stale timestamp fails doctor', async () => {
     assert.deepEqual(fails, [
       'fail bridge: The last OpenClaw sync is older than 600 seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.',
     ])
-    assert.match(result.lines[8], /^info openclaw:/)
+    assert.match(result.lines[7], /^info openclaw:/)
     for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
     await new Promise((resolve) => server.close(resolve))
@@ -780,7 +807,8 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
     )
     const missing = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
     assert.equal(missing.code, 0, missing.lines.join('\n'))
-    assert.match(missing.lines[9], /^info bridge: No OpenClaw sync timestamp was found/)
+    assert.match(missing.lines[8], /^info bridge: No OpenClaw sync timestamp was found/)
+    assert.equal(missing.lines.some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
 
     writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 5}\n`)
     const fresh = await runDoctor(dir, {
@@ -789,7 +817,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
       MC_BRIDGE_STALE_SECONDS: '30',
     })
     assert.equal(fresh.code, 0, fresh.lines.join('\n'))
-    assert.match(fresh.lines[9], /^pass bridge: The last OpenClaw sync is recent\./)
+    assert.match(fresh.lines[8], /^pass bridge: The last OpenClaw sync is recent\./)
 
     writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 120}\n`)
     const stale = await runDoctor(dir, {
@@ -799,7 +827,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
       ...isolatedSchedule(dir, true),
     })
     assert.equal(stale.code, 1, stale.lines.join('\n'))
-    assert.match(stale.lines[9], /^fail bridge: The last OpenClaw sync is older than 30 seconds\./)
+    assert.match(stale.lines[8], /^fail bridge: The last OpenClaw sync is older than 30 seconds\./)
 
     const unscheduled = await runDoctor(dir, {
       MC_DOCTOR_DOCKER: '1',
@@ -808,7 +836,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
       ...isolatedSchedule(dir, false),
     })
     assert.equal(unscheduled.code, 0, unscheduled.lines.join('\n'))
-    assert.match(unscheduled.lines[9], /^info bridge: The last OpenClaw sync is older than 30 seconds\. No bridge schedule is installed\./)
+    assert.match(unscheduled.lines[8], /^info bridge: The last OpenClaw sync is older than 30 seconds\. No bridge schedule is installed\./)
     for (const line of stale.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
     await new Promise((resolve) => server.close(resolve))

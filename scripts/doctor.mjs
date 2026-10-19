@@ -9,7 +9,8 @@
  * Token rules match apps/api/src/auth/write-token.ts.
  * Login rules match apps/api/src/auth/password.ts. Compose (MC_DOCTOR_DOCKER=1)
  * counts as exposed even when .env HOST is loopback, because the container
- * peer is the Docker bridge.
+ * peer is the Docker bridge. Compose does not check the host Node version
+ * and prints no node line.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -25,7 +26,7 @@ export const FIX_MIGRATIONS = '(cd apps/api && npx prisma migrate deploy)'
 export const FIX_TOKEN = 'openssl rand -hex 24'
 export const FIX_HEALTH = 'npm run dev'
 export const FIX_NODE =
-  'Install Node.js 20.17 or newer, or Node.js 22.9 or newer, then run npm run doctor again.'
+  "Node 20.17 or later is needed for the native install. Docker installs don't need Node."
 
 export function portFix(port) {
   return `lsof -nP -iTCP:${port} -sTCP:LISTEN`
@@ -36,14 +37,28 @@ export function hasDashPunctuation(text) {
   return /[\u2012\u2013\u2014\u2015]/.test(text)
 }
 
+const MIN_NATIVE_NODE = [20, 17, 0]
+
+/** major.minor.patch as numbers. Missing minor or patch counts as 0. */
+export function parseNodeVersion(version) {
+  const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(String(version).trim())
+  if (!match) return null
+  return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)]
+}
+
+function compareNodeParts(left, right) {
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] > right[i]) return 1
+    if (left[i] < right[i]) return -1
+  }
+  return 0
+}
+
+/** Native installs accept Node 20.17.0 or later. There is no upper bound. */
 export function nodeSupported(version) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version))
-  if (!match) return false
-  const major = Number(match[1])
-  const minor = Number(match[2])
-  if (major === 20) return minor >= 17
-  if (major === 22) return minor >= 9
-  return false
+  const parsed = parseNodeVersion(version)
+  if (!parsed) return false
+  return compareNodeParts(parsed, MIN_NATIVE_NODE) >= 0
 }
 
 export function bindHost(env) {
@@ -836,10 +851,15 @@ function healthLine(ports) {
 
 export function report(facts) {
   const docker = dockerRequested(facts.env)
-  const lines = [
-    nodeSupported(facts.nodeVersion)
-      ? `pass node: Node ${facts.nodeVersion} is supported.`
-      : `fail node: Node ${facts.nodeVersion} is not supported. ${FIX_NODE}`,
+  const lines = []
+  if (!docker) {
+    lines.push(
+      nodeSupported(facts.nodeVersion)
+        ? `pass node: Node ${facts.nodeVersion} is supported.`
+        : `fail node: ${FIX_NODE}`,
+    )
+  }
+  lines.push(
     portLine(facts.ports, docker),
     facts.envExists ? 'pass env: .env is present.' : `fail env: .env is missing. Create it with: ${FIX_ENV}`,
     databaseLine(facts.database),
@@ -850,7 +870,7 @@ export function report(facts) {
     `info openclaw: ${facts.openclaw}`,
     bridgeLine(facts.bridge),
     gatewayLine(facts.env, facts.gateway),
-  ]
+  )
   const code = lines.some((line) => line.startsWith('fail ')) ? 1 : 0
   return { lines, code }
 }

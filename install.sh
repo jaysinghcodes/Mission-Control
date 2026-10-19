@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mission Control installer.
 # One command writes random tokens, starts the stack, runs doctor, and prints the URL.
-# Docker is the default. If the docker command is missing, this uses Node.js 22 and Postgres 16.
+# Docker is the default. If the docker command is missing, this uses Node.js 20.17 or later and Postgres 16.
 # When the openclaw command is on PATH, this installs a bridge schedule.
 # Linux uses a systemd user timer, or cron when that timer is not available.
 # macOS uses launchd. The schedule PATH includes the openclaw directory and the python3 directory.
@@ -698,24 +698,66 @@ start_docker() {
   wait_on_port "$(docker_api_port)"
 }
 
-require_node_22() {
-  local ver major minor
+# Compare major, minor, and patch as integers. 20.17.0 is the minimum.
+# A later major passes. There is no upper bound.
+native_node_at_least() {
+  local major minor patch
+  major="$1"
+  minor="$2"
+  patch="$3"
+  if (( 10#$major > 20 )); then
+    return 0
+  fi
+  if (( 10#$major < 20 )); then
+    return 1
+  fi
+  if (( 10#$minor > 17 )); then
+    return 0
+  fi
+  if (( 10#$minor < 17 )); then
+    return 1
+  fi
+  if (( 10#$patch >= 0 )); then
+    return 0
+  fi
+  return 1
+}
+
+require_native_node() {
+  local ver body major minor patch rest
+  local need
+  need="Node 20.17 or later is needed for the native install. Docker installs don't need Node."
   if ! command -v node >/dev/null 2>&1; then
-    echo "Node.js 22 was not found. Install Node.js 22.9 or newer, then run bash install.sh again."
+    echo "$need"
     exit 1
   fi
   ver="$(node -v 2>/dev/null || true)"
-  major="${ver#v}"
-  major="${major%%.*}"
-  minor="${ver#v}"
-  minor="${minor#*.}"
-  minor="${minor%%.*}"
-  if [[ ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ ]]; then
-    echo "Node.js ${ver} is not a supported native runtime. Install Node.js 22.9 or newer, then run bash install.sh again."
+  body="${ver#v}"
+  major="${body%%.*}"
+  minor=0
+  patch=0
+  if [[ "$body" == *.* ]]; then
+    rest="${body#*.}"
+    minor="${rest%%.*}"
+    if [[ "$rest" == *.* ]]; then
+      patch="${rest#*.}"
+      patch="${patch%%.*}"
+    fi
+  fi
+  minor="${minor%%[!0-9]*}"
+  patch="${patch%%[!0-9]*}"
+  if [[ -z "$minor" ]]; then
+    minor=0
+  fi
+  if [[ -z "$patch" ]]; then
+    patch=0
+  fi
+  if [[ ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ || ! "$patch" =~ ^[0-9]+$ ]]; then
+    echo "$need"
     exit 1
   fi
-  if [[ "$major" -ne 22 || "$minor" -lt 9 ]]; then
-    echo "Node.js ${ver} is not a supported native runtime. Install Node.js 22.9 or newer, then run bash install.sh again."
+  if ! native_node_at_least "$major" "$minor" "$patch"; then
+    echo "$need"
     exit 1
   fi
 }
@@ -821,8 +863,8 @@ wait_ready() {
 
 start_native() {
   local shell_port shell_web shell_api
-  echo "Docker was not found. Using the native path. This needs Node.js 22 and Postgres 16."
-  require_node_22
+  echo "Docker was not found. Using the native path. This needs Node.js 20.17 or later and Postgres 16."
+  require_native_node
   require_postgres_16
   echo "Installing dependencies and starting the API and the web app."
   npm ci
@@ -1490,7 +1532,7 @@ finish() {
   elif command -v node >/dev/null 2>&1; then
     echo "info doctor: scripts/doctor.mjs is missing, so doctor did not run."
   else
-    echo "info node: Node is not on PATH, so doctor did not run. Docker does not need Node on the host. Install Node.js 22 if you want npm run doctor."
+    echo "info doctor: Node is not on PATH, so doctor did not run. Docker installs don't need Node."
   fi
   url="http://localhost:$(web_port)/#/tasks"
   echo "Open ${url}"
