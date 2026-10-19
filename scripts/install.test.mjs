@@ -109,6 +109,7 @@ function copyFixture(dir) {
 }
 
 function dockerStub(bin) {
+  const nodeBin = process.execPath
   writeExe(
     path.join(bin, 'docker'),
     `#!/bin/sh
@@ -118,14 +119,38 @@ if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  if [ "\${DOCKER_STUB_BIND:-}" = "1" ]; then
+    echo "listen tcp 127.0.0.1:\${DOCKER_STUB_BIND_PORT}: bind: address already in use" >&2
+    exit 1
+  fi
   if [ "\${DOCKER_STUB_FAIL:-}" = "1" ]; then
     echo "stub compose failed" >&2
     exit 1
   fi
   exit 0
 fi
-if [ "$1" = "compose" ] && [ "$2" = "exec" ]; then
-  printf '%s\n' '{"service":"mission-control","status":"ok","database":"connected"}'
+if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+  case "$*" in
+    *json*)
+      printf '%s\\n' '{"Service":"api","State":"running","Status":"Up"}'
+      printf '%s\\n' '{"Service":"db","State":"running","Status":"Up"}'
+      ;;
+    *)
+      printf '%s\\n' 'api running'
+      printf '%s\\n' 'db running'
+      ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "compose" ] && { [ "$2" = "exec" ] || [ "$2" = "run" ]; }; then
+  case "$*" in
+    *scripts/doctor.mjs*)
+      unset MC_DOCTOR_INSIDE
+      unset MC_DOCTOR_PROBE_PORT
+      exec ${shellQuote(nodeBin)} scripts/doctor.mjs
+      ;;
+  esac
+  printf '%s\\n' '{"service":"mission-control","status":"ok","database":"connected"}'
   exit 0
 fi
 exit 0
@@ -605,9 +630,11 @@ test('docker without Node still prints the URL and a readable doctor line', () =
       PATH: `${fx.bin}:/usr/bin:/bin`,
     })
     const text = outputOf(result)
-    assert.equal(result.status, 0, text)
-    assert.match(text, /^info doctor: Node is not on PATH/m)
+    assert.doesNotMatch(text, /Node is not on PATH/)
+    assert.match(readFileSync(fx.log, 'utf8'), /scripts\/doctor\.mjs/)
     assert.doesNotMatch(text, /^(pass|fail|info|skip) node:/m)
+    const failed = assertReadableDoctor(text).some((line) => line.startsWith('fail '))
+    assert.equal(result.status, failed ? 1 : 0, text)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assert.equal(PUNCT.test(text), false)
     assert.equal(hasDashPunctuation(text), false)
@@ -1780,23 +1807,89 @@ function extractShellFunction(source, name) {
   throw new Error(`unclosed ${name}`)
 }
 
-test('the Compose branch has no node, npm, or npx word', () => {
+function isContainerNode(line) {
+  return /\bdocker compose (exec|run)\b/.test(line) && /\bnode\b/.test(line) && !/\b(npm|npx)\b/.test(line)
+}
+
+function hostToolHits(text) {
+  const hits = []
+  String(text).split('\n').forEach((line, index) => {
+    if (isContainerNode(line)) return
+    if (/\b(node|npm|npx)\b/.test(line)) hits.push(`${index + 1}:${line}`)
+  })
+  return hits
+}
+
+test('the Compose branch has no host node, npm, or npx call', () => {
   const script = readFileSync(path.join(root, 'install.sh'), 'utf8')
   const doctor = readFileSync(path.join(root, 'scripts/doctor.mjs'), 'utf8')
+  const finish = extractShellFunction(script, 'finish')
+  const finishCompose = extractMarked(finish, '# compose-host-free:start', '# compose-host-free:end')
+  assert.match(finishCompose, /compose_doctor/)
+  assert.deepEqual(hostToolHits(finishCompose), [])
+  assert.ok(hostToolHits('  node scripts/doctor.mjs').length > 0)
+  assert.deepEqual(hostToolHits('  docker compose exec -T api node scripts/doctor.mjs'), [])
   const branch = [
     extractMarked(script, '# compose-host-free:start', '# compose-host-free:end'),
     extractShellFunction(script, 'start_docker'),
     extractShellFunction(script, 'health_ok_port'),
     extractShellFunction(script, 'wait_on_port'),
+    finishCompose,
     extractMarked(doctor, '// compose-host-free:start', '// compose-host-free:end'),
   ].join('\n')
-  const pattern = /\b(node|npm|npx)\b/
-  const hits = []
-  branch.split('\n').forEach((line, index) => {
-    const found = line.match(pattern)
-    if (found) hits.push(`${index + 1}:${line}`)
-  })
-  assert.deepEqual(hits, [])
+  assert.deepEqual(hostToolHits(branch), [])
+})
+
+test('compose finish does not call host node, npm, or npx', () => {
+  const fx = freshDir()
+  const calls = path.join(fx.dir, 'host-tools.log')
+  writeFileSync(calls, '')
+  for (const name of ['node', 'npm', 'npx']) {
+    writeExe(
+      path.join(fx.bin, name),
+      `#!/bin/sh\nprintf '%s %s\\n' ${shellQuote(name)} "$*" >> ${shellQuote(calls)}\nexit 99\n`,
+    )
+  }
+  try {
+    const result = runInstall(fx.repo, fx.env)
+    const text = outputOf(result)
+    assert.equal(readFileSync(calls, 'utf8'), '', text)
+    assert.match(readFileSync(fx.log, 'utf8'), /compose exec .*node scripts\/doctor\.mjs/)
+    assert.doesNotMatch(text, /Node is not on PATH/)
+    assertReadableDoctor(text)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('compose up names the env var when the port is already in use', () => {
+  const cases = [
+    ['MC_API_PORT', '3461'],
+    ['MC_WEB_PORT', '5461'],
+    ['MC_DB_PORT', '55601'],
+    ['MC_REMOTE_PORT', '4461'],
+  ]
+  for (const [key, port] of cases) {
+    const fx = freshDir()
+    try {
+      const result = runInstall(fx.repo, {
+        ...fx.env,
+        DOCKER_STUB_BIND: '1',
+        DOCKER_STUB_BIND_PORT: port,
+        [key]: port,
+      })
+      const text = outputOf(result)
+      assert.equal(result.status, 1, text)
+      assert.match(text, new RegExp(`Port ${port} is used by another program\\. Stop it or set ${key} in \\.env\\.`))
+      assert.match(text, /address already in use/)
+      assert.match(text, /Docker Compose did not start the stack\./)
+      assert.doesNotMatch(text, /Open http:\/\//)
+      assert.equal(hasDashPunctuation(text), false)
+      assert.equal(/[→←⇒]|->/.test(text), false)
+    } finally {
+      rmSync(fx.dir, { recursive: true, force: true })
+    }
+  }
 })
 
 test('pathWithHidden keeps dirname when node shares that directory', () => {
@@ -1875,7 +1968,8 @@ exit 99
     const curls = readFileSync(curlLog, 'utf8').split('\n').filter((line) => line.includes('/health'))
     assert.ok(curls.length >= 1 && curls.length < 5, readFileSync(curlLog, 'utf8'))
     const nodeCalls = readFileSync(nodeLog, 'utf8').split('\n').filter(Boolean)
-    assert.deepEqual(nodeCalls, ['scripts/doctor.mjs'])
+    assert.deepEqual(nodeCalls, [])
+    assert.match(readFileSync(ready.log, 'utf8'), /compose exec .*node scripts\/doctor\.mjs/)
     assert.equal(readFileSync(npmLog, 'utf8'), '')
     const env = assignments(readFileSync(path.join(ready.repo, '.env'), 'utf8'))
     const password = text.match(/Dashboard password, shown once: (\S+)/)
@@ -1904,9 +1998,10 @@ exit 7
       MC_DOCTOR_HEALTH_SECONDS: '0',
     })
     const text = outputOf(result)
-    assert.equal(result.status, 0, text)
+    assert.notEqual(result.status, 0, text)
     assert.match(text, /The API did not answer on port/)
-    assert.match(text, /Node is not on PATH/)
+    assert.doesNotMatch(text, /Node is not on PATH/)
+    assert.match(readFileSync(capped.log, 'utf8'), /scripts\/doctor\.mjs/)
     const curls = readFileSync(capLog, 'utf8').split('\n').filter((line) => line.includes('/health'))
     assert.equal(curls.length, 90, readFileSync(capLog, 'utf8'))
     assert.equal(readFileSync(clock, 'utf8').trim(), '90')
@@ -1940,7 +2035,7 @@ test('compose health wait uses docker compose exec when curl is missing and stay
   }
   let health
   try {
-    health = await startDelayedHealth(fx.dir, 1200)
+    health = await startDelayedHealth(fx.dir, 0)
     const result = runInstall(fx.repo, {
       ...fx.env,
       PATH: `${fx.bin}:${stripped}`,
@@ -1950,9 +2045,10 @@ test('compose health wait uses docker compose exec when curl is missing and stay
     const text = outputOf(result)
     assert.equal(result.status, 0, text)
     assert.doesNotMatch(text, /did not answer on port/)
-    assert.match(text, /Node is not on PATH/)
+    assert.doesNotMatch(text, /Node is not on PATH/)
     const dockerLog = readFileSync(fx.log, 'utf8')
     assert.match(dockerLog, /compose exec -T api/)
+    assert.match(dockerLog, /node scripts\/doctor\.mjs/)
     assert.equal(text.includes('node -e'), false)
   } finally {
     health?.child.kill()

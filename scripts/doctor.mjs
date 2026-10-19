@@ -12,8 +12,10 @@
  * peer is the Docker bridge. Compose does not check the host Node version
  * and prints no node line. The health probe retries for up to 60 seconds.
  * A port conflict is reported only when another program holds the port.
- * A stopped or paused Compose db or api service fails. A slow start is only
- * when both of those services are running and the probe has not answered.
+ * A stopped, paused, or missing Compose db or api service fails when the
+ * other one is present. A slow start is only when both services are running
+ * or starting and the probe has not answered. The Compose installer runs
+ * this file inside the api container. npm run doctor still runs it on the host.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -208,7 +210,8 @@ export function apiListenPort(env) {
  * The reported port stays the resolved listen port.
  */
 export function healthProbePort(logical, env) {
-  const raw = env.MC_INSTALL_HEALTH_PORT
+  const insidePort = env.MC_DOCTOR_INSIDE === '1' ? env.MC_DOCTOR_PROBE_PORT : ''
+  const raw = typeof insidePort === 'string' && insidePort.trim() !== '' ? insidePort : env.MC_INSTALL_HEALTH_PORT
   if (typeof raw !== 'string' || raw.trim() === '') return logical
   const port = parsePort(raw, logical)
   return port == null ? logical : port
@@ -418,7 +421,13 @@ function bridgeFacts(root, env, processEnv = process.env) {
   }
 }
 
-async function openclawDetail() {
+async function openclawDetail(env = process.env) {
+  if (env.MC_DOCTOR_OPENCLAW_ON_PATH === '0') {
+    return 'OpenClaw is optional. The openclaw command is not on PATH, so the bridge was not reached. Sample data does not need it.'
+  }
+  if (env.MC_DOCTOR_OPENCLAW_ON_PATH === '1') {
+    return 'OpenClaw is optional. The openclaw command is on PATH. Bridge reachability does not affect this check.'
+  }
   const bin = await which('openclaw')
   if (!bin) {
     return 'OpenClaw is optional. The openclaw command is not on PATH, so the bridge was not reached. Sample data does not need it.'
@@ -625,18 +634,21 @@ export function composeServiceReady(row) {
 }
 
 /**
- * Empty when db and api are absent or ready.
- * A paused service names unpause. Any other present service that is not
- * ready names start. Missing rows are ignored so a project with no
- * containers is not reported as stopped.
+ * Empty when neither db nor api has a container, or both are ready.
+ * A project with no containers is left to the port check.
+ * If one of them has a container, a missing partner is not running.
+ * A paused service names unpause. Any other service that is not ready names start.
  */
 export function composeServiceFailure(rows) {
+  const list = Array.isArray(rows) ? rows : []
+  const present = new Set(list.map((item) => item.service))
+  if (!present.has('db') && !present.has('api')) return ''
   const paused = []
   const stopped = []
   for (const name of ['db', 'api']) {
-    const row = (rows || []).find((item) => item.service === name)
-    if (!row || composeServiceReady(row)) continue
-    if (row.state === 'paused' || row.status.startsWith('paused')) paused.push(name)
+    const row = list.find((item) => item.service === name)
+    if (row && composeServiceReady(row)) continue
+    if (row && (row.state === 'paused' || row.status.startsWith('paused'))) paused.push(name)
     else stopped.push(name)
   }
   const parts = []
@@ -653,7 +665,19 @@ export function composeServiceFailure(rows) {
   return parts.join(' ')
 }
 
+function decodeComposePs(env) {
+  const b64 = typeof env.MC_DOCTOR_COMPOSE_PS_B64 === 'string' ? env.MC_DOCTOR_COMPOSE_PS_B64.trim() : ''
+  if (!b64) return null
+  try {
+    return Buffer.from(b64, 'base64').toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
 function readComposeServiceRows(root, env = process.env) {
+  const embedded = decodeComposePs(env)
+  if (embedded != null) return parseComposeServiceRows(embedded)
   const ps = runCaptured('docker', ['compose', 'ps', '-a', '--format', 'json'], root, env)
   if (!ps || ps.error || ps.status !== 0) return null
   return parseComposeServiceRows(ps.stdout || '')
@@ -825,12 +849,16 @@ function dockerLoopbackHealth(root, options = {}) {
 async function probeApiOnce(port, host, options) {
   const url = `http://${host}:${port}/health`
   const free = await listenFree(port, host)
-  if (free) return { state: 'free', url, db: null }
+  if (free) {
+    if (options.inside && options.servicesReady) return { state: 'pending', url, db: null }
+    return { state: 'free', url, db: null }
+  }
   const timeout = options.httpTimeoutMs ?? 1500
   const res = await httpGet(url, timeout)
   const identity = readHealthIdentity(res)
   if (identity.ours) return { state: 'ours', url, db: identity.db }
-  if (res.status === 401 && options.docker && options.root) {
+  if (options.inside && options.servicesReady) return { state: 'pending', url, db: null }
+  if (res.status === 401 && options.docker && options.root && !options.inside) {
     const inside = dockerLoopbackHealth(options.root, options)
     if (inside.ours) return { state: 'ours', url, db: inside.db }
   }
@@ -850,6 +878,7 @@ export async function inspectApiPort(port, host = '127.0.0.1', options = {}) {
   const started = now()
   const probeUrl = `http://${host}:${port}/health`
   while (true) {
+    let servicesReady = false
     if (options.docker && options.root) {
       const rows = typeof options.readServices === 'function'
         ? options.readServices()
@@ -857,9 +886,10 @@ export async function inspectApiPort(port, host = '127.0.0.1', options = {}) {
       if (Array.isArray(rows)) {
         const downMessage = composeServiceFailure(rows)
         if (downMessage) return { state: 'down', url: probeUrl, db: null, downMessage }
+        servicesReady = rows.some((row) => (row.service === 'db' || row.service === 'api') && composeServiceReady(row))
       }
     }
-    const seen = await probeApiOnce(port, host, options)
+    const seen = await probeApiOnce(port, host, { ...options, servicesReady })
     if (seen.state !== 'pending') return { state: seen.state, url: seen.url, db: seen.db }
     if (now() - started >= budgetMs) {
       return { state: 'starting', url: seen.url, db: null }
@@ -877,10 +907,12 @@ async function portFacts(env, root, processEnv = process.env) {
   if (port == null) {
     return { badPort: true, api: null, apiState: 'busy', health: null }
   }
-  const seen = await inspectApiPort(healthProbePort(port, env), bind, {
+  const merged = { ...processEnv, ...env }
+  const seen = await inspectApiPort(healthProbePort(port, merged), bind, {
     docker: dockerRequested(env),
+    inside: merged.MC_DOCTOR_INSIDE === '1',
     root,
-    env: { ...processEnv, ...env },
+    env: merged,
   })
   const apiState = seen.state === 'free'
     ? 'free'
@@ -906,14 +938,14 @@ async function portFacts(env, root, processEnv = process.env) {
 
 export async function gather(root, processEnv = process.env) {
   const envFile = path.join(root, '.env')
-  const envExists = existsSync(envFile)
+  const envExists = existsSync(envFile) || processEnv.MC_DOCTOR_ENV_PRESENT === '1'
   const loaded = effectiveEnv(loadEnvFile(envFile), processEnv)
   const docker = await usingDocker(root, loaded, processEnv)
   const env = { ...loaded, MC_DOCTOR_DOCKER: docker ? '1' : '0' }
   const [ports, database, openclaw] = await Promise.all([
     portFacts(env, root, processEnv),
     databaseFacts(root, env),
-    openclawDetail(),
+    openclawDetail(processEnv),
   ])
   const facts = {
     nodeVersion: process.version,

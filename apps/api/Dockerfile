@@ -42,6 +42,9 @@ COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 # Loopback only. Under Compose: docker compose exec api npm run login:reset
 COPY --from=build /app/apps/api/scripts/login-reset.mjs ./apps/api/scripts/login-reset.mjs
+# Compose install runs doctor here so the host does not need Node.
+# Runtime workdir is /app/apps/api, so the command is: node scripts/doctor.mjs
+COPY --from=build /app/scripts/doctor.mjs ./apps/api/scripts/doctor.mjs
 COPY --from=build /app/apps/api/git-sha.txt ./apps/api/git-sha.txt
 # Prisma 7 reads the datasource URL from prisma.config.ts (not schema.prisma);
 # without it `prisma migrate deploy` in CMD exits with "datasource.url property

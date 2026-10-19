@@ -1136,6 +1136,9 @@ test('a stopped or paused compose service is a failure, not a slow start or a po
   assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
   assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}')), apiPaused)
   assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"restarting","Status":"Restarting"}\n{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
+  assert.equal(composeServiceFailure([]), '')
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
   for (const line of [dbStopped, apiStopped, apiPaused]) {
     assert.equal(hasDashPunctuation(line), false)
     assert.equal(/[→←⇒]|->/.test(line), false)
@@ -1207,4 +1210,77 @@ test('a paused api is detected as this stack and fails with unpause', async () =
   assert.doesNotMatch(text, /still starting/)
   assert.doesNotMatch(text, /another program/)
   assert.equal(text.split('\n').some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
+})
+
+test('an inside doctor uses the compose snapshot for a stopped db', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-inside-'))
+  const bin = path.join(dir, 'bin')
+  mkdirSync(bin)
+  const log = path.join(dir, 'docker.log')
+  writeFileSync(log, '')
+  writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\nexit 99\n')
+  chmodSync(path.join(bin, 'docker'), 0o755)
+  const rows = '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}'
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(3461))
+  try {
+    const result = await runDoctor(dir, {
+      ...process.env,
+      PATH: bin,
+      DOCKER_LOG: log,
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_INSIDE: '1',
+      MC_DOCTOR_COMPOSE_PS_B64: Buffer.from(rows).toString('base64'),
+      MC_API_PORT: '3461',
+      MC_INSTALL_HEALTH_PORT: '3000',
+      MC_DOCTOR_HEALTH_SECONDS: '60',
+      MC_DOCTOR_ENV_PRESENT: '1',
+      MC_DOCTOR_OPENCLAW_ON_PATH: '0',
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, /^fail ports: The db service is not running\. Start it with: docker compose start db$/m)
+    assert.match(text, /^fail health: The db service is not running\. Start it with: docker compose start db$/m)
+    assert.doesNotMatch(text, /still starting/)
+    assert.equal(readFileSync(log, 'utf8'), '')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a running compose stack with no answer is still starting inside the container', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-starting-'))
+  const rows = [
+    '{"Service":"api","State":"running","Status":"Up"}',
+    '{"Service":"db","State":"running","Health":"starting","Status":"Up (health: starting)"}',
+  ].join('\n')
+  const server = net.createServer()
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  await new Promise((resolve) => server.close(resolve))
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  try {
+    const result = await runDoctor(dir, {
+      ...process.env,
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_INSIDE: '1',
+      MC_DOCTOR_COMPOSE_PS_B64: Buffer.from(rows).toString('base64'),
+      MC_API_PORT: String(port),
+      MC_INSTALL_HEALTH_PORT: String(port),
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_DOCTOR_ENV_PRESENT: '1',
+      MC_DOCTOR_OPENCLAW_ON_PATH: '0',
+      HOST: '127.0.0.1',
+      INGEST_TOKEN: 'abc123',
+      DASHBOARD_PASSWORD_HASH: 'scrypt:1',
+      SESSION_SECRET: 'ab',
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 0, text)
+    assert.match(text, /^info ports: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.match(text, /^info health: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.doesNotMatch(text, /another program/)
+    assert.doesNotMatch(text, /not running/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

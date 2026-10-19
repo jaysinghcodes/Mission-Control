@@ -526,6 +526,108 @@ compose_health_ok() {
   fi
   return "$code"
 }
+
+port_env_name() {
+  local port
+  port="$1"
+  if [[ "$port" == "$(docker_api_port)" ]]; then
+    printf '%s' MC_API_PORT
+    return 0
+  fi
+  if [[ "$port" == "$(web_port)" ]]; then
+    printf '%s' MC_WEB_PORT
+    return 0
+  fi
+  if [[ "$port" == "$(db_port)" ]]; then
+    printf '%s' MC_DB_PORT
+    return 0
+  fi
+  if [[ "$port" == "$(remote_port)" ]]; then
+    printf '%s' MC_REMOTE_PORT
+    return 0
+  fi
+  printf '%s' MC_API_PORT
+}
+
+# Prints one line per published port when Compose could not bind.
+# Returns 0 when it printed a line.
+compose_bind_conflict() {
+  local log port var seen found
+  log="$1"
+  if ! grep -Eiq 'address already in use|port is already allocated|already allocated' "$log"; then
+    return 1
+  fi
+  seen=" "
+  found=1
+  while IFS= read -r port; do
+    [[ "$port" =~ ^[0-9]+$ ]] || continue
+    [[ "$port" -ge 1 && "$port" -le 65535 ]] || continue
+    case "$seen" in
+      *" ${port} "*) continue ;;
+    esac
+    seen="${seen}${port} "
+    var="$(port_env_name "$port")"
+    echo "Port ${port} is used by another program. Stop it or set ${var} in .env." >&2
+    found=0
+  done < <(grep -Eo '(127\.0\.0\.1|0\.0\.0\.0|\[::\]):[0-9]+' "$log" | sed -E 's/.*://' || true)
+  return "$found"
+}
+
+compose_api_exec_ok() {
+  local service state
+  while read -r service state _; do
+    if [[ "$service" == "api" ]]; then
+      case "$state" in
+        running|starting) return 0 ;;
+      esac
+      return 1
+    fi
+  done < <(docker compose ps -a --format '{{.Service}} {{.State}}' 2>/dev/null || true)
+  return 1
+}
+
+compose_ps_b64() {
+  local raw
+  raw="$(docker compose ps -a --format json 2>/dev/null || true)"
+  if command -v base64 >/dev/null 2>&1; then
+    printf '%s' "$raw" | base64 | tr -d '\n'
+    return 0
+  fi
+  printf '%s' "$raw" | openssl base64 -A | tr -d '\n'
+}
+
+# Doctor for a Compose install. The api image runs the script.
+# A paused or stopped api cannot accept exec, so a one off container runs it.
+compose_doctor() {
+  local port
+  local -a health_args
+  port="$(docker_api_port)"
+  MC_DOCTOR_DOCKER=1
+  MC_DOCTOR_INSIDE=1
+  MC_API_PORT="$port"
+  MC_DOCTOR_PROBE_PORT=3000
+  MC_DOCTOR_COMPOSE_PS_B64="$(compose_ps_b64)"
+  MC_DOCTOR_ENV_PRESENT=0
+  if [[ -f .env ]]; then
+    MC_DOCTOR_ENV_PRESENT=1
+  fi
+  MC_DOCTOR_OPENCLAW_ON_PATH=0
+  if command -v openclaw >/dev/null 2>&1; then
+    MC_DOCTOR_OPENCLAW_ON_PATH=1
+  fi
+  export MC_DOCTOR_DOCKER MC_DOCTOR_INSIDE MC_API_PORT MC_DOCTOR_PROBE_PORT
+  export MC_DOCTOR_COMPOSE_PS_B64 MC_DOCTOR_ENV_PRESENT MC_DOCTOR_OPENCLAW_ON_PATH
+  health_args=()
+  if [[ -n "${MC_DOCTOR_HEALTH_SECONDS:-}" ]]; then
+    export MC_DOCTOR_HEALTH_SECONDS
+    health_args=(-e MC_DOCTOR_HEALTH_SECONDS)
+  fi
+  if compose_api_exec_ok; then
+    docker compose exec -T -e MC_DOCTOR_DOCKER -e MC_DOCTOR_INSIDE -e MC_API_PORT -e MC_DOCTOR_PROBE_PORT -e MC_DOCTOR_COMPOSE_PS_B64 -e MC_DOCTOR_ENV_PRESENT -e MC_DOCTOR_OPENCLAW_ON_PATH "${health_args[@]}" api node scripts/doctor.mjs
+    return
+  fi
+  docker compose run --rm --no-deps --entrypoint node -e MC_DOCTOR_DOCKER -e MC_DOCTOR_INSIDE -e MC_API_PORT -e MC_DOCTOR_PROBE_PORT -e MC_DOCTOR_COMPOSE_PS_B64 -e MC_DOCTOR_ENV_PRESENT -e MC_DOCTOR_OPENCLAW_ON_PATH "${health_args[@]}" api scripts/doctor.mjs
+}
 # compose-host-free:end
 
 accept_dashboard_secrets() {
@@ -783,10 +885,21 @@ start_docker() {
     GIT_SHA="$(git rev-parse HEAD)"
     export GIT_SHA
   fi
-  if ! docker compose up -d --build; then
+  local up_log
+  up_log="$(mktemp "${TMPDIR:-/tmp}/mc-compose.XXXXXX")"
+  if ! docker compose up -d --build >"$up_log" 2>&1; then
+    if compose_bind_conflict "$up_log"; then
+      cat "$up_log" >&2
+      rm -f "$up_log"
+      echo "Docker Compose did not start the stack." >&2
+      exit 1
+    fi
+    cat "$up_log" >&2
+    rm -f "$up_log"
     echo "Docker Compose did not start the stack." >&2
     exit 1
   fi
+  rm -f "$up_log"
   echo "Waiting for the API health check on port $(docker_api_port)."
   wait_on_port "$(docker_api_port)"
 }
@@ -1635,15 +1748,15 @@ uninstall_schedule() {
 finish() {
   local doctor_code url
   doctor_code=0
-  if command -v node >/dev/null 2>&1 && [[ -f scripts/doctor.mjs ]]; then
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
     set +e
     # compose-host-free:start
-    if [[ "${USE_DOCKER:-0}" == "1" ]]; then
-      MC_DOCTOR_DOCKER=1
-      MC_API_PORT="$(docker_api_port)"
-      export MC_DOCTOR_DOCKER MC_API_PORT
-    fi
+    compose_doctor
     # compose-host-free:end
+    doctor_code=$?
+    set -e
+  elif command -v node >/dev/null 2>&1 && [[ -f scripts/doctor.mjs ]]; then
+    set +e
     node scripts/doctor.mjs
     doctor_code=$?
     set -e

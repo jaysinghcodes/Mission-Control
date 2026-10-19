@@ -695,8 +695,11 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
       if (/did not answer on port/.test(log)) {
         throw new Error('Compose install with no host Node printed that the API did not answer.')
       }
-      if (!/Node is not on PATH/.test(log)) {
-        throw new Error('Compose install with no host Node did not skip doctor.')
+      if (/Node is not on PATH/.test(log)) {
+        throw new Error('Compose install skipped doctor because Node was not on PATH.')
+      }
+      if (!/^(pass|fail|info) ports:/m.test(log)) {
+        throw new Error('Compose install with no host Node did not run doctor.')
       }
     }
     const password = parseDashboardPassword(log)
