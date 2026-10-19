@@ -1,6 +1,12 @@
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
 import { hostname, tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import { Client } from 'pg';
@@ -45,6 +51,17 @@ function socketFile(dir: string, port: string): string {
 
 function socketUrl(dir: string, port: string, database: string): string {
   const base = `postgresql:///${database}?host=${dir}`;
+  return port === '5432' ? base : `${base}&port=${port}`;
+}
+
+function socketLoginUrl(
+  dir: string,
+  port: string,
+  database: string,
+  user: string,
+  password: string,
+): string {
+  const base = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@/${database}?host=${dir}`;
   return port === '5432' ? base : `${base}&port=${port}`;
 }
 
@@ -322,6 +339,7 @@ describe('test database isolation', () => {
       'postgresql://postgres:postgres@cursor:5432/mission_control',
       'postgresql://postgres:postgres@db.invalid:5432/mission_control?host=127.0.0.1',
       'postgresql:///mission_control?host=/var/run/postgresql',
+      'postgresql://app:pw@/mission_control?host=/var/run/postgresql',
     ];
     for (const alias of aliases) {
       seen.length = 0;
@@ -387,6 +405,104 @@ describe('test database isolation', () => {
     expect(error).toHaveBeenCalledWith(LIVE_DB_REFUSAL);
     exit.mockRestore();
     error.mockRestore();
+  });
+
+  it('parses a URL with no host name', () => {
+    const raw = 'postgresql://app:pw@/mc_live?host=/var/run/postgresql';
+    expect(databaseIdentity(raw)).toEqual({
+      host: '',
+      port: '5432',
+      database: 'mc_live',
+    });
+    expect(replaceDatabase(raw, 'postgres')).toBe(
+      'postgresql://app:pw@/postgres?host=/var/run/postgresql',
+    );
+    expect(sameDatabase(raw, LIVE)).toBe(false);
+  });
+
+  it('refuses when a fallback fingerprint is missing a component', async () => {
+    const sqls: string[] = [];
+    const opener = (url: string) =>
+      Promise.resolve({
+        query: (sql: string) => {
+          sqls.push(sql);
+          if (sql.includes('pg_control_system')) {
+            const err = new Error(
+              'permission denied for function pg_control_system',
+            ) as Error & { code: string };
+            err.code = '42501';
+            return Promise.reject(err);
+          }
+          const database = url.includes('mc_test_abc')
+            ? 'mc_test_abc'
+            : 'mission_control';
+          return Promise.resolve({
+            rows: [
+              {
+                started_at: new Date('2026-01-01T00:00:00.000Z'),
+                port: null,
+                database,
+              },
+            ],
+            rowCount: 1,
+          });
+        },
+        end: () => Promise.resolve(undefined),
+      });
+    const socket =
+      'postgresql://app:pw@/mission_control?host=/var/run/postgresql';
+    await expect(compareLiveDatabase(socket, LIVE, opener)).resolves.toBe(
+      'match',
+    );
+    await expect(
+      compareLiveDatabase(
+        'postgresql://app:pw@/mc_test_abc?host=/var/run/postgresql',
+        LIVE,
+        opener,
+      ),
+    ).resolves.toBe('match');
+    expect(
+      sqls.some((sql) => sql.includes('coalesce(inet_server_port()')),
+    ).toBe(true);
+  });
+
+  it('accepts a different database when the fallback fingerprint is complete', async () => {
+    const opener = (url: string) =>
+      Promise.resolve({
+        query: (sql: string) => {
+          if (sql.includes('pg_control_system')) {
+            const err = new Error(
+              'permission denied for function pg_control_system',
+            ) as Error & { code: string };
+            err.code = '42501';
+            return Promise.reject(err);
+          }
+          if (!sql.includes('coalesce(inet_server_port()')) {
+            return Promise.reject(new Error(`unexpected ${sql}`));
+          }
+          const database = url.includes('mc_test_abc')
+            ? 'mc_test_abc'
+            : 'mission_control';
+          return Promise.resolve({
+            rows: [
+              {
+                started_at: new Date('2026-01-01T00:00:00.000Z'),
+                port: '5432',
+                database,
+              },
+            ],
+            rowCount: 1,
+          });
+        },
+        end: () => Promise.resolve(undefined),
+      });
+    await expect(
+      compareLiveDatabase(
+        'postgresql://app:pw@/mc_test_abc?host=/var/run/postgresql',
+        LIVE,
+        opener,
+      ),
+    ).resolves.toBe('different');
   });
 
   it('treats a different database name on the same server as safe', () => {
@@ -548,6 +664,7 @@ describe('throwaway database lifecycle', () => {
       dropStateFile(file);
     }
     expect(await databaseExists(created.adminUrl, created.name)).toBe(false);
+    expect(existsSync(file)).toBe(false);
   });
 
   it('uses a schema when the login cannot create a database', async () => {
@@ -654,6 +771,44 @@ describe('throwaway database lifecycle', () => {
       expect(readState(keepFile)?.dropped).toBeUndefined();
     } finally {
       dropStateFile(keepFile);
+      expect(existsSync(keepFile)).toBe(false);
+    }
+  });
+
+  it('removes a state file that is already marked dropped', () => {
+    const dropped = stateFileForRun(1, randomBytes(4).toString('hex'));
+    const kept = stateFileForRun(1, randomBytes(4).toString('hex'));
+    writeFileSync(
+      dropped,
+      JSON.stringify({
+        testUrl: 'postgresql://postgres@127.0.0.1:1/mc_test_dropped1',
+        adminUrl: 'postgresql://postgres@127.0.0.1:1/postgres',
+        kind: 'database',
+        name: 'mc_test_dropped1',
+        disposable: true,
+        ownerPid: 1,
+        dropped: true,
+      }),
+    );
+    writeFileSync(
+      kept,
+      JSON.stringify({
+        testUrl: 'postgresql://postgres@127.0.0.1:1/mission_control',
+        adminUrl: 'postgresql://postgres@127.0.0.1:1/postgres',
+        kind: 'database',
+        name: 'mission_control',
+        disposable: false,
+        ownerPid: 1,
+        dropped: true,
+      }),
+    );
+    try {
+      reapDeadTestDatabases();
+      expect(existsSync(dropped)).toBe(false);
+      expect(existsSync(kept)).toBe(true);
+    } finally {
+      if (existsSync(dropped)) unlinkSync(dropped);
+      if (existsSync(kept)) unlinkSync(kept);
     }
   });
 
@@ -867,9 +1022,158 @@ describe('throwaway database lifecycle', () => {
   if ('skip' in socketAlias) {
     it.skip(`refuses a Unix socket alias [${socketAlias.skip}]`, () =>
       undefined);
+    it.skip(`a login without superuser over a Unix socket is refused [${socketAlias.skip}]`, () =>
+      undefined);
   } else {
     it(`refuses a Unix socket alias (${socketAlias.dir})`, async () => {
       await refuseLiveAlias(socketAlias.url, true);
+    });
+
+    it(`a login without superuser over a Unix socket is refused (${socketAlias.dir})`, async () => {
+      const server = serverUrl();
+      const direct = replaceDatabase(server, 'mc_alias_guard');
+      const osUser = userInfo().username;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(osUser)) {
+        throw new Error('refusing an unsafe operating system user name');
+      }
+      const password = 'mc_test_pw';
+      const admin = new Client({ connectionString: server });
+      await admin.connect();
+      const guard = new Client({ connectionString: direct });
+      let guardConnected = false;
+      let createdOsRole = false;
+      let previousPassword: string | null | undefined;
+      let revoked = false;
+      try {
+        await admin.query(
+          'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+          ['mc_alias_guard'],
+        );
+        await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
+        await admin.query('CREATE DATABASE mc_alias_guard');
+        const prior = await admin.query<{
+          rolpassword: string | null;
+          rolsuper: boolean;
+        }>('SELECT rolpassword, rolsuper FROM pg_authid WHERE rolname = $1', [
+          osUser,
+        ]);
+        if ((prior.rowCount ?? 0) === 0) {
+          await admin.query(
+            `CREATE ROLE "${osUser}" LOGIN PASSWORD '${password}' NOSUPERUSER`,
+          );
+          createdOsRole = true;
+        } else {
+          expect(prior.rows[0]?.rolsuper).toBe(false);
+          previousPassword = prior.rows[0]?.rolpassword ?? null;
+          await admin.query(`ALTER ROLE "${osUser}" PASSWORD '${password}'`);
+        }
+        await admin.query(
+          `GRANT CONNECT ON DATABASE mc_alias_guard TO "${osUser}"`,
+        );
+        await guard.connect();
+        guardConnected = true;
+        await guard.query(
+          'REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC',
+        );
+        revoked = true;
+        await guard.query('CREATE TABLE qa_sentinel (id int primary key)');
+        await guard.query('INSERT INTO qa_sentinel (id) VALUES (1)');
+        await guard.query(
+          `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE qa_sentinel TO "${osUser}"`,
+        );
+        const limitedTcp = retargetConnection(direct, {
+          user: osUser,
+          password,
+          database: 'mc_alias_guard',
+        });
+        const limitedSocket = socketLoginUrl(
+          socketAlias.dir,
+          socketPort,
+          'mc_alias_guard',
+          osUser,
+          password,
+        );
+        expect(sameDatabase(limitedSocket, limitedTcp)).toBe(false);
+        const deniedTcp = new Client({ connectionString: limitedTcp });
+        await deniedTcp.connect();
+        try {
+          await expect(
+            deniedTcp.query(
+              'SELECT system_identifier FROM pg_control_system()',
+            ),
+          ).rejects.toMatchObject({ code: '42501' });
+        } finally {
+          await deniedTcp.end();
+        }
+        const deniedSocket = new Client({ connectionString: limitedSocket });
+        await deniedSocket.connect();
+        try {
+          const who = await deniedSocket.query<{ u: string; port: string }>(
+            `SELECT current_user AS u, coalesce(inet_server_port(), current_setting('port')::int)::text AS port`,
+          );
+          expect(who.rows[0]?.u).toBe(osUser);
+          expect(who.rows[0]?.port).toBe(socketPort);
+          await expect(
+            deniedSocket.query(
+              'SELECT system_identifier FROM pg_control_system()',
+            ),
+          ).rejects.toMatchObject({ code: '42501' });
+        } finally {
+          await deniedSocket.end();
+        }
+
+        const exit = exitSpy();
+        const error = jest
+          .spyOn(console, 'error')
+          .mockImplementation(() => undefined);
+        await expect(
+          prepareJestDatabase({
+            DATABASE_URL: limitedTcp,
+            TEST_DATABASE_URL: limitedSocket,
+          }),
+        ).rejects.toThrow('exit 1');
+        expect(error).toHaveBeenCalledWith(LIVE_DB_REFUSAL);
+        const crash = error.mock.calls.some((call) =>
+          call.some(
+            (part) =>
+              typeof part === 'string' &&
+              part.includes('Could not read the database server'),
+          ),
+        );
+        expect(crash).toBe(false);
+        exit.mockRestore();
+        error.mockRestore();
+
+        const count = await guard.query<{ n: number }>(
+          'SELECT count(*)::int AS n FROM qa_sentinel',
+        );
+        expect(count.rows[0]?.n).toBe(1);
+        const migrated = await guard.query<{ reg: string | null }>(
+          `SELECT to_regclass('public."Agent"') AS reg`,
+        );
+        expect(migrated.rows[0]?.reg).toBeNull();
+      } finally {
+        if (revoked) {
+          await guard.query(
+            'GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC',
+          );
+        }
+        if (guardConnected) await guard.end();
+        await admin.query(
+          'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+          ['mc_alias_guard'],
+        );
+        await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
+        if (createdOsRole) {
+          await admin.query(`DROP ROLE IF EXISTS "${osUser}"`);
+        } else if (previousPassword !== undefined) {
+          await admin.query(
+            'UPDATE pg_authid SET rolpassword = $1 WHERE rolname = $2',
+            [previousPassword, osUser],
+          );
+        }
+        await admin.end();
+      }
     });
   }
 

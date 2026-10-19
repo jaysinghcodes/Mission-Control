@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
-import { readdirSync, readFileSync, writeFileSync } from 'fs';
+import { readdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { Client } from 'pg';
@@ -55,29 +55,46 @@ type SqlClient = {
   end: () => Promise<void>;
 };
 
-function parsePostgresUrl(raw: string): URL | null {
+/** Stand-in hostname so `user:pass@/db` can round-trip through the URL parser. */
+const EMPTY_HOST = 'mc-empty-host';
+
+type ParsedPostgresUrl = { url: URL; emptyHost: boolean };
+
+function parsePostgresUrl(raw: string): ParsedPostgresUrl | null {
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
-  let httpish = '';
+  let body = '';
   if (lower.startsWith('postgresql://')) {
-    httpish = `http://${trimmed.slice('postgresql://'.length)}`;
+    body = trimmed.slice('postgresql://'.length);
   } else if (lower.startsWith('postgres://')) {
-    httpish = `http://${trimmed.slice('postgres://'.length)}`;
+    body = trimmed.slice('postgres://'.length);
   } else {
     return null;
   }
+  // `user:pass@/db?host=...` has userinfo and no host name. The URL parser
+  // rejects that form, so a placeholder host is inserted and removed on format.
+  let emptyHost = false;
+  if (/^[^/?#\s]*@(?=$|[/?#])/.test(body)) {
+    emptyHost = true;
+    body = body.replace('@', `@${EMPTY_HOST}`);
+  }
   try {
-    return new URL(httpish);
+    return { url: new URL(`http://${body}`), emptyHost };
   } catch {
     return null;
   }
 }
 
-function formatPostgresUrl(url: URL, original: string): string {
+function formatPostgresUrl(
+  parsed: ParsedPostgresUrl,
+  original: string,
+): string {
   const protocol = original.trim().toLowerCase().startsWith('postgres://')
     ? 'postgres:'
     : 'postgresql:';
-  return url.toString().replace(/^http:/i, protocol);
+  const text = parsed.url.toString().replace(/^http:/i, protocol);
+  if (!parsed.emptyHost) return text;
+  return text.replace(`@${EMPTY_HOST}`, '@');
 }
 
 function hostKey(hostname: string): string {
@@ -92,15 +109,17 @@ function hostKey(hostname: string): string {
 
 export function databaseIdentity(raw: string | undefined): DbIdentity | null {
   if (!raw?.trim()) return null;
-  const url = parsePostgresUrl(raw);
-  if (!url) return null;
-  const path = decodeURIComponent(url.pathname.replace(/^\/+|\/+$/g, ''));
+  const parsed = parsePostgresUrl(raw);
+  if (!parsed) return null;
+  const path = decodeURIComponent(
+    parsed.url.pathname.replace(/^\/+|\/+$/g, ''),
+  );
   const database = (
-    path || decodeURIComponent(url.username || 'postgres')
+    path || decodeURIComponent(parsed.url.username || 'postgres')
   ).toLowerCase();
   return {
-    host: hostKey(url.hostname),
-    port: url.port || '5432',
+    host: parsed.emptyHost ? '' : hostKey(parsed.url.hostname),
+    port: parsed.url.port || '5432',
     database,
   };
 }
@@ -120,7 +139,10 @@ export interface DbFingerprint {
   systemIdentifier: string;
   /** pg_postmaster_start_time(), used when system_identifier is unavailable. */
   startedAt: string;
-  /** inet_server_port(), used with startedAt. Empty on a Unix socket. */
+  /**
+   * Server port, used with startedAt. inet_server_port() is null on a Unix
+   * socket, so the fallback uses current_setting('port') in that case.
+   */
   port: string;
   database: string;
 }
@@ -154,7 +176,7 @@ function scalar(value: unknown): string {
 const SYSTEM_SQL =
   'SELECT system_identifier::text AS system_identifier, current_database() AS database FROM pg_control_system()';
 const FALLBACK_SQL =
-  'SELECT pg_postmaster_start_time() AS started_at, inet_server_port()::text AS port, current_database() AS database';
+  "SELECT pg_postmaster_start_time() AS started_at, coalesce(inet_server_port(), current_setting('port')::int)::text AS port, current_database() AS database";
 
 function rowRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object') return null;
@@ -188,13 +210,23 @@ function unreachable(err: unknown): boolean {
 async function readFallback(client: SqlClient): Promise<DbFingerprint> {
   const result = await client.query(FALLBACK_SQL);
   const record = rowRecord(result.rows[0]);
-  const startedAt = scalar(record?.started_at);
-  const port = scalar(record?.port);
-  const database = scalar(record?.database).toLowerCase();
-  if (!startedAt || !database) {
-    throw new Error('Could not read the database identity.');
-  }
-  return { systemIdentifier: '', startedAt, port, database };
+  return {
+    systemIdentifier: '',
+    startedAt: scalar(record?.started_at),
+    port: scalar(record?.port),
+    database: scalar(record?.database).toLowerCase(),
+  };
+}
+
+/**
+ * system_identifier plus the database name is complete.
+ * A fallback reading needs the start time, the port, and the database name.
+ * An empty component is unusable, not evidence of a different database.
+ */
+function identityReady(fp: DbFingerprint): boolean {
+  if (!fp.database) return false;
+  if (fp.systemIdentifier) return true;
+  return Boolean(fp.startedAt && fp.port);
 }
 
 export async function readFingerprint(
@@ -248,6 +280,7 @@ export async function compareLiveDatabase(
       liveFp = await readFingerprint(liveUrl, opener, true);
     }
   }
+  if (!identityReady(testFp) || !identityReady(liveFp)) return 'match';
   return sameFingerprint(testFp, liveFp) ? 'match' : 'different';
 }
 
@@ -257,15 +290,16 @@ export function rewriteHost(
   host: string,
   queryHost?: string,
 ): string {
-  const url = parsePostgresUrl(raw);
-  if (!url) {
+  const parsed = parsePostgresUrl(raw);
+  if (!parsed) {
     throw new Error(
       'Could not read the database server from the connection URL.',
     );
   }
-  url.hostname = host;
-  if (queryHost !== undefined) url.searchParams.set('host', queryHost);
-  return formatPostgresUrl(url, raw);
+  parsed.url.hostname = host;
+  parsed.emptyHost = false;
+  if (queryHost !== undefined) parsed.url.searchParams.set('host', queryHost);
+  return formatPostgresUrl(parsed, raw);
 }
 
 export function decideTestDatabase(input: {
@@ -291,20 +325,27 @@ export function retargetConnection(
   raw: string,
   parts: { user?: string; password?: string; database?: string },
 ): string {
-  const url = parsePostgresUrl(raw);
-  if (!url) {
+  const parsed = parsePostgresUrl(raw);
+  if (!parsed) {
     throw new Error(
       'Could not read the database server from the connection URL.',
     );
   }
-  if (parts.user !== undefined) url.username = parts.user;
-  if (parts.password !== undefined) url.password = parts.password;
+  if (parts.user !== undefined) parsed.url.username = parts.user;
+  if (parts.password !== undefined) parsed.url.password = parts.password;
   if (parts.database !== undefined) {
-    url.pathname = `/${parts.database}`;
-    url.searchParams.delete('schema');
-    url.searchParams.delete('options');
+    parsed.url.pathname = `/${parts.database}`;
+    // Deleting a query parameter re-encodes the rest of the query. Skip that
+    // when schema and options are absent so a socket host path stays readable.
+    if (
+      parsed.url.searchParams.has('schema') ||
+      parsed.url.searchParams.has('options')
+    ) {
+      parsed.url.searchParams.delete('schema');
+      parsed.url.searchParams.delete('options');
+    }
   }
-  return formatPostgresUrl(url, raw);
+  return formatPostgresUrl(parsed, raw);
 }
 
 export function replaceDatabase(raw: string, database: string): string {
@@ -313,15 +354,15 @@ export function replaceDatabase(raw: string, database: string): string {
 
 export function withSearchPath(raw: string, schema: string): string {
   assertSafeName(schema);
-  const url = parsePostgresUrl(raw);
-  if (!url) {
+  const parsed = parsePostgresUrl(raw);
+  if (!parsed) {
     throw new Error(
       'Could not read the database server from the connection URL.',
     );
   }
-  url.searchParams.delete('schema');
-  url.searchParams.set('options', `-c search_path=${schema}`);
-  return formatPostgresUrl(url, raw);
+  parsed.url.searchParams.delete('schema');
+  parsed.url.searchParams.set('options', `-c search_path=${schema}`);
+  return formatPostgresUrl(parsed, raw);
 }
 
 function assertSafeName(name: string): void {
@@ -534,7 +575,15 @@ export function reapDeadTestDatabases(keepFile?: string): void {
     const file = join(tmpdir(), name);
     if (keepFile && file === keepFile) continue;
     const state = readState(file);
-    if (!state?.disposable || state.dropped) continue;
+    if (!state?.disposable) continue;
+    if (state.dropped) {
+      try {
+        unlinkSync(file);
+      } catch {
+        // The next run tries again.
+      }
+      continue;
+    }
     if (pidAlive(state.ownerPid)) continue;
     try {
       dropStateFile(file);

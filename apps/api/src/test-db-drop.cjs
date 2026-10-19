@@ -5,9 +5,10 @@
  *
  * Without --wait, drop immediately. With --wait, drop after that process
  * exits, unless the state file already says the database was dropped.
- * A failure is best effort: the next test run tries again.
+ * A successful drop removes the state file. A failure is best effort:
+ * the next test run tries again.
  */
-const { readFileSync, writeFileSync, existsSync } = require('fs');
+const { readFileSync, writeFileSync, existsSync, unlinkSync } = require('fs');
 const { Client } = require('pg');
 
 const NAME_RE = /^mc_test_[a-z0-9]+$/;
@@ -31,8 +32,20 @@ function pidAlive(pid) {
   }
 }
 
+function forgetStateFile(file) {
+  try {
+    unlinkSync(file);
+  } catch {
+    // Already gone, or the next run removes a file that is still here.
+  }
+}
+
 async function dropState(state, file) {
-  if (!state || !state.disposable || state.dropped) return;
+  if (!state || !state.disposable) return;
+  if (state.dropped) {
+    forgetStateFile(file);
+    return;
+  }
   if (typeof state.name !== 'string' || !NAME_RE.test(state.name)) {
     throw new Error('refusing an unsafe test database name');
   }
@@ -63,6 +76,7 @@ async function dropState(state, file) {
     await client.end();
   }
   writeFileSync(file, JSON.stringify({ ...state, dropped: true }));
+  forgetStateFile(file);
 }
 
 async function main() {
@@ -74,7 +88,11 @@ async function main() {
     const deadline = Date.now() + 60 * 60 * 1000;
     while (Date.now() < deadline) {
       const state = readState(file);
-      if (!state || state.dropped || !state.disposable) return;
+      if (!state || !state.disposable) return;
+      if (state.dropped) {
+        forgetStateFile(file);
+        return;
+      }
       if (state.ownerPid && state.ownerPid !== waitPid) return;
       if (!pidAlive(waitPid)) break;
       await new Promise((resolve) => setTimeout(resolve, 400));
