@@ -559,9 +559,19 @@ function allocateStateFile(): string {
   return file;
 }
 
+function forgetStateFile(file: string): void {
+  try {
+    unlinkSync(file);
+  } catch {
+    // The next run tries again.
+  }
+}
+
 /**
  * Drop disposable databases left by runs whose owner process is gone.
  * A live ownerPid is another npm test, so its database stays.
+ * A non-disposable file only records TEST_DATABASE_URL. When its owner is
+ * gone, remove the file and leave that database.
  */
 export function reapDeadTestDatabases(keepFile?: string): void {
   let names: string[] = [];
@@ -575,16 +585,16 @@ export function reapDeadTestDatabases(keepFile?: string): void {
     const file = join(tmpdir(), name);
     if (keepFile && file === keepFile) continue;
     const state = readState(file);
-    if (!state?.disposable) continue;
-    if (state.dropped) {
-      try {
-        unlinkSync(file);
-      } catch {
-        // The next run tries again.
-      }
+    if (!state) continue;
+    if (state.disposable && state.dropped) {
+      forgetStateFile(file);
       continue;
     }
     if (pidAlive(state.ownerPid)) continue;
+    if (!state.disposable) {
+      forgetStateFile(file);
+      continue;
+    }
     try {
       dropStateFile(file);
     } catch {
@@ -686,6 +696,11 @@ export function installWorkerDatabase(): void {
 export function dropPreparedDatabase(): void {
   const file = currentStateFile();
   const state = readState(file);
-  if (!state?.disposable || state.dropped) return;
+  if (!state) return;
+  if (!state.disposable) {
+    forgetStateFile(file);
+    return;
+  }
+  if (state.dropped) return;
   dropStateFile(file);
 }

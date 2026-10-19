@@ -11,7 +11,11 @@ import { hostname, tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import { Client } from 'pg';
 import { findApiDir } from './boot';
-import { currentStateFile, stateFileForRun } from './test-db-file';
+import {
+  TEST_DB_STATE_ENV,
+  currentStateFile,
+  stateFileForRun,
+} from './test-db-file';
 import {
   LIVE_DB_REFUSAL,
   compareLiveDatabase,
@@ -19,6 +23,7 @@ import {
   databaseIdentity,
   decideTestDatabase,
   sameFingerprint,
+  dropPreparedDatabase,
   dropStateFile,
   pidAlive,
   prepareJestDatabase,
@@ -775,6 +780,105 @@ describe('throwaway database lifecycle', () => {
     }
   });
 
+  it('removes the state file after a TEST_DATABASE_URL run and keeps that database', async () => {
+    const server = serverUrl();
+    const live = replaceDatabase(server, 'postgres');
+    const keepUrl = replaceDatabase(server, 'mc_alias_keep');
+    const admin = new Client({ connectionString: server });
+    await admin.connect();
+    const previousFile = process.env[TEST_DB_STATE_ENV];
+    const previousBody =
+      previousFile && existsSync(previousFile)
+        ? readFileSync(previousFile, 'utf8')
+        : undefined;
+    let createdFile: string | undefined;
+    try {
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        ['mc_alias_keep'],
+      );
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_keep');
+      await admin.query('CREATE DATABASE mc_alias_keep');
+      delete process.env[TEST_DB_STATE_ENV];
+      await prepareJestDatabase({
+        DATABASE_URL: live,
+        TEST_DATABASE_URL: keepUrl,
+      });
+      createdFile = process.env[TEST_DB_STATE_ENV];
+      expect(createdFile).toBeTruthy();
+      expect(createdFile).not.toBe(previousFile);
+      expect(readState(createdFile)?.disposable).toBe(false);
+      expect(existsSync(createdFile ?? '')).toBe(true);
+      dropPreparedDatabase();
+      expect(existsSync(createdFile ?? '')).toBe(false);
+      expect(await databaseExists(server, 'mc_alias_keep')).toBe(true);
+      const check = new Client({ connectionString: keepUrl });
+      await check.connect();
+      try {
+        const table = await check.query<{ reg: string | null }>(
+          `SELECT to_regclass('public."Agent"') AS reg`,
+        );
+        expect(table.rows[0]?.reg).toBeTruthy();
+      } finally {
+        await check.end();
+      }
+    } finally {
+      if (previousFile) process.env[TEST_DB_STATE_ENV] = previousFile;
+      else delete process.env[TEST_DB_STATE_ENV];
+      if (previousFile && previousBody !== undefined) {
+        writeFileSync(previousFile, previousBody);
+      }
+      if (createdFile && existsSync(createdFile)) unlinkSync(createdFile);
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        ['mc_alias_keep'],
+      );
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_keep');
+      await admin.end();
+    }
+  });
+
+  it('removes a non-disposable state file when its owner is gone and keeps the database', async () => {
+    const server = serverUrl();
+    const name = 'mc_alias_stale';
+    const admin = new Client({ connectionString: server });
+    await admin.connect();
+    const ended = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    const deadPid = ended.pid ?? 0;
+    const file = stateFileForRun(deadPid, randomBytes(4).toString('hex'));
+    try {
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        [name],
+      );
+      await admin.query(`DROP DATABASE IF EXISTS "${name}"`);
+      await admin.query(`CREATE DATABASE "${name}"`);
+      writeFileSync(
+        file,
+        JSON.stringify({
+          testUrl: replaceDatabase(server, name),
+          adminUrl: server,
+          kind: 'database',
+          name,
+          disposable: false,
+          ownerPid: deadPid,
+        }),
+      );
+      expect(pidAlive(deadPid)).toBe(false);
+      reapDeadTestDatabases();
+      expect(existsSync(file)).toBe(false);
+      expect(await databaseExists(server, name)).toBe(true);
+    } finally {
+      if (existsSync(file)) unlinkSync(file);
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        [name],
+      );
+      await admin.query(`DROP DATABASE IF EXISTS "${name}"`);
+      await admin.end();
+    }
+  });
+
   it('removes a state file that is already marked dropped', () => {
     const dropped = stateFileForRun(1, randomBytes(4).toString('hex'));
     const kept = stateFileForRun(1, randomBytes(4).toString('hex'));
@@ -1072,6 +1176,10 @@ describe('throwaway database lifecycle', () => {
         );
         await guard.connect();
         guardConnected = true;
+        const configured = await admin.query<{ port: string }>(
+          "SELECT current_setting('port') AS port",
+        );
+        const serverPort = configured.rows[0]?.port || socketPort;
         await guard.query(
           'REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC',
         );
@@ -1088,7 +1196,7 @@ describe('throwaway database lifecycle', () => {
         });
         const limitedSocket = socketLoginUrl(
           socketAlias.dir,
-          socketPort,
+          serverPort,
           'mc_alias_guard',
           osUser,
           password,
@@ -1112,7 +1220,7 @@ describe('throwaway database lifecycle', () => {
             `SELECT current_user AS u, coalesce(inet_server_port(), current_setting('port')::int)::text AS port`,
           );
           expect(who.rows[0]?.u).toBe(osUser);
-          expect(who.rows[0]?.port).toBe(socketPort);
+          expect(who.rows[0]?.port).toBe(serverPort);
           await expect(
             deniedSocket.query(
               'SELECT system_identifier FROM pg_control_system()',
