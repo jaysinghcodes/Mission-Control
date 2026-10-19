@@ -27,8 +27,20 @@ import { fileURLToPath } from 'node:url'
 import { hasDashPunctuation } from './doctor.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-// macOS CI uses /bin/bash 3.2. MC_INSTALL_BASH selects another binary for a local replay.
-const installBash = process.env.MC_INSTALL_BASH || '/bin/bash'
+
+function resolveBash() {
+  const override = process.env.MC_INSTALL_BASH
+  if (override) return override
+  const found = spawnSync('sh', ['-c', 'command -v bash'], { encoding: 'utf8' })
+  const fromCommand = (found.stdout ?? '').trim().split('\n')[0]
+  if (found.status === 0 && fromCommand) return fromCommand
+  const shell = process.env.SHELL
+  if (shell && existsSync(shell)) return shell
+  return '/bin/bash'
+}
+
+// macOS keeps bash at /bin/bash. MC_INSTALL_BASH selects another binary for a local replay.
+const installBash = resolveBash()
 const PUNCT = /[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]/
 
 function outputOf(result) {
@@ -1937,7 +1949,7 @@ test('pathWithHidden keeps dirname when node shares that directory', () => {
     assert.equal(existsSync(path.join(hidden, 'node')), false)
     assert.equal(existsSync(path.join(hidden, 'npm')), false)
     assert.equal(existsSync(path.join(hidden, 'npx')), false)
-    const which = spawnSync('/usr/bin/bash', ['-c', 'command -v dirname; command -v openssl; command -v node || true'], {
+    const which = spawnSync(installBash, ['-c', 'command -v dirname; command -v openssl; command -v node || true'], {
       env: { ...process.env, PATH: hidden },
       encoding: 'utf8',
     })
