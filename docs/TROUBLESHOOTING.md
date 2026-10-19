@@ -4,9 +4,13 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 **Start with `npm run doctor`.** It prints one line per check. A failing line includes the command to run next. OpenClaw is optional in that report. A missing command does not fail doctor. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` does, when a bridge schedule is installed. The command exits 0 when every required check passes, and exits non zero when one does not. The health probe retries for up to 60 seconds.
 
-**Doctor says the API is still starting.** This stack holds the API port and the health probe did not finish. The line is `The API is still starting. Run doctor again in a minute.` That is not a port conflict. Run `npm run doctor` again in a minute.
+**Doctor says the API is still starting.** The db and api containers are running, this stack holds the API port, and the health probe did not finish. The line is `The API is still starting. Run doctor again in a minute.` That is not a port conflict. Run `npm run doctor` again in a minute.
 
-**Doctor says the port is used by another program.** A process outside this stack is listening. Stop that program, or set `MC_API_PORT` on Compose, or `PORT` on the native path. A slow Compose start does not use this line.
+**Doctor says a service is not running.** `docker compose ps -a` shows db or api exited, restarting, or otherwise not running. Doctor fails and names that service. Start it with `docker compose start db` or `docker compose start api`. That is not a slow start.
+
+**Doctor says a service is paused.** The db or api container is paused. Doctor fails and names `docker compose unpause` for that service. A paused api is still this stack. It is not a port conflict.
+
+**Doctor says the port is used by another program.** A process outside this stack is listening. Stop that program, or set `MC_API_PORT` on Compose, or `PORT` on the native path. A slow Compose start does not use this line. A stopped or paused service in this stack does not use this line.
 
 `npm run doctor` prints one line per check, in this order: Node, the API port, `.env`, the database, migrations, the ingest token, dashboard login, API health, an info line for the optional OpenClaw command, then the bridge sync age. The native path uses `PORT` (default 3000), or `MC_API_PORT` when `PORT` is unset. When the Compose API service is running, the port check uses `MC_API_PORT` (default 3000) and the database and migration lines are info. It does not check the web port (`MC_WEB_PORT`, default 5173) or the tunnel port (`MC_REMOTE_PORT`, default 3011). OpenClaw staying down does not fail the command. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` does when a schedule is installed. Run it from the repo root when setup fails, or after `npm run dev` is up.
 

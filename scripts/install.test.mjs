@@ -55,6 +55,33 @@ function pathWithout(names) {
     .join(':')
 }
 
+/** Hide named commands without dropping the rest of a shared directory. */
+function pathWithHidden(parentDir, names) {
+  const hidden = new Set(names)
+  const destRoot = path.join(parentDir, 'path-hidden')
+  mkdirSync(destRoot, { recursive: true })
+  for (const entry of (process.env.PATH ?? '').split(':')) {
+    if (!entry || !existsSync(entry)) continue
+    let listed = []
+    try {
+      listed = readdirSync(entry)
+    } catch {
+      continue
+    }
+    for (const name of listed) {
+      if (hidden.has(name)) continue
+      const dest = path.join(destRoot, name)
+      if (existsSync(dest)) continue
+      try {
+        symlinkSync(path.join(entry, name), dest)
+      } catch {
+        // Skip entries that cannot be linked.
+      }
+    }
+  }
+  return destRoot
+}
+
 function writeExe(file, body) {
   writeFileSync(file, body)
   chmodSync(file, 0o755)
@@ -656,7 +683,7 @@ test('the native path accepts Node 20.17 or later and rejects older versions', (
       writeExe(path.join(fx.bin, 'node'), `#!/bin/sh\necho ${JSON.stringify(version)}\nexit 0\n`)
       const old = runInstall(fx.repo, {
         ...fx.env,
-        PATH: `${fx.bin}:${pathWithout(['node'])}`,
+        PATH: `${fx.bin}:${pathWithHidden(fx.dir, ['node'])}`,
       })
       const oldText = outputOf(old)
       assert.notEqual(old.status, 0, version)
@@ -1772,6 +1799,38 @@ test('the Compose branch has no node, npm, or npx word', () => {
   assert.deepEqual(hits, [])
 })
 
+test('pathWithHidden keeps dirname when node shares that directory', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-path-'))
+  const usrBin = path.join(dir, 'usr-bin')
+  mkdirSync(usrBin)
+  writeExe(path.join(usrBin, 'node'), '#!/bin/sh\nexit 0\n')
+  writeExe(path.join(usrBin, 'npm'), '#!/bin/sh\nexit 0\n')
+  writeExe(path.join(usrBin, 'npx'), '#!/bin/sh\nexit 0\n')
+  writeExe(path.join(usrBin, 'dirname'), '#!/bin/sh\nprintf %s "$1"\n')
+  writeExe(path.join(usrBin, 'openssl'), '#!/bin/sh\nexit 0\n')
+  const saved = process.env.PATH
+  process.env.PATH = usrBin
+  try {
+    const hidden = pathWithHidden(dir, ['node', 'npm', 'npx'])
+    assert.equal(existsSync(path.join(hidden, 'dirname')), true)
+    assert.equal(existsSync(path.join(hidden, 'openssl')), true)
+    assert.equal(existsSync(path.join(hidden, 'node')), false)
+    assert.equal(existsSync(path.join(hidden, 'npm')), false)
+    assert.equal(existsSync(path.join(hidden, 'npx')), false)
+    const which = spawnSync('/usr/bin/bash', ['-c', 'command -v dirname; command -v openssl; command -v node || true'], {
+      env: { ...process.env, PATH: hidden },
+      encoding: 'utf8',
+    })
+    assert.equal(which.status, 0, which.stderr || which.error)
+    assert.match(which.stdout, /dirname/)
+    assert.match(which.stdout, /openssl/)
+    assert.doesNotMatch(which.stdout, /node/)
+  } finally {
+    process.env.PATH = saved
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('compose health wait uses curl, returns as soon as the API answers, and caps at 90 seconds', async () => {
   const curlBin = realCommand('curl')
   assert.ok(curlBin)
@@ -1839,7 +1898,7 @@ exit 7
   try {
     const result = runInstall(capped.repo, {
       ...capped.env,
-      PATH: `${capped.bin}:${pathWithout(['node', 'npm', 'npx'])}`,
+      PATH: `${capped.bin}:${pathWithHidden(capped.dir, ['node', 'npm', 'npx'])}`,
       MC_INSTALL_READY_SECONDS: '90',
       MC_INSTALL_CLOCK_FILE: clock,
       MC_DOCTOR_HEALTH_SECONDS: '0',
