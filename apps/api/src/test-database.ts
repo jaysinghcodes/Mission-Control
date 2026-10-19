@@ -114,6 +114,92 @@ export function sameDatabase(
   return a.host === b.host && a.port === b.port && a.database === b.database;
 }
 
+export interface DbFingerprint {
+  systemIdentifier: string;
+  database: string;
+  port: string;
+}
+
+export function sameFingerprint(
+  left: DbFingerprint,
+  right: DbFingerprint,
+): boolean {
+  return (
+    left.systemIdentifier === right.systemIdentifier &&
+    left.database === right.database &&
+    left.port === right.port
+  );
+}
+
+function scalar(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+}
+
+const FINGERPRINT_SQL =
+  'SELECT system_identifier::text AS system_identifier, current_database() AS database, inet_server_port()::text AS port FROM pg_control_system()';
+
+export async function readFingerprint(
+  url: string,
+  opener: (url: string) => Promise<SqlClient>,
+): Promise<DbFingerprint> {
+  const client = await opener(url);
+  try {
+    const result = await client.query(FINGERPRINT_SQL);
+    const row: unknown = result.rows[0];
+    if (!row || typeof row !== 'object') {
+      throw new Error('Could not read the database identity.');
+    }
+    const record = row as Record<string, unknown>;
+    const systemIdentifier = scalar(record.system_identifier);
+    const database = scalar(record.database);
+    const port = scalar(record.port);
+    if (!systemIdentifier || !database || !port) {
+      throw new Error('Could not read the database identity.');
+    }
+    return {
+      systemIdentifier,
+      database: database.toLowerCase(),
+      port,
+    };
+  } finally {
+    await client.end();
+  }
+}
+
+async function refuseIfSameServer(
+  testUrl: string,
+  liveUrl: string,
+  opener: (url: string) => Promise<SqlClient>,
+): Promise<void> {
+  const [testFp, liveFp] = await Promise.all([
+    readFingerprint(testUrl, opener),
+    readFingerprint(liveUrl, opener),
+  ]);
+  if (sameFingerprint(testFp, liveFp)) {
+    console.error(LIVE_DB_REFUSAL);
+    process.exit(1);
+  }
+}
+
+/** Keep the host and port. Optionally set the libpq `host` query parameter. */
+export function rewriteHost(
+  raw: string,
+  host: string,
+  queryHost?: string,
+): string {
+  const url = parsePostgresUrl(raw);
+  if (!url) {
+    throw new Error(
+      'Could not read the database server from the connection URL.',
+    );
+  }
+  url.hostname = host;
+  if (queryHost !== undefined) url.searchParams.set('host', queryHost);
+  return formatPostgresUrl(url, raw);
+}
+
 export function decideTestDatabase(input: {
   testUrl?: string;
   liveUrl?: string;
@@ -405,6 +491,12 @@ export async function prepareJestDatabase(
   if (decision.action === 'refuse') {
     console.error(LIVE_DB_REFUSAL);
     process.exit(1);
+  }
+
+  // String comparison is the fast check. Aliases that still name this
+  // database are refused after a read of both connections, before any write.
+  if (decision.action === 'use' && liveUrl) {
+    await refuseIfSameServer(decision.url, liveUrl, opener ?? openPg);
   }
 
   const file = allocateStateFile();

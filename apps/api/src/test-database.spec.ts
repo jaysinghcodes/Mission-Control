@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
 import { mkdtempSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { hostname, tmpdir } from 'os';
 import { join } from 'path';
 import { Client } from 'pg';
 import { findApiDir } from './boot';
@@ -18,6 +18,7 @@ import {
   reapDeadTestDatabases,
   replaceDatabase,
   retargetConnection,
+  rewriteHost,
   sameDatabase,
   type TestDbState,
 } from './test-database';
@@ -118,6 +119,54 @@ describe('test database isolation', () => {
     expect(opener).not.toHaveBeenCalled();
     exit.mockRestore();
     error.mockRestore();
+  });
+
+  it('refuses alias URLs when the server fingerprint matches', async () => {
+    const seen: string[] = [];
+    const opener = (url: string) => {
+      seen.push(url);
+      return Promise.resolve({
+        query: (sql: string) => {
+          if (!sql.includes('pg_control_system')) {
+            return Promise.reject(new Error(`unexpected ${sql}`));
+          }
+          return Promise.resolve({
+            rows: [
+              {
+                system_identifier: '99',
+                database: 'mission_control',
+                port: '5432',
+              },
+            ],
+            rowCount: 1,
+          });
+        },
+        end: () => Promise.resolve(undefined),
+      });
+    };
+    const aliases = [
+      'postgresql://postgres:postgres@0.0.0.0:5432/mission_control',
+      'postgresql://postgres:postgres@cursor:5432/mission_control',
+      'postgresql://postgres:postgres@db.invalid:5432/mission_control?host=127.0.0.1',
+    ];
+    for (const alias of aliases) {
+      seen.length = 0;
+      const exit = exitSpy();
+      const error = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      await expect(
+        prepareJestDatabase(
+          { DATABASE_URL: LIVE, TEST_DATABASE_URL: alias },
+          opener,
+        ),
+      ).rejects.toThrow('exit 1');
+      expect(error).toHaveBeenCalledWith(LIVE_DB_REFUSAL);
+      expect(seen).toEqual(expect.arrayContaining([alias, LIVE]));
+      expect(sameDatabase(alias, LIVE)).toBe(false);
+      exit.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it('builds a throwaway database without opening the live database', async () => {
@@ -432,4 +481,76 @@ describe('throwaway database lifecycle', () => {
       await Promise.all([stop(first), stop(second)]);
     }
   }, 180000);
+
+  it('refuses 0.0.0.0, the machine hostname, and a host query alias', async () => {
+    const server = serverUrl();
+    const direct = replaceDatabase(server, 'mc_alias_guard');
+    const connectHost = new URL(server.replace(/^postgres(ql)?:/i, 'http:'))
+      .hostname;
+    const aliases = [
+      rewriteHost(direct, '0.0.0.0'),
+      rewriteHost(direct, hostname()),
+      rewriteHost(direct, 'db.invalid', connectHost),
+    ];
+    const admin = new Client({ connectionString: server });
+    await admin.connect();
+    const openGuard = async () => {
+      const client = new Client({ connectionString: direct });
+      await client.connect();
+      return client;
+    };
+    try {
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        ['mc_alias_guard'],
+      );
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
+      await admin.query('CREATE DATABASE mc_alias_guard');
+      const seed = await openGuard();
+      try {
+        await seed.query('CREATE TABLE qa_sentinel (id int primary key)');
+        await seed.query('INSERT INTO qa_sentinel (id) VALUES (1)');
+      } finally {
+        await seed.end();
+      }
+
+      for (const alias of aliases) {
+        expect(sameDatabase(alias, direct)).toBe(false);
+        const exit = exitSpy();
+        const error = jest
+          .spyOn(console, 'error')
+          .mockImplementation(() => undefined);
+        await expect(
+          prepareJestDatabase({
+            DATABASE_URL: direct,
+            TEST_DATABASE_URL: alias,
+          }),
+        ).rejects.toThrow('exit 1');
+        expect(error).toHaveBeenCalledWith(LIVE_DB_REFUSAL);
+        exit.mockRestore();
+        error.mockRestore();
+      }
+
+      const check = await openGuard();
+      try {
+        const count = await check.query<{ n: number }>(
+          'SELECT count(*)::int AS n FROM qa_sentinel',
+        );
+        expect(count.rows[0]?.n).toBe(1);
+        const migrated = await check.query<{ reg: string | null }>(
+          `SELECT to_regclass('public."Agent"') AS reg`,
+        );
+        expect(migrated.rows[0]?.reg).toBeNull();
+      } finally {
+        await check.end();
+      }
+    } finally {
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+        ['mc_alias_guard'],
+      );
+      await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
+      await admin.end();
+    }
+  });
 });
