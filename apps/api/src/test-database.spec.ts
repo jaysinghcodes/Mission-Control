@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { hostname, tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import { Client } from 'pg';
@@ -578,18 +578,27 @@ describe('throwaway database lifecycle', () => {
     const connectHost = new URL(server.replace(/^postgres(ql)?:/i, 'http:'))
       .hostname;
     const port = databaseIdentity(server)?.port || '5432';
-    const socket =
-      port === '5432'
-        ? 'postgresql:///mc_alias_guard?host=/var/run/postgresql'
-        : `postgresql:///mc_alias_guard?host=/var/run/postgresql&port=${port}`;
+    const admin = new Client({ connectionString: server });
+    await admin.connect();
+    // Docker CI publishes TCP only. Use a socket when this process can see the server's socket file.
+    const shown = await admin.query<{ dir: string }>(
+      'SHOW unix_socket_directories',
+    );
+    const socketDir = (shown.rows[0]?.dir ?? '')
+      .split(',')
+      .map((dir) => dir.trim())
+      .find((dir) => dir && existsSync(`${dir}/.s.PGSQL.${port}`));
+    const socket = socketDir
+      ? port === '5432'
+        ? `postgresql:///mc_alias_guard?host=${socketDir}`
+        : `postgresql:///mc_alias_guard?host=${socketDir}&port=${port}`
+      : undefined;
     const aliases = [
       rewriteHost(direct, '0.0.0.0'),
       rewriteHost(direct, hostname()),
       rewriteHost(direct, 'db.invalid', connectHost),
-      socket,
+      ...(socket ? [socket] : []),
     ];
-    const admin = new Client({ connectionString: server });
-    await admin.connect();
     const openGuard = async () => {
       const client = new Client({ connectionString: direct });
       await client.connect();
