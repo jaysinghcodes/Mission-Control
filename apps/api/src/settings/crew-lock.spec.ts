@@ -7,7 +7,7 @@ import { SettingsController } from './settings.controller';
 import type { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 
 /**
- * Seat assignment and roster position share the settings row lock.
+ * Seat assignment and roster position share one advisory lock.
  * These hit the isolated test database from jest global setup.
  * A lost update would leave two of six concurrent registers without a seat.
  */
@@ -61,16 +61,18 @@ describe('crew seat lock', () => {
       await prisma.setting.deleteMany({ where: { id: SETTING_ID } });
       return;
     }
-    await prisma.setting.update({
+    const data = {
+      mission: original.mission,
+      openclawVersion: original.openclawVersion,
+      namingMode: original.namingMode,
+      crewMap: original.crewMap ?? {},
+      timezone: original.timezone,
+      setupDone: original.setupDone,
+    };
+    await prisma.setting.upsert({
       where: { id: SETTING_ID },
-      data: {
-        mission: original.mission,
-        openclawVersion: original.openclawVersion,
-        namingMode: original.namingMode,
-        crewMap: original.crewMap ?? {},
-        timezone: original.timezone,
-        setupDone: original.setupDone,
-      },
+      create: { id: SETTING_ID, ...data },
+      update: data,
     });
   });
 
@@ -234,5 +236,16 @@ describe('crew seat lock', () => {
     const seats = await map();
     expect(seats[id]).toBeTruthy();
     expect(Object.values(parked).includes(seats[id])).toBe(false);
+  });
+
+  it('does not create a settings row just to take the lock', async () => {
+    await prisma.setting.deleteMany({ where: { id: SETTING_ID } });
+    const id = `${stamp}bare`;
+    const res = statusResponse();
+    await agents.register({ id, name: 'Bare' }, res);
+    expect(res.statusCode).toBe(201);
+    expect(
+      await prisma.setting.findUnique({ where: { id: SETTING_ID } }),
+    ).toBeNull();
   });
 });

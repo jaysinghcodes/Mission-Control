@@ -13,8 +13,8 @@ import {
 /**
  * Keeps Setting.crewMap stable while crew mode is on.
  *
- * Register, snapshot, delete, and PUT /settings take the settings row
- * lock before they read the roster or write the map. A saved seat stays.
+ * Register, snapshot, delete, and PUT /settings share one lock
+ * before they read the roster or write the map. A saved seat stays.
  * A matching id takes a seat only when it is free. An agent missing from
  * the map takes the next free seat, earliest registration first. A PUT
  * that releases a seat gives it to someone who was already without one.
@@ -60,10 +60,6 @@ export interface CrewMapDb {
     query: TemplateStringsArray,
     ...values: unknown[]
   ) => Promise<unknown>;
-  $queryRaw?: (
-    query: TemplateStringsArray,
-    ...values: unknown[]
-  ) => Promise<unknown>;
 }
 
 const LOCK_ATTEMPTS = 4;
@@ -76,25 +72,17 @@ function isRetryable(err: unknown): boolean {
   return message.includes('40001');
 }
 
-async function lockSettingRow(db: CrewMapDb): Promise<void> {
-  if (
-    typeof db.$executeRaw !== 'function' ||
-    typeof db.$queryRaw !== 'function'
-  ) {
-    return;
-  }
-  await db.$executeRaw`
-    INSERT INTO "Setting" ("id", "mission", "updatedAt")
-    VALUES (${SETTING_ID}, '', NOW())
-    ON CONFLICT ("id") DO NOTHING
-  `;
-  await db.$queryRaw`
-    SELECT "id" FROM "Setting" WHERE "id" = ${SETTING_ID} FOR UPDATE
-  `;
+async function takeCrewLock(db: CrewMapDb): Promise<void> {
+  if (typeof db.$executeRaw !== 'function') return;
+  // A transaction advisory lock serializes seat writes without inserting
+  // a settings row. An empty row would block seed:demo from saving the
+  // sample mission, because that upsert leaves an existing row alone.
+  // $executeRaw skips the void column Prisma cannot deserialize.
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(CAST(112112 AS bigint))`;
 }
 
 /**
- * One transaction around the settings row. Callers read the roster and
+ * One transaction and one advisory lock. Callers read the roster and
  * write seats inside `fn`, so concurrent registers cannot drop a seat
  * or share a position. A client with no `$transaction` runs `fn` inline
  * so unit mocks stay simple. A transaction client has no `$transaction`
@@ -105,7 +93,7 @@ export async function withCrewLock<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
   if (typeof prisma.$transaction !== 'function') {
-    await lockSettingRow(prisma);
+    await takeCrewLock(prisma);
     return fn(prisma as unknown as Prisma.TransactionClient);
   }
   let last: unknown;
@@ -113,7 +101,7 @@ export async function withCrewLock<T>(
     try {
       return (await prisma.$transaction(async (tx) => {
         const db = tx as unknown as CrewMapDb;
-        await lockSettingRow(db);
+        await takeCrewLock(db);
         return fn(tx);
       })) as T;
     } catch (err) {

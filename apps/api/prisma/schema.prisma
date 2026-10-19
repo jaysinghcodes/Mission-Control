@@ -228,7 +228,7 @@ model Setting {
   namingMode       String?
   /// Agent id to crew seat id. The screen applies it only when namingMode is crew.
   /// A matching id takes a free seat. A saved seat stays. The earliest agent
-  /// without a seat takes a seat that opens. Writes lock this row.
+  /// without a seat takes a seat that opens. Those writes share one lock.
   crewMap          Json?
   /// IANA timezone for usage and memory days. Null uses the server timezone.
   timezone         String?
