@@ -1,10 +1,16 @@
 import { spawn, spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
-import { readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { readdirSync, readFileSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join, resolve } from 'path';
 import { Client } from 'pg';
 import { findApiDir, readEnvFile } from './boot';
-import { TEST_DB_STATE_FILE } from './test-db-file';
+import {
+  TEST_DB_STATE_ENV,
+  currentStateFile,
+  isStateFileName,
+  stateFileForRun,
+} from './test-db-file';
 
 /**
  * npm test connects with TEST_DATABASE_URL only.
@@ -123,17 +129,32 @@ export function decideTestDatabase(input: {
   return { action: 'create' };
 }
 
-export function replaceDatabase(raw: string, database: string): string {
+/**
+ * Keep the host and port of `raw`. Replace only the parts that are set.
+ * A database change drops schema and options so the new URL is that database.
+ */
+export function retargetConnection(
+  raw: string,
+  parts: { user?: string; password?: string; database?: string },
+): string {
   const url = parsePostgresUrl(raw);
   if (!url) {
     throw new Error(
       'Could not read the database server from the connection URL.',
     );
   }
-  url.pathname = `/${database}`;
-  url.searchParams.delete('schema');
-  url.searchParams.delete('options');
+  if (parts.user !== undefined) url.username = parts.user;
+  if (parts.password !== undefined) url.password = parts.password;
+  if (parts.database !== undefined) {
+    url.pathname = `/${parts.database}`;
+    url.searchParams.delete('schema');
+    url.searchParams.delete('options');
+  }
   return formatPostgresUrl(url, raw);
+}
+
+export function replaceDatabase(raw: string, database: string): string {
+  return retargetConnection(raw, { database });
 }
 
 export function withSearchPath(raw: string, schema: string): string {
@@ -186,8 +207,9 @@ export function configuredUrl(
   key: 'DATABASE_URL' | 'TEST_DATABASE_URL',
   env: NodeJS.ProcessEnv,
 ): string | undefined {
-  const fromEnv = env[key]?.trim();
-  if (fromEnv) return fromEnv;
+  if (Object.prototype.hasOwnProperty.call(env, key)) {
+    return env[key]?.trim() || undefined;
+  }
   if (env !== process.env) return undefined;
   return readFileUrl(key);
 }
@@ -277,12 +299,15 @@ function migrate(url: string, liveUrl: string | undefined): void {
   }
 }
 
-function writeState(state: TestDbState): void {
-  writeFileSync(TEST_DB_STATE_FILE, JSON.stringify(state));
+function writeState(
+  state: TestDbState,
+  file: string = currentStateFile(),
+): void {
+  writeFileSync(file, JSON.stringify(state));
 }
 
 export function readState(
-  file: string = TEST_DB_STATE_FILE,
+  file: string = currentStateFile(),
 ): TestDbState | null {
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as TestDbState;
@@ -307,13 +332,62 @@ export function dropStateFile(file: string): void {
   }
 }
 
-function armWatcher(): void {
+function armWatcher(file: string): void {
   const child = spawn(
     process.execPath,
-    [dropScript(), TEST_DB_STATE_FILE, '--wait', String(process.pid)],
+    [dropScript(), file, '--wait', String(process.pid)],
     { detached: true, stdio: 'ignore' },
   );
   child.unref();
+}
+
+/** True when `pid` is still running. EPERM means it exists and is not ours. */
+export function pidAlive(pid: number | undefined): boolean {
+  if (!Number.isInteger(pid) || !pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+    return code === 'EPERM';
+  }
+}
+
+function allocateStateFile(): string {
+  const existing = process.env[TEST_DB_STATE_ENV]?.trim();
+  if (existing) return existing;
+  const file = stateFileForRun(process.pid, randomBytes(4).toString('hex'));
+  process.env[TEST_DB_STATE_ENV] = file;
+  return file;
+}
+
+/**
+ * Drop disposable databases left by runs whose owner process is gone.
+ * A live ownerPid is another npm test, so its database stays.
+ */
+export function reapDeadTestDatabases(keepFile?: string): void {
+  let names: string[] = [];
+  try {
+    names = readdirSync(tmpdir());
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!isStateFileName(name)) continue;
+    const file = join(tmpdir(), name);
+    if (keepFile && file === keepFile) continue;
+    const state = readState(file);
+    if (!state?.disposable || state.dropped) continue;
+    if (pidAlive(state.ownerPid)) continue;
+    try {
+      dropStateFile(file);
+    } catch {
+      // The leftover database is dropped on a best effort basis.
+    }
+  }
 }
 
 function publish(url: string): void {
@@ -333,23 +407,21 @@ export async function prepareJestDatabase(
     process.exit(1);
   }
 
-  const previous = readState();
-  if (previous?.disposable && !previous.dropped) {
-    try {
-      dropStateFile(TEST_DB_STATE_FILE);
-    } catch {
-      // The leftover database is dropped on a best effort basis.
-    }
-  }
+  const file = allocateStateFile();
+  reapDeadTestDatabases(file);
 
   let state: TestDbState;
   if (decision.action === 'use') {
     assertNotLive(decision.url, liveUrl);
+    const identity = databaseIdentity(decision.url);
     state = {
       testUrl: decision.url,
-      adminUrl: '',
+      adminUrl: replaceDatabase(
+        decision.url,
+        adminDatabase(identity?.database),
+      ),
       kind: 'database',
-      name: databaseIdentity(decision.url)?.database ?? '',
+      name: identity?.database ?? '',
       disposable: false,
       ownerPid: process.pid,
     };
@@ -360,9 +432,9 @@ export async function prepareJestDatabase(
     try {
       migrate(state.testUrl, liveUrl);
     } catch (err) {
-      writeState(state);
+      writeState(state, file);
       try {
-        dropStateFile(TEST_DB_STATE_FILE);
+        dropStateFile(file);
       } catch {
         // The watcher or the next run still tries to drop it.
       }
@@ -370,9 +442,9 @@ export async function prepareJestDatabase(
     }
   }
 
-  writeState(state);
+  writeState(state, file);
   if (env === process.env) publish(state.testUrl);
-  if (state.disposable) armWatcher();
+  if (state.disposable) armWatcher(file);
 }
 
 /** Worker setup. Replaces DATABASE_URL before any suite connects. */
@@ -394,7 +466,8 @@ export function installWorkerDatabase(): void {
 }
 
 export function dropPreparedDatabase(): void {
-  const state = readState();
+  const file = currentStateFile();
+  const state = readState(file);
   if (!state?.disposable || state.dropped) return;
-  dropStateFile(TEST_DB_STATE_FILE);
+  dropStateFile(file);
 }

@@ -26,8 +26,8 @@ function pidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    return Boolean(err && err.code === 'EPERM');
   }
 }
 

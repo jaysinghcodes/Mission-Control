@@ -1,18 +1,23 @@
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Client } from 'pg';
 import { findApiDir } from './boot';
+import { stateFileForRun } from './test-db-file';
 import {
   LIVE_DB_REFUSAL,
   createThrowaway,
   databaseIdentity,
   decideTestDatabase,
   dropStateFile,
+  pidAlive,
   prepareJestDatabase,
   readState,
+  reapDeadTestDatabases,
+  replaceDatabase,
+  retargetConnection,
   sameDatabase,
   type TestDbState,
 } from './test-database';
@@ -57,6 +62,22 @@ describe('test database isolation', () => {
       databaseIdentity('postgresql://postgres@localhost/Mission_Control')
         ?.database,
     ).toBe('mission_control');
+    const customPort =
+      'postgresql://postgres:postgres@127.0.0.1:5433/mission_control_test?sslmode=disable';
+    expect(databaseIdentity(replaceDatabase(customPort, 'postgres'))).toEqual({
+      host: 'loopback',
+      port: '5433',
+      database: 'postgres',
+    });
+    expect(
+      retargetConnection(customPort, {
+        user: 'mc_nodb_role',
+        password: 'mc_test_pw',
+        database: 'mission_control',
+      }),
+    ).toBe(
+      'postgresql://mc_nodb_role:mc_test_pw@127.0.0.1:5433/mission_control?sslmode=disable',
+    );
   });
 
   it('refuses a test URL that names the live database', () => {
@@ -154,11 +175,19 @@ describe('test database isolation', () => {
 describe('throwaway database lifecycle', () => {
   jest.setTimeout(120000);
 
+  function urlInUse(): string {
+    const state = readState();
+    const recorded = state?.adminUrl?.trim() || state?.testUrl?.trim();
+    if (recorded) return recorded;
+    const fromEnv =
+      process.env.TEST_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim();
+    if (fromEnv) return fromEnv;
+    throw new Error('No database URL is available to build a server URL.');
+  }
+
+  /** Maintenance connection on the host and port of the URL this run uses. */
   function serverUrl(): string {
-    return (
-      readState()?.adminUrl ||
-      'postgresql://postgres:postgres@127.0.0.1:5432/postgres'
-    );
+    return replaceDatabase(urlInUse(), 'postgres');
   }
 
   async function databaseExists(
@@ -179,9 +208,15 @@ describe('throwaway database lifecycle', () => {
   }
 
   it('creates a throwaway database and drops it', async () => {
-    const live =
-      'postgresql://postgres:postgres@127.0.0.1:5432/mission_control';
-    const created = await createThrowaway(serverUrl(), live);
+    const server = serverUrl();
+    const live = replaceDatabase(server, 'mission_control');
+    const created = await createThrowaway(server, live);
+    expect(databaseIdentity(created.testUrl)?.port).toBe(
+      databaseIdentity(server)?.port,
+    );
+    expect(databaseIdentity(created.adminUrl)?.host).toBe(
+      databaseIdentity(server)?.host,
+    );
     const file = join(mkdtempSync(join(tmpdir(), 'mc-drop-')), 'state.json');
     try {
       expect(created.kind).toBe('database');
@@ -219,7 +254,15 @@ describe('throwaway database lifecycle', () => {
       await admin.query(
         `GRANT CONNECT, CREATE ON DATABASE postgres TO "${role}"`,
       );
-      const limited = `postgresql://${role}:${password}@127.0.0.1:5432/mission_control`;
+      const server = serverUrl();
+      const limited = retargetConnection(server, {
+        user: role,
+        password,
+        database: 'mission_control',
+      });
+      expect(databaseIdentity(limited)?.port).toBe(
+        databaseIdentity(server)?.port,
+      );
       created = await createThrowaway(limited, limited);
       expect(created.kind).toBe('schema');
       expect(sameDatabase(created.testUrl, limited)).toBe(false);
@@ -271,4 +314,122 @@ describe('throwaway database lifecycle', () => {
       await admin.end();
     }
   });
+
+  it('drops a leftover database only when its owner is gone', async () => {
+    const server = serverUrl();
+    const live = replaceDatabase(server, 'mission_control');
+    const kept = await createThrowaway(server, live);
+    const gone = await createThrowaway(server, live);
+    const ended = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    const deadPid = ended.pid ?? 0;
+    const keepFile = stateFileForRun(
+      process.pid,
+      randomBytes(4).toString('hex'),
+    );
+    const deadFile = stateFileForRun(deadPid, randomBytes(4).toString('hex'));
+    writeFileSync(
+      keepFile,
+      JSON.stringify({ ...kept, ownerPid: process.pid, disposable: true }),
+    );
+    writeFileSync(
+      deadFile,
+      JSON.stringify({ ...gone, ownerPid: deadPid, disposable: true }),
+    );
+    try {
+      expect(pidAlive(process.pid)).toBe(true);
+      expect(pidAlive(deadPid)).toBe(false);
+      reapDeadTestDatabases();
+      expect(await databaseExists(kept.adminUrl, kept.name)).toBe(true);
+      expect(await databaseExists(gone.adminUrl, gone.name)).toBe(false);
+      expect(readState(keepFile)?.dropped).toBeUndefined();
+    } finally {
+      dropStateFile(keepFile);
+    }
+  });
+
+  it('two concurrent setups do not drop each other', async () => {
+    const holdUrl = readState()?.testUrl?.trim() || serverUrl();
+    const apiDir = findApiDir();
+    const register = require.resolve('ts-node/register/transpile-only');
+    const childSource = [
+      'delete process.env.MC_TEST_DB_STATE_FILE;',
+      "process.env.TEST_DATABASE_URL = '';",
+      'process.env.DATABASE_URL = process.env.MC_HOLD_URL;',
+      "const { prepareJestDatabase, readState, dropPreparedDatabase } = require('./src/test-database');",
+      'prepareJestDatabase()',
+      '  .then(() => {',
+      '    const state = readState();',
+      "    process.stdout.write(JSON.stringify({ name: state.name, adminUrl: state.adminUrl, file: process.env.MC_TEST_DB_STATE_FILE }) + '\\n');",
+      '    const timer = setInterval(() => undefined, 1000);',
+      '    const stop = () => {',
+      '      clearInterval(timer);',
+      '      try { dropPreparedDatabase(); } catch (err) { console.error(err); }',
+      '      process.exit(0);',
+      '    };',
+      "    process.on('SIGTERM', stop);",
+      '  })',
+      '  .catch((err) => { console.error(err); process.exit(1); });',
+    ].join('\n');
+
+    function start(): ChildProcess {
+      return spawn(process.execPath, ['-r', register, '-e', childSource], {
+        cwd: apiDir,
+        env: {
+          ...process.env,
+          MC_HOLD_URL: holdUrl,
+          TEST_DATABASE_URL: '',
+          MC_TEST_DB_STATE_FILE: '',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    }
+
+    function ready(
+      child: ChildProcess,
+    ): Promise<{ name: string; adminUrl: string; file: string }> {
+      return new Promise((resolve, reject) => {
+        let out = '';
+        let err = '';
+        let settled = false;
+        child.stdout?.on('data', (buf: Buffer) => {
+          out += buf.toString();
+          const line = out.split('\n').find((row) => row.startsWith('{'));
+          if (!line || settled) return;
+          settled = true;
+          resolve(
+            JSON.parse(line) as {
+              name: string;
+              adminUrl: string;
+              file: string;
+            },
+          );
+        });
+        child.stderr?.on('data', (buf: Buffer) => {
+          err += buf.toString();
+        });
+        child.once('exit', (code) => {
+          if (settled) return;
+          reject(new Error(`setup exited ${code}\n${err}\n${out}`));
+        });
+      });
+    }
+
+    async function stop(child: ChildProcess): Promise<void> {
+      if (child.exitCode !== null || child.signalCode) return;
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.once('exit', resolve));
+    }
+
+    const first = start();
+    const second = start();
+    try {
+      const [left, right] = await Promise.all([ready(first), ready(second)]);
+      expect(left.name).not.toBe(right.name);
+      expect(await databaseExists(left.adminUrl, left.name)).toBe(true);
+      expect(await databaseExists(right.adminUrl, right.name)).toBe(true);
+      expect(await databaseExists(left.adminUrl, right.name)).toBe(true);
+    } finally {
+      await Promise.all([stop(first), stop(second)]);
+    }
+  }, 180000);
 });
