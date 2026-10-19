@@ -156,12 +156,13 @@ export default function Settings() {
       <Card className="mt-4 px-5 py-4">
         <SectionLabel>Agent names</SectionLabel>
         <p className="mt-2 text-[13px] text-mc-sub">
-          Crew seats come from the saved crew file and apply by agent id. Own names shows each agent as registered.
+          Crew seats come from the saved crew file. An agent whose id matches a seat takes that seat. Everyone else takes the next free seat in the order they first registered. The map is saved by agent id. Adding, removing, or reordering agents does not move a saved seat. A display name does not pick a seat. Own names shows each agent as registered.
         </p>
         <div className="mt-4">
           <NamingChoice
             key={`${naming.mode ?? 'unset'}:${JSON.stringify(naming.map)}`}
             agents={agentsQ.data?.agents ?? []}
+            agentsReady={Boolean(agentsQ.data)}
             initialMode={naming.mode}
             initialMap={naming.map}
             intro={false}

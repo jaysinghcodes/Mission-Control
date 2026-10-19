@@ -19,7 +19,9 @@ import { readSettingsPatch } from './settings-patch';
  * timezone stays null until a zone is saved. Reads then use the server zone.
  * setupDone stays false until the first open is finished or skipped.
  * crewMap is agent id to seat id. The web applies those seats only
- * when the mode is crew. PUT is a dashboard write. Loopback stays open.
+ * when the mode is crew. A matching id takes that seat. Other agents
+ * take the next free seat when they first register. A saved entry
+ * stays put. PUT is a dashboard write. Loopback stays open.
  * Any other peer needs the session cookie.
  */
 @Controller('settings')

@@ -3,6 +3,7 @@ import { clearDemoDocs } from '../docs/demo-docs';
 import { configuredDocsRoot } from '../docs/docs-path';
 import { buildDemoMemories } from '../memory/demo-memories';
 import { DEMO_MISSION } from '../team/demo-team';
+import { syncCrewSeats } from '../settings/crew-map';
 import { SETTING_ID } from '../team/mission';
 import { isUntouchedDemoUsage } from '../usage/demo-usage';
 import {
@@ -130,6 +131,7 @@ export async function clearDemoData(
         where: { id: { in: agentIds } },
       });
       agents = removed.count;
+      await syncCrewSeats(tx, { removed: agentIds });
     }
 
     return {

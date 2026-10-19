@@ -68,6 +68,7 @@ import { SETTING_ID } from '../src/team/mission';
 import { demoUsageBuckets, demoUsageId, isUntouchedDemoUsage } from '../src/usage/demo-usage';
 import { slugFromName } from '../src/agents/agent-merge';
 import { demoAgentId, demoAssigneeRewrites } from '../src/seed/demo-assignees';
+import { syncCrewSeats } from '../src/settings/crew-map';
 
 /** Load KEY=VALUE pairs from a .env file without overriding the real env. */
 function loadDotenv(path: string): void {
@@ -276,6 +277,7 @@ async function main(): Promise<void> {
   // Agents — phase 1: upsert by slug id (no parent yet → FK-safe in any order).
   // A snapshot row may share the display name. update is empty so a bridge
   // or register that already owns this id is left alone.
+  const arrivedAgents: string[] = [];
   for (let index = 0; index < AGENTS.length; index++) {
     const a = AGENTS[index];
     const id = slugFromName(a.name) ?? `agent_${index}`;
@@ -303,7 +305,13 @@ async function main(): Promise<void> {
         position: index,
       },
     });
-    if (!before) counts.agents++;
+    if (!before) {
+      counts.agents++;
+      arrivedAgents.push(id);
+    }
+  }
+  if (arrivedAgents.length > 0) {
+    await syncCrewSeats(prisma, { arrived: arrivedAgents });
   }
   // Agents — phase 2: the seed owns the parent of each default id.
   // Pixel stays under Speedy. A snapshot cannot move that link, and a

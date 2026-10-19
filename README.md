@@ -140,7 +140,7 @@ Then open **http://localhost:5173/#/tasks**. Leave `VITE_API_URL` unset here too
 
 1. `bash install.sh`, or the advanced commands above, starts Postgres, the API, and the web UI.
 2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar chip says **Connected** when `GET /health` and the socket are up.
-3. The first open asks for a timezone, then a naming choice, then confirms the detected provider. Skip finishes that open. Change them later under System, then Settings.
+3. The first open asks for a timezone, then a naming choice, then confirms the detected provider. Skip finishes that open. Change them later under System, then Settings. Crew mode maps each seat by agent id. A matching id takes that seat. Everyone else takes the next free seat in the order they first registered. The map stays put when agents are added, removed, or reordered. A display name does not pick a seat.
 4. A fresh setup does not load sample data. Empty states are a valid first run. On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the sample shots. `npm run seed:clear` removes only those rows.
 5. If something fails, run `npm run doctor` from the repo root. The failing line names the next command. Notes are in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

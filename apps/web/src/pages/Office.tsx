@@ -231,6 +231,7 @@ export default function Office() {
                         key={agent.id}
                         type="button"
                         data-agent-id={agent.id}
+                        data-crew-name={cap.name}
                         data-offline={offline ? 'true' : 'false'}
                         data-live-room={work?.room ?? 'commons'}
                         data-live-subtitle={line}
@@ -340,6 +341,7 @@ export default function Office() {
                           key={agent.id}
                           type="button"
                           data-agent-id={agent.id}
+                          data-crew-name={cap.name}
                           data-offline={offline ? 'true' : 'false'}
                           data-live-room={work?.room ?? 'commons'}
                           data-live-subtitle={line}

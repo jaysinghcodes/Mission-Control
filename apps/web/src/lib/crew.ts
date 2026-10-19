@@ -127,17 +127,63 @@ export function orderByPosition<T extends { id: string; position?: number | null
 }
 
 /**
- * First open assignment. Seat i goes to the agent at position i.
- * Names and roles are not read.
+ * Crew seats by agent id.
+ *
+ * An agent whose id equals a seat id takes that seat.
+ * Everyone else takes the next free seat in registration order.
+ * A saved seat for an agent id stays. Agents in `decided` without a
+ * seat stay on their own name. Display names are not read.
+ * The same function lives in apps/api/src/settings/naming.ts.
  */
-export function assignSeatsInOrder(
+export function assignCrewSeats(
   agents: readonly { id: string; position?: number | null }[],
   seats: readonly { id: string }[],
+  saved: Record<string, string> = {},
+  decided?: ReadonlySet<string> | null,
 ): Record<string, string> {
   const ordered = orderByPosition(agents)
+  const seatIds = seats.map((seat) => seat.id)
+  const known = new Set(seatIds)
+  const used = new Set<string>()
   const map: Record<string, string> = {}
-  for (let i = 0; i < ordered.length && i < seats.length; i++) {
-    map[ordered[i].id] = seats[i].id
+  const locked = decided ?? new Set<string>()
+
+  for (const agent of ordered) {
+    const seat = saved[agent.id]
+    if (!seat || !known.has(seat) || used.has(seat)) continue
+    map[agent.id] = seat
+    used.add(seat)
+  }
+
+  const fresh = ordered.filter((agent) => !map[agent.id] && !locked.has(agent.id))
+  for (const agent of fresh) {
+    if (!known.has(agent.id) || used.has(agent.id)) continue
+    map[agent.id] = agent.id
+    used.add(agent.id)
+  }
+
+  const free = seatIds.filter((id) => !used.has(id))
+  let cursor = 0
+  for (const agent of fresh) {
+    if (map[agent.id]) continue
+    const seat = free[cursor]
+    if (!seat) break
+    cursor += 1
+    map[agent.id] = seat
   }
   return map
+}
+
+/** Refetch settings after a roster change that can move the crew map. Heartbeats do not. */
+export function namingRefreshTs(
+  seenTs: number,
+  events: readonly { type: string; ts: number; action?: unknown }[],
+): number | null {
+  let latest = 0
+  for (const event of events) {
+    if (event.type !== 'agents.snapshot') continue
+    if (event.action === 'heartbeat') continue
+    if (event.ts > latest) latest = event.ts
+  }
+  return latest > seenTs ? latest : null
 }

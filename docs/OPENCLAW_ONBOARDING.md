@@ -20,7 +20,7 @@ The native path is in [API.md](API.md#advanced-node-and-postgres), [INSTALL.md](
 
 ## 3. What each screen shows
 
-Screen notes are in [API.md](API.md#3-what-each-screen-shows). The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent's own name, then confirms the detected provider. The operator makes those choices. Skip finishes that open. Do not choose them for the operator.
+Screen notes are in [API.md](API.md#3-what-each-screen-shows). The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent's own name, then confirms the detected provider. The operator makes those choices. Skip finishes that open. Do not choose them for the operator. Crew mode maps each seat by agent id. A matching id takes that seat. Everyone else takes the next free seat in the order they first registered. The map is saved by agent id. A display name does not pick a seat.
 
 ## 4. How you report into Mission Control
 

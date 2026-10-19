@@ -59,6 +59,9 @@ function harness() {
   const rows = new Map<string, Stored>();
   const events: { type: string; payload: unknown }[] = [];
   const broadcast = jest.fn();
+  const settings: {
+    row: { namingMode: string | null; crewMap: unknown } | null;
+  } = { row: null };
   const prisma = {
     agent: {
       findMany: jest.fn(() => Promise.resolve([...rows.values()])),
@@ -115,6 +118,18 @@ function harness() {
         },
       ),
     },
+    setting: {
+      findUnique: jest.fn(() => Promise.resolve(settings.row)),
+      update: jest.fn(
+        ({ data }: { data: { crewMap: Record<string, string> } }) => {
+          settings.row = {
+            namingMode: settings.row?.namingMode ?? 'crew',
+            crewMap: data.crewMap,
+          };
+          return Promise.resolve(settings.row);
+        },
+      ),
+    },
   };
   const gateway = { broadcast, clientCount: 0 };
   const controller = new AgentsController(
@@ -126,7 +141,9 @@ function harness() {
     rows,
     events,
     broadcast,
+    gateway,
     prisma,
+    settings,
     controller,
     res: res as unknown as Response & { statusCode: number },
   };
@@ -576,5 +593,46 @@ describe('AgentsController register, heartbeat, delete', () => {
     expect(hit('DELETE', '/agents/bot').called).toBe(true);
 
     process.env = { ...saved };
+  });
+
+  it('crew seats stick by agent id across a restart, a new register, and a delete', async () => {
+    const { settings, controller, res, prisma, gateway } = harness();
+    settings.row = { namingMode: 'crew', crewMap: {} };
+
+    await controller.register({ id: 'helper', name: 'Pixel' }, res);
+    expect(settings.row?.crewMap).toEqual({ helper: 'speedy' });
+
+    const restarted = new AgentsController(
+      prisma as unknown as PrismaService,
+      gateway as unknown as LiveActivityGateway,
+    );
+    await restarted.register({ id: 'pixel', name: 'Quill' }, res);
+    await restarted.register({ id: 'quill', name: 'Ada' }, res);
+    expect(settings.row?.crewMap).toEqual({
+      helper: 'speedy',
+      pixel: 'pixel',
+      quill: 'quill',
+    });
+
+    settings.row = {
+      namingMode: 'crew',
+      crewMap: {
+        ...(settings.row?.crewMap as Record<string, string>),
+        helper: 'ledger',
+      },
+    };
+    await restarted.register({ id: 'nova', name: 'Nova' }, res);
+    const afterManual = settings.row.crewMap as Record<string, string>;
+    expect(afterManual.helper).toBe('ledger');
+    expect(afterManual.pixel).toBe('pixel');
+    expect(afterManual.quill).toBe('quill');
+    expect(afterManual.nova).toBe('speedy');
+
+    await restarted.remove('nova');
+    const afterDelete = settings.row.crewMap as Record<string, string>;
+    expect(afterDelete.nova).toBeUndefined();
+    expect(afterDelete.helper).toBe('ledger');
+    expect(afterDelete.pixel).toBe('pixel');
+    expect(afterDelete.quill).toBe('quill');
   });
 });

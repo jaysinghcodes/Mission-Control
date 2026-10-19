@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { syncCrewSeats } from '../settings/crew-map';
 import {
   agentRegistered,
   agentStatusName,
@@ -109,6 +110,9 @@ export class AgentsController {
     const saved = plan.created
       ? await this.insertRegistered(plan.row)
       : await this.updateRegistered(plan.row);
+    if (plan.created) {
+      await syncCrewSeats(this.prisma, { arrived: [saved.id] });
+    }
     await this.emit('register', saved.id, saved.source, true, saved.name);
     res.status(plan.created ? 201 : 200);
     return { agent: this.present(saved, now), ts: Date.now() };
@@ -168,6 +172,7 @@ export class AgentsController {
       throw new NotFoundException(plan.ok ? 'agent not found' : plan.message);
     }
     await this.prisma.agent.delete({ where: { id } });
+    await syncCrewSeats(this.prisma, { removed: [id] });
     await this.emit('delete', id, found.source, true, found.name);
   }
 

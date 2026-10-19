@@ -1,8 +1,10 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
+import { useLiveActivity } from '../hooks/useLiveActivity'
 import { apiSend, useApi } from '../hooks/useApi'
 import {
-  assignSeatsInOrder,
+  assignCrewSeats,
   findById,
+  namingRefreshTs,
   orderByPosition,
   presentAgent,
   type CrewSeat,
@@ -11,6 +13,7 @@ import {
   type NamingState,
   type Presented,
 } from './crew'
+import { rosterConnectRefresh } from './roster-live'
 import { setOfflineWindowMs } from './sample-roster'
 import { setActiveTimeZone } from './zone-day'
 
@@ -62,6 +65,19 @@ const Ctx = createContext<NamingValue>(EMPTY)
 
 export function NamingProvider({ children }: { children: ReactNode }) {
   const query = useApi<SettingsResp>('/settings')
+  const { events, connected } = useLiveActivity()
+  const seenRoster = useRef(0)
+  const wasConnected = useRef(false)
+  const refetch = query.refetch
+  useEffect(() => {
+    const justConnected = rosterConnectRefresh(wasConnected.current, connected)
+    wasConnected.current = connected
+    if (justConnected) void refetch()
+    const next = namingRefreshTs(seenRoster.current, events)
+    if (next == null) return
+    seenRoster.current = next
+    void refetch()
+  }, [events, connected, refetch])
   const data = query.data
   const state: NamingState = {
     mode: data?.namingMode ?? null,
@@ -102,6 +118,6 @@ export function useNaming() {
     present: (agent: NamedAgent): Presented => presentAgent(agent, value),
     find: <T extends NamedAgent>(agents: readonly T[], id: string | null | undefined) => findById(agents, id),
     order: <T extends { id: string; position?: number | null }>(agents: readonly T[]) => orderByPosition(agents),
-    assign: assignSeatsInOrder,
+    assign: assignCrewSeats,
   }
 }

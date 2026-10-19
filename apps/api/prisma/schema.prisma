@@ -227,6 +227,8 @@ model Setting {
   /// crew or own. Null until the first run choice is saved.
   namingMode       String?
   /// Agent id to crew seat id. The screen applies it only when namingMode is crew.
+  /// An id that equals a seat id takes that seat. Other agents take the next
+  /// free seat in the order they first registered. A saved entry stays put.
   crewMap          Json?
   /// IANA timezone for usage and memory days. Null uses the server timezone.
   timezone         String?
