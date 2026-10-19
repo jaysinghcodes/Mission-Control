@@ -122,6 +122,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
 
+      # /bin/bash on macos-latest is bash 3.2. The install tests invoke that binary,
+      # including the Compose path while health_args is empty.
       - name: Run install.sh with a docker stub
         run: node --test scripts/install.test.mjs
 

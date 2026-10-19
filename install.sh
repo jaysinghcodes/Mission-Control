@@ -617,16 +617,18 @@ compose_doctor() {
   fi
   export MC_DOCTOR_DOCKER MC_DOCTOR_INSIDE MC_API_PORT MC_DOCTOR_PROBE_PORT
   export MC_DOCTOR_COMPOSE_PS_B64 MC_DOCTOR_ENV_PRESENT MC_DOCTOR_OPENCLAW_ON_PATH
+  # macOS bash 3.2 with set -u treats an empty "${health_args[@]}" as an unbound variable.
+  # ${name[@]+"${name[@]}"} expands to nothing when that array is empty, and keeps each word when it is not.
   health_args=()
   if [[ -n "${MC_DOCTOR_HEALTH_SECONDS:-}" ]]; then
     export MC_DOCTOR_HEALTH_SECONDS
     health_args=(-e MC_DOCTOR_HEALTH_SECONDS)
   fi
   if compose_api_exec_ok; then
-    docker compose exec -T -e MC_DOCTOR_DOCKER -e MC_DOCTOR_INSIDE -e MC_API_PORT -e MC_DOCTOR_PROBE_PORT -e MC_DOCTOR_COMPOSE_PS_B64 -e MC_DOCTOR_ENV_PRESENT -e MC_DOCTOR_OPENCLAW_ON_PATH "${health_args[@]}" api node scripts/doctor.mjs
+    docker compose exec -T -e MC_DOCTOR_DOCKER -e MC_DOCTOR_INSIDE -e MC_API_PORT -e MC_DOCTOR_PROBE_PORT -e MC_DOCTOR_COMPOSE_PS_B64 -e MC_DOCTOR_ENV_PRESENT -e MC_DOCTOR_OPENCLAW_ON_PATH ${health_args[@]+"${health_args[@]}"} api node scripts/doctor.mjs
     return
   fi
-  docker compose run --rm --no-deps --entrypoint node -e MC_DOCTOR_DOCKER -e MC_DOCTOR_INSIDE -e MC_API_PORT -e MC_DOCTOR_PROBE_PORT -e MC_DOCTOR_COMPOSE_PS_B64 -e MC_DOCTOR_ENV_PRESENT -e MC_DOCTOR_OPENCLAW_ON_PATH "${health_args[@]}" api scripts/doctor.mjs
+  docker compose run --rm --no-deps --entrypoint node -e MC_DOCTOR_DOCKER -e MC_DOCTOR_INSIDE -e MC_API_PORT -e MC_DOCTOR_PROBE_PORT -e MC_DOCTOR_COMPOSE_PS_B64 -e MC_DOCTOR_ENV_PRESENT -e MC_DOCTOR_OPENCLAW_ON_PATH ${health_args[@]+"${health_args[@]}"} api scripts/doctor.mjs
 }
 # compose-host-free:end
 
@@ -1320,7 +1322,8 @@ bridge_schedule_path() {
     IFS=':'
     read -r -a parts <<< "${PATH}"
     IFS="$old_ifs"
-    for part in "${parts[@]}"; do
+    # macOS bash 3.2 with set -u treats an empty "${parts[@]}" as an unbound variable.
+    for part in ${parts[@]+"${parts[@]}"}; do
       acc="$(add_schedule_dir "$acc" "$part")"
     done
   fi

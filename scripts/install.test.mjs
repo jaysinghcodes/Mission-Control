@@ -27,6 +27,8 @@ import { fileURLToPath } from 'node:url'
 import { hasDashPunctuation } from './doctor.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// macOS CI uses /bin/bash 3.2. MC_INSTALL_BASH selects another binary for a local replay.
+const installBash = process.env.MC_INSTALL_BASH || '/bin/bash'
 const PUNCT = /[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]/
 
 function outputOf(result) {
@@ -186,7 +188,7 @@ function runInstall(dir, env, args = []) {
   for (const [key, value] of Object.entries(merged)) {
     if (value === undefined) delete merged[key]
   }
-  return spawnSync('/bin/bash', ['install.sh', ...args], {
+  return spawnSync(installBash, ['install.sh', ...args], {
     cwd: dir,
     env: merged,
     encoding: 'utf8',
@@ -1840,6 +1842,31 @@ test('the Compose branch has no host node, npm, or npx call', () => {
   assert.deepEqual(hostToolHits(branch), [])
 })
 
+test('compose doctor with an empty health_args array survives bash nounset', () => {
+  const version = spawnSync(installBash, ['--version'], { encoding: 'utf8' })
+  assert.equal(version.status, 0, version.stderr || version.error)
+  if (process.platform === 'darwin' && !process.env.MC_INSTALL_BASH) {
+    assert.match(`${version.stdout}\n${version.stderr}`, /version 3\./, version.stdout)
+  }
+  const fx = freshDir()
+  try {
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      MC_DOCTOR_HEALTH_SECONDS: undefined,
+    })
+    const text = outputOf(result)
+    const dockerLog = readFileSync(fx.log, 'utf8')
+    assert.match(text, /OpenClaw was not found on PATH/)
+    assert.doesNotMatch(text, /unbound variable/, text)
+    assert.doesNotMatch(dockerLog, /unbound variable/)
+    assert.doesNotMatch(dockerLog, /MC_DOCTOR_HEALTH_SECONDS/)
+    assert.match(dockerLog, /compose exec .*node scripts\/doctor\.mjs/)
+    assertReadableDoctor(text)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
 test('compose finish does not call host node, npm, or npx', () => {
   const fx = freshDir()
   const calls = path.join(fx.dir, 'host-tools.log')
@@ -2001,6 +2028,7 @@ exit 7
     assert.notEqual(result.status, 0, text)
     assert.match(text, /The API did not answer on port/)
     assert.doesNotMatch(text, /Node is not on PATH/)
+    assert.match(readFileSync(capped.log, 'utf8'), /-e MC_DOCTOR_HEALTH_SECONDS/)
     assert.match(readFileSync(capped.log, 'utf8'), /scripts\/doctor\.mjs/)
     const curls = readFileSync(capLog, 'utf8').split('\n').filter((line) => line.includes('/health'))
     assert.equal(curls.length, 90, readFileSync(capLog, 'utf8'))
