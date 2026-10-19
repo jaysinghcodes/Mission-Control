@@ -161,6 +161,10 @@ if [ "$1" = "compose" ] && { [ "$2" = "exec" ] || [ "$2" = "run" ]; }; then
     *scripts/doctor.mjs*)
       unset MC_DOCTOR_INSIDE
       unset MC_DOCTOR_PROBE_PORT
+      # The host may already listen on the Compose defaults. This stub is the
+      # host, so an unset web or db port would look like an outside holder.
+      if [ -z "\${MC_WEB_PORT:-}" ]; then MC_WEB_PORT=59173; export MC_WEB_PORT; fi
+      if [ -z "\${MC_DB_PORT:-}" ]; then MC_DB_PORT=59132; export MC_DB_PORT; fi
       exec ${shellQuote(nodeBin)} scripts/doctor.mjs
       ;;
   esac

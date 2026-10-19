@@ -11,11 +11,14 @@
  * counts as exposed even when .env HOST is loopback, because the container
  * peer is the Docker bridge. Compose does not check the host Node version
  * and prints no node line. The health probe retries for up to 60 seconds.
- * A port conflict is reported only when another program holds the port.
- * A stopped, paused, or missing Compose db or api service fails when the
- * other one is present. A slow start is only when both services are running
- * or starting and the probe has not answered. The Compose installer runs
- * this file inside the api container. npm run doctor still runs it on the host.
+ * Compose mode is a compose file, any project container, or MC_DOCTOR_DOCKER=1.
+ * MC_DOCTOR_DOCKER=0 keeps the native check. In Compose mode the order is
+ * fixed: an outside holder of the API, web, or database port, then a
+ * missing, stopped, or paused service, then a slow start. The port line
+ * names MC_API_PORT, MC_WEB_PORT, or MC_DB_PORT, including when no container
+ * exists. A slow start is only when those ports are free, db and api are
+ * running or starting, and the probe has not answered. The Compose installer
+ * runs this file inside the api container. npm run doctor still runs it on the host.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -243,12 +246,47 @@ function composeServices(root, env = process.env) {
   })
 }
 
+const COMPOSE_FILE_NAMES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+
+export function parseComposeServiceNames(text) {
+  const names = []
+  let inServices = false
+  for (const line of String(text).split(/\n/)) {
+    if (/^services:\s*(?:#.*)?$/.test(line)) {
+      inServices = true
+      continue
+    }
+    if (!inServices) continue
+    if (/^\S/.test(line)) break
+    const match = /^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$/.exec(line)
+    if (match) names.push(match[1])
+  }
+  return names
+}
+
+function readComposeServiceNames(root) {
+  for (const name of COMPOSE_FILE_NAMES) {
+    const file = path.join(root, name)
+    if (!existsSync(file)) continue
+    try {
+      return parseComposeServiceNames(readFileSync(file, 'utf8'))
+    } catch {
+      return []
+    }
+  }
+  return null
+}
+
+function composeFilePresent(root) {
+  return COMPOSE_FILE_NAMES.some((name) => existsSync(path.join(root, name)))
+}
+
 async function usingDocker(root, env, processEnv = process.env) {
   if (env.MC_DOCTOR_DOCKER === '1') return true
   if (env.MC_DOCTOR_DOCKER === '0') return false
-  // Any project container selects Compose, including a created api or a
-  // stack whose api container was removed. A compose file with no containers
-  // stays on the native check, which names PORT.
+  // A compose file selects Compose with zero containers. Any project
+  // container does too: created, exited, paused, running, or removed.
+  if (composeFilePresent(root)) return true
   const listed = await composeServices(root, { ...processEnv, ...env })
   return listed.split(/\r?\n/).some((line) => line.trim() !== '')
 }
@@ -651,17 +689,30 @@ function serviceFailureSentence(names, kind) {
 }
 
 /**
- * Empty when the project has no containers, or db and api are both ready.
+ * Empty when db and api are both ready, or when there is nothing to name.
  * A removed or never created service names docker compose up -d.
  * An exited, created, or restarting service names docker compose start.
  * A paused service names docker compose unpause.
- * A created api whose port is held by another program is handled by the port check.
+ * An outside holder of a configured port is reported by the caller first.
+ * serviceNames, when the compose file lists any, limits db and api to that file.
  */
-export function composeServiceFailure(rows) {
+export function composeServiceFailure(rows, serviceNames) {
   const list = Array.isArray(rows) ? rows : []
-  if (list.length === 0) return ''
+  const required = ['db', 'api']
+  let expected
+  if (Array.isArray(serviceNames)) {
+    if (serviceNames.length === 0 && list.length === 0) return ''
+    const fromFile = required.filter((name) => serviceNames.includes(name))
+    if (fromFile.length > 0) expected = fromFile
+    else if (list.length === 0) return ''
+    else expected = required
+  } else if (list.length === 0) {
+    return ''
+  } else {
+    expected = required
+  }
   const buckets = { start: [], missing: [], paused: [] }
-  for (const name of ['db', 'api']) {
+  for (const name of expected) {
     const row = list.find((item) => item.service === name)
     if (row && composeServiceReady(row)) continue
     if (!row) buckets.missing.push(name)
@@ -802,6 +853,44 @@ async function outsideProgramHoldsPort(port, host, options) {
   return owner === 'foreign'
 }
 
+const COMPOSE_PORT_SPECS = [
+  { key: 'MC_API_PORT', fallback: 3000, api: true },
+  { key: 'MC_WEB_PORT', fallback: 5173, api: false },
+  { key: 'MC_DB_PORT', fallback: 5432, api: false },
+]
+
+export function composePortConflictLine(port, key) {
+  return `Port ${port} is used by another program. Stop it or set ${key} in .env.`
+}
+
+async function apiPortHeldByOtherProgram(port, host, options) {
+  if (!(await outsideProgramHoldsPort(port, host, options))) return false
+  const timeout = options.httpTimeoutMs ?? 1500
+  const res = await httpGet(`http://${host}:${port}/health`, timeout)
+  if (readHealthIdentity(res).ours) return false
+  if (res.status === 401 && options.docker && options.root && !options.inside) {
+    const inside = dockerLoopbackHealth(options.root, options)
+    if (inside.ours) return false
+  }
+  return true
+}
+
+async function composeOutsideConflicts(host, options) {
+  const env = options.env || {}
+  const seen = new Set()
+  const hits = []
+  for (const spec of COMPOSE_PORT_SPECS) {
+    const port = parsePort(env[spec.key], spec.fallback)
+    if (port == null || seen.has(port)) continue
+    seen.add(port)
+    const held = spec.api
+      ? await apiPortHeldByOtherProgram(port, host, options)
+      : await outsideProgramHoldsPort(port, host, options)
+    if (held) hits.push({ key: spec.key, port, api: spec.api })
+  }
+  return hits
+}
+
 async function defaultPortOwner(port, options) {
   const env = options.env || process.env
   const listeners = options.readListeners ? options.readListeners(port) : readListenerRows(port, env)
@@ -902,13 +991,18 @@ export async function inspectApiPort(port, host = '127.0.0.1', options = {}) {
       const rows = typeof options.readServices === 'function'
         ? options.readServices()
         : readComposeServiceRows(options.root, options.env || process.env)
-      if (Array.isArray(rows)) {
-        const api = rows.find((row) => row.service === 'api')
-        // A created api never bound its port. Starting it fails while another program holds that port.
-        if (api && api.state === 'created' && await outsideProgramHoldsPort(port, host, options)) {
-          return { state: 'other', url: probeUrl, db: null }
+      const hits = await composeOutsideConflicts(host, options)
+      if (hits.length > 0) {
+        return {
+          state: 'other',
+          url: probeUrl,
+          db: null,
+          conflict: hits.map((hit) => composePortConflictLine(hit.port, hit.key)).join(' '),
+          conflictApi: hits.some((hit) => hit.api),
         }
-        const downMessage = composeServiceFailure(rows)
+      }
+      if (Array.isArray(rows)) {
+        const downMessage = composeServiceFailure(rows, readComposeServiceNames(options.root))
         if (downMessage) return { state: 'down', url: probeUrl, db: null, downMessage }
         servicesReady = rows.some((row) => (row.service === 'db' || row.service === 'api') && composeServiceReady(row))
       }
@@ -952,6 +1046,8 @@ async function portFacts(env, root, processEnv = process.env) {
     api: port,
     apiState,
     downMessage: seen.downMessage || '',
+    conflict: seen.conflict || '',
+    conflictApi: seen.conflictApi === false ? false : true,
     health: {
       reachable: seen.state === 'ours',
       db: seen.db,
@@ -989,6 +1085,7 @@ function portLine(ports, docker = false) {
   if (ports.badPort) {
     return `fail ports: ${label} is not a valid port number. Set ${label} in .env to a free port, then run npm run doctor again.`
   }
+  if (ports.conflict) return `fail ports: ${ports.conflict}`
   if (ports.apiState === 'free') return `pass ports: Port ${ports.api} is free.`
   if (ports.apiState === 'ours') return `pass ports: Port ${ports.api} is already running.`
   if (ports.apiState === 'down') return `fail ports: ${ports.downMessage}`
@@ -1196,7 +1293,7 @@ function bridgeLine(bridge) {
   return 'info bridge: No OpenClaw sync timestamp was found. That is normal before the first successful bridge run.'
 }
 
-function healthLine(ports) {
+function healthLine(ports, docker = false) {
   const url = ports.health?.url ?? 'http://127.0.0.1:3000/health'
   if (!ports.badPort && ports.apiState === 'down') {
     return `fail health: ${ports.downMessage}`
@@ -1205,6 +1302,9 @@ function healthLine(ports) {
     return `info health: ${STARTING_NOTE}`
   }
   if (!ports.badPort && ports.apiState === 'busy') {
+    if (ports.conflict && ports.conflictApi === false) {
+      return 'info health: Skipped because a Compose port is used by another program.'
+    }
     return 'info health: Skipped because the API port is used by another program.'
   }
   if (ports.health?.reachable && ports.health.db === 'up') {
@@ -1215,6 +1315,9 @@ function healthLine(ports) {
   }
   if (ports.health?.reachable) {
     return `fail health: The health check at ${url} did not say whether the database is up.`
+  }
+  if (docker) {
+    return `fail health: The API health endpoint is not reachable at ${url}. Start the stack with: docker compose up -d`
   }
   return `fail health: The API health endpoint is not reachable at ${url}. Start the API and the web app with: ${FIX_HEALTH}`
 }
@@ -1236,7 +1339,7 @@ export function report(facts) {
     migrationsLine(facts.database),
     tokenLine(facts.env),
     loginLine(facts.env),
-    healthLine(facts.ports),
+    healthLine(facts.ports, docker),
     `info openclaw: ${facts.openclaw}`,
     bridgeLine(facts.bridge),
     gatewayLine(facts.env, facts.gateway),

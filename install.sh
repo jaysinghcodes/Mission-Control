@@ -1760,7 +1760,9 @@ finish() {
     set -e
   elif command -v node >/dev/null 2>&1 && [[ -f scripts/doctor.mjs ]]; then
     set +e
-    node scripts/doctor.mjs
+    # This run already chose the native path. A compose file in the checkout
+    # would otherwise select Compose ports and Compose commands.
+    MC_DOCTOR_DOCKER=0 node scripts/doctor.mjs
     doctor_code=$?
     set -e
   elif command -v node >/dev/null 2>&1; then
