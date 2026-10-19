@@ -20,6 +20,7 @@ jobs:
         node-version:
           - '20'
           - '22'
+          - '24'
     steps:
       - name: Check out a clean tree
         uses: actions/checkout@v4
@@ -53,6 +54,7 @@ jobs:
         node-version:
           - '20'
           - '22'
+          - '24'
     services:
       postgres:
         image: postgres:16

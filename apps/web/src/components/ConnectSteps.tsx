@@ -92,7 +92,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'ON THE HOST',
     body: [
       'Docker with the Compose plugin, git, curl, and bash. One command installs Mission Control. The browser uses one port.',
-      'No Docker? The installer says so and uses Node.js 22 (22.9 or newer) and Postgres 16. The advanced path still accepts Node.js 20.17 or newer.',
+      'No Docker? The installer says so and uses Node.js 20.17 or later and Postgres 16. Docker installs do not need Node on the host.',
       // OpenClaw is optional. Tickets work without it, and seed:demo fills sample data.
       'Optional: your OpenClaw instance running. It is the live data source (step 6). Without it, the tickets loop works and `npm run seed:demo` fills sample data.',
     ],
@@ -193,7 +193,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       `\`bash install.sh\` already starts Postgres, the API, and the web UI. The browser uses port ${WEB_PORT} (\`MC_WEB_PORT\`). Leave \`VITE_API_URL\` unset. nginx proxies \`/api\` and \`/socket.io\` to the API.`,
       `The API loads the root \`.env\` and runs \`prisma migrate deploy\` before it listens. A native install listens on port ${API_PORT} (\`PORT\`, or \`MC_API_PORT\` when \`PORT\` is unset). Inside Compose the log line stays \`mission-control api listening on 0.0.0.0:3000\`. The host API port is \`MC_API_PORT\`.`,
-      'No Docker? The installer says so and uses Node.js 22 and Postgres 16. The advanced path is also in the README. No OpenClaw? `npm run seed:demo` fills sample data.',
+      'No Docker? The installer says so and uses Node.js 20.17 or later and Postgres 16. The advanced path is also in the README. No OpenClaw? `npm run seed:demo` fills sample data.',
     ],
     commands: [
       { label: 'Build and start', cmd: 'docker compose up -d --build' },

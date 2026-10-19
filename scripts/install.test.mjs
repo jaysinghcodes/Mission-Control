@@ -140,17 +140,21 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`
 }
 
-function writeNode22Report(bin) {
+function writeNodeVersion(bin, version) {
   writeExe(
     path.join(bin, 'node'),
     `#!/bin/sh
 if [ "$1" = "-v" ]; then
-  printf '%s\\n' "v22.14.0"
+  printf '%s\\n' ${shellQuote(version)}
   exit 0
 fi
 exec ${shellQuote(process.execPath)} "$@"
 `,
   )
+}
+
+function writeNode22Report(bin) {
+  writeNodeVersion(bin, 'v22.14.0')
 }
 
 function setApiPort(repo, port) {
@@ -570,7 +574,8 @@ test('docker without Node still prints the URL and a readable doctor line', () =
     })
     const text = outputOf(result)
     assert.equal(result.status, 0, text)
-    assert.match(text, /^info node: Node is not on PATH/m)
+    assert.match(text, /^info doctor: Node is not on PATH/m)
+    assert.doesNotMatch(text, /^(pass|fail|info|skip) node:/m)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assert.equal(PUNCT.test(text), false)
     assert.equal(hasDashPunctuation(text), false)
@@ -633,34 +638,75 @@ exit 0
   }
 })
 
-test('the native path names Node 22 and Postgres 16 when Docker is missing', () => {
-  const fx = freshDir()
-  try {
-    writeExe(path.join(fx.bin, 'docker'), '#!/bin/sh\nexit 127\n')
-    writeExe(path.join(fx.bin, 'node'), '#!/bin/sh\necho "v18.20.8"\nexit 0\n')
-    const old = runInstall(fx.repo, {
-      ...fx.env,
-      PATH: `${fx.bin}:${pathWithout(['node'])}`,
-    })
-    const oldText = outputOf(old)
-    assert.notEqual(old.status, 0)
-    assert.match(oldText, /Docker was not found\. Using the native path\. This needs Node\.js 22 and Postgres 16\./)
-    assert.match(oldText, /Node\.js v18\.20\.8 is not a supported native runtime/)
-    assert.doesNotMatch(oldText, /Open http:\/\//)
-    assert.equal(PUNCT.test(oldText), false)
+const NATIVE_NODE_NEED =
+  "Node 20.17 or later is needed for the native install. Docker installs don't need Node."
 
-    writeExe(path.join(fx.bin, 'node'), '#!/bin/sh\necho "v22.14.0"\nexit 0\n')
-    const bare = path.join(fx.dir, 'bare')
-    linkCommands(bare, ['dirname', 'pwd', 'grep', 'tail', 'openssl', 'mktemp', 'chmod', 'mv'])
-    const down = runInstall(fx.repo, {
-      ...fx.env,
-      PATH: `${fx.bin}:${bare}`,
-    })
-    assert.notEqual(down.status, 0)
-    assert.match(outputOf(down), /pg_isready is not on PATH/)
-    assert.equal(existsSync(path.join(fx.repo, '.env')), true)
-  } finally {
-    rmSync(fx.dir, { recursive: true, force: true })
+test('the native path accepts Node 20.17 or later and rejects older versions', () => {
+  const failures = ['v18.20.0', 'v18.20.8', 'v20.16.0', 'v20.16.9']
+  const passes = ['v20.17.0', 'v22.0.0', 'v22.14.0', 'v24.0.0', 'v26.5.1']
+  for (const version of failures) {
+    const fx = freshDir()
+    try {
+      writeExe(path.join(fx.bin, 'docker'), '#!/bin/sh\nexit 127\n')
+      writeExe(path.join(fx.bin, 'node'), `#!/bin/sh\necho ${JSON.stringify(version)}\nexit 0\n`)
+      const old = runInstall(fx.repo, {
+        ...fx.env,
+        PATH: `${fx.bin}:${pathWithout(['node'])}`,
+      })
+      const oldText = outputOf(old)
+      assert.notEqual(old.status, 0, version)
+      assert.match(oldText, /Docker was not found\. Using the native path\. This needs Node\.js 20\.17 or later and Postgres 16\./)
+      assert.match(oldText, new RegExp(`^${NATIVE_NODE_NEED.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+      assert.equal(oldText.split('\n').filter((line) => line === NATIVE_NODE_NEED).length, 1, version)
+      assert.doesNotMatch(oldText, /Open http:\/\//)
+      assert.equal(PUNCT.test(oldText), false, version)
+    } finally {
+      rmSync(fx.dir, { recursive: true, force: true })
+    }
+  }
+  for (const version of passes) {
+    const fx = freshDir()
+    try {
+      writeExe(path.join(fx.bin, 'docker'), '#!/bin/sh\nexit 127\n')
+      writeNodeVersion(fx.bin, version)
+      const bare = path.join(fx.dir, 'bare')
+      linkCommands(bare, ['dirname', 'pwd', 'grep', 'tail', 'sed', 'openssl', 'mktemp', 'chmod', 'mv'])
+      const down = runInstall(fx.repo, {
+        ...fx.env,
+        PATH: `${fx.bin}:${bare}`,
+      })
+      const text = outputOf(down)
+      assert.notEqual(down.status, 0, text)
+      assert.match(text, /pg_isready is not on PATH/)
+      assert.doesNotMatch(text, /Node 20\.17 or later is needed/)
+      assert.equal(existsSync(path.join(fx.repo, '.env')), true)
+    } finally {
+      rmSync(fx.dir, { recursive: true, force: true })
+    }
+  }
+})
+
+test('compose install on Node 26 exits 0 and doctor prints no node line', async () => {
+  for (const version of ['v18.20.8', 'v26.5.1']) {
+    const fx = freshDir()
+    let health
+    try {
+      health = await startDelayedHealth(fx.dir, 0)
+      writeNodeVersion(fx.bin, version)
+      const result = runInstall(fx.repo, {
+        ...fx.env,
+        PATH: `${fx.bin}:${process.env.PATH ?? ''}`,
+        MC_API_PORT: String(health.port),
+      })
+      const text = outputOf(result)
+      assert.equal(result.status, 0, `${version}\n${text}`)
+      assert.doesNotMatch(text, /^(pass|fail|info|skip) node:/m)
+      assert.doesNotMatch(text, /Node 20\.17 or later is needed/)
+      assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
+    } finally {
+      health?.child.kill()
+      rmSync(fx.dir, { recursive: true, force: true })
+    }
   }
 })
 
