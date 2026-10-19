@@ -28,6 +28,112 @@ import {
 const LIVE = 'postgresql://postgres:postgres@localhost:5432/mission_control';
 const LOOPBACK_ALIAS =
   'postgresql://other:secret@127.0.0.1/mission_control?sslmode=disable';
+/** Directory to search first for `.s.PGSQL.<port>`. Test-only. Unset in CI. */
+const SOCKET_DIR_ENV = 'MC_TEST_SOCKET_DIR';
+const SOCKET_CANDIDATE_DIRS = [
+  '/var/run/postgresql',
+  '/run/postgresql',
+  '/tmp',
+];
+
+type SocketAlias = { url: string; dir: string } | { skip: string };
+type HostAlias = { address: string } | { skip: string };
+
+function socketFile(dir: string, port: string): string {
+  return `${dir.replace(/\/+$/, '')}/.s.PGSQL.${port}`;
+}
+
+function socketUrl(dir: string, port: string, database: string): string {
+  const base = `postgresql:///${database}?host=${dir}`;
+  return port === '5432' ? base : `${base}&port=${port}`;
+}
+
+/**
+ * Use a socket alias when the socket file is on this machine.
+ * MC_TEST_SOCKET_DIR names an extra directory to search. No file means skip.
+ */
+export function resolveSocketAlias(input: {
+  port: string;
+  database: string;
+  overrideDir?: string;
+  candidateDirs: string[];
+  fileExists: (path: string) => boolean;
+}): SocketAlias {
+  const override = input.overrideDir?.trim().replace(/\/+$/, '');
+  const dirs: string[] = [];
+  for (const dir of [override, ...input.candidateDirs]) {
+    const clean = dir?.trim().replace(/\/+$/, '');
+    if (!clean || dirs.includes(clean)) continue;
+    dirs.push(clean);
+  }
+  for (const dir of dirs) {
+    if (input.fileExists(socketFile(dir, input.port))) {
+      return {
+        url: socketUrl(dir, input.port, input.database),
+        dir,
+      };
+    }
+  }
+  const looked = dirs.join(', ') || '(none)';
+  if (override) {
+    return {
+      skip: `${SOCKET_DIR_ENV}=${override} has no socket file .s.PGSQL.${input.port}. Looked in ${looked}.`,
+    };
+  }
+  return {
+    skip: `no Unix socket file .s.PGSQL.${input.port}. Looked in ${looked}. Set ${SOCKET_DIR_ENV} to the directory that contains it.`,
+  };
+}
+
+/** The hostname alias runs only when this machine name resolves. */
+export function resolveHostnameAlias(
+  name: string,
+  lookup: (host: string) => string,
+): HostAlias {
+  const host = name.trim();
+  if (!host) return { skip: 'the machine hostname is empty' };
+  try {
+    const address = lookup(host).trim();
+    if (!address)
+      return { skip: `hostname ${host} resolved to an empty address` };
+    return { address };
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : 'lookup failed';
+    return { skip: `hostname ${host} did not resolve (${code})` };
+  }
+}
+
+function lookupHost(host: string): string {
+  const result = spawnSync(
+    process.execPath,
+    [
+      '-e',
+      [
+        "const { lookup } = require('dns');",
+        'lookup(process.argv[1], (err, address) => {',
+        '  if (err) {',
+        "    process.stderr.write(String(err.code || 'lookup failed'));",
+        '    process.exit(1);',
+        '  }',
+        '  process.stdout.write(String(address));',
+        '});',
+      ].join('\n'),
+      host,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (result.status !== 0) {
+    const err = new Error(result.stderr.trim() || 'lookup failed') as Error & {
+      code: string;
+    };
+    err.code = result.stderr.trim() || 'lookup failed';
+    throw err;
+  }
+  return result.stdout.trim();
+}
 
 function exitSpy(): jest.SpyInstance {
   return jest.spyOn(process, 'exit').mockImplementation((code?: number) => {
@@ -123,6 +229,69 @@ describe('test database isolation', () => {
     error.mockRestore();
   });
 
+  it('builds a socket alias from a real socket file or MC_TEST_SOCKET_DIR', () => {
+    const files = new Set(['/var/run/postgresql/.s.PGSQL.5432']);
+    const exists = (path: string) => files.has(path);
+    expect(
+      resolveSocketAlias({
+        port: '5432',
+        database: 'mission_control',
+        candidateDirs: SOCKET_CANDIDATE_DIRS,
+        fileExists: exists,
+      }),
+    ).toEqual({
+      url: 'postgresql:///mission_control?host=/var/run/postgresql',
+      dir: '/var/run/postgresql',
+    });
+    expect(
+      resolveSocketAlias({
+        port: '5433',
+        database: 'mission_control',
+        overrideDir: '/custom/pg',
+        candidateDirs: SOCKET_CANDIDATE_DIRS,
+        fileExists: (path) => path === '/custom/pg/.s.PGSQL.5433',
+      }),
+    ).toEqual({
+      url: 'postgresql:///mission_control?host=/custom/pg&port=5433',
+      dir: '/custom/pg',
+    });
+    const missing = resolveSocketAlias({
+      port: '5433',
+      database: 'mission_control',
+      candidateDirs: ['/var/run/postgresql'],
+      fileExists: () => false,
+    });
+    expect('skip' in missing ? missing.skip : '').toContain(
+      'no Unix socket file .s.PGSQL.5433',
+    );
+    const overrideMiss = resolveSocketAlias({
+      port: '5433',
+      database: 'mission_control',
+      overrideDir: '/missing/socket',
+      candidateDirs: ['/var/run/postgresql'],
+      fileExists: () => false,
+    });
+    expect('skip' in overrideMiss && overrideMiss.skip).toContain(
+      'MC_TEST_SOCKET_DIR=/missing/socket',
+    );
+  });
+
+  it('skips the hostname alias when the machine name does not resolve', () => {
+    expect(resolveHostnameAlias('db.example', () => '10.0.0.8')).toEqual({
+      address: '10.0.0.8',
+    });
+    const missed = resolveHostnameAlias('db.example', () => {
+      const err = new Error('getaddrinfo ENOTFOUND db.example') as Error & {
+        code: string;
+      };
+      err.code = 'ENOTFOUND';
+      throw err;
+    });
+    expect(missed).toEqual({
+      skip: 'hostname db.example did not resolve (ENOTFOUND)',
+    });
+  });
+
   it('refuses alias URLs when the server fingerprint matches', async () => {
     const seen: string[] = [];
     const opener = (url: string) => {
@@ -146,6 +315,8 @@ describe('test database isolation', () => {
         end: () => Promise.resolve(undefined),
       });
     };
+    // Fixture strings for the guard. They do not open a server, so this
+    // case still runs when the host has no socket and no resolvable name.
     const aliases = [
       'postgresql://postgres:postgres@0.0.0.0:5432/mission_control',
       'postgresql://postgres:postgres@cursor:5432/mission_control',
@@ -572,38 +743,14 @@ describe('throwaway database lifecycle', () => {
     }
   }, 180000);
 
-  it('refuses 0.0.0.0, the machine hostname, and a host query alias', async () => {
-    const server = serverUrl();
-    const direct = replaceDatabase(server, 'mc_alias_guard');
-    const connectHost = new URL(server.replace(/^postgres(ql)?:/i, 'http:'))
-      .hostname;
-    const port = databaseIdentity(server)?.port || '5432';
-    const admin = new Client({ connectionString: server });
+  async function refuseLiveAlias(
+    alias: string,
+    peerRole: boolean,
+  ): Promise<void> {
+    const direct = replaceDatabase(serverUrl(), 'mc_alias_guard');
+    expect(sameDatabase(alias, direct)).toBe(false);
+    const admin = new Client({ connectionString: serverUrl() });
     await admin.connect();
-    // Docker CI publishes TCP only. Use a socket when this process can see the server's socket file.
-    const shown = await admin.query<{ dir: string }>(
-      'SHOW unix_socket_directories',
-    );
-    const socketDir = (shown.rows[0]?.dir ?? '')
-      .split(',')
-      .map((dir) => dir.trim())
-      .find((dir) => dir && existsSync(`${dir}/.s.PGSQL.${port}`));
-    const socket = socketDir
-      ? port === '5432'
-        ? `postgresql:///mc_alias_guard?host=${socketDir}`
-        : `postgresql:///mc_alias_guard?host=${socketDir}&port=${port}`
-      : undefined;
-    const aliases = [
-      rewriteHost(direct, '0.0.0.0'),
-      rewriteHost(direct, hostname()),
-      rewriteHost(direct, 'db.invalid', connectHost),
-      ...(socket ? [socket] : []),
-    ];
-    const openGuard = async () => {
-      const client = new Client({ connectionString: direct });
-      await client.connect();
-      return client;
-    };
     let createdOsRole = false;
     let osUser = '';
     try {
@@ -613,20 +760,23 @@ describe('throwaway database lifecycle', () => {
       );
       await admin.query('DROP DATABASE IF EXISTS mc_alias_guard');
       await admin.query('CREATE DATABASE mc_alias_guard');
-      osUser = userInfo().username;
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(osUser)) {
-        throw new Error('refusing an unsafe operating system user name');
+      if (peerRole) {
+        osUser = userInfo().username;
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(osUser)) {
+          throw new Error('refusing an unsafe operating system user name');
+        }
+        const roleExists = await admin.query(
+          'SELECT 1 FROM pg_roles WHERE rolname = $1',
+          [osUser],
+        );
+        createdOsRole = (roleExists.rowCount ?? 0) === 0;
+        if (createdOsRole) await admin.query(`CREATE ROLE "${osUser}" LOGIN`);
+        await admin.query(
+          `GRANT CONNECT ON DATABASE mc_alias_guard TO "${osUser}"`,
+        );
       }
-      const roleExists = await admin.query(
-        'SELECT 1 FROM pg_roles WHERE rolname = $1',
-        [osUser],
-      );
-      createdOsRole = (roleExists.rowCount ?? 0) === 0;
-      if (createdOsRole) await admin.query(`CREATE ROLE "${osUser}" LOGIN`);
-      await admin.query(
-        `GRANT CONNECT ON DATABASE mc_alias_guard TO "${osUser}"`,
-      );
-      const seed = await openGuard();
+      const seed = new Client({ connectionString: direct });
+      await seed.connect();
       try {
         await seed.query(
           'GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC',
@@ -637,12 +787,11 @@ describe('throwaway database lifecycle', () => {
         await seed.end();
       }
 
-      for (const alias of aliases) {
-        expect(sameDatabase(alias, direct)).toBe(false);
-        const exit = exitSpy();
-        const error = jest
-          .spyOn(console, 'error')
-          .mockImplementation(() => undefined);
+      const exit = exitSpy();
+      const error = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      try {
         await expect(
           prepareJestDatabase({
             DATABASE_URL: direct,
@@ -650,11 +799,13 @@ describe('throwaway database lifecycle', () => {
           }),
         ).rejects.toThrow('exit 1');
         expect(error).toHaveBeenCalledWith(LIVE_DB_REFUSAL);
+      } finally {
         exit.mockRestore();
         error.mockRestore();
       }
 
-      const check = await openGuard();
+      const check = new Client({ connectionString: direct });
+      await check.connect();
       try {
         const count = await check.query<{ n: number }>(
           'SELECT count(*)::int AS n FROM qa_sentinel',
@@ -676,7 +827,51 @@ describe('throwaway database lifecycle', () => {
       if (createdOsRole) await admin.query(`DROP ROLE "${osUser}"`);
       await admin.end();
     }
+  }
+
+  it('refuses 0.0.0.0 when it reaches the live database', async () => {
+    const direct = replaceDatabase(serverUrl(), 'mc_alias_guard');
+    await refuseLiveAlias(rewriteHost(direct, '0.0.0.0'), false);
   });
+
+  it('refuses a host query alias', async () => {
+    const server = serverUrl();
+    const direct = replaceDatabase(server, 'mc_alias_guard');
+    const connectHost = new URL(server.replace(/^postgres(ql)?:/i, 'http:'))
+      .hostname;
+    await refuseLiveAlias(
+      rewriteHost(direct, 'db.invalid', connectHost),
+      false,
+    );
+  });
+
+  const hostAlias = resolveHostnameAlias(hostname(), lookupHost);
+  if ('skip' in hostAlias) {
+    it.skip(`refuses the machine hostname [${hostAlias.skip}]`, () =>
+      undefined);
+  } else {
+    it(`refuses the machine hostname (${hostAlias.address})`, async () => {
+      const direct = replaceDatabase(serverUrl(), 'mc_alias_guard');
+      await refuseLiveAlias(rewriteHost(direct, hostname()), false);
+    });
+  }
+
+  const socketPort = databaseIdentity(serverUrl())?.port || '5432';
+  const socketAlias = resolveSocketAlias({
+    port: socketPort,
+    database: 'mc_alias_guard',
+    overrideDir: process.env[SOCKET_DIR_ENV],
+    candidateDirs: SOCKET_CANDIDATE_DIRS,
+    fileExists: existsSync,
+  });
+  if ('skip' in socketAlias) {
+    it.skip(`refuses a Unix socket alias [${socketAlias.skip}]`, () =>
+      undefined);
+  } else {
+    it(`refuses a Unix socket alias (${socketAlias.dir})`, async () => {
+      await refuseLiveAlias(socketAlias.url, true);
+    });
+  }
 
   it('a login without superuser still refuses an alias', async () => {
     const server = serverUrl();
