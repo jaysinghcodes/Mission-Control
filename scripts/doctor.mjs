@@ -246,8 +246,11 @@ function composeServices(root, env = process.env) {
 async function usingDocker(root, env, processEnv = process.env) {
   if (env.MC_DOCTOR_DOCKER === '1') return true
   if (env.MC_DOCTOR_DOCKER === '0') return false
+  // Any project container selects Compose, including a created api or a
+  // stack whose api container was removed. A compose file with no containers
+  // stays on the native check, which names PORT.
   const listed = await composeServices(root, { ...processEnv, ...env })
-  return listed.split(/\r?\n/).some((line) => line.trim() === 'api')
+  return listed.split(/\r?\n/).some((line) => line.trim() !== '')
 }
 
 function probeHost(host) {
@@ -633,36 +636,43 @@ export function composeServiceReady(row) {
   return false
 }
 
+function serviceFailureSentence(names, kind) {
+  if (names.length === 0) return ''
+  const subject = names.length === 1 ? `The ${names[0]} service` : `The ${names.join(' and ')} services`
+  const command = kind === 'paused' ? 'unpause' : kind === 'missing' ? 'up -d' : 'start'
+  if (kind === 'paused') {
+    const state = names.length === 1 ? 'is paused' : 'are paused'
+    const verb = names.length === 1 ? 'Unpause it' : 'Unpause them'
+    return `${subject} ${state}. ${verb} with: docker compose ${command} ${names.join(' ')}`
+  }
+  const state = names.length === 1 ? 'is not running' : 'are not running'
+  const verb = names.length === 1 ? 'Start it' : 'Start them'
+  return `${subject} ${state}. ${verb} with: docker compose ${command} ${names.join(' ')}`
+}
+
 /**
- * Empty when neither db nor api has a container, or both are ready.
- * A project with no containers is left to the port check.
- * If one of them has a container, a missing partner is not running.
- * A paused service names unpause. Any other service that is not ready names start.
+ * Empty when the project has no containers, or db and api are both ready.
+ * A removed or never created service names docker compose up -d.
+ * An exited, created, or restarting service names docker compose start.
+ * A paused service names docker compose unpause.
+ * A created api whose port is held by another program is handled by the port check.
  */
 export function composeServiceFailure(rows) {
   const list = Array.isArray(rows) ? rows : []
-  const present = new Set(list.map((item) => item.service))
-  if (!present.has('db') && !present.has('api')) return ''
-  const paused = []
-  const stopped = []
+  if (list.length === 0) return ''
+  const buckets = { start: [], missing: [], paused: [] }
   for (const name of ['db', 'api']) {
     const row = list.find((item) => item.service === name)
     if (row && composeServiceReady(row)) continue
-    if (row && (row.state === 'paused' || row.status.startsWith('paused'))) paused.push(name)
-    else stopped.push(name)
+    if (!row) buckets.missing.push(name)
+    else if (row.state === 'paused' || row.status.startsWith('paused')) buckets.paused.push(name)
+    else buckets.start.push(name)
   }
-  const parts = []
-  if (stopped.length === 1) {
-    parts.push(`The ${stopped[0]} service is not running. Start it with: docker compose start ${stopped[0]}`)
-  } else if (stopped.length > 1) {
-    parts.push(`The ${stopped.join(' and ')} services are not running. Start them with: docker compose start ${stopped.join(' ')}`)
-  }
-  if (paused.length === 1) {
-    parts.push(`The ${paused[0]} service is paused. Unpause it with: docker compose unpause ${paused[0]}`)
-  } else if (paused.length > 1) {
-    parts.push(`The ${paused.join(' and ')} services are paused. Unpause them with: docker compose unpause ${paused.join(' ')}`)
-  }
-  return parts.join(' ')
+  return [
+    serviceFailureSentence(buckets.start, 'start'),
+    serviceFailureSentence(buckets.missing, 'missing'),
+    serviceFailureSentence(buckets.paused, 'paused'),
+  ].filter(Boolean).join(' ')
 }
 
 function decodeComposePs(env) {
@@ -783,6 +793,15 @@ function readComposeOwnership(root, port, env = process.env) {
   return { ok: true, published, containerPids }
 }
 
+async function outsideProgramHoldsPort(port, host, options) {
+  const free = await listenFree(port, host)
+  if (free) return false
+  const owner = typeof options.portOwner === 'function'
+    ? await options.portOwner(port, options)
+    : await defaultPortOwner(port, options)
+  return owner === 'foreign'
+}
+
 async function defaultPortOwner(port, options) {
   const env = options.env || process.env
   const listeners = options.readListeners ? options.readListeners(port) : readListenerRows(port, env)
@@ -884,6 +903,11 @@ export async function inspectApiPort(port, host = '127.0.0.1', options = {}) {
         ? options.readServices()
         : readComposeServiceRows(options.root, options.env || process.env)
       if (Array.isArray(rows)) {
+        const api = rows.find((row) => row.service === 'api')
+        // A created api never bound its port. Starting it fails while another program holds that port.
+        if (api && api.state === 'created' && await outsideProgramHoldsPort(port, host, options)) {
+          return { state: 'other', url: probeUrl, db: null }
+        }
         const downMessage = composeServiceFailure(rows)
         if (downMessage) return { state: 'down', url: probeUrl, db: null, downMessage }
         servicesReady = rows.some((row) => (row.service === 'db' || row.service === 'api') && composeServiceReady(row))

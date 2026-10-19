@@ -1136,10 +1136,17 @@ test('a stopped or paused compose service is a failure, not a slow start or a po
   assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
   assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}')), apiPaused)
   assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"restarting","Status":"Restarting"}\n{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"created","Status":"Created"}\n{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
   assert.equal(composeServiceFailure([]), '')
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
-  for (const line of [dbStopped, apiStopped, apiPaused]) {
+  const dbMissing = 'The db service is not running. Start it with: docker compose up -d db'
+  const apiMissing = 'The api service is not running. Start it with: docker compose up -d api'
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"running","Status":"Up"}')), dbMissing)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"running","Status":"Up"}')), apiMissing)
+  assert.equal(
+    composeServiceFailure(parseComposeServiceRows('{"Service":"web","State":"running","Status":"Up"}')),
+    'The db and api services are not running. Start them with: docker compose up -d db api',
+  )
+  for (const line of [dbStopped, apiStopped, apiPaused, dbMissing, apiMissing]) {
     assert.equal(hasDashPunctuation(line), false)
     assert.equal(/[→←⇒]|->/.test(line), false)
   }
@@ -1210,6 +1217,87 @@ test('a paused api is detected as this stack and fails with unpause', async () =
   assert.doesNotMatch(text, /still starting/)
   assert.doesNotMatch(text, /another program/)
   assert.equal(text.split('\n').some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
+})
+
+test('a created api on a busy port is a conflict, not a start command', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-created-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('occupied')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  const json = [
+    '{"Service":"api","State":"created","Status":"Created"}',
+    '{"Service":"db","State":"running","Status":"Up"}',
+    '{"Service":"web","State":"created","Status":"Created"}',
+  ].join('\n')
+  writeDockerStub(bin, { portLine: '', json, services: 'api\ndb\nweb' })
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_API_PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: Port ${port} is used by another program\\. Stop it or set MC_API_PORT in \\.env\\.$`, 'm'))
+    assert.match(text, /^info health: Skipped because the API port is used by another program\.$/m)
+    assert.doesNotMatch(text, /not running/)
+    assert.doesNotMatch(text, /docker compose start/)
+    assert.doesNotMatch(text, /set PORT in/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a removed api is still Compose and names docker compose up', async () => {
+  const message = 'The api service is not running. Start it with: docker compose up -d api'
+  const { result } = await doctorWithServices(
+    '{"Service":"db","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
+    'db\nweb',
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /npm run dev/)
+  assert.doesNotMatch(text, /Port .* is free/)
+  assert.doesNotMatch(text, /docker compose start/)
+})
+
+test('no containers report a port conflict with PORT', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-native-port-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('occupied')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: '', json: '', services: '' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services: {}\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: Port ${port} is used by another program\\. Stop it or set PORT in \\.env\\.$`, 'm'))
+    assert.doesNotMatch(text, /set MC_API_PORT in/)
+    assert.doesNotMatch(text, /not running/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('an inside doctor uses the compose snapshot for a stopped db', async () => {
