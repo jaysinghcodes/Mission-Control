@@ -926,9 +926,11 @@ test('port holder classification uses listeners and published compose ports', ()
   }), 'stack')
 })
 
-const FREE_WEB_PORT = 59173
-const FREE_DB_PORT = 59132
-const FREE_API_PORT = 59174
+// Below the ephemeral range (Linux 32768+, macOS 49152+) so a parallel listen(0)
+// cannot bind the port doctor expects to be free.
+const FREE_WEB_PORT = 18173
+const FREE_DB_PORT = 18132
+const FREE_API_PORT = 18174
 
 function doctorEnvFile(port, overrides = {}) {
   const api = overrides.api ?? port

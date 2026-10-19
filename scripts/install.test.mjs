@@ -163,8 +163,8 @@ if [ "$1" = "compose" ] && { [ "$2" = "exec" ] || [ "$2" = "run" ]; }; then
       unset MC_DOCTOR_PROBE_PORT
       # The host may already listen on the Compose defaults. This stub is the
       # host, so an unset web or db port would look like an outside holder.
-      if [ -z "\${MC_WEB_PORT:-}" ]; then MC_WEB_PORT=59173; export MC_WEB_PORT; fi
-      if [ -z "\${MC_DB_PORT:-}" ]; then MC_DB_PORT=59132; export MC_DB_PORT; fi
+      if [ -z "\${MC_WEB_PORT:-}" ]; then MC_WEB_PORT=18173; export MC_WEB_PORT; fi
+      if [ -z "\${MC_DB_PORT:-}" ]; then MC_DB_PORT=18132; export MC_DB_PORT; fi
       exec ${shellQuote(nodeBin)} scripts/doctor.mjs
       ;;
   esac
@@ -980,9 +980,9 @@ test('Run A: shell ports with no .env wait on that API port and print that web U
     const result = runInstall(fx.repo, {
       ...fx.env,
       MC_INSTALL_READY_SECONDS: '8',
-      MC_WEB_PORT: '5880',
+      MC_WEB_PORT: '15880',
       MC_API_PORT: '3880',
-      MC_DB_PORT: '55880',
+      MC_DB_PORT: '15580',
       MC_REMOTE_PORT: '4011',
     })
     const text = outputOf(result)
@@ -991,12 +991,12 @@ test('Run A: shell ports with no .env wait on that API port and print that web U
     assert.match(text, /Waiting for the API health check on port 3880\./)
     assert.doesNotMatch(text, /port 3000/)
     assert.match(text, /pass ports: Port 3880 is already running\./)
-    assert.match(text, /Open http:\/\/localhost:5880\/#\/tasks/)
+    assert.match(text, /Open http:\/\/localhost:15880\/#\/tasks/)
     assert.match(text, /Tunnel port 4011\./)
     assert.doesNotMatch(text, /localhost:5173/)
     assert.match(written, /^MC_API_PORT=3880$/m)
-    assert.match(written, /^MC_WEB_PORT=5880$/m)
-    assert.match(written, /^MC_DB_PORT=55880$/m)
+    assert.match(written, /^MC_WEB_PORT=15880$/m)
+    assert.match(written, /^MC_DB_PORT=15580$/m)
     assert.match(written, /^MC_REMOTE_PORT=4011$/m)
     assert.match(text, /Wrote host port values from the environment into \.env\./)
     assert.equal(/\bfail /.test(text), false, text)
@@ -1013,8 +1013,8 @@ test('Run B: ports already in .env are kept and used', async () => {
     health = await startDelayedHealthOn(fx.dir, 3881, 1200)
     const envFile = keptEnv(fx.repo, {
       MC_API_PORT: '3881',
-      MC_WEB_PORT: '5881',
-      MC_DB_PORT: '55881',
+      MC_WEB_PORT: '15881',
+      MC_DB_PORT: '15581',
     })
     const before = readFileSync(envFile)
     const result = runInstall(fx.repo, {
@@ -1029,7 +1029,7 @@ test('Run B: ports already in .env are kept and used', async () => {
     assert.doesNotMatch(text, /Set DATABASE_URL to port/)
     assert.match(text, /Waiting for the API health check on port 3881\./)
     assert.match(text, /pass ports: Port 3881 is already running\./)
-    assert.match(text, /Open http:\/\/localhost:5881\/#\/tasks/)
+    assert.match(text, /Open http:\/\/localhost:15881\/#\/tasks/)
     assert.doesNotMatch(text, /localhost:5173/)
     assert.doesNotMatch(text, /Wrote host port values/)
     assert.equal(/\bfail /.test(text), false, text)
@@ -1042,19 +1042,19 @@ test('Run B: ports already in .env are kept and used', async () => {
 test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and updated on a rerun', () => {
   const fx = freshDir()
   try {
-    const first = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55432' })
+    const first = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15432' })
     const firstText = outputOf(first)
     const firstFailed = assertReadableDoctor(firstText).some((line) => line.startsWith('fail '))
     assert.equal(first.status, firstFailed ? 1 : 0, firstText)
     const envPath = path.join(fx.repo, '.env')
     const firstEnv = assignments(readFileSync(envPath, 'utf8'))
-    assert.equal(firstEnv.MC_DB_PORT, '55432')
-    assert.equal(firstEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:55432/mission_control')
+    assert.equal(firstEnv.MC_DB_PORT, '15432')
+    assert.equal(firstEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:15432/mission_control')
     assert.match(firstEnv.INGEST_TOKEN, /^[0-9a-f]{48}$/)
     assert.equal(firstEnv.SOCKET_TOKEN ?? '', '')
     assert.match(firstEnv.DASHBOARD_PASSWORD_HASH, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/)
     assert.match(firstEnv.SESSION_SECRET, /^[0-9a-f]{64}$/)
-    assert.match(firstText, /Set DATABASE_URL to port 55432\./)
+    assert.match(firstText, /Set DATABASE_URL to port 15432\./)
     assert.equal(firstText.includes(firstEnv.INGEST_TOKEN), false)
     assert.equal(firstText.includes(firstEnv.DASHBOARD_PASSWORD_HASH), false)
     assert.equal(firstText.includes(firstEnv.SESSION_SECRET), false)
@@ -1072,19 +1072,19 @@ test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and upda
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
     assert.equal(plainText.includes(firstEnv.INGEST_TOKEN), false)
 
-    const changed = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55499' })
+    const changed = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15499' })
     const changedText = outputOf(changed)
     const changedEnv = assignments(readFileSync(envPath, 'utf8'))
     const changedFailed = assertReadableDoctor(changedText).some((line) => line.startsWith('fail '))
     assert.equal(changed.status, changedFailed ? 1 : 0, changedText)
-    assert.equal(changedEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:55499/mission_control')
-    assert.equal(changedEnv.MC_DB_PORT, '55499')
+    assert.equal(changedEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:15499/mission_control')
+    assert.equal(changedEnv.MC_DB_PORT, '15499')
     assert.equal(changedEnv.INGEST_TOKEN, firstEnv.INGEST_TOKEN)
     assert.equal(changedEnv.SOCKET_TOKEN ?? '', '')
     assert.equal(changedEnv.DASHBOARD_PASSWORD_HASH, firstEnv.DASHBOARD_PASSWORD_HASH)
     assert.equal(changedEnv.SESSION_SECRET, firstEnv.SESSION_SECRET)
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
-    assert.match(changedText, /Set DATABASE_URL to port 55499\./)
+    assert.match(changedText, /Set DATABASE_URL to port 15499\./)
     assert.match(changedText, /Tokens and secrets were not changed\./)
     assert.doesNotMatch(changedText, /DATABASE_URL is custom/)
     assert.equal(changedText.includes(firstEnv.INGEST_TOKEN), false)
@@ -1097,8 +1097,8 @@ test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and upda
     }
     const changedFile = readFileSync(envPath, 'utf8')
     const expectedFile = beforePlain.toString('utf8')
-      .replace('MC_DB_PORT=55432', 'MC_DB_PORT=55499')
-      .replace('localhost:55432/', 'localhost:55499/')
+      .replace('MC_DB_PORT=15432', 'MC_DB_PORT=15499')
+      .replace('localhost:15432/', 'localhost:15499/')
     assert.equal(changedFile, expectedFile)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
@@ -1114,7 +1114,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       `SOCKET_TOKEN=${'cd'.repeat(24)}`,
       'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       `SESSION_SECRET=${'ef'.repeat(32)}`,
-      'MC_DB_PORT=55494',
+      'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@db.example.internal:6543/otherdb?sslmode=require',
       'PORT=3000',
       '',
@@ -1132,7 +1132,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
     assert.equal(PUNCT.test(plainText), false)
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
 
-    const override = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55499' })
+    const override = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15499' })
     const overrideText = outputOf(override)
     assert.deepEqual(readFileSync(envPath), before)
     assert.match(overrideText, /DATABASE_URL is custom, so it was left as is\. Update its port by hand if needed\./)
@@ -1145,7 +1145,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       `SOCKET_TOKEN=${'cd'.repeat(24)}`,
       'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       `SESSION_SECRET=${'ef'.repeat(32)}`,
-      'MC_DB_PORT=55494',
+      'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@localhost/otherdb',
       'PORT=3000',
       '',
@@ -1153,7 +1153,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
     writeFileSync(envPath, portless)
     chmodSync(envPath, 0o640)
     const portlessBefore = readFileSync(envPath)
-    const portlessRun = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55499' })
+    const portlessRun = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15499' })
     const portlessText = outputOf(portlessRun)
     assert.deepEqual(readFileSync(envPath), portlessBefore)
     assert.match(portlessText, /DATABASE_URL is custom, so it was left as is\. Update its port by hand if needed\./)
