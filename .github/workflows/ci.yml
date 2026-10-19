@@ -143,15 +143,24 @@ jobs:
         include:
           - os: ubuntu-latest
             mode: compose
-            label: ubuntu compose
+            node: '26'
+            label: ubuntu compose node 26
           - os: ubuntu-latest
             mode: native
-            label: ubuntu native
+            node: '22'
+            label: ubuntu native node 22
+            api_port: '3405'
+            web_port: '5405'
+          - os: ubuntu-latest
+            mode: native
+            node: '24'
+            label: ubuntu native node 24
             api_port: '3405'
             web_port: '5405'
           - os: macos-latest
             mode: native
-            label: macos native
+            node: '22'
+            label: macos native node 22
             api_port: '3405'
             web_port: '5405'
     env:
@@ -168,7 +177,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
 
       - name: Use npm 11.17.0
         run: npm install -g npm@11.17.0
