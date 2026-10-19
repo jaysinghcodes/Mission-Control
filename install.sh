@@ -443,6 +443,82 @@ print("scrypt:16384:8:1:%s:%s" % (salt.hex(), key.hex()))
 print(secrets.token_hex(32))'
 }
 
+# compose-host-free:start
+# Compose helpers. curl and docker compose exec only. No host node, npm, or npx.
+dashboard_secrets_from_openssl() {
+  local password salt key secret
+  password="$(openssl rand -base64 18 | tr '+/' '-_' | tr -d '\n=')"
+  salt="$(openssl rand -hex 16)"
+  key="$(openssl kdf -keylen 32 -kdfopt "pass:${password}" -kdfopt "hexsalt:${salt}" -kdfopt n:16384 -kdfopt r:8 -kdfopt p:1 SCRYPT 2>/dev/null || true)"
+  key="$(printf '%s' "$key" | tr -d ':\n\r ' | tr 'A-F' 'a-f' | tr -cd '0-9a-f')"
+  secret="$(openssl rand -hex 32)"
+  if [[ ! "$key" =~ ^[0-9a-f]{64}$ ]]; then
+    return 1
+  fi
+  printf '%s\n%s\n%s\n' "$password" "scrypt:16384:8:1:${salt}:${key}" "$secret"
+}
+
+compose_dashboard_secrets() {
+  local raw
+  raw="$(dashboard_secrets_from_openssl 2>/dev/null || true)"
+  if accept_dashboard_secrets "$raw"; then
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    raw="$(dashboard_secrets_from_python 2>/dev/null || true)"
+    if accept_dashboard_secrets "$raw"; then
+      return 0
+    fi
+  fi
+  echo "Could not generate a dashboard password. Install OpenSSL 3 or Python 3, then run bash install.sh again." >&2
+  return 1
+}
+
+compose_health_exec() {
+  docker compose exec -T api node -e 'fetch("http://127.0.0.1:3000/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' >/dev/null 2>&1
+}
+
+health_body_ready() {
+  local body
+  body="$(cat "$1" 2>/dev/null || true)"
+  [[ "$body" == *'"service":"mission-control"'* || "$body" == *'"service": "mission-control"'* ]] || return 1
+  [[ "$body" == *'"status":"ok"'* || "$body" == *'"status": "ok"'* ]] || return 1
+  [[ "$body" == *'"database":"connected"'* || "$body" == *'"database": "connected"'* ]] || return 1
+}
+
+compose_health_curl() {
+  local port body code
+  port="$(health_connect_port "$1")"
+  body="$(mktemp "${TMPDIR:-/tmp}/mc-health.XXXXXX")"
+  code="$(curl -sS -o "$body" -w '%{http_code}' --max-time 2 "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
+  code="${code//$'\n'/}"
+  code="${code//$'\r'/}"
+  if health_body_ready "$body"; then
+    rm -f "$body"
+    return 0
+  fi
+  rm -f "$body"
+  # A published Compose port is not loopback, so a live API answers 401.
+  if [[ "$code" == "401" ]]; then
+    compose_health_exec
+    return
+  fi
+  return 1
+}
+
+compose_health_ok() {
+  local port code
+  port="$1"
+  code=0
+  if command -v curl >/dev/null 2>&1; then
+    compose_health_curl "$port" || code=$?
+  else
+    compose_health_exec || code=$?
+  fi
+  return "$code"
+}
+# compose-host-free:end
+
 accept_dashboard_secrets() {
   local raw password hash secret
   raw="$1"
@@ -466,6 +542,10 @@ accept_dashboard_secrets() {
 generate_dashboard_secrets() {
   local raw
   raw=""
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+    compose_dashboard_secrets
+    return
+  fi
   if command -v node >/dev/null 2>&1; then
     raw="$(dashboard_secrets_from_node 2>/dev/null || true)"
     if accept_dashboard_secrets "$raw"; then
@@ -477,6 +557,10 @@ generate_dashboard_secrets() {
     if accept_dashboard_secrets "$raw"; then
       return 0
     fi
+  fi
+  raw="$(dashboard_secrets_from_openssl 2>/dev/null || true)"
+  if accept_dashboard_secrets "$raw"; then
+    return 0
   fi
   echo "Could not generate a dashboard password. Install Node.js or Python 3, then run bash install.sh again." >&2
   return 1
@@ -806,30 +890,49 @@ health_connect_port() {
   printf '%s' "$logical"
 }
 
-health_probe_host() {
+native_health_ok() {
   local port
   port="$(health_connect_port "$1")"
-  # 0 is a healthy Mission Control body. 2 is HTTP 401. Anything else is 1.
-  node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/health").then(async (res) => { if (res.status === 401) process.exit(2); if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' "$port" >/dev/null 2>&1
+  # 0 is a healthy Mission Control body. The native path already requires Node.
+  node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' "$port" >/dev/null 2>&1
 }
 
 health_ok_port() {
-  local port code
+  local port
   port="$1"
-  code=0
-  health_probe_host "$port" || code=$?
-  if [[ "$code" -eq 0 ]]; then
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+    compose_health_ok "$port"
+    return
+  fi
+  native_health_ok "$port"
+}
+
+# MC_INSTALL_CLOCK_FILE is a test seam. Each pause adds MC_INSTALL_CLOCK_STEP seconds.
+install_now() {
+  local now
+  if [[ -n "${MC_INSTALL_CLOCK_FILE:-}" ]]; then
+    now="$(tr -cd '0-9' < "$MC_INSTALL_CLOCK_FILE" 2>/dev/null || true)"
+    if [[ -z "$now" ]]; then
+      now=0
+    fi
+    printf '%s' "$now"
     return 0
   fi
-  # Compose publishes the API through the Docker bridge, so the host request
-  # is not loopback and /health is 401. Probe 127.0.0.1 inside the container.
-  if [[ "$code" -eq 2 && "${USE_DOCKER:-0}" == "1" ]]; then
-    if docker compose exec -T api node -e 'fetch("http://127.0.0.1:3000/health").then(async (res) => { if (!res.ok) process.exit(1); const body = await res.json(); const ok = body && body.service === "mission-control" && body.status === "ok" && body.database === "connected"; process.exit(ok ? 0 : 1); }).catch(() => process.exit(1))' >/dev/null 2>&1; then
-      return 0
+  date +%s
+}
+
+install_pause() {
+  local now step
+  if [[ -n "${MC_INSTALL_CLOCK_FILE:-}" ]]; then
+    now="$(install_now)"
+    step="${MC_INSTALL_CLOCK_STEP:-1}"
+    if [[ ! "$step" =~ ^[0-9]+$ || "$step" -lt 1 ]]; then
+      step=1
     fi
-    return 1
+    printf '%s\n' "$((now + step))" > "$MC_INSTALL_CLOCK_FILE"
+    return 0
   fi
-  return 1
+  sleep 1
 }
 
 health_ok() {
@@ -837,7 +940,7 @@ health_ok() {
 }
 
 wait_on_port() {
-  local port seconds i
+  local port seconds start now
   port="$1"
   seconds="${MC_INSTALL_READY_SECONDS:-90}"
   if [[ "$seconds" == "0" ]]; then
@@ -846,13 +949,16 @@ wait_on_port() {
   if [[ ! "$seconds" =~ ^[0-9]+$ ]]; then
     seconds=90
   fi
-  i=0
-  while [[ "$i" -lt "$seconds" ]]; do
+  start="$(install_now)"
+  while true; do
+    now="$(install_now)"
+    if [[ $((now - start)) -ge "$seconds" ]]; then
+      break
+    fi
     if health_ok_port "$port"; then
       return 0
     fi
-    i=$((i + 1))
-    sleep 1
+    install_pause
   done
   echo "The API did not answer on port ${port} yet. Doctor will report the health check."
 }
@@ -1568,10 +1674,12 @@ main() {
     uninstall_schedule
     exit 0
   fi
-  ensure_env
   USE_DOCKER=0
   if have_docker; then
     USE_DOCKER=1
+  fi
+  ensure_env
+  if [[ "$USE_DOCKER" == "1" ]]; then
     start_docker
   else
     start_native

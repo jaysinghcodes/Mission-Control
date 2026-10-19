@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -20,8 +20,16 @@ import {
   dockerPermissionDenied,
   effectiveEnv,
   hasDashPunctuation,
+  STARTING_NOTE,
+  classifyPortHolder,
+  doctorHealthBudgetMs,
   inspectApiPort,
   nodeSupported,
+  parseComposePublishedPorts,
+  parseDockerPortLines,
+  parseLsofListeners,
+  parseSsListeners,
+  readListenerRows,
   readHealthIdentity,
   report,
   runDoctor,
@@ -853,4 +861,249 @@ test('docs point at npm run doctor and do not use dash punctuation in that guida
   const onboardingLine = onboarding.split('\n').find((line) => line.includes('npm run doctor'))
   assert.equal(hasDashPunctuation(readmeLine), false)
   assert.equal(hasDashPunctuation(onboardingLine), false)
+})
+
+test('doctor health budget defaults to 60 seconds and accepts 0', () => {
+  assert.equal(doctorHealthBudgetMs({}), 60000)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: '' }), 60000)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: 'nope' }), 60000)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: '0' }), 0)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: '60' }), 60000)
+  assert.equal(STARTING_NOTE, 'The API is still starting. Run doctor again in a minute.')
+  assert.equal(hasDashPunctuation(STARTING_NOTE), false)
+})
+
+test('port holder classification uses listeners and published compose ports', () => {
+  const ss = 'LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:(("docker-proxy",pid=4242,fd=4))'
+  assert.deepEqual(parseSsListeners(ss, 3000), [{ pid: 4242, command: 'docker-proxy' }])
+  assert.deepEqual(parseSsListeners(ss, 3001), [])
+  assert.deepEqual(parseLsofListeners('node 5151 user 23u IPv4 1 0t0 TCP 127.0.0.1:3000 (LISTEN)\n'), [{ pid: 5151, command: 'node' }])
+  const published = parseComposePublishedPorts('{"Service":"api","Publishers":[{"PublishedPort":3200,"TargetPort":3000}]}\n')
+  assert.deepEqual(published, [3200])
+  assert.deepEqual(parseDockerPortLines('127.0.0.1:3200\n'), [3200])
+  assert.equal(classifyPortHolder({
+    port: 3200,
+    listeners: [{ pid: 9, command: 'docker-proxy' }],
+    publishedPorts: [3200],
+    containerPids: [],
+    dockerOk: true,
+    portInUse: true,
+  }), 'stack')
+  assert.equal(classifyPortHolder({
+    port: 3000,
+    listeners: [{ pid: 5151, command: 'node' }],
+    publishedPorts: [3200],
+    containerPids: [],
+    dockerOk: true,
+    portInUse: true,
+  }), 'foreign')
+  assert.equal(classifyPortHolder({
+    port: 3000,
+    listeners: [{ pid: 9, command: 'docker-proxy' }],
+    publishedPorts: [],
+    containerPids: [],
+    dockerOk: false,
+    portInUse: true,
+  }), 'unknown')
+  assert.equal(classifyPortHolder({
+    port: 3000,
+    listeners: [{ pid: 77, command: 'node' }],
+    publishedPorts: [],
+    containerPids: [77],
+    dockerOk: true,
+    portInUse: true,
+  }), 'stack')
+})
+
+function doctorEnvFile(port) {
+  return [
+    'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
+    'PORT=3000',
+    `MC_API_PORT=${port}`,
+    'HOST=127.0.0.1',
+    'INGEST_TOKEN=abc123',
+    'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabbccddeeff00112233445566778899:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'SESSION_SECRET=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+    '',
+  ].join('\n')
+}
+
+function writeDockerStub(bin, { portLine = '', json = '' } = {}) {
+  mkdirSync(bin, { recursive: true })
+  const file = path.join(bin, 'docker')
+  writeFileSync(file, `#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "json" ]; then
+      printf '%s\\n' ${JSON.stringify(json)}
+      exit 0
+    fi
+  done
+  exit 0
+fi
+if [ "$1" = "compose" ] && [ "$2" = "port" ]; then
+  if [ -n ${JSON.stringify(portLine)} ]; then
+    printf '%s\\n' ${JSON.stringify(portLine)}
+    exit 0
+  fi
+  exit 1
+fi
+exit 0
+`)
+  chmodSync(file, 0o755)
+}
+
+test('a slow compose probe waits up to 60 seconds and reports healthy as soon as the API answers', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-slow-'))
+  const bin = path.join(dir, 'bin')
+  let hits = 0
+  let hold = false
+  const server = http.createServer((req, res) => {
+    hits += 1
+    if (hold || hits < 3) {
+      res.writeHead(404, { 'content-type': 'text/plain' })
+      res.end('starting')
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: `127.0.0.1:${port}`, json: `{"Service":"api","Publishers":[{"PublishedPort":${port}}]}` })
+  try {
+    const listeners = readListenerRows(port)
+    assert.ok(listeners.some((row) => row.command && row.command !== 'docker-proxy'), JSON.stringify(listeners))
+    let soonClock = 0
+    const soon = await inspectApiPort(port, '127.0.0.1', {
+      docker: true,
+      root: dir,
+      budgetMs: 60000,
+      httpTimeoutMs: 200,
+      now: () => soonClock,
+      sleep: async (ms) => { soonClock += ms },
+      env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` },
+    })
+    assert.equal(soon.state, 'ours')
+    assert.equal(soon.db, 'up')
+    assert.equal(hits, 3)
+    assert.ok(soonClock < 60000, String(soonClock))
+    hold = true
+    let clock = 0
+    const capped = await inspectApiPort(port, '127.0.0.1', {
+      docker: true,
+      root: dir,
+      budgetMs: 60000,
+      httpTimeoutMs: 50,
+      now: () => clock,
+      sleep: async (ms) => { clock += ms },
+      portOwner: async () => 'stack',
+    })
+    assert.equal(capped.state, 'starting')
+    assert.ok(clock >= 60000 && clock < 120000, String(clock))
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('doctor slow probe output is the starting sentence and does not fail', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-start-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('not yet')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: `127.0.0.1:${port}`, json: `{"Service":"api","Publishers":[{"PublishedPort":${port}}]}` })
+  try {
+    writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_API_PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 0, text)
+    assert.match(text, /^info ports: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.match(text, /^info health: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.doesNotMatch(text, /another program/)
+    assert.doesNotMatch(text, /npm run dev/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('doctor reports a real port conflict when another program holds the port', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-foreign-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('occupied')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: '', json: '' })
+  try {
+    const listeners = readListenerRows(port)
+    assert.ok(listeners.some((row) => row.pid && row.command && !row.command.includes('docker-proxy')), JSON.stringify(listeners))
+    assert.equal(classifyPortHolder({
+      port,
+      listeners,
+      publishedPorts: [],
+      containerPids: [],
+      dockerOk: true,
+      portInUse: true,
+    }), 'foreign')
+    writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_API_PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: Port ${port} is used by another program\\. Stop it or set MC_API_PORT in \\.env\\.$`, 'm'))
+    assert.match(text, /^info health: Skipped because the API port is used by another program\.$/m)
+    assert.doesNotMatch(text, /still starting/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a database down health body still fails and is not a slow start', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-down-'))
+  const server = http.createServer((req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'degraded', database: 'unavailable', db: 'down' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    const seen = await inspectApiPort(port, '127.0.0.1', { docker: true, root: dir, budgetMs: 60000, portOwner: async () => 'stack' })
+    assert.equal(seen.state, 'ours')
+    assert.equal(seen.db, 'down')
+    writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_API_PORT: String(port),
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, /^pass ports: /m)
+    assert.match(text, /^fail health: The health check says the database is down\.$/m)
+    assert.doesNotMatch(text, /still starting/)
+    assert.doesNotMatch(text, /another program/)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

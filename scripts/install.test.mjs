@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
+import { scryptSync } from 'node:crypto'
 import { createServer } from 'node:http'
 import {
   chmodSync,
@@ -1698,6 +1699,202 @@ test('bridge schedule: unknown arguments do not install or uninstall', () => {
     assert.notEqual(extra.status, 0)
     assert.equal(existsSync(path.join(fx.repo, '.env')), false)
   } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+function passwordMatchesHash(password, stored) {
+  const parts = String(stored).split(':')
+  if (parts.length !== 6) return false
+  const salt = Buffer.from(parts[4], 'hex')
+  const expected = Buffer.from(parts[5], 'hex')
+  const actual = scryptSync(password, salt, expected.length, { N: 16384, r: 8, p: 1 })
+  return actual.equals(expected)
+}
+
+function realCommand(name) {
+  const found = spawnSync('bash', ['-lc', `command -v ${name}`], { encoding: 'utf8' })
+  if (found.status !== 0) return ''
+  return found.stdout.trim()
+}
+
+function stripQuotes(text) {
+  return String(text).replace(/'(?:\\'|[^'])*'|"(?:\\"|[^"])*"|`(?:\\`|[^`])*`/g, '""')
+}
+
+function extractMarked(source, startMark, endMark) {
+  const start = source.indexOf(startMark)
+  const end = source.indexOf(endMark)
+  assert.ok(start >= 0 && end > start, startMark)
+  return source.slice(start, end)
+}
+
+function extractShellFunction(source, name) {
+  const token = `\n${name}() {`
+  const start = source.indexOf(token)
+  assert.ok(start >= 0, name)
+  let depth = 0
+  for (let i = start + token.length - 1; i < source.length; i += 1) {
+    const char = source[i]
+    if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(start, i + 1)
+    }
+  }
+  throw new Error(`unclosed ${name}`)
+}
+
+test('rg finds no host node, npm, or npx invocation on the compose path or in doctor', () => {
+  const script = readFileSync(path.join(root, 'install.sh'), 'utf8')
+  const doctor = readFileSync(path.join(root, 'scripts/doctor.mjs'), 'utf8')
+  const branch = [
+    extractMarked(script, '# compose-host-free:start', '# compose-host-free:end'),
+    extractShellFunction(script, 'start_docker'),
+    extractShellFunction(script, 'health_ok_port'),
+    extractShellFunction(script, 'wait_on_port'),
+    stripQuotes(doctor),
+  ].join('\n')
+  const which = spawnSync('bash', ['-lc', 'command -v rg'], { encoding: 'utf8' })
+  assert.equal(which.status, 0, 'rg is required for the compose host tool check')
+  const result = spawnSync(which.stdout.trim(), [
+    '-n',
+    '--pcre2',
+    '(?:^|[;&|(`]|&&|\\|\\|)[[:space:]]*(?:node|npm|npx)(?:[[:space:]]|$)',
+    '-',
+  ], {
+    input: branch,
+    encoding: 'utf8',
+  })
+  assert.equal(result.status, 1, result.stdout || result.stderr)
+  assert.equal(result.stdout, '')
+})
+
+test('compose health wait uses curl, returns as soon as the API answers, and caps at 90 seconds', async () => {
+  const curlBin = realCommand('curl')
+  assert.ok(curlBin)
+  const ready = freshDir()
+  let health
+  const curlLog = path.join(ready.dir, 'curl.log')
+  const nodeLog = path.join(ready.dir, 'node.log')
+  const npmLog = path.join(ready.dir, 'npm.log')
+  writeFileSync(curlLog, '')
+  writeFileSync(nodeLog, '')
+  writeFileSync(npmLog, '')
+  writeExe(path.join(ready.bin, 'curl'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(curlLog)}
+exec ${shellQuote(curlBin)} "$@"
+`)
+  writeExe(path.join(ready.bin, 'node'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(nodeLog)}
+if [ "$1" = "scripts/doctor.mjs" ]; then
+  exec ${shellQuote(process.execPath)} "$@"
+fi
+exit 99
+`)
+  writeExe(path.join(ready.bin, 'npm'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(npmLog)}
+exit 99
+`)
+  writeExe(path.join(ready.bin, 'npx'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(npmLog)}
+exit 99
+`)
+  try {
+    health = await startDelayedHealth(ready.dir, 0)
+    const result = runInstall(ready.repo, {
+      ...ready.env,
+      PATH: `${ready.bin}:${process.env.PATH ?? ''}`,
+      MC_API_PORT: String(health.port),
+      MC_INSTALL_READY_SECONDS: '90',
+    })
+    const text = outputOf(result)
+    assert.equal(result.status, 0, text)
+    assert.doesNotMatch(text, /did not answer on port/)
+    const curls = readFileSync(curlLog, 'utf8').split('\n').filter((line) => line.includes('/health'))
+    assert.ok(curls.length >= 1 && curls.length < 5, readFileSync(curlLog, 'utf8'))
+    const nodeCalls = readFileSync(nodeLog, 'utf8').split('\n').filter(Boolean)
+    assert.deepEqual(nodeCalls, ['scripts/doctor.mjs'])
+    assert.equal(readFileSync(npmLog, 'utf8'), '')
+    const env = assignments(readFileSync(path.join(ready.repo, '.env'), 'utf8'))
+    const password = text.match(/Dashboard password, shown once: (\S+)/)
+    assert.ok(password, text)
+    assert.equal(passwordMatchesHash(password[1], env.DASHBOARD_PASSWORD_HASH), true)
+  } finally {
+    health?.child.kill()
+    rmSync(ready.dir, { recursive: true, force: true })
+  }
+
+  const capped = freshDir()
+  const capLog = path.join(capped.dir, 'curl.log')
+  const clock = path.join(capped.dir, 'clock')
+  writeFileSync(capLog, '')
+  writeFileSync(clock, '0\n')
+  writeExe(path.join(capped.bin, 'curl'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(capLog)}
+exit 7
+`)
+  try {
+    const result = runInstall(capped.repo, {
+      ...capped.env,
+      PATH: `${capped.bin}:${pathWithout(['node', 'npm', 'npx'])}`,
+      MC_INSTALL_READY_SECONDS: '90',
+      MC_INSTALL_CLOCK_FILE: clock,
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+    })
+    const text = outputOf(result)
+    assert.equal(result.status, 0, text)
+    assert.match(text, /The API did not answer on port/)
+    assert.match(text, /Node is not on PATH/)
+    const curls = readFileSync(capLog, 'utf8').split('\n').filter((line) => line.includes('/health'))
+    assert.equal(curls.length, 90, readFileSync(capLog, 'utf8'))
+    assert.equal(readFileSync(clock, 'utf8').trim(), '90')
+  } finally {
+    rmSync(capped.dir, { recursive: true, force: true })
+  }
+})
+
+test('compose health wait uses docker compose exec when curl is missing and stays healthy without host node', async () => {
+  const fx = freshDir()
+  const stripped = path.join(fx.dir, 'stripped')
+  mkdirSync(stripped)
+  for (const entry of (process.env.PATH ?? '').split(':')) {
+    if (!entry || !existsSync(entry)) continue
+    let names = []
+    try {
+      names = readdirSync(entry)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (name === 'curl' || name === 'node' || name === 'npm' || name === 'npx') continue
+      const dest = path.join(stripped, name)
+      if (existsSync(dest)) continue
+      try {
+        symlinkSync(path.join(entry, name), dest)
+      } catch {
+        // Skip entries that cannot be linked.
+      }
+    }
+  }
+  let health
+  try {
+    health = await startDelayedHealth(fx.dir, 1200)
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      PATH: `${fx.bin}:${stripped}`,
+      MC_API_PORT: String(health.port),
+      MC_INSTALL_READY_SECONDS: '8',
+    })
+    const text = outputOf(result)
+    assert.equal(result.status, 0, text)
+    assert.doesNotMatch(text, /did not answer on port/)
+    assert.match(text, /Node is not on PATH/)
+    const dockerLog = readFileSync(fx.log, 'utf8')
+    assert.match(dockerLog, /compose exec -T api/)
+    assert.equal(text.includes('node -e'), false)
+  } finally {
+    health?.child.kill()
     rmSync(fx.dir, { recursive: true, force: true })
   }
 })

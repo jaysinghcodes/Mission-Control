@@ -111,6 +111,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'ON THE HOST',
     body: [
       'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and prints the URL. The password is shown once.',
+      'The Compose health wait polls /health with curl. If curl is missing, it uses docker compose exec against the api container. That wait does not call host Node.',
       'The README opens with that installer on one line. From a directory that is not this checkout, that line clones into mission-control and runs bash install.sh.',
       'CI runs this installer with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker.',
       'Before Compose starts, the installer creates `data/docs` as the user running the script. That user can delete the checkout. `npm run seed:demo` on the host writes sample docs as that same user.',
