@@ -39,6 +39,9 @@ import { AppModule } from '../app.module';
 /**
  * IngestController e2e-style tests (supertest against the real module).
  *
+ * The app connects to the isolated test database from jest global setup.
+ * This file does not read DATABASE_URL.
+ *
  * Scope: auth guard + event validation on POST /events. Broadcast behavior
  * itself is covered by the gateway spec; here we prove the door is locked
  * in production and rejects unknown types.
@@ -112,15 +115,13 @@ describe('IngestController (POST /events)', () => {
 });
 
 /**
- * MC-200 — agent snapshot profile fields + roster endpoints.
+ * MC-200 agent snapshot profile fields and roster endpoints.
  *
  * Covers the three acceptance cases: (1) a snapshot WITH the new fields
  * persists them, (2) a legacy snapshot WITHOUT them falls back to
  * defaults/null (backward compatible), and (3) GET /agents/:id returns one
- * agent with its children (parentId tree). These tests run against the real
- * module + dev DB like the rest of this file; the roster present before the
- * tests is restored in afterAll so the dashboard isn't left showing test
- * agents after the suite runs.
+ * agent with its children (parentId tree). The suite uses the isolated test
+ * database, not the database named by DATABASE_URL.
  */
 describe('MC-200 agent snapshot profile fields (POST /events agents.snapshot)', () => {
   let app: INestApplication;

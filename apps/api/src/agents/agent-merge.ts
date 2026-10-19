@@ -72,7 +72,7 @@ export type RegisterPlan =
   | { ok: false; status: 409; message: string };
 
 export type DeletePlan =
-  { ok: true } | { ok: false; status: 404 | 409; message: string };
+  { ok: true } | { ok: false; status: 404; message: string };
 
 export type HeartbeatPlan =
   { ok: true; row: RosterAgent } | { ok: false; status: 404; message: string };
@@ -298,20 +298,6 @@ export function planHeartbeat(
 
 export function planDelete(row: RosterAgent | null): DeletePlan {
   if (!row) return { ok: false, status: 404, message: 'agent not found' };
-  if (row.source === 'default') {
-    return {
-      ok: false,
-      status: 409,
-      message: 'default agents cannot be deleted',
-    };
-  }
-  if (row.source !== 'registered') {
-    return {
-      ok: false,
-      status: 409,
-      message: 'snapshot agents cannot be deleted',
-    };
-  }
   return { ok: true };
 }
 

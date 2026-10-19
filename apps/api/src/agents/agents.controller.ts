@@ -155,20 +155,20 @@ export class AgentsController {
   }
 
   /**
-   * DELETE /agents/:id. 204 for a registered bot. 409 for a default or
-   * snapshot row. 404 when the id is missing. Nothing is auto deleted.
+   * DELETE /agents/:id. 204 for any agent. 404 when the id is missing.
+   * A snapshot row stays gone until a later agents.snapshot includes it.
+   * This is a dashboard write. It does not use the ingest token.
    */
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string): Promise<void> {
     const found = await this.prisma.agent.findUnique({ where: { id } });
     const plan = planDelete(found ? asRosterAgent(found) : null);
-    if (!plan.ok) {
-      if (plan.status === 404) throw new NotFoundException(plan.message);
-      throw new ConflictException(plan.message);
+    if (!plan.ok || !found) {
+      throw new NotFoundException(plan.ok ? 'agent not found' : plan.message);
     }
     await this.prisma.agent.delete({ where: { id } });
-    await this.emit('delete', id, 'registered', true, found?.name);
+    await this.emit('delete', id, found.source, true, found.name);
   }
 
   private present<T extends { source: string; lastSeenAt: Date | null }>(
