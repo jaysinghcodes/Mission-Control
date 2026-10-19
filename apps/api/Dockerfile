@@ -30,6 +30,8 @@ RUN npx prisma generate --schema apps/api/prisma/schema.prisma
 RUN cd apps/api && npx prisma generate && npm run build
 
 FROM base AS runtime
+# Compose runs this client inside the api container when the host has no curl.
+RUN apk add --no-cache curl
 ARG GIT_SHA=
 ENV NODE_ENV=production
 ENV GIT_SHA=${GIT_SHA}
@@ -40,6 +42,9 @@ COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 # Loopback only. Under Compose: docker compose exec api npm run login:reset
 COPY --from=build /app/apps/api/scripts/login-reset.mjs ./apps/api/scripts/login-reset.mjs
+# Compose install runs doctor here so the host does not need Node.
+# Runtime workdir is /app/apps/api, so the command is: node scripts/doctor.mjs
+COPY --from=build /app/scripts/doctor.mjs ./apps/api/scripts/doctor.mjs
 COPY --from=build /app/apps/api/git-sha.txt ./apps/api/git-sha.txt
 # Prisma 7 reads the datasource URL from prisma.config.ts (not schema.prisma);
 # without it `prisma migrate deploy` in CMD exits with "datasource.url property

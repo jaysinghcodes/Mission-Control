@@ -122,6 +122,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
 
+      # /bin/bash on macos-latest is bash 3.2. The install tests invoke that binary,
+      # including the Compose path while health_args is empty.
       - name: Run install.sh with a docker stub
         run: node --test scripts/install.test.mjs
 
@@ -146,6 +148,11 @@ jobs:
             node: '26'
             label: ubuntu compose node 26
           - os: ubuntu-latest
+            mode: compose
+            node: '22'
+            label: ubuntu compose no host node
+            hide_node: '1'
+          - os: ubuntu-latest
             mode: native
             node: '22'
             label: ubuntu native node 22
@@ -166,6 +173,7 @@ jobs:
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
       FRESH_INSTALL_MODE: ${{ matrix.mode }}
+      FRESH_INSTALL_HIDE_NODE: ${{ matrix.hide_node }}
       MC_INSTALL_READY_SECONDS: '180'
       # Native jobs prove a custom PORT and MC_WEB_PORT. Compose leaves these empty.
       PORT: ${{ matrix.api_port }}

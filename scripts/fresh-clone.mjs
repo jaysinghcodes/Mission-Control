@@ -433,6 +433,16 @@ function ipv4First(env) {
   }
 }
 
+function pathWithoutHostNode(pathValue) {
+  return String(pathValue || '')
+    .split(path.delimiter)
+    .filter((entry) => {
+      if (!entry || !existsSync(entry)) return false
+      return !['node', 'npm', 'npx'].some((name) => existsSync(path.join(entry, name)))
+    })
+    .join(path.delimiter)
+}
+
 function prependDockerStub(workParent, env) {
   const bin = path.join(workParent, 'docker-stub')
   mkdirSync(bin, { recursive: true })
@@ -652,7 +662,10 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
   const workParent = mkdtempSync(path.join(tmpdir(), 'mc-install-'))
   const cloneDir = path.join(workParent, 'mission-control')
   const logPath = path.join(workParent, 'install.log')
+  const hideNode = process.env.FRESH_INSTALL_HIDE_NODE === '1'
   let env = ipv4First({ ...process.env })
+  const hostPath = env.PATH
+  if (hideNode) env = { ...env, PATH: pathWithoutHostNode(env.PATH) }
   let installError = null
   try {
     const cloned = await runShell(`git clone --local ${shellQuote(source)} ${shellQuote(cloneDir)}`, {
@@ -678,6 +691,17 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
       console.error(tail(path.join(cloneDir, 'install-dev.log')))
       throw new Error(`bash install.sh failed (exit ${install.code}).`)
     }
+    if (hideNode) {
+      if (/did not answer on port/.test(log)) {
+        throw new Error('Compose install with no host Node printed that the API did not answer.')
+      }
+      if (/Node is not on PATH/.test(log)) {
+        throw new Error('Compose install skipped doctor because Node was not on PATH.')
+      }
+      if (!/^(pass|fail|info) ports:/m.test(log)) {
+        throw new Error('Compose install with no host Node did not run doctor.')
+      }
+    }
     const password = parseDashboardPassword(log)
     const webUrl = parseInstallerUrl(log)
     if (!webUrl) throw new Error('The installer did not print the dashboard URL.')
@@ -692,6 +716,7 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
     await waitFor(webUrl, (res) => res.ok && res.text.includes('Mission Control'), 180000)
     const bridgeEnv = {
       ...env,
+      PATH: hostPath,
       INGEST_TOKEN: token,
       MC_API_URL: apiUrl,
       MC_EXPECT_GATEWAY_SOURCE: mode === 'compose' ? 'bridge' : 'probe',

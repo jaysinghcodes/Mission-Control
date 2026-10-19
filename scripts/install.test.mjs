@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
+import { scryptSync } from 'node:crypto'
 import { createServer } from 'node:http'
 import {
   chmodSync,
@@ -26,6 +27,20 @@ import { fileURLToPath } from 'node:url'
 import { hasDashPunctuation } from './doctor.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+function resolveBash() {
+  const override = process.env.MC_INSTALL_BASH
+  if (override) return override
+  const found = spawnSync('sh', ['-c', 'command -v bash'], { encoding: 'utf8' })
+  const fromCommand = (found.stdout ?? '').trim().split('\n')[0]
+  if (found.status === 0 && fromCommand) return fromCommand
+  const shell = process.env.SHELL
+  if (shell && existsSync(shell)) return shell
+  return '/bin/bash'
+}
+
+// macOS keeps bash at /bin/bash. MC_INSTALL_BASH selects another binary for a local replay.
+const installBash = resolveBash()
 const PUNCT = /[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]/
 
 function outputOf(result) {
@@ -52,6 +67,33 @@ function pathWithout(names) {
     .split(':')
     .filter((entry) => entry && !names.some((name) => existsSync(path.join(entry, name))))
     .join(':')
+}
+
+/** Hide named commands without dropping the rest of a shared directory. */
+function pathWithHidden(parentDir, names) {
+  const hidden = new Set(names)
+  const destRoot = path.join(parentDir, 'path-hidden')
+  mkdirSync(destRoot, { recursive: true })
+  for (const entry of (process.env.PATH ?? '').split(':')) {
+    if (!entry || !existsSync(entry)) continue
+    let listed = []
+    try {
+      listed = readdirSync(entry)
+    } catch {
+      continue
+    }
+    for (const name of listed) {
+      if (hidden.has(name)) continue
+      const dest = path.join(destRoot, name)
+      if (existsSync(dest)) continue
+      try {
+        symlinkSync(path.join(entry, name), dest)
+      } catch {
+        // Skip entries that cannot be linked.
+      }
+    }
+  }
+  return destRoot
 }
 
 function writeExe(file, body) {
@@ -81,6 +123,7 @@ function copyFixture(dir) {
 }
 
 function dockerStub(bin) {
+  const nodeBin = process.execPath
   writeExe(
     path.join(bin, 'docker'),
     `#!/bin/sh
@@ -90,10 +133,42 @@ if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  if [ "\${DOCKER_STUB_BIND:-}" = "1" ]; then
+    echo "listen tcp 127.0.0.1:\${DOCKER_STUB_BIND_PORT}: bind: address already in use" >&2
+    exit 1
+  fi
   if [ "\${DOCKER_STUB_FAIL:-}" = "1" ]; then
     echo "stub compose failed" >&2
     exit 1
   fi
+  exit 0
+fi
+if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+  case "$*" in
+    *json*)
+      printf '%s\\n' '{"Service":"api","State":"running","Status":"Up"}'
+      printf '%s\\n' '{"Service":"db","State":"running","Status":"Up"}'
+      ;;
+    *)
+      printf '%s\\n' 'api running'
+      printf '%s\\n' 'db running'
+      ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "compose" ] && { [ "$2" = "exec" ] || [ "$2" = "run" ]; }; then
+  case "$*" in
+    *scripts/doctor.mjs*)
+      unset MC_DOCTOR_INSIDE
+      unset MC_DOCTOR_PROBE_PORT
+      # The host may already listen on the Compose defaults. This stub is the
+      # host, so an unset web or db port would look like an outside holder.
+      if [ -z "\${MC_WEB_PORT:-}" ]; then MC_WEB_PORT=18173; export MC_WEB_PORT; fi
+      if [ -z "\${MC_DB_PORT:-}" ]; then MC_DB_PORT=18132; export MC_DB_PORT; fi
+      exec ${shellQuote(nodeBin)} scripts/doctor.mjs
+      ;;
+  esac
+  printf '%s\\n' '{"service":"mission-control","status":"ok","database":"connected"}'
   exit 0
 fi
 exit 0
@@ -129,7 +204,7 @@ function runInstall(dir, env, args = []) {
   for (const [key, value] of Object.entries(merged)) {
     if (value === undefined) delete merged[key]
   }
-  return spawnSync('/bin/bash', ['install.sh', ...args], {
+  return spawnSync(installBash, ['install.sh', ...args], {
     cwd: dir,
     env: merged,
     encoding: 'utf8',
@@ -573,9 +648,11 @@ test('docker without Node still prints the URL and a readable doctor line', () =
       PATH: `${fx.bin}:/usr/bin:/bin`,
     })
     const text = outputOf(result)
-    assert.equal(result.status, 0, text)
-    assert.match(text, /^info doctor: Node is not on PATH/m)
+    assert.doesNotMatch(text, /Node is not on PATH/)
+    assert.match(readFileSync(fx.log, 'utf8'), /scripts\/doctor\.mjs/)
     assert.doesNotMatch(text, /^(pass|fail|info|skip) node:/m)
+    const failed = assertReadableDoctor(text).some((line) => line.startsWith('fail '))
+    assert.equal(result.status, failed ? 1 : 0, text)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assert.equal(PUNCT.test(text), false)
     assert.equal(hasDashPunctuation(text), false)
@@ -651,7 +728,7 @@ test('the native path accepts Node 20.17 or later and rejects older versions', (
       writeExe(path.join(fx.bin, 'node'), `#!/bin/sh\necho ${JSON.stringify(version)}\nexit 0\n`)
       const old = runInstall(fx.repo, {
         ...fx.env,
-        PATH: `${fx.bin}:${pathWithout(['node'])}`,
+        PATH: `${fx.bin}:${pathWithHidden(fx.dir, ['node'])}`,
       })
       const oldText = outputOf(old)
       assert.notEqual(old.status, 0, version)
@@ -903,9 +980,9 @@ test('Run A: shell ports with no .env wait on that API port and print that web U
     const result = runInstall(fx.repo, {
       ...fx.env,
       MC_INSTALL_READY_SECONDS: '8',
-      MC_WEB_PORT: '5880',
+      MC_WEB_PORT: '15880',
       MC_API_PORT: '3880',
-      MC_DB_PORT: '55880',
+      MC_DB_PORT: '15580',
       MC_REMOTE_PORT: '4011',
     })
     const text = outputOf(result)
@@ -914,12 +991,12 @@ test('Run A: shell ports with no .env wait on that API port and print that web U
     assert.match(text, /Waiting for the API health check on port 3880\./)
     assert.doesNotMatch(text, /port 3000/)
     assert.match(text, /pass ports: Port 3880 is already running\./)
-    assert.match(text, /Open http:\/\/localhost:5880\/#\/tasks/)
+    assert.match(text, /Open http:\/\/localhost:15880\/#\/tasks/)
     assert.match(text, /Tunnel port 4011\./)
     assert.doesNotMatch(text, /localhost:5173/)
     assert.match(written, /^MC_API_PORT=3880$/m)
-    assert.match(written, /^MC_WEB_PORT=5880$/m)
-    assert.match(written, /^MC_DB_PORT=55880$/m)
+    assert.match(written, /^MC_WEB_PORT=15880$/m)
+    assert.match(written, /^MC_DB_PORT=15580$/m)
     assert.match(written, /^MC_REMOTE_PORT=4011$/m)
     assert.match(text, /Wrote host port values from the environment into \.env\./)
     assert.equal(/\bfail /.test(text), false, text)
@@ -936,8 +1013,8 @@ test('Run B: ports already in .env are kept and used', async () => {
     health = await startDelayedHealthOn(fx.dir, 3881, 1200)
     const envFile = keptEnv(fx.repo, {
       MC_API_PORT: '3881',
-      MC_WEB_PORT: '5881',
-      MC_DB_PORT: '55881',
+      MC_WEB_PORT: '15881',
+      MC_DB_PORT: '15581',
     })
     const before = readFileSync(envFile)
     const result = runInstall(fx.repo, {
@@ -952,7 +1029,7 @@ test('Run B: ports already in .env are kept and used', async () => {
     assert.doesNotMatch(text, /Set DATABASE_URL to port/)
     assert.match(text, /Waiting for the API health check on port 3881\./)
     assert.match(text, /pass ports: Port 3881 is already running\./)
-    assert.match(text, /Open http:\/\/localhost:5881\/#\/tasks/)
+    assert.match(text, /Open http:\/\/localhost:15881\/#\/tasks/)
     assert.doesNotMatch(text, /localhost:5173/)
     assert.doesNotMatch(text, /Wrote host port values/)
     assert.equal(/\bfail /.test(text), false, text)
@@ -965,19 +1042,19 @@ test('Run B: ports already in .env are kept and used', async () => {
 test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and updated on a rerun', () => {
   const fx = freshDir()
   try {
-    const first = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55432' })
+    const first = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15432' })
     const firstText = outputOf(first)
     const firstFailed = assertReadableDoctor(firstText).some((line) => line.startsWith('fail '))
     assert.equal(first.status, firstFailed ? 1 : 0, firstText)
     const envPath = path.join(fx.repo, '.env')
     const firstEnv = assignments(readFileSync(envPath, 'utf8'))
-    assert.equal(firstEnv.MC_DB_PORT, '55432')
-    assert.equal(firstEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:55432/mission_control')
+    assert.equal(firstEnv.MC_DB_PORT, '15432')
+    assert.equal(firstEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:15432/mission_control')
     assert.match(firstEnv.INGEST_TOKEN, /^[0-9a-f]{48}$/)
     assert.equal(firstEnv.SOCKET_TOKEN ?? '', '')
     assert.match(firstEnv.DASHBOARD_PASSWORD_HASH, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/)
     assert.match(firstEnv.SESSION_SECRET, /^[0-9a-f]{64}$/)
-    assert.match(firstText, /Set DATABASE_URL to port 55432\./)
+    assert.match(firstText, /Set DATABASE_URL to port 15432\./)
     assert.equal(firstText.includes(firstEnv.INGEST_TOKEN), false)
     assert.equal(firstText.includes(firstEnv.DASHBOARD_PASSWORD_HASH), false)
     assert.equal(firstText.includes(firstEnv.SESSION_SECRET), false)
@@ -995,19 +1072,19 @@ test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and upda
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
     assert.equal(plainText.includes(firstEnv.INGEST_TOKEN), false)
 
-    const changed = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55499' })
+    const changed = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15499' })
     const changedText = outputOf(changed)
     const changedEnv = assignments(readFileSync(envPath, 'utf8'))
     const changedFailed = assertReadableDoctor(changedText).some((line) => line.startsWith('fail '))
     assert.equal(changed.status, changedFailed ? 1 : 0, changedText)
-    assert.equal(changedEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:55499/mission_control')
-    assert.equal(changedEnv.MC_DB_PORT, '55499')
+    assert.equal(changedEnv.DATABASE_URL, 'postgresql://postgres:postgres@localhost:15499/mission_control')
+    assert.equal(changedEnv.MC_DB_PORT, '15499')
     assert.equal(changedEnv.INGEST_TOKEN, firstEnv.INGEST_TOKEN)
     assert.equal(changedEnv.SOCKET_TOKEN ?? '', '')
     assert.equal(changedEnv.DASHBOARD_PASSWORD_HASH, firstEnv.DASHBOARD_PASSWORD_HASH)
     assert.equal(changedEnv.SESSION_SECRET, firstEnv.SESSION_SECRET)
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
-    assert.match(changedText, /Set DATABASE_URL to port 55499\./)
+    assert.match(changedText, /Set DATABASE_URL to port 15499\./)
     assert.match(changedText, /Tokens and secrets were not changed\./)
     assert.doesNotMatch(changedText, /DATABASE_URL is custom/)
     assert.equal(changedText.includes(firstEnv.INGEST_TOKEN), false)
@@ -1020,8 +1097,8 @@ test('a custom MC_DB_PORT is written into DATABASE_URL on the first run and upda
     }
     const changedFile = readFileSync(envPath, 'utf8')
     const expectedFile = beforePlain.toString('utf8')
-      .replace('MC_DB_PORT=55432', 'MC_DB_PORT=55499')
-      .replace('localhost:55432/', 'localhost:55499/')
+      .replace('MC_DB_PORT=15432', 'MC_DB_PORT=15499')
+      .replace('localhost:15432/', 'localhost:15499/')
     assert.equal(changedFile, expectedFile)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
@@ -1037,7 +1114,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       `SOCKET_TOKEN=${'cd'.repeat(24)}`,
       'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       `SESSION_SECRET=${'ef'.repeat(32)}`,
-      'MC_DB_PORT=55494',
+      'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@db.example.internal:6543/otherdb?sslmode=require',
       'PORT=3000',
       '',
@@ -1055,7 +1132,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
     assert.equal(PUNCT.test(plainText), false)
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
 
-    const override = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55499' })
+    const override = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15499' })
     const overrideText = outputOf(override)
     assert.deepEqual(readFileSync(envPath), before)
     assert.match(overrideText, /DATABASE_URL is custom, so it was left as is\. Update its port by hand if needed\./)
@@ -1068,7 +1145,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       `SOCKET_TOKEN=${'cd'.repeat(24)}`,
       'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       `SESSION_SECRET=${'ef'.repeat(32)}`,
-      'MC_DB_PORT=55494',
+      'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@localhost/otherdb',
       'PORT=3000',
       '',
@@ -1076,7 +1153,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
     writeFileSync(envPath, portless)
     chmodSync(envPath, 0o640)
     const portlessBefore = readFileSync(envPath)
-    const portlessRun = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '55499' })
+    const portlessRun = runInstall(fx.repo, { ...fx.env, MC_DB_PORT: '15499' })
     const portlessText = outputOf(portlessRun)
     assert.deepEqual(readFileSync(envPath), portlessBefore)
     assert.match(portlessText, /DATABASE_URL is custom, so it was left as is\. Update its port by hand if needed\./)
@@ -1698,6 +1775,327 @@ test('bridge schedule: unknown arguments do not install or uninstall', () => {
     assert.notEqual(extra.status, 0)
     assert.equal(existsSync(path.join(fx.repo, '.env')), false)
   } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+function passwordMatchesHash(password, stored) {
+  const parts = String(stored).split(':')
+  if (parts.length !== 6) return false
+  const salt = Buffer.from(parts[4], 'hex')
+  const expected = Buffer.from(parts[5], 'hex')
+  const actual = scryptSync(password, salt, expected.length, { N: 16384, r: 8, p: 1 })
+  return actual.equals(expected)
+}
+
+function realCommand(name) {
+  const found = spawnSync('bash', ['-lc', `command -v ${name}`], { encoding: 'utf8' })
+  if (found.status !== 0) return ''
+  return found.stdout.trim()
+}
+
+function extractMarked(source, startMark, endMark) {
+  const parts = []
+  let from = 0
+  while (from < source.length) {
+    const start = source.indexOf(startMark, from)
+    if (start < 0) break
+    const end = source.indexOf(endMark, start + startMark.length)
+    assert.ok(end > start, startMark)
+    parts.push(source.slice(start, end))
+    from = end + endMark.length
+  }
+  assert.ok(parts.length > 0, startMark)
+  return parts.join('\n')
+}
+
+function extractShellFunction(source, name) {
+  const token = `\n${name}() {`
+  const start = source.indexOf(token)
+  assert.ok(start >= 0, name)
+  let depth = 0
+  for (let i = start + token.length - 1; i < source.length; i += 1) {
+    const char = source[i]
+    if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(start, i + 1)
+    }
+  }
+  throw new Error(`unclosed ${name}`)
+}
+
+function isContainerNode(line) {
+  return /\bdocker compose (exec|run)\b/.test(line) && /\bnode\b/.test(line) && !/\b(npm|npx)\b/.test(line)
+}
+
+function hostToolHits(text) {
+  const hits = []
+  String(text).split('\n').forEach((line, index) => {
+    if (isContainerNode(line)) return
+    if (/\b(node|npm|npx)\b/.test(line)) hits.push(`${index + 1}:${line}`)
+  })
+  return hits
+}
+
+test('the Compose branch has no host node, npm, or npx call', () => {
+  const script = readFileSync(path.join(root, 'install.sh'), 'utf8')
+  const doctor = readFileSync(path.join(root, 'scripts/doctor.mjs'), 'utf8')
+  const finish = extractShellFunction(script, 'finish')
+  const finishCompose = extractMarked(finish, '# compose-host-free:start', '# compose-host-free:end')
+  assert.match(finishCompose, /compose_doctor/)
+  assert.deepEqual(hostToolHits(finishCompose), [])
+  assert.ok(hostToolHits('  node scripts/doctor.mjs').length > 0)
+  assert.deepEqual(hostToolHits('  docker compose exec -T api node scripts/doctor.mjs'), [])
+  const branch = [
+    extractMarked(script, '# compose-host-free:start', '# compose-host-free:end'),
+    extractShellFunction(script, 'start_docker'),
+    extractShellFunction(script, 'health_ok_port'),
+    extractShellFunction(script, 'wait_on_port'),
+    finishCompose,
+    extractMarked(doctor, '// compose-host-free:start', '// compose-host-free:end'),
+  ].join('\n')
+  assert.deepEqual(hostToolHits(branch), [])
+})
+
+test('compose doctor with an empty health_args array survives bash nounset', () => {
+  const version = spawnSync(installBash, ['--version'], { encoding: 'utf8' })
+  assert.equal(version.status, 0, version.stderr || version.error)
+  if (process.platform === 'darwin' && !process.env.MC_INSTALL_BASH) {
+    assert.match(`${version.stdout}\n${version.stderr}`, /version 3\./, version.stdout)
+  }
+  const fx = freshDir()
+  try {
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      MC_DOCTOR_HEALTH_SECONDS: undefined,
+    })
+    const text = outputOf(result)
+    const dockerLog = readFileSync(fx.log, 'utf8')
+    assert.match(text, /OpenClaw was not found on PATH/)
+    assert.doesNotMatch(text, /unbound variable/, text)
+    assert.doesNotMatch(dockerLog, /unbound variable/)
+    assert.doesNotMatch(dockerLog, /MC_DOCTOR_HEALTH_SECONDS/)
+    assert.match(dockerLog, /compose exec .*node scripts\/doctor\.mjs/)
+    assertReadableDoctor(text)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('compose finish does not call host node, npm, or npx', () => {
+  const fx = freshDir()
+  const calls = path.join(fx.dir, 'host-tools.log')
+  writeFileSync(calls, '')
+  for (const name of ['node', 'npm', 'npx']) {
+    writeExe(
+      path.join(fx.bin, name),
+      `#!/bin/sh\nprintf '%s %s\\n' ${shellQuote(name)} "$*" >> ${shellQuote(calls)}\nexit 99\n`,
+    )
+  }
+  try {
+    const result = runInstall(fx.repo, fx.env)
+    const text = outputOf(result)
+    assert.equal(readFileSync(calls, 'utf8'), '', text)
+    assert.match(readFileSync(fx.log, 'utf8'), /compose exec .*node scripts\/doctor\.mjs/)
+    assert.doesNotMatch(text, /Node is not on PATH/)
+    assertReadableDoctor(text)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('compose up names the env var when the port is already in use', () => {
+  const cases = [
+    ['MC_API_PORT', '3461'],
+    ['MC_WEB_PORT', '5461'],
+    ['MC_DB_PORT', '55601'],
+    ['MC_REMOTE_PORT', '4461'],
+  ]
+  for (const [key, port] of cases) {
+    const fx = freshDir()
+    try {
+      const result = runInstall(fx.repo, {
+        ...fx.env,
+        DOCKER_STUB_BIND: '1',
+        DOCKER_STUB_BIND_PORT: port,
+        [key]: port,
+      })
+      const text = outputOf(result)
+      assert.equal(result.status, 1, text)
+      assert.match(text, new RegExp(`Port ${port} is used by another program\\. Stop it or set ${key} in \\.env\\.`))
+      assert.match(text, /address already in use/)
+      assert.match(text, /Docker Compose did not start the stack\./)
+      assert.doesNotMatch(text, /Open http:\/\//)
+      assert.equal(hasDashPunctuation(text), false)
+      assert.equal(/[→←⇒]|->/.test(text), false)
+    } finally {
+      rmSync(fx.dir, { recursive: true, force: true })
+    }
+  }
+})
+
+test('pathWithHidden keeps dirname when node shares that directory', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-path-'))
+  const usrBin = path.join(dir, 'usr-bin')
+  mkdirSync(usrBin)
+  writeExe(path.join(usrBin, 'node'), '#!/bin/sh\nexit 0\n')
+  writeExe(path.join(usrBin, 'npm'), '#!/bin/sh\nexit 0\n')
+  writeExe(path.join(usrBin, 'npx'), '#!/bin/sh\nexit 0\n')
+  writeExe(path.join(usrBin, 'dirname'), '#!/bin/sh\nprintf %s "$1"\n')
+  writeExe(path.join(usrBin, 'openssl'), '#!/bin/sh\nexit 0\n')
+  const saved = process.env.PATH
+  process.env.PATH = usrBin
+  try {
+    const hidden = pathWithHidden(dir, ['node', 'npm', 'npx'])
+    assert.equal(existsSync(path.join(hidden, 'dirname')), true)
+    assert.equal(existsSync(path.join(hidden, 'openssl')), true)
+    assert.equal(existsSync(path.join(hidden, 'node')), false)
+    assert.equal(existsSync(path.join(hidden, 'npm')), false)
+    assert.equal(existsSync(path.join(hidden, 'npx')), false)
+    const which = spawnSync(installBash, ['-c', 'command -v dirname; command -v openssl; command -v node || true'], {
+      env: { ...process.env, PATH: hidden },
+      encoding: 'utf8',
+    })
+    assert.equal(which.status, 0, which.stderr || which.error)
+    assert.match(which.stdout, /dirname/)
+    assert.match(which.stdout, /openssl/)
+    assert.doesNotMatch(which.stdout, /node/)
+  } finally {
+    process.env.PATH = saved
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('compose health wait uses curl, returns as soon as the API answers, and caps at 90 seconds', async () => {
+  const curlBin = realCommand('curl')
+  assert.ok(curlBin)
+  const ready = freshDir()
+  let health
+  const curlLog = path.join(ready.dir, 'curl.log')
+  const nodeLog = path.join(ready.dir, 'node.log')
+  const npmLog = path.join(ready.dir, 'npm.log')
+  writeFileSync(curlLog, '')
+  writeFileSync(nodeLog, '')
+  writeFileSync(npmLog, '')
+  writeExe(path.join(ready.bin, 'curl'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(curlLog)}
+exec ${shellQuote(curlBin)} "$@"
+`)
+  writeExe(path.join(ready.bin, 'node'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(nodeLog)}
+if [ "$1" = "scripts/doctor.mjs" ]; then
+  exec ${shellQuote(process.execPath)} "$@"
+fi
+exit 99
+`)
+  writeExe(path.join(ready.bin, 'npm'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(npmLog)}
+exit 99
+`)
+  writeExe(path.join(ready.bin, 'npx'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(npmLog)}
+exit 99
+`)
+  try {
+    health = await startDelayedHealth(ready.dir, 0)
+    const result = runInstall(ready.repo, {
+      ...ready.env,
+      PATH: `${ready.bin}:${process.env.PATH ?? ''}`,
+      MC_API_PORT: String(health.port),
+      MC_INSTALL_READY_SECONDS: '90',
+    })
+    const text = outputOf(result)
+    assert.equal(result.status, 0, text)
+    assert.doesNotMatch(text, /did not answer on port/)
+    const curls = readFileSync(curlLog, 'utf8').split('\n').filter((line) => line.includes('/health'))
+    assert.ok(curls.length >= 1 && curls.length < 5, readFileSync(curlLog, 'utf8'))
+    const nodeCalls = readFileSync(nodeLog, 'utf8').split('\n').filter(Boolean)
+    assert.deepEqual(nodeCalls, [])
+    assert.match(readFileSync(ready.log, 'utf8'), /compose exec .*node scripts\/doctor\.mjs/)
+    assert.equal(readFileSync(npmLog, 'utf8'), '')
+    const env = assignments(readFileSync(path.join(ready.repo, '.env'), 'utf8'))
+    const password = text.match(/Dashboard password, shown once: (\S+)/)
+    assert.ok(password, text)
+    assert.equal(passwordMatchesHash(password[1], env.DASHBOARD_PASSWORD_HASH), true)
+  } finally {
+    health?.child.kill()
+    rmSync(ready.dir, { recursive: true, force: true })
+  }
+
+  const capped = freshDir()
+  const capLog = path.join(capped.dir, 'curl.log')
+  const clock = path.join(capped.dir, 'clock')
+  writeFileSync(capLog, '')
+  writeFileSync(clock, '0\n')
+  writeExe(path.join(capped.bin, 'curl'), `#!/bin/sh
+printf '%s\\n' "$*" >> ${shellQuote(capLog)}
+exit 7
+`)
+  try {
+    const result = runInstall(capped.repo, {
+      ...capped.env,
+      PATH: `${capped.bin}:${pathWithHidden(capped.dir, ['node', 'npm', 'npx'])}`,
+      MC_INSTALL_READY_SECONDS: '90',
+      MC_INSTALL_CLOCK_FILE: clock,
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+    })
+    const text = outputOf(result)
+    assert.notEqual(result.status, 0, text)
+    assert.match(text, /The API did not answer on port/)
+    assert.doesNotMatch(text, /Node is not on PATH/)
+    assert.match(readFileSync(capped.log, 'utf8'), /-e MC_DOCTOR_HEALTH_SECONDS/)
+    assert.match(readFileSync(capped.log, 'utf8'), /scripts\/doctor\.mjs/)
+    const curls = readFileSync(capLog, 'utf8').split('\n').filter((line) => line.includes('/health'))
+    assert.equal(curls.length, 90, readFileSync(capLog, 'utf8'))
+    assert.equal(readFileSync(clock, 'utf8').trim(), '90')
+  } finally {
+    rmSync(capped.dir, { recursive: true, force: true })
+  }
+})
+
+test('compose health wait uses docker compose exec when curl is missing and stays healthy without host node', async () => {
+  const fx = freshDir()
+  const stripped = path.join(fx.dir, 'stripped')
+  mkdirSync(stripped)
+  for (const entry of (process.env.PATH ?? '').split(':')) {
+    if (!entry || !existsSync(entry)) continue
+    let names = []
+    try {
+      names = readdirSync(entry)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (name === 'curl' || name === 'node' || name === 'npm' || name === 'npx') continue
+      const dest = path.join(stripped, name)
+      if (existsSync(dest)) continue
+      try {
+        symlinkSync(path.join(entry, name), dest)
+      } catch {
+        // Skip entries that cannot be linked.
+      }
+    }
+  }
+  let health
+  try {
+    health = await startDelayedHealth(fx.dir, 0)
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      PATH: `${fx.bin}:${stripped}`,
+      MC_API_PORT: String(health.port),
+      MC_INSTALL_READY_SECONDS: '8',
+    })
+    const text = outputOf(result)
+    assert.equal(result.status, 0, text)
+    assert.doesNotMatch(text, /did not answer on port/)
+    assert.doesNotMatch(text, /Node is not on PATH/)
+    const dockerLog = readFileSync(fx.log, 'utf8')
+    assert.match(dockerLog, /compose exec -T api/)
+    assert.match(dockerLog, /node scripts\/doctor\.mjs/)
+    assert.equal(text.includes('node -e'), false)
+  } finally {
+    health?.child.kill()
     rmSync(fx.dir, { recursive: true, force: true })
   }
 })

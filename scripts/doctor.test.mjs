@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -20,8 +20,21 @@ import {
   dockerPermissionDenied,
   effectiveEnv,
   hasDashPunctuation,
+  STARTING_NOTE,
+  classifyPortHolder,
+  doctorHealthBudgetMs,
   inspectApiPort,
   nodeSupported,
+  parseComposePublishedPorts,
+  parseComposeServiceRows,
+  composeServiceReady,
+  composeServiceFailure,
+  parseComposeServiceNames,
+  composePortConflictLine,
+  parseDockerPortLines,
+  parseLsofListeners,
+  parseSsListeners,
+  readListenerRows,
   readHealthIdentity,
   report,
   runDoctor,
@@ -510,6 +523,8 @@ test('docker doctor reads gateway state from /system and an override probes dire
     'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
     'PORT=3000',
     `MC_API_PORT=${port}`,
+    `MC_WEB_PORT=${FREE_WEB_PORT}`,
+    `MC_DB_PORT=${FREE_DB_PORT}`,
     'HOST=127.0.0.1',
     'INGEST_TOKEN=abc123',
     'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
@@ -591,6 +606,8 @@ test('compose doctor names the missing Docker socket permission', async () => {
         'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
         'PORT=3000',
         `MC_API_PORT=${port}`,
+        `MC_WEB_PORT=${FREE_WEB_PORT}`,
+        `MC_DB_PORT=${FREE_DB_PORT}`,
         'HOST=127.0.0.1',
         'INGEST_TOKEN=abc123',
         'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
@@ -685,7 +702,7 @@ test('docker doctor uses the shell MC_API_PORT when .env names a different port'
   try {
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', 'MC_API_PORT=3000', 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control', ''].join('\n'),
+      ['PORT=3000', 'MC_API_PORT=3000', `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control', ''].join('\n'),
     )
     const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1', MC_API_PORT: String(port) })
     assert.equal(result.code, 0, result.lines.join('\n'))
@@ -720,6 +737,8 @@ test('docker doctor reports host database checks as info and checks the custom A
         'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
         'PORT=3000',
         `MC_API_PORT=${port}`,
+        `MC_WEB_PORT=${FREE_WEB_PORT}`,
+        `MC_DB_PORT=${FREE_DB_PORT}`,
         'HOST=127.0.0.1',
         'INGEST_TOKEN=abc123',
         'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
@@ -771,7 +790,7 @@ test('bridge sync: a stale timestamp fails doctor', async () => {
     writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 5000}\n`)
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
+      ['PORT=3000', `MC_API_PORT=${port}`, `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
     )
     const result = await runDoctor(dir, {
       MC_DOCTOR_DOCKER: '1',
@@ -803,7 +822,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
   try {
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', `MC_API_PORT=${port}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=30', ''].join('\n'),
+      ['PORT=3000', `MC_API_PORT=${port}`, `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=30', ''].join('\n'),
     )
     const missing = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
     assert.equal(missing.code, 0, missing.lines.join('\n'))
@@ -853,4 +872,757 @@ test('docs point at npm run doctor and do not use dash punctuation in that guida
   const onboardingLine = onboarding.split('\n').find((line) => line.includes('npm run doctor'))
   assert.equal(hasDashPunctuation(readmeLine), false)
   assert.equal(hasDashPunctuation(onboardingLine), false)
+})
+
+test('doctor health budget defaults to 60 seconds and accepts 0', () => {
+  assert.equal(doctorHealthBudgetMs({}), 60000)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: '' }), 60000)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: 'nope' }), 60000)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: '0' }), 0)
+  assert.equal(doctorHealthBudgetMs({ MC_DOCTOR_HEALTH_SECONDS: '60' }), 60000)
+  assert.equal(STARTING_NOTE, 'The API is still starting. Run doctor again in a minute.')
+  assert.equal(hasDashPunctuation(STARTING_NOTE), false)
+})
+
+test('port holder classification uses listeners and published compose ports', () => {
+  const ss = 'LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:(("docker-proxy",pid=4242,fd=4))'
+  assert.deepEqual(parseSsListeners(ss, 3000), [{ pid: 4242, command: 'docker-proxy' }])
+  assert.deepEqual(parseSsListeners(ss, 3001), [])
+  assert.deepEqual(parseLsofListeners('node 5151 user 23u IPv4 1 0t0 TCP 127.0.0.1:3000 (LISTEN)\n'), [{ pid: 5151, command: 'node' }])
+  const published = parseComposePublishedPorts('{"Service":"api","Publishers":[{"PublishedPort":3200,"TargetPort":3000}]}\n')
+  assert.deepEqual(published, [3200])
+  assert.deepEqual(parseDockerPortLines('127.0.0.1:3200\n'), [3200])
+  assert.equal(classifyPortHolder({
+    port: 3200,
+    listeners: [{ pid: 9, command: 'docker-proxy' }],
+    publishedPorts: [3200],
+    containerPids: [],
+    dockerOk: true,
+    portInUse: true,
+  }), 'stack')
+  assert.equal(classifyPortHolder({
+    port: 3000,
+    listeners: [{ pid: 5151, command: 'node' }],
+    publishedPorts: [3200],
+    containerPids: [],
+    dockerOk: true,
+    portInUse: true,
+  }), 'foreign')
+  assert.equal(classifyPortHolder({
+    port: 3000,
+    listeners: [{ pid: 9, command: 'docker-proxy' }],
+    publishedPorts: [],
+    containerPids: [],
+    dockerOk: false,
+    portInUse: true,
+  }), 'unknown')
+  assert.equal(classifyPortHolder({
+    port: 3000,
+    listeners: [{ pid: 77, command: 'node' }],
+    publishedPorts: [],
+    containerPids: [77],
+    dockerOk: true,
+    portInUse: true,
+  }), 'stack')
+})
+
+// Below the ephemeral range (Linux 32768+, macOS 49152+) so a parallel listen(0)
+// cannot bind the port doctor expects to be free.
+const FREE_WEB_PORT = 18173
+const FREE_DB_PORT = 18132
+const FREE_API_PORT = 18174
+
+function doctorEnvFile(port, overrides = {}) {
+  const api = overrides.api ?? port
+  const web = overrides.web ?? FREE_WEB_PORT
+  const db = overrides.db ?? FREE_DB_PORT
+  return [
+    'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
+    'PORT=3000',
+    `MC_API_PORT=${api}`,
+    `MC_WEB_PORT=${web}`,
+    `MC_DB_PORT=${db}`,
+    'HOST=127.0.0.1',
+    'INGEST_TOKEN=abc123',
+    'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabbccddeeff00112233445566778899:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'SESSION_SECRET=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+    '',
+  ].join('\n')
+}
+
+function writeDockerStub(bin, { portLine = '', json = '', services = '' } = {}) {
+  mkdirSync(bin, { recursive: true })
+  const file = path.join(bin, 'docker')
+  const serviceLines = String(services).split('\n').filter(Boolean).map((name) => JSON.stringify(name)).join(' ')
+  writeFileSync(file, `#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "--services" ] || [ "$arg" = "services" ]; then
+      printf '%s\\n' ${serviceLines || "''"}
+      exit 0
+    fi
+  done
+  cat <<'MC_JSON'
+${json}
+MC_JSON
+  exit 0
+fi
+if [ "$1" = "compose" ] && [ "$2" = "port" ]; then
+  if [ -n ${JSON.stringify(portLine)} ]; then
+    printf '%s\\n' ${JSON.stringify(portLine)}
+    exit 0
+  fi
+  exit 1
+fi
+exit 0
+`)
+  chmodSync(file, 0o755)
+}
+
+function runningStackJson(port) {
+  return [
+    `{"Service":"api","State":"running","Health":"","Publishers":[{"PublishedPort":${port}}]}`,
+    '{"Service":"db","State":"running","Health":""}',
+  ].join('\n')
+}
+
+test('a slow compose probe waits up to 60 seconds and reports healthy as soon as the API answers', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-slow-'))
+  const bin = path.join(dir, 'bin')
+  let hits = 0
+  let hold = false
+  const server = http.createServer((req, res) => {
+    hits += 1
+    if (hold || hits < 3) {
+      res.writeHead(404, { 'content-type': 'text/plain' })
+      res.end('starting')
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: `127.0.0.1:${port}`, json: runningStackJson(port), services: 'api\ndb' })
+  try {
+    const listeners = readListenerRows(port)
+    assert.ok(listeners.some((row) => row.command && row.command !== 'docker-proxy'), JSON.stringify(listeners))
+    let soonClock = 0
+    const soon = await inspectApiPort(port, '127.0.0.1', {
+      docker: true,
+      root: dir,
+      budgetMs: 60000,
+      httpTimeoutMs: 200,
+      now: () => soonClock,
+      sleep: async (ms) => { soonClock += ms },
+      env: {
+        PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+        MC_API_PORT: String(port),
+        MC_WEB_PORT: String(FREE_WEB_PORT),
+        MC_DB_PORT: String(FREE_DB_PORT),
+      },
+    })
+    assert.equal(soon.state, 'ours')
+    assert.equal(soon.db, 'up')
+    assert.equal(hits, 3)
+    assert.ok(soonClock < 60000, String(soonClock))
+    hold = true
+    let clock = 0
+    const capped = await inspectApiPort(port, '127.0.0.1', {
+      docker: true,
+      root: dir,
+      budgetMs: 60000,
+      httpTimeoutMs: 50,
+      now: () => clock,
+      sleep: async (ms) => { clock += ms },
+      portOwner: async () => 'stack',
+    })
+    assert.equal(capped.state, 'starting')
+    assert.ok(clock >= 60000 && clock < 120000, String(clock))
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('doctor slow probe output is the starting sentence and does not fail', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-start-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('not yet')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: `127.0.0.1:${port}`, json: runningStackJson(port), services: 'api\ndb' })
+  try {
+    writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_API_PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 0, text)
+    assert.match(text, /^info ports: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.match(text, /^info health: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.doesNotMatch(text, /another program/)
+    assert.doesNotMatch(text, /npm run dev/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('doctor reports a real port conflict when another program holds the port', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-foreign-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('occupied')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: '', json: '' })
+  try {
+    const listeners = readListenerRows(port)
+    assert.ok(listeners.some((row) => row.pid && row.command && !row.command.includes('docker-proxy')), JSON.stringify(listeners))
+    assert.equal(classifyPortHolder({
+      port,
+      listeners,
+      publishedPorts: [],
+      containerPids: [],
+      dockerOk: true,
+      portInUse: true,
+    }), 'foreign')
+    writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_API_PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: Port ${port} is used by another program\\. Stop it or set MC_API_PORT in \\.env\\.$`, 'm'))
+    assert.match(text, /^info health: Skipped because the API port is used by another program\.$/m)
+    assert.doesNotMatch(text, /still starting/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a database down health body still fails and is not a slow start', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-down-'))
+  const server = http.createServer((req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'degraded', database: 'unavailable', db: 'down' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    const seen = await inspectApiPort(port, '127.0.0.1', { docker: true, root: dir, budgetMs: 60000, portOwner: async () => 'stack' })
+    assert.equal(seen.state, 'ours')
+    assert.equal(seen.db, 'down')
+    writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_API_PORT: String(port),
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, /^pass ports: /m)
+    assert.match(text, /^fail health: The health check says the database is down\.$/m)
+    assert.doesNotMatch(text, /still starting/)
+    assert.doesNotMatch(text, /another program/)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a stopped or paused compose service is a failure, not a slow start or a port conflict', () => {
+  const running = parseComposeServiceRows([
+    '{"Service":"api","State":"running","Health":"starting","Status":"Up 1 second (health: starting)"}',
+    '{"Service":"db","State":"running","Health":"","Status":"Up 1 second"}',
+  ].join('\n'))
+  assert.equal(composeServiceReady(running[0]), true)
+  assert.equal(composeServiceFailure(running), '')
+  const dbStopped = 'The db service is not running. Start it with: docker compose start db'
+  const apiStopped = 'The api service is not running. Start it with: docker compose start api'
+  const apiPaused = 'The api service is paused. Unpause it with: docker compose unpause api'
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}')), apiPaused)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"restarting","Status":"Restarting"}\n{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"created","Status":"Created"}\n{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
+  assert.equal(composeServiceFailure([]), '')
+  assert.equal(composeServiceFailure([], []), '')
+  assert.equal(
+    composeServiceFailure([], ['db', 'api', 'web']),
+    'The db and api services are not running. Start them with: docker compose up -d db api',
+  )
+  const dbMissing = 'The db service is not running. Start it with: docker compose up -d db'
+  const apiMissing = 'The api service is not running. Start it with: docker compose up -d api'
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"running","Status":"Up"}')), dbMissing)
+  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"running","Status":"Up"}')), apiMissing)
+  assert.equal(
+    composeServiceFailure(parseComposeServiceRows('{"Service":"web","State":"running","Status":"Up"}')),
+    'The db and api services are not running. Start them with: docker compose up -d db api',
+  )
+  for (const line of [dbStopped, apiStopped, apiPaused, dbMissing, apiMissing]) {
+    assert.equal(hasDashPunctuation(line), false)
+    assert.equal(/[→←⇒]|->/.test(line), false)
+  }
+})
+
+async function doctorWithServices(json, services, env = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-svc-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('not yet')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: `127.0.0.1:${port}`, json, services })
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  const result = await runDoctor(dir, {
+    MC_DOCTOR_HEALTH_SECONDS: '60',
+    MC_API_PORT: String(port),
+    PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    ...env,
+  })
+  await new Promise((resolve) => server.close(resolve))
+  rmSync(dir, { recursive: true, force: true })
+  return { port, result }
+}
+
+test('doctor fails when the db container is stopped', async () => {
+  const message = 'The db service is not running. Start it with: docker compose start db'
+  const { result } = await doctorWithServices(
+    '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}',
+    'api\ndb',
+    { MC_DOCTOR_DOCKER: '1' },
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /still starting/)
+  assert.doesNotMatch(text, /another program/)
+})
+
+test('doctor fails when the api container is stopped', async () => {
+  const message = 'The api service is not running. Start it with: docker compose start api'
+  const { result } = await doctorWithServices(
+    '{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}',
+    'api\ndb',
+    { MC_DOCTOR_DOCKER: '1' },
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /still starting/)
+  assert.doesNotMatch(text, /another program/)
+})
+
+test('a paused api is detected as this stack and fails with unpause', async () => {
+  const message = 'The api service is paused. Unpause it with: docker compose unpause api'
+  const { result } = await doctorWithServices(
+    '{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}',
+    'api\ndb',
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /still starting/)
+  assert.doesNotMatch(text, /another program/)
+  assert.equal(text.split('\n').some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
+})
+
+test('a created api on a busy port is a conflict, not a start command', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-created-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('occupied')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  const json = [
+    '{"Service":"api","State":"created","Status":"Created"}',
+    '{"Service":"db","State":"running","Status":"Up"}',
+    '{"Service":"web","State":"created","Status":"Created"}',
+  ].join('\n')
+  writeDockerStub(bin, { portLine: '', json, services: 'api\ndb\nweb' })
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_API_PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: Port ${port} is used by another program\\. Stop it or set MC_API_PORT in \\.env\\.$`, 'm'))
+    assert.match(text, /^info health: Skipped because the API port is used by another program\.$/m)
+    assert.doesNotMatch(text, /not running/)
+    assert.doesNotMatch(text, /docker compose start/)
+    assert.doesNotMatch(text, /set PORT in/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a removed api is still Compose and names docker compose up', async () => {
+  const message = 'The api service is not running. Start it with: docker compose up -d api'
+  const { result } = await doctorWithServices(
+    '{"Service":"db","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
+    'db\nweb',
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /npm run dev/)
+  assert.doesNotMatch(text, /Port .* is free/)
+  assert.doesNotMatch(text, /docker compose start/)
+})
+
+test('a removed db is still Compose and names docker compose up', async () => {
+  const message = 'The db service is not running. Start it with: docker compose up -d db'
+  const { result } = await doctorWithServices(
+    '{"Service":"api","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
+    'api\nweb',
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /npm run dev/)
+  assert.doesNotMatch(text, /Port .* is free/)
+  assert.doesNotMatch(text, /docker compose start/)
+  assert.doesNotMatch(text, /set PORT in/)
+})
+
+const HALF_CREATED_JSON = [
+  '{"Service":"api","State":"created","Status":"Created"}',
+  '{"Service":"db","State":"exited","Status":"Exited (1)"}',
+  '{"Service":"web","State":"created","Status":"Created"}',
+].join('\n')
+
+async function occupyPort() {
+  const avoid = new Set([FREE_WEB_PORT, FREE_DB_PORT, FREE_API_PORT])
+  for (;;) {
+    const server = http.createServer((req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' })
+      res.end('occupied')
+    })
+    const port = await listen(server)
+    if (!avoid.has(port)) return { server, port }
+    await close(server)
+  }
+}
+
+async function halfCreatedPortConflict(key, extraEnv = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-half-'))
+  const bin = path.join(dir, 'bin')
+  const held = await occupyPort()
+  const overrides = { api: FREE_API_PORT, web: FREE_WEB_PORT, db: FREE_DB_PORT }
+  if (key === 'MC_API_PORT') overrides.api = held.port
+  if (key === 'MC_WEB_PORT') overrides.web = held.port
+  if (key === 'MC_DB_PORT') overrides.db = held.port
+  writeDockerStub(bin, { portLine: '', json: HALF_CREATED_JSON, services: 'api\ndb\nweb' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(overrides.api, overrides))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+      ...extraEnv,
+    })
+    return { port: held.port, result }
+  } finally {
+    await close(held.server)
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+for (const key of ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT']) {
+  for (const forced of [false, true]) {
+    const mode = forced ? 'MC_DOCTOR_DOCKER=1' : 'auto mode'
+    test(`half created containers report ${key} in ${mode}`, async () => {
+      const { port, result } = await halfCreatedPortConflict(key, forced ? { MC_DOCTOR_DOCKER: '1' } : {})
+      const text = result.lines.join('\n')
+      const line = composePortConflictLine(port, key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      assert.equal(result.code, 1, text)
+      assert.match(text, new RegExp(`^fail ports: ${line}$`, 'm'))
+      assert.doesNotMatch(text, /npm run dev/)
+      assert.doesNotMatch(text, /not running/)
+      assert.doesNotMatch(text, /docker compose start/)
+      assert.doesNotMatch(text, /set PORT in/)
+      assert.doesNotMatch(text, /still starting/)
+      if (key === 'MC_API_PORT') {
+        assert.match(text, /^info health: Skipped because the API port is used by another program\.$/m)
+      } else {
+        assert.match(text, /^info health: Skipped because a Compose port is used by another program\.$/m)
+        assert.doesNotMatch(text, /Skipped because the API port/)
+      }
+      assert.equal(hasDashPunctuation(text), false)
+    })
+  }
+}
+
+test('an exited api on a busy port is a conflict, not a start command', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-exited-busy-'))
+  const bin = path.join(dir, 'bin')
+  const held = await occupyPort()
+  const json = [
+    '{"Service":"api","State":"exited","Status":"Exited (137)"}',
+    '{"Service":"db","State":"running","Status":"Up"}',
+    '{"Service":"web","State":"running","Status":"Up"}',
+  ].join('\n')
+  writeDockerStub(bin, { portLine: '', json, services: 'api\ndb\nweb' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(held.port))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: ${composePortConflictLine(held.port, 'MC_API_PORT').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+    assert.doesNotMatch(text, /docker compose start/)
+    assert.doesNotMatch(text, /npm run dev/)
+    assert.doesNotMatch(text, /set PORT in/)
+  } finally {
+    await close(held.server)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('compose service names are the keys under services', () => {
+  const names = parseComposeServiceNames(readFileSync(path.join(root, 'docker-compose.yml'), 'utf8'))
+  assert.deepEqual(names, ['db', 'api', 'web'])
+  assert.deepEqual(parseComposeServiceNames('services: {}\n'), [])
+  assert.deepEqual(parseComposeServiceNames('services:\n  db:\n  api:\n'), ['db', 'api'])
+})
+
+test('compose mode does not suggest npm run dev when health is unreachable', () => {
+  const env = {
+    HOST: '127.0.0.1',
+    INGEST_TOKEN: 'change-me',
+    PORT: '3000',
+    MC_DOCTOR_DOCKER: '1',
+    DASHBOARD_PASSWORD_HASH: 'scrypt:1',
+    SESSION_SECRET: 'ab',
+  }
+  const result = report(facts({
+    env,
+    database: { state: 'docker', migrations: 'docker', pending: [], detail: '' },
+    ports: {
+      badPort: false,
+      api: 3000,
+      apiState: 'free',
+      health: { reachable: false, db: null, url: 'http://127.0.0.1:3000/health' },
+    },
+  }))
+  const text = result.lines.join('\n')
+  assert.match(text, /^fail health: The API health endpoint is not reachable at http:\/\/127\.0\.0\.1:3000\/health\. Start the stack with: docker compose up -d$/m)
+  assert.doesNotMatch(text, /npm run dev/)
+  assert.equal(hasDashPunctuation(text), false)
+})
+
+test('no containers with a compose file name MC_API_PORT in auto mode', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-native-port-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('occupied')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: '', json: '', services: '' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services: {}\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: ${composePortConflictLine(port, 'MC_API_PORT').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+    assert.doesNotMatch(text, /set PORT in/)
+    assert.doesNotMatch(text, /npm run dev/)
+    assert.doesNotMatch(text, /not running/)
+    assert.equal(text.split('\n').some((line) => /^(pass|fail|info|skip) node:/.test(line)), false)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a compose file keeps the native check when the native API is already answering', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-native-up-'))
+  const bin = path.join(dir, 'bin')
+  const api = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  const web = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<!doctype html><title>Mission Control</title><div id="root"></div>')
+  })
+  const db = net.createServer((socket) => socket.destroy())
+  await listen(api)
+  await listen(web)
+  await listen(db)
+  const apiPort = api.address().port
+  const webPort = web.address().port
+  const dbPort = db.address().port
+  writeDockerStub(bin, { portLine: '', json: '', services: '' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(apiPort, { web: webPort, db: dbPort }))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PORT: String(apiPort),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.match(text, /^pass node:/m)
+    assert.match(text, new RegExp(`^pass ports: Port ${apiPort} is already running\\.$`, 'm'))
+    assert.match(text, /^pass login: A dashboard password is configured\.$/m)
+    assert.doesNotMatch(text, /another program/)
+    assert.doesNotMatch(text, /set MC_WEB_PORT in/)
+    assert.doesNotMatch(text, /set MC_DB_PORT in/)
+    assert.doesNotMatch(text, /Docker runs Postgres inside Compose/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await close(api)
+    await close(web)
+    await close(db)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('MC_DOCTOR_DOCKER=0 keeps the native PORT line when a compose file exists', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-native-force-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('occupied')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  writeDockerStub(bin, { portLine: '', json: '', services: '' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(FREE_API_PORT))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '0',
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PORT: String(port),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: Port ${port} is used by another program\\. Stop it or set PORT in \\.env\\.$`, 'm'))
+    assert.doesNotMatch(text, /set MC_API_PORT in/)
+    assert.match(text, /^pass node:/m)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an inside doctor uses the compose snapshot for a stopped db', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-inside-'))
+  const bin = path.join(dir, 'bin')
+  mkdirSync(bin)
+  const log = path.join(dir, 'docker.log')
+  writeFileSync(log, '')
+  writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\nexit 99\n')
+  chmodSync(path.join(bin, 'docker'), 0o755)
+  const rows = '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}'
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(3461))
+  try {
+    const result = await runDoctor(dir, {
+      ...process.env,
+      PATH: bin,
+      DOCKER_LOG: log,
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_INSIDE: '1',
+      MC_DOCTOR_COMPOSE_PS_B64: Buffer.from(rows).toString('base64'),
+      MC_API_PORT: '3461',
+      MC_WEB_PORT: String(FREE_WEB_PORT),
+      MC_DB_PORT: String(FREE_DB_PORT),
+      MC_INSTALL_HEALTH_PORT: '3000',
+      MC_DOCTOR_HEALTH_SECONDS: '60',
+      MC_DOCTOR_ENV_PRESENT: '1',
+      MC_DOCTOR_OPENCLAW_ON_PATH: '0',
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, /^fail ports: The db service is not running\. Start it with: docker compose start db$/m)
+    assert.match(text, /^fail health: The db service is not running\. Start it with: docker compose start db$/m)
+    assert.doesNotMatch(text, /still starting/)
+    assert.equal(readFileSync(log, 'utf8'), '')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a running compose stack with no answer is still starting inside the container', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-starting-'))
+  const rows = [
+    '{"Service":"api","State":"running","Status":"Up"}',
+    '{"Service":"db","State":"running","Health":"starting","Status":"Up (health: starting)"}',
+  ].join('\n')
+  const server = net.createServer()
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  await new Promise((resolve) => server.close(resolve))
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  try {
+    const result = await runDoctor(dir, {
+      ...process.env,
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_INSIDE: '1',
+      MC_DOCTOR_COMPOSE_PS_B64: Buffer.from(rows).toString('base64'),
+      MC_API_PORT: String(port),
+      MC_WEB_PORT: String(FREE_WEB_PORT),
+      MC_DB_PORT: String(FREE_DB_PORT),
+      MC_INSTALL_HEALTH_PORT: String(port),
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_DOCTOR_ENV_PRESENT: '1',
+      MC_DOCTOR_OPENCLAW_ON_PATH: '0',
+      HOST: '127.0.0.1',
+      INGEST_TOKEN: 'abc123',
+      DASHBOARD_PASSWORD_HASH: 'scrypt:1',
+      SESSION_SECRET: 'ab',
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 0, text)
+    assert.match(text, /^info ports: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.match(text, /^info health: The API is still starting\. Run doctor again in a minute\.$/m)
+    assert.doesNotMatch(text, /another program/)
+    assert.doesNotMatch(text, /not running/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
