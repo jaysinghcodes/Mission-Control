@@ -94,9 +94,10 @@ function seatedName(actor: ActivityActor, naming?: NamingState | null): string {
 /**
  * The line to show, or null when the row is a snapshot refresh or has
  * nothing to say. payload.id is read as a roster id by activityActor.
- * Register, delete, and status sentences use the current crew map, so a
- * seat change in Settings relabels rows that were stored under the
- * registered name.
+ * A living agent, or an id that still has a seat, uses the current name,
+ * so a seat change in Settings relabels the row. An id that has left the
+ * roster and has no seat keeps the stored sentence. The raw id does not
+ * replace the registered name.
  */
 export function activityRailLine(
   event: RailEvent,
@@ -112,9 +113,12 @@ export function activityRailLine(
   const refresh = Array.isArray(payload?.agents) || action === 'heartbeat'
   if (refresh && !stored) return null
   const actor = activityActor(payload, roster, tickets, runs)
-  const name = actor ? seatedName(actor, naming) : ''
-  const rebuilt = actor ? sentenceFor(payload ?? {}, name) : ''
+  const known = actor != null && roster.some((agent) => agent.id.trim() === actor.id.trim())
+  const presented = actor ? seatedName(actor, naming) : ''
+  const fromSeat = actor != null && presented !== actor.name
+  const relabel = known || fromSeat
+  const rebuilt = relabel ? sentenceFor(payload ?? {}, presented) : ''
   const text = rebuilt || stored
   if (!text || isEventType(text) || text === event.type) return null
-  return { actor: actor ? { ...actor, name } : null, text }
+  return { actor: actor ? { ...actor, name: relabel ? presented : actor.name } : null, text }
 }

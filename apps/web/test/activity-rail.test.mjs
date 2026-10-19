@@ -121,6 +121,37 @@ test('activity text uses the seated crew name from the current map', async () =>
   assert.equal(byName.actor.id, 'Pixel')
   assert.equal(byName.text, 'Pixel registered')
 
+  const departed = rail.activityRailLine(
+    {
+      type: 'agents.snapshot',
+      payload: {
+        id: 'rail_quill',
+        agent: 'rail_quill',
+        action: 'delete',
+        name: 'Rail Quill went offline',
+      },
+    },
+    roster,
+    [],
+    [],
+    crew,
+  )
+  assert.equal(departed.text, 'Rail Quill went offline')
+  assert.equal(departed.actor.name, 'rail_quill')
+
+  const stillSeated = rail.activityRailLine(
+    {
+      type: 'agents.snapshot',
+      payload: { id: 'helper', agent: 'helper', action: 'delete', name: 'Pixel went offline' },
+    },
+    [],
+    [],
+    [],
+    crew,
+  )
+  assert.equal(stillSeated.text, 'Speedy went offline')
+  assert.equal(stillSeated.actor.name, 'Speedy')
+
   const ticket = rail.activityRailLine(
     { type: 'run.progress', payload: { id: 'helper', agent: 'helper', name: 'MC-151 moved to QA', ticket: 'MC-151' } },
     roster,
