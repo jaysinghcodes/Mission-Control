@@ -152,4 +152,35 @@ describe('applyAgents source merge', () => {
     expect(nova?.source).toBe('snapshot');
     expect(nova?.parentId).toBe('speedy');
   });
+
+  it('a removed snapshot agent stays gone until a later snapshot includes it', async () => {
+    const { rows, service } = memory([
+      row({ id: 'speedy', name: 'Speedy', source: 'default', position: 0 }),
+      row({
+        id: 'forge_2',
+        name: 'Forge 2',
+        source: 'snapshot',
+        position: 4,
+      }),
+    ]);
+    rows.delete('forge_2');
+
+    await service.applyAgents({
+      agents: [{ id: 'speedy', name: 'Speedy', status: 'idle' }],
+    });
+    expect(rows.has('forge_2')).toBe(false);
+
+    await service.applyAgents({
+      agents: [
+        { id: 'speedy', name: 'Speedy', status: 'idle' },
+        { id: 'forge_2', name: 'Forge 2', status: 'working' },
+      ],
+    });
+    expect(rows.get('forge_2')).toMatchObject({
+      source: 'snapshot',
+      name: 'Forge 2',
+      status: 'working',
+    });
+    expect(rows.get('speedy')?.source).toBe('default');
+  });
 });

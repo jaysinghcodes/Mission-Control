@@ -58,9 +58,7 @@ npm test
 npm run build
 ```
 
-`npm run lint` checks the web app with oxlint and the API with eslint. It only reads files. `npm run lint:fix` runs the same checks and applies their automatic fixes. Commit the result only after you review the diff. `npm run test:e2e` needs Postgres. `npm run doctor` prints one line per check. The order is in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
-
-Six of the tests in `apps/api/src/ingest/ingest.controller.spec.ts` need Postgres. With Postgres unreachable, that file is the API failure. The unknown event type check and the production missing ingest token check on `POST /events` return before they write. Production loopback `POST /tickets` with no title returns 400 before it writes, with or without an ingest token. The write route coverage tests do not need Postgres. Web tests do not use Postgres.
+`npm run lint` checks the web app with oxlint and the API with eslint. It only reads files. `npm run lint:fix` runs the same checks and applies their automatic fixes. Commit the result only after you review the diff. `npm test` for the API needs Postgres. It uses `TEST_DATABASE_URL` when that is set, and otherwise creates a throwaway database named `mc_test_<random>` so it never connects to the database named by `DATABASE_URL`. If creating a database is not permitted, setup uses a throwaway schema and drops it afterward. If `TEST_DATABASE_URL` names the same host, port, and database as `DATABASE_URL`, the run refuses before it writes. Web tests do not use Postgres. `npm run test:e2e` uses `DATABASE_URL`. `npm run doctor` prints one line per check. The order is in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## What works without OpenClaw
 

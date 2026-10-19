@@ -348,7 +348,7 @@ describe('agent merge', () => {
     ).toBe(false);
   });
 
-  it('criterion 5: delete allows a registered row and refuses a default', () => {
+  it('criterion 5: delete allows every source and 404s when the id is missing', () => {
     expect(
       planDelete(
         row({ id: 'forge_helper', name: 'Forge Helper', source: 'registered' }),
@@ -356,18 +356,10 @@ describe('agent merge', () => {
     ).toEqual({ ok: true });
     expect(
       planDelete(row({ id: 'speedy', name: 'Speedy', source: 'default' })),
-    ).toEqual({
-      ok: false,
-      status: 409,
-      message: 'default agents cannot be deleted',
-    });
+    ).toEqual({ ok: true });
     expect(
       planDelete(row({ id: 'nova', name: 'Nova', source: 'snapshot' })),
-    ).toEqual({
-      ok: false,
-      status: 409,
-      message: 'snapshot agents cannot be deleted',
-    });
+    ).toEqual({ ok: true });
     expect(planDelete(null)).toEqual({
       ok: false,
       status: 404,

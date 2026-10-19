@@ -21,6 +21,9 @@ interface GatewayBody {
  * gateway.snapshot is the Compose status. The bridge posts it with
  * x-ingest-token. GET /system reads that row only when MC_COMPOSE=1 and
  * OPENCLAW_GATEWAY_HOST is blank.
+ *
+ * The Nest app uses the isolated test database. This file does not read
+ * DATABASE_URL.
  */
 
 function listen(server: Server): Promise<number> {

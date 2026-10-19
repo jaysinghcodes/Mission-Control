@@ -535,7 +535,7 @@ describe('Agents register (e2e)', () => {
     expect(after?.lastSeenAt).toEqual(before?.lastSeenAt);
   });
 
-  it('criterion 5: delete removes a registered row and returns 409 for a default', async () => {
+  it('criterion 5: delete removes a registered row and a default row', async () => {
     const id = 'e2e_delete_me';
     const def = 'e2e_delete_default';
     created.push(id, def);
@@ -548,12 +548,9 @@ describe('Agents register (e2e)', () => {
         position: 44,
       },
     });
-    const blocked = await call().delete(`/agents/${def}`);
-    expect(blocked.status).toBe(409);
-    expect(bodyMessage(blocked)).toBe('default agents cannot be deleted');
-    expect(
-      await prisma.agent.findUnique({ where: { id: def } }),
-    ).not.toBeNull();
+    const removedDefault = await call().delete(`/agents/${def}`);
+    expect(removedDefault.status).toBe(204);
+    expect(await prisma.agent.findUnique({ where: { id: def } })).toBeNull();
 
     const removed = await call().delete(`/agents/${id}`);
     expect(removed.status).toBe(204);

@@ -201,7 +201,7 @@ That prints `204`.
 curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agents/forge_helper"
 ```
 
-`204` is the native loopback result. On Compose the same command returns 401, because the API does not see loopback. Delete the agent from the UI, or send a session cookie. A default id returns 409. If register returns 401, run `npm run doctor` and send the token that check is using. Field tables: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
+`204` is the native loopback result. On Compose the same command returns 401, because the API does not see loopback. Delete the agent from the UI, or send a session cookie. Settings can remove any agent. A snapshot agent comes back only when a later snapshot includes it. If register returns 401, run `npm run doctor` and send the token that check is using. Field tables: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
 
 Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. Turn on Show sample bots on System to bring them back. They show the Sample tag. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed. The row is not deleted.
 
@@ -223,7 +223,7 @@ npm test
 npm run build
 ```
 
-`npm run lint` checks the web app with oxlint and the API with eslint. `npm run test:e2e` needs Postgres. `npm run doctor` prints one line per check. OpenClaw staying down does not fail it. The order of those lines, and what a failing line means, is in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+`npm test` connects with `TEST_DATABASE_URL` only. It does not connect to the database named by `DATABASE_URL`. When `TEST_DATABASE_URL` is unset, setup creates a database named `mc_test_<random>` on the same server, migrates it, and drops it when the run ends, including after a failure. If creating a database is not permitted, setup uses a throwaway schema and drops that schema afterward. If `TEST_DATABASE_URL` names the same host, port, and database as `DATABASE_URL`, the run prints `Tests will not run against your live database. Set TEST_DATABASE_URL.` and exits before it writes. Postgres must be reachable. `npm run lint` checks the web app with oxlint and the API with eslint. `npm run test:e2e` needs a migrated Postgres at `DATABASE_URL`. `npm run doctor` prints one line per check. OpenClaw staying down does not fail it. The order of those lines, and what a failing line means, is in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Troubleshooting
 

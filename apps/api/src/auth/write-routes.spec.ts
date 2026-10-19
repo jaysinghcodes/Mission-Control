@@ -14,6 +14,9 @@ import { isAuthRoute, isIngestWrite } from './route-class';
  *
  * Ingest routes still 401 without x-ingest-token. Dashboard writes on
  * loopback do not. Off loopback coverage lives in dashboard-auth.spec.ts.
+ *
+ * The Nest app uses the isolated test database. This file does not read
+ * DATABASE_URL.
  */
 const TOKEN = 'route-coverage-token';
 

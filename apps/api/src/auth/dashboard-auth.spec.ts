@@ -24,6 +24,9 @@ import { listRegisteredRoutes, probePath } from './write-routes';
  * Off loopback, every dashboard read and write is 401 without a session.
  * Supertest connects from 127.0.0.1. x-test-peer replaces that socket
  * address inside this file only. A forwarded header does not.
+ *
+ * The Nest app uses the isolated test database. This file does not read
+ * DATABASE_URL.
  */
 const TOKEN = 'route-coverage-token';
 const PASSWORD = 'dashboard-login-test-password';

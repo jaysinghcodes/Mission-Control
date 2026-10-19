@@ -13,7 +13,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run dev` | `nest start --watch`. The process loads the root `.env` and runs `prisma migrate deploy` before it listens. Export the root `.env` as well so the Vite dev proxy sees `INGEST_TOKEN`. |
 | `npm run build` | `nest build` |
 | `npm run start:prod` | `node dist/main` |
-| `npm test` | Jest. Most suites mock Prisma and need no database. Six of the nine tests in `src/ingest/ingest.controller.spec.ts` write through the real app and need a migrated Postgres at `DATABASE_URL` (a known event, a valid production token, and the four agent snapshot cases). The unknown type check, the production missing ingest token check on `POST /events`, and the production loopback `POST /tickets` check (400, title required, no ingest token) do not. Export the root `.env` (`set -a; . ./.env; set +a`), generate the client, and run `npx prisma migrate deploy` in this directory before `npm test` when that database is not already up. |
+| `npm test` | Jest. Global setup connects with `TEST_DATABASE_URL` only. It does not connect to the database named by `DATABASE_URL`. When `TEST_DATABASE_URL` is unset, setup creates `mc_test_<random>` on that server, migrates it, and drops it afterward. If creating a database is not permitted, setup uses a throwaway schema and drops that schema afterward. The same host, port, and database as `DATABASE_URL` makes the run refuse before it writes. Postgres must be reachable. Generate the client first (`npx prisma generate`). |
 | `npm run test:e2e` | Separate Jest config under `test/`. Also needs a migrated Postgres at `DATABASE_URL`. |
 | `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Not part of a fresh setup. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run seed:clear` | Deletes only the rows `seed:demo` created. Registered, snapshot, and API created rows stay. Idempotent. Same production guard. |
@@ -28,7 +28,8 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mission_control` | Required when `NODE_ENV=production` |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/mission_control` | Required when `NODE_ENV=production`. `npm test` does not connect to this database |
+| `TEST_DATABASE_URL` | unset | Optional database for `npm test`. Unset creates `mc_test_<random>` and drops it afterward. The same host, port, and database as `DATABASE_URL` refuses the run |
 | `PORT` / `HOST` | `3000` / `127.0.0.1` | Compose sets `HOST=0.0.0.0` inside the container and publishes `127.0.0.1` only |
 | `WEB_ORIGIN` | `http://localhost:5173,http://127.0.0.1:5173` | Comma separated CORS list. Never `*` |
 | `INGEST_TOKEN` | empty in code, placeholder in the example file | `x-ingest-token` for agent ingest: `POST /events`, register, heartbeat, and run writes. Unset on loopback when `NODE_ENV` is not `production`: ingest stays open, one warning. Unset in production, including loopback: process starts and ingest returns 401. Unset on any other `HOST`: process refuses to start |

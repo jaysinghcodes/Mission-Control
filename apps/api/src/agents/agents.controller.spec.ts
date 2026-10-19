@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   NotFoundException,
   RequestMethod,
 } from '@nestjs/common';
@@ -431,16 +430,27 @@ describe('AgentsController register, heartbeat, delete', () => {
     expect(rows.get('forge_helper')!.currentTask).toBeNull();
   });
 
-  it('criterion 5: delete removes a registered row and returns 409 for a default', async () => {
+  it('criterion 5: delete removes a default, a snapshot, and a registered row', async () => {
     const { rows, controller, res, broadcast } = harness();
     seedDefault(rows);
-    await expect(controller.remove('forge')).rejects.toBeInstanceOf(
-      ConflictException,
-    );
-    await expect(controller.remove('forge')).rejects.toMatchObject({
-      message: 'default agents cannot be deleted',
+    rows.set('forge_2', {
+      ...rows.get('forge')!,
+      id: 'forge_2',
+      name: 'Forge 2',
+      source: 'snapshot',
     });
-    expect(rows.has('forge')).toBe(true);
+    await controller.remove('forge');
+    expect(rows.has('forge')).toBe(false);
+    await controller.remove('forge_2');
+    expect(rows.has('forge_2')).toBe(false);
+    expect(broadcast).toHaveBeenCalledWith(
+      'agents.snapshot',
+      expect.objectContaining({
+        id: 'forge_2',
+        source: 'snapshot',
+        action: 'delete',
+      }),
+    );
 
     await controller.register(
       { id: 'forge_helper', name: 'Forge Helper' },
@@ -452,6 +462,7 @@ describe('AgentsController register, heartbeat, delete', () => {
       'agents.snapshot',
       expect.objectContaining({
         id: 'forge_helper',
+        source: 'registered',
         action: 'delete',
         agent: 'forge_helper',
         name: 'Forge Helper went offline',
