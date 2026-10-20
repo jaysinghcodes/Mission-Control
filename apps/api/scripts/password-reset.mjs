@@ -41,6 +41,8 @@ const COMPOSE_REFUSE =
   'Could not reset the dashboard password, so run docker compose up -d first and then npm run password:reset.';
 const LEGACY_REFUSE =
   'This install has no install mode in .env, so the password was not reset. Run bash install.sh again to record it, then run npm run password:reset again.';
+const DOCKER_SILENT_REFUSE =
+  'This install has no install mode in .env and Docker did not answer, so the password was not reset. Start Docker or run bash install.sh again to record it, then run npm run password:reset again.';
 const UNCONFIRMED_EXIT = 3;
 const DOCKER_TIMEOUT_MS = 20000;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -56,9 +58,14 @@ if (insideCompose) {
   resetInPlace();
 } else if (installMode === 'compose') {
   resetThroughCompose();
-} else if (installMode === '' && composeTrace() !== 'none') {
-  console.error(LEGACY_REFUSE);
-  process.exit(1);
+} else if (installMode === '') {
+  const trace = composeTrace();
+  if (trace === 'none') {
+    resetInPlace();
+  } else {
+    console.error(trace === 'unknown' ? DOCKER_SILENT_REFUSE : LEGACY_REFUSE);
+    process.exit(1);
+  }
 } else {
   resetInPlace();
 }

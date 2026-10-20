@@ -19,6 +19,8 @@ const REFUSE =
 const EXEC_ARGS = 'compose exec -T api npm run password:reset';
 const LEGACY_REFUSE =
   'This install has no install mode in .env, so the password was not reset. Run bash install.sh again to record it, then run npm run password:reset again.';
+const DOCKER_SILENT_REFUSE =
+  'This install has no install mode in .env and Docker did not answer, so the password was not reset. Start Docker or run bash install.sh again to record it, then run npm run password:reset again.';
 const MAY_HAVE_CHANGED =
   'The new dashboard password could not be read back, so the password may have changed and the old one may no longer work.';
 
@@ -471,7 +473,11 @@ async function expectLegacyRefusal(mode: TraceMode): Promise<void> {
     );
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe('');
-    expect(result.stderr.trim()).toBe(LEGACY_REFUSE);
+    expect(result.stderr.trim()).toBe(
+      mode === 'unreachable' || mode === 'config-fails'
+        ? DOCKER_SILENT_REFUSE
+        : LEGACY_REFUSE,
+    );
     expect(readFileSync(tree.state, 'utf8')).toBe(tree.original);
     expect(
       existsSync(join(tree.root, 'apps/api/data/session-state.json')),
