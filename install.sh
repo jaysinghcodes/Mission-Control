@@ -1799,12 +1799,14 @@ print_install_summary() {
 }
 
 # A failed run still shows a new password. The hash is not recoverable later.
+# Called from finish as well as the EXIT trap. A trap only call looks unreachable to shellcheck.
 on_exit() {
   if [[ "${MC_SUMMARY_PRINTED:-0}" == "1" ]]; then
     return 0
   fi
   if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
     echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+    MC_SUMMARY_PRINTED=1
   fi
 }
 
@@ -1831,6 +1833,7 @@ finish() {
     echo "info doctor: Node is not on PATH, so doctor did not run. Docker installs don't need Node."
   fi
   print_install_summary
+  on_exit
   exit "$doctor_code"
 }
 
