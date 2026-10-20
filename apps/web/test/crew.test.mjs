@@ -106,12 +106,78 @@ test('resolveSticker matches the agent id and a display name stays generic', () 
   assert.equal(blank.agent.id, 'agent')
 })
 
-test('assignSeatsInOrder follows position and ignores names', () => {
-  const agents = [
-    { id: 'dev', name: 'Speedy', position: 1 },
-    { id: 'main', name: 'dev', position: 0 },
+test('assignCrewSeats matches pixel and quill by id and ignores display names', () => {
+  const named = [
+    ...seats,
+    { id: 'pixel', name: 'Pixel', role: 'Designer', desk: 'Design desk', color: '#ff5fa6' },
+    { id: 'quill', name: 'Quill', role: 'Writer', desk: 'Writing desk', color: '#d257ef' },
   ]
-  assert.deepEqual(crew.assignSeatsInOrder(agents, seats), { main: 'speedy', dev: 'forge' })
+  const map = crew.assignCrewSeats(
+    [
+      { id: 'quill', name: 'Pixel', position: 0 },
+      { id: 'pixel', name: 'Quill', position: 4 },
+      { id: 'helper', name: 'Pixel', position: 1 },
+    ],
+    named,
+  )
+  assert.deepEqual(map, { pixel: 'pixel', quill: 'quill', helper: 'speedy' })
+})
+
+test('a free seat stays when another agent arrives, one leaves, or positions change', () => {
+  const first = crew.assignCrewSeats([{ id: 'helper', name: 'Pixel', position: 0 }], seats)
+  assert.deepEqual(first, { helper: 'speedy' })
+  const arrived = crew.assignCrewSeats(
+    [
+      { id: 'helper', position: 0 },
+      { id: 'nova', position: 1 },
+    ],
+    seats,
+    first,
+    new Set(['helper']),
+  )
+  assert.deepEqual(arrived, { helper: 'speedy', nova: 'forge' })
+  const removed = crew.assignCrewSeats([{ id: 'nova', position: 3 }], seats, arrived, new Set(['nova']))
+  assert.deepEqual(removed, { nova: 'forge' })
+  const reordered = crew.assignCrewSeats(
+    [
+      { id: 'nova', position: 0 },
+      { id: 'helper', position: 9 },
+    ],
+    seats,
+    { helper: 'speedy', nova: 'forge' },
+    new Set(['helper', 'nova']),
+  )
+  assert.deepEqual(reordered, { helper: 'speedy', nova: 'forge' })
+})
+
+test('naming refresh follows roster changes and skips heartbeats', () => {
+  const events = [
+    { type: 'agents.snapshot', ts: 5, action: 'heartbeat' },
+    { type: 'agent.status', ts: 6 },
+  ]
+  assert.equal(crew.namingRefreshTs(0, events), null)
+  events.push({ type: 'agents.snapshot', ts: 7, action: 'register' })
+  assert.equal(crew.namingRefreshTs(0, events), 7)
+  assert.equal(crew.namingRefreshTs(7, events), null)
+})
+
+test('the naming screen proposes by agent id and settings keeps a saved map', async () => {
+  const screen = await readFile(new URL('../src/components/NamingChoice.tsx', import.meta.url), 'utf8')
+  const settings = await readFile(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8')
+  const firstRun = await readFile(new URL('../src/pages/FirstRun.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /assignCrewSeats/)
+  assert.equal(screen.includes('assignSeatsInOrder'), false)
+  assert.match(firstRun, /agentsReady=\{Boolean\(agentsQ\.data\)\}/)
+  assert.match(screen, /An agent whose id matches a crew seat takes it\. Everyone else fills open seats in the order they joined\. You can change any seat\./)
+  assert.match(screen, /Agents keep the name, role, and color they registered with\. Desks stay generic\./)
+  assert.match(screen, /This choice is saved for this Mission Control\. You can change it later in Settings\. Sample rows keep the names already stored on them\./)
+  assert.equal(screen.includes('when the seat is free'), false)
+  assert.equal(screen.includes('no saved choice'), false)
+  assert.match(settings, /Each agent gets a crew name and desk\. Seats are saved by agent id, and you can change any seat here\./)
+  assert.equal(settings.includes('when the seat is free'), false)
+  assert.equal(settings.includes('no saved choice'), false)
+  assert.equal(/[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]/.test(screen), false)
+  assert.equal(/[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]/.test(settings), false)
 })
 
 test('orderByPosition sorts by position then id', () => {

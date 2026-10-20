@@ -4,7 +4,10 @@
  * The locked picture is Build / QA / Ship / Deploy desks plus a Commons.
  * Who sits where is the room already chosen by live work (see live-work.ts).
  * This module only applies the segmented filter and the two desk cap.
- * Role text is not a seat.
+ * Role text is not a seat. A display name is not a seat.
+ * Crew names are applied by agent id before this floor runs.
+ * Order inside a room follows agent id, so a crew rename does not
+ * move someone between a desk and the Commons. Roster position does not either.
  */
 
 import { pluralize } from './pluralize'
@@ -85,12 +88,12 @@ export function placeFloor<T extends FloorAgent>(
   }
   for (const id of DESK_ROOMS) {
     buckets[id].sort(
-      (a, b) => seatRank(a, blockedIds) - seatRank(b, blockedIds) || a.name.localeCompare(b.name),
+      (a, b) => seatRank(a, blockedIds) - seatRank(b, blockedIds) || a.id.localeCompare(b.id),
     )
     const extra = buckets[id].splice(DESK_CAP)
     buckets.commons.push(...extra)
   }
-  buckets.commons.sort((a, b) => a.name.localeCompare(b.name))
+  buckets.commons.sort((a, b) => a.id.localeCompare(b.id))
   return buckets
 }
 

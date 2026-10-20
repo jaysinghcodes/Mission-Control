@@ -45,13 +45,32 @@ function memory(seed: RosterAgent[]) {
       return Promise.resolve(next);
     },
   };
+  const settings: {
+    row: { namingMode: string | null; crewMap: unknown } | null;
+  } = { row: null };
+  const setting = {
+    findUnique: () => Promise.resolve(settings.row),
+    update: ({ data }: { data: { crewMap: Record<string, string> } }) => {
+      settings.row = {
+        namingMode: settings.row?.namingMode ?? 'crew',
+        crewMap: data.crewMap,
+      };
+      return Promise.resolve(settings.row);
+    },
+  };
   const prisma = {
     agent,
-    $transaction: (fn: (tx: { agent: typeof agent }) => Promise<void>) =>
-      fn({ agent }),
+    setting,
+    $transaction: (
+      fn: (tx: {
+        agent: typeof agent;
+        setting: typeof setting;
+      }) => Promise<unknown>,
+    ) => fn({ agent, setting }),
   };
   return {
     rows,
+    settings,
     service: new SnapshotsService(prisma as unknown as PrismaService),
   };
 }
@@ -182,5 +201,22 @@ describe('applyAgents source merge', () => {
       status: 'working',
     });
     expect(rows.get('speedy')?.source).toBe('default');
+  });
+
+  it('crew mode seats pixel and quill by id and does not use the display name', async () => {
+    const { settings, service } = memory([]);
+    settings.row = { namingMode: 'crew', crewMap: {} };
+    await service.applyAgents({
+      agents: [
+        { id: 'helper', name: 'Pixel', role: 'designer', position: 0 },
+        { id: 'pixel', name: 'Quill', role: 'writer' },
+        { id: 'quill', name: 'Ada', role: 'notes' },
+      ],
+    });
+    expect(settings.row?.crewMap).toEqual({
+      pixel: 'pixel',
+      quill: 'quill',
+      helper: 'speedy',
+    });
   });
 });

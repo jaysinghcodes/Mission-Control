@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { syncCrewSeats, withCrewLock } from '../settings/crew-map';
 import {
   agentRegistered,
   agentStatusName,
@@ -103,15 +104,26 @@ export class AgentsController {
   ) {
     const input = this.registerInput(body);
     const now = new Date();
-    const existing = (await this.prisma.agent.findMany()).map(asRosterAgent);
-    const plan = planRegister(existing, input, now);
-    if (!plan.ok) throw new ConflictException(plan.message);
-    const saved = plan.created
-      ? await this.insertRegistered(plan.row)
-      : await this.updateRegistered(plan.row);
-    await this.emit('register', saved.id, saved.source, true, saved.name);
-    res.status(plan.created ? 201 : 200);
-    return { agent: this.present(saved, now), ts: Date.now() };
+    const outcome = await withCrewLock(this.prisma, async (tx) => {
+      const existing = (await tx.agent.findMany()).map(asRosterAgent);
+      const plan = planRegister(existing, input, now);
+      if (!plan.ok) throw new ConflictException(plan.message);
+      const saved = plan.created
+        ? await this.insertRegistered(plan.row, tx)
+        : await this.updateRegistered(plan.row, tx);
+      if (!saved) throw new ConflictException('name already exists');
+      await syncCrewSeats(tx, { arrived: [saved.id] });
+      return { saved, created: plan.created };
+    });
+    await this.emit(
+      'register',
+      outcome.saved.id,
+      outcome.saved.source,
+      true,
+      outcome.saved.name,
+    );
+    res.status(outcome.created ? 201 : 200);
+    return { agent: this.present(outcome.saved, now), ts: Date.now() };
   }
 
   /**
@@ -162,12 +174,16 @@ export class AgentsController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string): Promise<void> {
-    const found = await this.prisma.agent.findUnique({ where: { id } });
-    const plan = planDelete(found ? asRosterAgent(found) : null);
-    if (!plan.ok || !found) {
-      throw new NotFoundException(plan.ok ? 'agent not found' : plan.message);
-    }
-    await this.prisma.agent.delete({ where: { id } });
+    const found = await withCrewLock(this.prisma, async (tx) => {
+      const row = await tx.agent.findUnique({ where: { id } });
+      const plan = planDelete(row ? asRosterAgent(row) : null);
+      if (!plan.ok || !row) {
+        throw new NotFoundException(plan.ok ? 'agent not found' : plan.message);
+      }
+      await tx.agent.delete({ where: { id } });
+      await syncCrewSeats(tx, { removed: [id] });
+      return row;
+    });
     await this.emit('delete', id, found.source, true, found.name);
   }
 
@@ -304,17 +320,23 @@ export class AgentsController {
     return { [key]: text };
   }
 
-  private async insertRegistered(row: RosterAgent) {
+  private async insertRegistered(
+    row: RosterAgent,
+    db: { agent: PrismaService['agent'] },
+  ) {
     try {
-      return await this.prisma.agent.create({ data: this.writeData(row) });
+      return await db.agent.create({ data: this.writeData(row) });
     } catch (err) {
       this.rethrowUnique(err);
     }
   }
 
-  private async updateRegistered(row: RosterAgent) {
+  private async updateRegistered(
+    row: RosterAgent,
+    db: { agent: PrismaService['agent'] },
+  ) {
     try {
-      return await this.prisma.agent.update({
+      return await db.agent.update({
         where: { id: row.id },
         data: {
           name: row.name,

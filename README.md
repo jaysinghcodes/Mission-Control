@@ -140,9 +140,13 @@ Then open **http://localhost:5173/#/tasks**. Leave `VITE_API_URL` unset here too
 
 1. `bash install.sh`, or the advanced commands above, starts Postgres, the API, and the web UI.
 2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar chip says **Connected** when `GET /health` and the socket are up.
-3. The first open asks for a timezone, then a naming choice, then confirms the detected provider. Skip finishes that open. Change them later under System, then Settings.
+3. The first open asks for a timezone, then a naming choice, then confirms the detected provider. Skip finishes that open. Change them later under System, then Settings. Seat rules are in [How crew seats work](#how-crew-seats-work).
 4. A fresh setup does not load sample data. Empty states are a valid first run. On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the sample shots. `npm run seed:clear` removes only those rows.
 5. If something fails, run `npm run doctor` from the repo root. The failing line names the next command. Notes are in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## How crew seats work
+
+Crew mode maps each seat by agent id. The names live in `config/crew.json`. A matching id takes that seat only when the seat is free. A saved seat stays with that agent. Everyone else with no saved choice takes the next free seat in the order they first registered. When a seat opens, the earliest agent with no saved choice takes it. Own name is a saved choice. It stays until a Settings save changes that agent, and that agent is never auto seated. A Settings save changes only the agents it names. Agents it leaves out keep their seat or Own name choice. If a save gives a seat to one agent while another agent holds it, the named agent gets the seat and the holder loses it. The holder then has no saved choice, unless this save sets the holder to Own name. A `crewMap` key that is not a roster agent id returns 400 and writes nothing. The message is `unknown agent <id>`. A display name does not pick a seat.
 
 ## Stack
 

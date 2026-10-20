@@ -210,7 +210,7 @@ export const STEP_DATA: ConnectStep[] = [
     phaseLabel: 'VERIFY',
     body: [
       `Open \`http://localhost:${WEB_PORT}/#/tasks\`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.`,
-      'The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent\'s own name, then confirms the detected provider. Skip finishes that open. Change each one later under System, then Settings. Open Tasks for the board and System for health.',
+      'The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent\'s own name, then confirms the detected provider. Skip finishes that open. Change each one later under System, then Settings. Crew seats are saved by agent id. Open Tasks for the board and System for health.',
       'Health on this same origin shows uptime, client count, and database state. Empty states show actions.',
       'Dot stays red? The API is down, or this browser has no session. On Compose, sign in with the password the installer printed.',
     ],

@@ -226,7 +226,11 @@ model Setting {
   openclawVersion  String?
   /// crew or own. Null until the first run choice is saved.
   namingMode       String?
-  /// Agent id to crew seat id. The screen applies it only when namingMode is crew.
+  /// Agent id to crew seat id. An empty string is Own name. The screen applies
+  /// a seat only when namingMode is crew. A matching id takes a free seat.
+  /// A saved seat stays. Own name stays until a Settings save changes it.
+  /// A seat that opens goes to the earliest agent with no saved choice.
+  /// Those writes share one lock.
   crewMap          Json?
   /// IANA timezone for usage and memory days. Null uses the server timezone.
   timezone         String?

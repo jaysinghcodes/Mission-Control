@@ -53,8 +53,8 @@ export default function FirstRun() {
   }
 
   return (
-    <div className="mc-scroll grid min-h-dvh place-items-center bg-mc-bg px-6 py-10">
-      <div className="mc-card w-full max-w-2xl px-8 py-8" data-setup-step={step}>
+    <div className="mc-scroll flex h-dvh min-h-0 flex-col items-center overflow-y-auto bg-mc-bg px-6 py-10">
+      <div className="mc-card my-auto w-full max-w-2xl px-8 py-8" data-setup-step={step}>
         {step === 'timezone' && (
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-mc-faint">Step 1 of 3</p>
@@ -82,6 +82,7 @@ export default function FirstRun() {
               <div className="mt-2">
                 <NamingChoice
                   agents={agents}
+                  agentsReady={Boolean(agentsQ.data)}
                   initialMode={naming.mode}
                   initialMap={naming.map}
                   intro

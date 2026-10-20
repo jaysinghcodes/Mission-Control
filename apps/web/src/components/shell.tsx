@@ -182,10 +182,10 @@ export function AgentName({
   })
   const nameCls = size === 'md' ? 'text-[14px]' : 'text-[12px]'
   return (
-    <span className={`inline-flex min-w-0 items-center gap-1 truncate ${className}`}>
+    <span className={`inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1 ${className}`}>
       <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: cap.color }} />
-      <span className={`truncate font-semibold text-mc-text ${nameCls}`}>{cap.name}</span>
-      <span className="text-[11px] font-normal text-mc-sub"> · {cap.role}</span>
+      <span className={`break-words font-semibold text-mc-text ${nameCls}`}>{cap.name}</span>
+      <span className="min-w-0 break-words text-[11px] font-normal text-mc-sub"> · {cap.role}</span>
     </span>
   )
 }

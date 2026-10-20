@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNaming } from '../lib/naming'
 import type { NamingMode } from '../lib/crew'
 import type { Agent } from '../types'
-import { assignSeatsInOrder, orderByPosition } from '../lib/crew'
+import { assignCrewSeats, orderByPosition } from '../lib/crew'
 import { Btn } from './shell'
 
 /**
  * First run and Settings share this form.
- * Crew seats come from the API. The default map is position order.
+ * A saved crew map is shown as stored. The first proposal matches
+ * seat ids, then fills free seats in registration order.
  */
 export function NamingChoice({
   agents,
@@ -16,6 +17,7 @@ export function NamingChoice({
   intro,
   submitLabel,
   onSaved,
+  agentsReady = true,
 }: {
   agents: readonly Agent[]
   initialMode: NamingMode | null
@@ -23,30 +25,41 @@ export function NamingChoice({
   intro: boolean
   submitLabel: string
   onSaved?: () => void
+  /** False while the roster is still loading, so an empty list is not saved as the proposal. */
+  agentsReady?: boolean
 }) {
   const naming = useNaming()
   const seats = naming.seats
   const ordered = orderByPosition(agents)
+  const locked = initialMode === 'crew' || initialMode === 'own' || Object.keys(initialMap).length > 0
   const [mode, setMode] = useState<NamingMode>(initialMode === 'own' ? 'own' : 'crew')
-  const [map, setMap] = useState<Record<string, string>>(() => startingMap(initialMode, initialMap, ordered, seats))
+  const [map, setMap] = useState<Record<string, string>>(() => {
+    if (locked) return storedMap(initialMode, initialMap)
+    if (!agentsReady || seats.length === 0) return {}
+    return assignCrewSeats(ordered, seats, {})
+  })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const proposed = useRef(locked || (agentsReady && seats.length > 0))
+
+  useEffect(() => {
+    if (proposed.current) return
+    if (!agentsReady || seats.length === 0) return
+    proposed.current = true
+    setMap(assignCrewSeats(ordered, seats, {}))
+  }, [agentsReady, seats, ordered])
 
   function choose(next: NamingMode) {
     setMode(next)
     setError(null)
-    if (next === 'crew' && Object.keys(map).length === 0) {
-      setMap(naming.assign(ordered, seats))
+    if (next === 'crew' && Object.keys(map).length === 0 && initialMode !== 'crew') {
+      setMap(assignCrewSeats(ordered, seats, {}))
     }
   }
 
   function setSeat(agentId: string, seatId: string) {
-    setMap((prev) => {
-      const next = { ...prev }
-      if (!seatId) delete next[agentId]
-      else next[agentId] = seatId
-      return next
-    })
+    // Empty string is Own name. The key stays so this save names that agent.
+    setMap((prev) => ({ ...prev, [agentId]: seatId }))
   }
 
   async function save() {
@@ -75,7 +88,7 @@ export function NamingChoice({
           selected={mode === 'crew'}
           title="Use the Mission Control crew"
           badge="Recommended"
-          body="Each agent takes the next crew seat in the order already stored. Change a seat before you continue."
+          body="An agent whose id matches a crew seat takes it. Everyone else fills open seats in the order they joined. You can change any seat."
           onSelect={() => choose('crew')}
         />
         <Choice
@@ -90,7 +103,7 @@ export function NamingChoice({
         <div className="mt-5">
           {ordered.length === 0 ? (
             <p className="text-[13px] text-mc-sub">
-              No agents yet. You can still continue. Agents that show up later keep their own names until you assign seats in Settings.
+              No agents yet. You can still continue. An agent that registers later takes the next free seat. Seats already saved stay put.
             </p>
           ) : (
             <ul className="divide-y divide-mc-sep rounded-[14px] bg-mc-inner">
@@ -100,12 +113,13 @@ export function NamingChoice({
                   <li key={agent.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
                     <span className="min-w-0">
                       <span className="block text-[14px] font-semibold text-mc-text">{agent.name}</span>
-                      <span className="block text-[12px] text-mc-sub">{agent.role?.trim() || 'Agent'}</span>
+                      <span className="block text-[12px] text-mc-sub">{agent.id} · {agent.role?.trim() || 'Agent'}</span>
                     </span>
                     <label className="text-[12px] text-mc-sub">
-                      <span className="sr-only">Crew seat for {agent.name}</span>
+                      <span className="sr-only">Crew seat for {agent.id}</span>
                       <select
-                        aria-label={`Crew seat for ${agent.name}`}
+                        aria-label={`Crew seat for ${agent.id}`}
+                        data-agent-id={agent.id}
                         value={map[agent.id] ?? ''}
                         onChange={(e) => setSeat(agent.id, e.target.value)}
                         className="h-8 rounded-lg bg-mc-ctl px-2 text-[13px] text-mc-text"
@@ -134,15 +148,15 @@ export function NamingChoice({
   )
 }
 
-function startingMap(
+/** A saved crew or own choice is shown as stored. A first run proposes below. */
+function storedMap(
   mode: NamingMode | null,
   initialMap: Record<string, string>,
-  agents: readonly { id: string; position?: number | null }[],
-  seats: readonly { id: string }[],
 ): Record<string, string> {
   if (mode === 'own') return {}
+  if (mode === 'crew') return { ...initialMap }
   if (Object.keys(initialMap).length > 0) return { ...initialMap }
-  return assignSeatsInOrder(agents, seats)
+  return {}
 }
 
 function Choice({

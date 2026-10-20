@@ -97,6 +97,15 @@ test('gather keeps on the clock agents in their live room, meeting is commons on
   assert.equal(meeting.build.length + meeting.qa.length + meeting.ship.length + meeting.deploy.length, 0)
 })
 
+test('desk order follows agent id, not the display name', () => {
+  const swapped = [
+    { id: 'b', name: 'Alpha', status: 'idle', room: 'commons' },
+    { id: 'a', name: 'Zed', status: 'working', room: 'commons' },
+  ]
+  const floor = office.placeFloor(swapped, 'all', new Set())
+  assert.deepEqual(floor.commons.map((agent) => agent.id), ['a', 'b'])
+})
+
 test('a third desk agent overflows into the commons', () => {
   const extra = [
     { id: 'a', name: 'Ada', role: 'engineer', status: 'working', room: 'build' },

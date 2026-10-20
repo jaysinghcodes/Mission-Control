@@ -112,6 +112,7 @@ export default function Agents() {
               key={agent.id}
               type="button"
               data-agent-id={agent.id}
+              data-crew-name={cap.name}
               data-offline={offline ? 'true' : 'false'}
               data-live-room={live.room}
               data-live-subtitle={line}

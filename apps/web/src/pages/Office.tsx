@@ -154,7 +154,7 @@ export default function Office() {
   const pipe = stageCounts(ticketRows)
   const events = (activityQ.data?.events ?? [])
     .map((event, index) => {
-      const line = activityRailLine(event, agents, ticketRows, runRows)
+      const line = activityRailLine(event, agents, ticketRows, runRows, naming)
       return line ? { event, index, ...line } : null
     })
     .filter((row): row is NonNullable<typeof row> => row != null)
@@ -231,6 +231,7 @@ export default function Office() {
                         key={agent.id}
                         type="button"
                         data-agent-id={agent.id}
+                        data-crew-name={cap.name}
                         data-offline={offline ? 'true' : 'false'}
                         data-live-room={work?.room ?? 'commons'}
                         data-live-subtitle={line}
@@ -340,6 +341,7 @@ export default function Office() {
                           key={agent.id}
                           type="button"
                           data-agent-id={agent.id}
+                          data-crew-name={cap.name}
                           data-offline={offline ? 'true' : 'false'}
                           data-live-room={work?.room ?? 'commons'}
                           data-live-subtitle={line}
@@ -391,7 +393,11 @@ export default function Office() {
             {events.length === 0 && <p className="px-4 py-6 text-[12.5px] text-mc-sub">No activity yet. Seed or the bridge fills this list.</p>}
             {events.map(({ event: e, index, actor, text }) => {
               const sticker = actor ? resolveSticker(agents, actor.id) : null
-              const who = sticker?.agent ?? null
+              const who = sticker?.agent
+                ? sticker.matched
+                  ? sticker.agent
+                  : { ...sticker.agent, name: actor?.name || sticker.agent.name }
+                : null
               const shown = who ? naming.present(who) : null
               const waiting = activityNeedsYou(e.payload, pending)
               const failed = /fail/i.test(text)
@@ -400,7 +406,7 @@ export default function Office() {
                 <>
                   {who ? <Face agent={who} agents={sticker?.agents} px={36} /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-mc-fill" aria-hidden />}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline justify-between gap-2">
+                    <div className="flex min-w-0 items-baseline justify-between gap-2">
                       {who ? <AgentName agent={who} /> : <span className="text-[12px] font-semibold">{text}</span>}
                       <span className="shrink-0 whitespace-nowrap text-[11px] text-mc-sub">{age}</span>
                     </div>

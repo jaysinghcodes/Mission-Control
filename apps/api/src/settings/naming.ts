@@ -6,8 +6,11 @@ import { dirname, join } from 'path';
  * Naming choice for the roster.
  *
  * config/crew.json is the shipped crew (name, role, desk, color).
- * A saved map points an agent id at a seat id. Nothing here matches
- * a name or a role keyword. Own names mode ignores the map.
+ * A saved map points an agent id at a seat id. An id that equals a
+ * free seat id takes that seat. A saved seat stays with that agent.
+ * Other agents take the next free seat in the order they first
+ * registered. Nothing here matches a display name or a role keyword.
+ * Own names mode ignores the map.
  */
 
 export interface CrewSeat {
@@ -93,6 +96,85 @@ export function readStoredMode(
   return null;
 }
 
+export interface SeatAgent {
+  id: string;
+  /** Set once when the row is created. Later roster order does not change it. */
+  position?: number | null;
+}
+
+/** First registration order. Position is assigned once. Id breaks a tie. */
+export function registrationOrder<T extends SeatAgent>(
+  agents: readonly T[],
+): T[] {
+  return [...agents].sort((a, b) => {
+    const pa = a.position ?? 0;
+    const pb = b.position ?? 0;
+    if (pa !== pb) return pa - pb;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Crew seats by agent id.
+ *
+ * An agent whose id equals a free seat id takes that seat.
+ * A saved seat stays, so a later id match cannot take it.
+ * Everyone else takes the next free seat in registration order.
+ * Agents in `decided` stay on their own name.
+ * Display names are not read. An empty string in a stored map is Own name.
+ * The same function lives in apps/web/src/lib/crew.ts.
+ */
+export function assignCrewSeats(
+  agents: readonly SeatAgent[],
+  seats: readonly { id: string }[],
+  saved: Record<string, string> = {},
+  decided?: ReadonlySet<string> | null,
+): Record<string, string> {
+  const ordered = registrationOrder(agents);
+  const seatIds = seats.map((seat) => seat.id);
+  const known = new Set(seatIds);
+  const used = new Set<string>();
+  const map: Record<string, string> = {};
+  const locked = decided ?? new Set<string>();
+
+  for (const agent of ordered) {
+    const seat = saved[agent.id];
+    if (!seat || !known.has(seat) || used.has(seat)) continue;
+    map[agent.id] = seat;
+    used.add(seat);
+  }
+
+  const fresh = ordered.filter(
+    (agent) => !map[agent.id] && !locked.has(agent.id),
+  );
+  for (const agent of fresh) {
+    if (!known.has(agent.id) || used.has(agent.id)) continue;
+    map[agent.id] = agent.id;
+    used.add(agent.id);
+  }
+
+  const free = seatIds.filter((id) => !used.has(id));
+  let cursor = 0;
+  for (const agent of fresh) {
+    if (map[agent.id]) continue;
+    const seat = free[cursor];
+    if (!seat) break;
+    cursor += 1;
+    map[agent.id] = seat;
+  }
+  return map;
+}
+
+export function crewMapsEqual(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const a = Object.keys(left).sort();
+  const b = Object.keys(right).sort();
+  if (a.length !== b.length) return false;
+  return a.every((key, index) => key === b[index] && left[key] === right[key]);
+}
+
 /**
  * PUT /settings body. namingMode is required. crewMap is optional and
  * defaults to an empty object. Seat ids must exist in the crew file.
@@ -141,6 +223,11 @@ export function readNamingBody(
       throw new BadRequestException('crewMap values must be seat ids');
     }
     const seat = rawSeat.trim();
+    // Empty string is Own name, a saved choice, not a seat id.
+    if (!seat) {
+      crewMap[key] = '';
+      continue;
+    }
     if (!known.has(seat)) {
       throw new BadRequestException(`unknown crew seat ${seat}`);
     }

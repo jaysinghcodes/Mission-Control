@@ -158,7 +158,7 @@ export default function Team() {
                 const live = liveFor(agent)
                 const line = offline ? OFFLINE_LABEL : live.subtitle
                 return (
-                  <li key={agent.id} data-agent-id={agent.id} data-offline={offline ? 'true' : 'false'} data-live-room={live.room} data-live-subtitle={line} data-live-source={live.source}>
+                  <li key={agent.id} data-agent-id={agent.id} data-crew-name={cap.name} data-offline={offline ? 'true' : 'false'} data-live-room={live.room} data-live-subtitle={line} data-live-source={live.source}>
                     <Link to="/agents" className="flex shrink-0 items-center gap-2" aria-label={`${cap.name} · ${cap.role}, ${line}`}>
                       <RosterRobot agent={agent} agents={agents} px={36} now={now} status={live.working ? 'working' : 'idle'} />
                       <span className="min-w-0">
@@ -166,6 +166,7 @@ export default function Team() {
                           <AgentName agent={agent} size="md" />
                           {showSampleTag(agent) && <SampleTag />}
                         </span>
+                        {cap.desk ? <span className="block text-[11px] text-mc-sub">{cap.desk}</span> : null}
                         {offline ? (
                           <span className="block text-[11px] text-mc-sub">{OFFLINE_LABEL}</span>
                         ) : line !== 'Idle' ? (
