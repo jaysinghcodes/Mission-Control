@@ -14,7 +14,7 @@ async function loadTs(rel) {
   return import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'))
 }
 
-const { costSummary, costText, priceNote, PRICE_NOT_SET_SOME } = await loadTs('../src/lib/cost.ts')
+const { costSummary, costText, dayCostText, priceNote, spendPhrase, PRICE_NOT_SET_SOME } = await loadTs('../src/lib/cost.ts')
 
 test('the note is exact', () => {
   assert.equal(PRICE_NOT_SET_SOME, 'Price not set for some models')
@@ -61,5 +61,26 @@ test('System and Usage both use lib/cost and keep no copy of their own', async (
     assert.equal(/[\u2012\u2013\u2014\u2015→←]/.test(page), false, rel)
   }
   const system = await readFile(new URL('../src/pages/System.tsx', import.meta.url), 'utf8')
-  assert.match(system, /spent \$\{periodName\}\$\{periodCost\.note \? ` · \$\{periodCost\.note\}` : ''\}/)
+  assert.match(system, /spendPhrase\(periodCost, periodName\)/)
+  assert.match(system, /dayCostText\(d\)/)
+  assert.doesNotMatch(system, /costText\(d\.totalCost/)
+})
+
+test('the header reads naturally when nothing is priced and keeps the note', () => {
+  assert.equal(spendPhrase({ text: '$1.32', note: null }, 'today'), ' · $1.32 spent today')
+  assert.equal(
+    spendPhrase({ text: '$1.32', note: 'Price not set for some models' }, 'month to date'),
+    ' · $1.32 spent month to date · Price not set for some models',
+  )
+  assert.equal(
+    spendPhrase({ text: 'Price not set', note: 'Price not set for some models' }, 'month to date'),
+    ' · Price not set for month to date · Price not set for some models',
+  )
+})
+
+test('a spend bar day with nothing priced reads Price not set, never $0.00', () => {
+  assert.equal(dayCostText({ totalCost: 0, priceLabel: 'Price not set', priceNote: 'Price not set for some models' }), 'Price not set')
+  assert.equal(dayCostText({ totalCost: 1.32, priceLabel: null, priceNote: null }), '$1.32')
+  assert.equal(dayCostText({ totalCost: 1.32, priceLabel: null, priceNote: 'Price not set for some models' }), '$1.32, price not set for some models')
+  assert.equal(dayCostText({ totalCost: 0, priceLabel: null, priceNote: null }), '$0.00')
 })

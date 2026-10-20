@@ -578,6 +578,27 @@ def ago(ms: Optional[int], now_ms: int) -> Optional[str]:
 # ── Mapping: OpenClaw JSON → Mission Control snapshot payloads ──────────────
 # Output shapes are dictated by apps/api/src/snapshots/snapshots.service.ts.
 
+def price_model(provider: Any, model: Any) -> Optional[str]:
+    """The usage model name the API prices: provider/model.
+
+    OpenClaw reports `modelProvider` and often a bare `model`, for example
+    deepseek and deepseek-v4-flash. That becomes deepseek/deepseek-v4-flash.
+    A run through a router keeps the router in front, so openrouter with
+    deepseek/deepseek-v4-flash becomes openrouter/deepseek/deepseek-v4-flash
+    and is charged the OpenRouter row. A name that already starts with the
+    provider is kept as is. With no provider the model is kept as is.
+    """
+    if not isinstance(model, str) or not model.strip():
+        return model if isinstance(model, str) else None
+    text = model.strip()
+    prov = provider.strip() if isinstance(provider, str) else ""
+    if not prov:
+        return text
+    if text.lower().startswith(prov.lower() + "/"):
+        return text
+    return f"{prov}/{text}"
+
+
 def map_sessions(rows: List[Dict[str, Any]], now_ms: int) -> List[Dict[str, Any]]:
     out = []
     for s in rows:
@@ -598,6 +619,8 @@ def map_sessions(rows: List[Dict[str, Any]], now_ms: int) -> List[Dict[str, Any]
             "hot": updated is not None and now_ms - updated < HOT_WINDOW_MS,
             # Not stored by SnapshotsService; used below for usage + agent status.
             "_updatedMs": updated,
+            # Usage prices this name. The session row above keeps the model as OpenClaw sent it.
+            "_priceModel": price_model(first(s, "modelProvider", "provider"), first(s, "model")),
             "_in": first(s, "inputTokens") or 0,
             "_out": first(s, "outputTokens") or 0,
             # None when the session did not report a cost. Zero is a real report.
@@ -1477,7 +1500,7 @@ def usage_points_from_sessions(
 
     for s in sessions:
         name = str(s.get("name") or s.get("model") or "session")
-        model = str(s.get("model") or "unknown")
+        model = str(s.get("_priceModel") or s.get("model") or "unknown")
         bot = str(s.get("agent") or "No bot")
         cost = _optional_cost(s.get("_cost"))
         tin = _usage_num(s.get("_in"))

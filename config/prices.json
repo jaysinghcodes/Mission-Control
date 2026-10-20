@@ -8,7 +8,7 @@
     "deepseek": "https://api-docs.deepseek.com/quick_start/pricing",
     "openrouter": "https://openrouter.ai/api/v1/models"
   },
-  "notes": "Standard tier list prices, short context, no cache or batch discount. DeepSeek rows use the peak rate. Off peak is half. Gemini 3.8 Flash and Gemini 4 Argon rows use the price through the end of 2026. Override any row in config/prices.local.json.",
+  "notes": "Standard tier list prices, short context, no cache or batch discount. DeepSeek rows use the peak rate. Off peak is half. The Gemini 3.8 Flash row is the price through Dec 31 2026. The Gemini 4 Argon row is $2 input and $10 output through Nov 30 2026. Google lists $4 and $20 from Dec 1 2026. Override any row in config/prices.local.json.",
   "models": {
     "openai/gpt-6.1-sol": { "input": 2, "output": 10 },
     "openai/gpt-6-sol": { "input": 2, "output": 10 },
@@ -37,7 +37,6 @@
     "deepseek/deepseek-v4-flash": { "input": 0.3, "output": 1.2 },
     "deepseek/deepseek-flash": { "input": 0.3, "output": 1.2 },
     "deepseek/deepseek-v4-pro": { "input": 1.32, "output": 3.96 },
-    "deepseek/deepseek-chat": { "input": 0.27, "output": 1.1 },
     "google/gemini-4-argon": { "input": 2, "output": 10 },
     "google/gemini-3.8-flash": { "input": 0.75, "output": 3.75 },
     "google/gemini-3.5-flash-lite": { "input": 0.3, "output": 2.5 },

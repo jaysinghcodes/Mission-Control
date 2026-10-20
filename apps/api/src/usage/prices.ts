@@ -125,7 +125,32 @@ export function lookupPrice(
     if (!Number.isFinite(hit.input) || !Number.isFinite(hit.output)) continue;
     return hit;
   }
-  return null;
+  return routedBareModel(table, keys[keys.length - 1] ?? '');
+}
+
+function priced(price: ModelPrice | undefined): price is ModelPrice {
+  return (
+    !!price && Number.isFinite(price.input) && Number.isFinite(price.output)
+  );
+}
+
+/**
+ * A router such as OpenRouter names models vendor/model, so its rows are
+ * openrouter/<vendor>/<model>. When a run reports openrouter and a bare model,
+ * the one row under that router that ends with the bare model is its price.
+ * Two or more matches stay unpriced rather than guess.
+ */
+function routedBareModel(table: PriceTable, key: string): ModelPrice | null {
+  const parts = key.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const [router, bare] = parts;
+  const hits = Object.entries(table.models).filter(([id, price]) => {
+    const seg = id.split('/');
+    return (
+      seg.length === 3 && seg[0] === router && seg[2] === bare && priced(price)
+    );
+  });
+  return hits.length === 1 ? hits[0][1] : null;
 }
 
 /** Tokens times the per million rates. Linear, so a sum of runs matches one combined line. */

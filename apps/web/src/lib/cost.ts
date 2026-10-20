@@ -48,8 +48,35 @@ export function priceNote(usage: CostUsage | null | undefined): string | null {
   return rows(usage).some((row) => row.priceLabel === PRICE_NOT_SET) ? PRICE_NOT_SET_SOME : null
 }
 
+export interface CostDay {
+  totalCost: number
+  priceLabel?: string | null
+  priceNote?: string | null
+}
+
+/**
+ * One day of the spend bars, for the chart's accessible label. A day with no
+ * priced model reads "Price not set", never $0.00. A day with some unpriced
+ * models keeps its known total and says so.
+ */
+export function dayCostText(day: CostDay): string {
+  if (day.priceLabel === PRICE_NOT_SET) return PRICE_NOT_SET
+  const text = costText(day.totalCost, null, 'No data')
+  return day.priceNote ? `${text}, ${PRICE_NOT_SET_SOME.toLowerCase()}` : text
+}
+
 /** The period total and its note, as System and Usage show them. */
 export function costSummary(usage: CostUsage | null | undefined): { text: string; note: string | null } {
   if (!usage) return { text: 'No data', note: null }
   return { text: costText(usage.totalCost, usage.priceLabel), note: priceNote(usage) }
+}
+
+/**
+ * The spend part of the System header: "$1.32 spent today", plus the note
+ * when some models have no price. With nothing priced the total reads
+ * "Price not set for today", still followed by the note.
+ */
+export function spendPhrase(cost: { text: string; note: string | null }, periodName: string): string {
+  const lead = cost.text === PRICE_NOT_SET ? `${PRICE_NOT_SET} for ${periodName}` : `${cost.text} spent ${periodName}`
+  return ` · ${lead}${cost.note ? ` · ${cost.note}` : ''}`
 }
