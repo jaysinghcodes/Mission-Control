@@ -524,7 +524,7 @@ test('docker doctor reads gateway state from /system and an override probes dire
     'PORT=3000',
     `MC_API_PORT=${port}`,
     `MC_WEB_PORT=${FREE_WEB_PORT}`,
-    `MC_DB_PORT=${FREE_DB_PORT}`,
+    `MC_DB_PORT=${FREE_DB_PORT}`, `MC_REMOTE_PORT=${FREE_REMOTE_PORT}`,
     'HOST=127.0.0.1',
     'INGEST_TOKEN=abc123',
     'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
@@ -607,7 +607,7 @@ test('compose doctor names the missing Docker socket permission', async () => {
         'PORT=3000',
         `MC_API_PORT=${port}`,
         `MC_WEB_PORT=${FREE_WEB_PORT}`,
-        `MC_DB_PORT=${FREE_DB_PORT}`,
+        `MC_DB_PORT=${FREE_DB_PORT}`, `MC_REMOTE_PORT=${FREE_REMOTE_PORT}`,
         'HOST=127.0.0.1',
         'INGEST_TOKEN=abc123',
         'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
@@ -643,11 +643,13 @@ test('bridge sync age uses the limit and treats an equal age as recent', () => {
 })
 
 test('MC port environment wins over .env and a blank shell value does not', () => {
-  const file = { MC_API_PORT: '3881', MC_WEB_PORT: '5881', MC_DB_PORT: '55881', PORT: '3000' }
-  const over = effectiveEnv(file, { MC_API_PORT: '3880', MC_WEB_PORT: '5880', MC_DB_PORT: '55880' })
+  const file = { MC_API_PORT: '3881', MC_WEB_PORT: '5881', MC_DB_PORT: '55881', MC_REMOTE_PORT: '4011', PORT: '3000' }
+  const over = effectiveEnv(file, { MC_API_PORT: '3880', MC_WEB_PORT: '5880', MC_DB_PORT: '55880', MC_REMOTE_PORT: '4012' })
   assert.equal(over.MC_API_PORT, '3880')
   assert.equal(over.MC_WEB_PORT, '5880')
   assert.equal(over.MC_DB_PORT, '55880')
+  assert.equal(over.MC_REMOTE_PORT, '4012')
+  assert.equal(effectiveEnv(file, { MC_REMOTE_PORT: '  ' }).MC_REMOTE_PORT, '4011')
   assert.equal(effectiveEnv(file, { MC_API_PORT: '  ' }).MC_API_PORT, '3881')
   assert.equal(
     effectiveEnv(
@@ -702,7 +704,7 @@ test('docker doctor uses the shell MC_API_PORT when .env names a different port'
   try {
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', 'MC_API_PORT=3000', `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control', ''].join('\n'),
+      ['PORT=3000', 'MC_API_PORT=3000', `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, `MC_REMOTE_PORT=${FREE_REMOTE_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control', ''].join('\n'),
     )
     const result = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1', MC_API_PORT: String(port) })
     assert.equal(result.code, 0, result.lines.join('\n'))
@@ -738,7 +740,7 @@ test('docker doctor reports host database checks as info and checks the custom A
         'PORT=3000',
         `MC_API_PORT=${port}`,
         `MC_WEB_PORT=${FREE_WEB_PORT}`,
-        `MC_DB_PORT=${FREE_DB_PORT}`,
+        `MC_DB_PORT=${FREE_DB_PORT}`, `MC_REMOTE_PORT=${FREE_REMOTE_PORT}`,
         'HOST=127.0.0.1',
         'INGEST_TOKEN=abc123',
         'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd',
@@ -790,7 +792,7 @@ test('bridge sync: a stale timestamp fails doctor', async () => {
     writeFileSync(stamp, `${Math.floor(Date.now() / 1000) - 5000}\n`)
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', `MC_API_PORT=${port}`, `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
+      ['PORT=3000', `MC_API_PORT=${port}`, `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, `MC_REMOTE_PORT=${FREE_REMOTE_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=600', ''].join('\n'),
     )
     const result = await runDoctor(dir, {
       MC_DOCTOR_DOCKER: '1',
@@ -822,7 +824,7 @@ test('bridge sync: a fresh timestamp passes and a missing timestamp stays inform
   try {
     writeFileSync(
       path.join(dir, '.env'),
-      ['PORT=3000', `MC_API_PORT=${port}`, `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=30', ''].join('\n'),
+      ['PORT=3000', `MC_API_PORT=${port}`, `MC_WEB_PORT=${FREE_WEB_PORT}`, `MC_DB_PORT=${FREE_DB_PORT}`, `MC_REMOTE_PORT=${FREE_REMOTE_PORT}`, 'HOST=127.0.0.1', 'INGEST_TOKEN=abc123', 'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabb:ccdd', 'SESSION_SECRET=001122', 'MC_BRIDGE_STALE_SECONDS=30', ''].join('\n'),
     )
     const missing = await runDoctor(dir, { MC_DOCTOR_DOCKER: '1' })
     assert.equal(missing.code, 0, missing.lines.join('\n'))
@@ -931,17 +933,20 @@ test('port holder classification uses listeners and published compose ports', ()
 const FREE_WEB_PORT = 18173
 const FREE_DB_PORT = 18132
 const FREE_API_PORT = 18174
+const FREE_REMOTE_PORT = 18175
 
 function doctorEnvFile(port, overrides = {}) {
   const api = overrides.api ?? port
   const web = overrides.web ?? FREE_WEB_PORT
   const db = overrides.db ?? FREE_DB_PORT
+  const remote = overrides.remote ?? FREE_REMOTE_PORT
   return [
     'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:59999/mission_control',
     'PORT=3000',
     `MC_API_PORT=${api}`,
     `MC_WEB_PORT=${web}`,
     `MC_DB_PORT=${db}`,
+    `MC_REMOTE_PORT=${remote}`,
     'HOST=127.0.0.1',
     'INGEST_TOKEN=abc123',
     'DASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aabbccddeeff00112233445566778899:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
@@ -983,6 +988,7 @@ function runningStackJson(port) {
   return [
     `{"Service":"api","State":"running","Health":"","Publishers":[{"PublishedPort":${port}}]}`,
     '{"Service":"db","State":"running","Health":""}',
+    '{"Service":"web","State":"running","Health":""}',
   ].join('\n')
 }
 
@@ -1020,6 +1026,7 @@ test('a slow compose probe waits up to 60 seconds and reports healthy as soon as
         MC_API_PORT: String(port),
         MC_WEB_PORT: String(FREE_WEB_PORT),
         MC_DB_PORT: String(FREE_DB_PORT),
+        MC_REMOTE_PORT: String(FREE_REMOTE_PORT),
       },
     })
     assert.equal(soon.state, 'ours')
@@ -1147,35 +1154,48 @@ test('a database down health body still fails and is not a slow start', async ()
 })
 
 test('a stopped or paused compose service is a failure, not a slow start or a port conflict', () => {
+  const webUp = '{"Service":"web","State":"running","Status":"Up"}'
   const running = parseComposeServiceRows([
     '{"Service":"api","State":"running","Health":"starting","Status":"Up 1 second (health: starting)"}',
     '{"Service":"db","State":"running","Health":"","Status":"Up 1 second"}',
+    webUp,
   ].join('\n'))
   assert.equal(composeServiceReady(running[0]), true)
   assert.equal(composeServiceFailure(running), '')
   const dbStopped = 'The db service is not running. Start it with: docker compose start db'
   const apiStopped = 'The api service is not running. Start it with: docker compose start api'
   const apiPaused = 'The api service is paused. Unpause it with: docker compose unpause api'
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}')), apiPaused)
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"restarting","Status":"Restarting"}\n{"Service":"api","State":"running","Status":"Up"}')), dbStopped)
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"created","Status":"Created"}\n{"Service":"db","State":"running","Status":"Up"}')), apiStopped)
+  const webStopped = 'The web service is not running. Start it with: docker compose start web'
+  const webPaused = 'The web service is paused. Unpause it with: docker compose unpause web'
+  const webMissing = 'The web service is not running. Start it with: docker compose up -d web'
+  const up = '{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}'
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}\n${webUp}`)), dbStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}\n${webUp}`)), apiStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}\n${webUp}`)), apiPaused)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"db","State":"restarting","Status":"Restarting"}\n{"Service":"api","State":"running","Status":"Up"}\n${webUp}`)), dbStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"api","State":"created","Status":"Created"}\n{"Service":"db","State":"running","Status":"Up"}\n${webUp}`)), apiStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"web","State":"exited","Status":"Exited (0)"}\n${up}`)), webStopped)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"web","State":"paused","Status":"Paused"}\n${up}`)), webPaused)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(up), ['db', 'api', 'web']), webMissing)
   assert.equal(composeServiceFailure([]), '')
   assert.equal(composeServiceFailure([], []), '')
   assert.equal(
     composeServiceFailure([], ['db', 'api', 'web']),
+    'The db, api, and web services are not running. Start them with: docker compose up -d db api web',
+  )
+  assert.equal(
+    composeServiceFailure([], ['db', 'api']),
     'The db and api services are not running. Start them with: docker compose up -d db api',
   )
   const dbMissing = 'The db service is not running. Start it with: docker compose up -d db'
   const apiMissing = 'The api service is not running. Start it with: docker compose up -d api'
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"running","Status":"Up"}')), dbMissing)
-  assert.equal(composeServiceFailure(parseComposeServiceRows('{"Service":"db","State":"running","Status":"Up"}')), apiMissing)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"api","State":"running","Status":"Up"}\n${webUp}`)), dbMissing)
+  assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"db","State":"running","Status":"Up"}\n${webUp}`)), apiMissing)
   assert.equal(
     composeServiceFailure(parseComposeServiceRows('{"Service":"web","State":"running","Status":"Up"}')),
     'The db and api services are not running. Start them with: docker compose up -d db api',
   )
-  for (const line of [dbStopped, apiStopped, apiPaused, dbMissing, apiMissing]) {
+  for (const line of [dbStopped, apiStopped, apiPaused, webStopped, webPaused, webMissing, dbMissing, apiMissing]) {
     assert.equal(hasDashPunctuation(line), false)
     assert.equal(/[→←⇒]|->/.test(line), false)
   }
@@ -1206,7 +1226,7 @@ async function doctorWithServices(json, services, env = {}) {
 test('doctor fails when the db container is stopped', async () => {
   const message = 'The db service is not running. Start it with: docker compose start db'
   const { result } = await doctorWithServices(
-    '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}',
+    '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'api\ndb',
     { MC_DOCTOR_DOCKER: '1' },
   )
@@ -1221,7 +1241,7 @@ test('doctor fails when the db container is stopped', async () => {
 test('doctor fails when the api container is stopped', async () => {
   const message = 'The api service is not running. Start it with: docker compose start api'
   const { result } = await doctorWithServices(
-    '{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}',
+    '{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'api\ndb',
     { MC_DOCTOR_DOCKER: '1' },
   )
@@ -1236,7 +1256,7 @@ test('doctor fails when the api container is stopped', async () => {
 test('a paused api is detected as this stack and fails with unpause', async () => {
   const message = 'The api service is paused. Unpause it with: docker compose unpause api'
   const { result } = await doctorWithServices(
-    '{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}',
+    '{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'api\ndb',
   )
   const text = result.lines.join('\n')
@@ -1315,6 +1335,90 @@ test('a removed db is still Compose and names docker compose up', async () => {
   assert.doesNotMatch(text, /set PORT in/)
 })
 
+test('doctor fails when the web container is stopped', async () => {
+  const message = 'The web service is not running. Start it with: docker compose start web'
+  const { result } = await doctorWithServices(
+    '{"Service":"web","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}',
+    'api\ndb\nweb',
+    { MC_DOCTOR_DOCKER: '1' },
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /still starting/)
+  assert.doesNotMatch(text, /another program/)
+  assert.doesNotMatch(text, /npm run dev/)
+  assert.equal(hasDashPunctuation(text), false)
+})
+
+test('a paused web is named with docker compose unpause', async () => {
+  const message = 'The web service is paused. Unpause it with: docker compose unpause web'
+  const { result } = await doctorWithServices(
+    '{"Service":"web","State":"paused","Status":"Paused"}\n{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}',
+    'api\ndb\nweb',
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /still starting/)
+  assert.doesNotMatch(text, /another program/)
+  assert.doesNotMatch(text, /npm run dev/)
+  assert.equal(hasDashPunctuation(text), false)
+})
+
+test('a removed web container is named with docker compose up', async () => {
+  const message = 'The web service is not running. Start it with: docker compose up -d web'
+  const { result } = await doctorWithServices(
+    '{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}',
+    'api\ndb',
+  )
+  const text = result.lines.join('\n')
+  assert.equal(result.code, 1, text)
+  assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+  assert.doesNotMatch(text, /npm run dev/)
+  assert.doesNotMatch(text, /Port .* is free/)
+  assert.doesNotMatch(text, /docker compose start/)
+  assert.doesNotMatch(text, /still starting/)
+  assert.equal(hasDashPunctuation(text), false)
+})
+
+test('a missing web container is named with docker compose up', async () => {
+  const message = 'The web service is not running. Start it with: docker compose up -d web'
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-web-missing-'))
+  const bin = path.join(dir, 'bin')
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('not yet')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  const json = '{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}'
+  writeDockerStub(bin, { portLine: `127.0.0.1:${port}`, json, services: 'api\ndb' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(port))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '60',
+      MC_DOCTOR_DOCKER: '1',
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+    assert.match(text, new RegExp(`^fail health: ${message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+    assert.doesNotMatch(text, /npm run dev/)
+    assert.doesNotMatch(text, /docker compose start/)
+    assert.doesNotMatch(text, /still starting/)
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 const HALF_CREATED_JSON = [
   '{"Service":"api","State":"created","Status":"Created"}',
   '{"Service":"db","State":"exited","Status":"Exited (1)"}',
@@ -1322,7 +1426,7 @@ const HALF_CREATED_JSON = [
 ].join('\n')
 
 async function occupyPort() {
-  const avoid = new Set([FREE_WEB_PORT, FREE_DB_PORT, FREE_API_PORT])
+  const avoid = new Set([FREE_WEB_PORT, FREE_DB_PORT, FREE_API_PORT, FREE_REMOTE_PORT])
   for (;;) {
     const server = http.createServer((req, res) => {
       res.writeHead(404, { 'content-type': 'text/plain' })
@@ -1338,10 +1442,11 @@ async function halfCreatedPortConflict(key, extraEnv = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-half-'))
   const bin = path.join(dir, 'bin')
   const held = await occupyPort()
-  const overrides = { api: FREE_API_PORT, web: FREE_WEB_PORT, db: FREE_DB_PORT }
+  const overrides = { api: FREE_API_PORT, web: FREE_WEB_PORT, db: FREE_DB_PORT, remote: FREE_REMOTE_PORT }
   if (key === 'MC_API_PORT') overrides.api = held.port
   if (key === 'MC_WEB_PORT') overrides.web = held.port
   if (key === 'MC_DB_PORT') overrides.db = held.port
+  if (key === 'MC_REMOTE_PORT') overrides.remote = held.port
   writeDockerStub(bin, { portLine: '', json: HALF_CREATED_JSON, services: 'api\ndb\nweb' })
   writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
   writeFileSync(path.join(dir, '.env'), doctorEnvFile(overrides.api, overrides))
@@ -1358,7 +1463,7 @@ async function halfCreatedPortConflict(key, extraEnv = {}) {
   }
 }
 
-for (const key of ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT']) {
+for (const key of ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT']) {
   for (const forced of [false, true]) {
     const mode = forced ? 'MC_DOCTOR_DOCKER=1' : 'auto mode'
     test(`half created containers report ${key} in ${mode}`, async () => {
@@ -1510,6 +1615,7 @@ test('a compose file keeps the native check when the native API is already answe
     assert.doesNotMatch(text, /another program/)
     assert.doesNotMatch(text, /set MC_WEB_PORT in/)
     assert.doesNotMatch(text, /set MC_DB_PORT in/)
+    assert.doesNotMatch(text, /set MC_REMOTE_PORT in/)
     assert.doesNotMatch(text, /Docker runs Postgres inside Compose/)
     assert.equal(hasDashPunctuation(text), false)
   } finally {
@@ -1543,6 +1649,7 @@ test('MC_DOCTOR_DOCKER=0 keeps the native PORT line when a compose file exists',
     assert.equal(result.code, 1, text)
     assert.match(text, new RegExp(`^fail ports: Port ${port} is used by another program\\. Stop it or set PORT in \\.env\\.$`, 'm'))
     assert.doesNotMatch(text, /set MC_API_PORT in/)
+    assert.doesNotMatch(text, /set MC_REMOTE_PORT in/)
     assert.match(text, /^pass node:/m)
   } finally {
     await new Promise((resolve) => server.close(resolve))
@@ -1558,7 +1665,7 @@ test('an inside doctor uses the compose snapshot for a stopped db', async () => 
   writeFileSync(log, '')
   writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\nexit 99\n')
   chmodSync(path.join(bin, 'docker'), 0o755)
-  const rows = '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}'
+  const rows = '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}'
   writeFileSync(path.join(dir, '.env'), doctorEnvFile(3461))
   try {
     const result = await runDoctor(dir, {
@@ -1571,6 +1678,7 @@ test('an inside doctor uses the compose snapshot for a stopped db', async () => 
       MC_API_PORT: '3461',
       MC_WEB_PORT: String(FREE_WEB_PORT),
       MC_DB_PORT: String(FREE_DB_PORT),
+      MC_REMOTE_PORT: String(FREE_REMOTE_PORT),
       MC_INSTALL_HEALTH_PORT: '3000',
       MC_DOCTOR_HEALTH_SECONDS: '60',
       MC_DOCTOR_ENV_PRESENT: '1',
@@ -1592,6 +1700,7 @@ test('a running compose stack with no answer is still starting inside the contai
   const rows = [
     '{"Service":"api","State":"running","Status":"Up"}',
     '{"Service":"db","State":"running","Health":"starting","Status":"Up (health: starting)"}',
+    '{"Service":"web","State":"running","Status":"Up"}',
   ].join('\n')
   const server = net.createServer()
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -1607,6 +1716,7 @@ test('a running compose stack with no answer is still starting inside the contai
       MC_API_PORT: String(port),
       MC_WEB_PORT: String(FREE_WEB_PORT),
       MC_DB_PORT: String(FREE_DB_PORT),
+      MC_REMOTE_PORT: String(FREE_REMOTE_PORT),
       MC_INSTALL_HEALTH_PORT: String(port),
       MC_DOCTOR_HEALTH_SECONDS: '0',
       MC_DOCTOR_ENV_PRESENT: '1',
@@ -1623,6 +1733,97 @@ test('a running compose stack with no answer is still starting inside the contai
     assert.doesNotMatch(text, /another program/)
     assert.doesNotMatch(text, /not running/)
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an outside holder on MC_REMOTE_PORT is reported before a stopped web service', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-remote-'))
+  const bin = path.join(dir, 'bin')
+  const held = await occupyPort()
+  const json = [
+    '{"Service":"api","State":"running","Status":"Up"}',
+    '{"Service":"db","State":"running","Status":"Up"}',
+    '{"Service":"web","State":"exited","Status":"Exited (0)"}',
+  ].join('\n')
+  writeDockerStub(bin, { portLine: '', json, services: 'api\ndb\nweb' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(FREE_API_PORT, { remote: held.port }))
+  try {
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      MC_DOCTOR_DOCKER: '1',
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    const line = composePortConflictLine(held.port, 'MC_REMOTE_PORT')
+    assert.equal(result.code, 1, text)
+    assert.match(text, new RegExp(`^fail ports: ${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
+    assert.match(text, /^info health: Skipped because a Compose port is used by another program\.$/m)
+    assert.doesNotMatch(text, /not running/)
+    assert.doesNotMatch(text, /docker compose start/)
+    assert.doesNotMatch(text, /still starting/)
+    assert.doesNotMatch(text, /npm run dev/)
+    assert.doesNotMatch(text, /set PORT in/)
+    assert.equal(hasDashPunctuation(text), false)
+    assert.equal(/[→←⇒]|->/.test(text), false)
+  } finally {
+    await close(held.server)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the stack holding MC_REMOTE_PORT is not a conflict and a healthy stack passes', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-remote-own-'))
+  const bin = path.join(dir, 'bin')
+  const api = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ service: 'mission-control', status: 'ok', database: 'connected', db: 'up' }))
+  })
+  const remote = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' })
+    res.end('tunnel')
+  })
+  await listen(api)
+  await listen(remote)
+  const apiPort = api.address().port
+  const remotePort = remote.address().port
+  const json = [
+    `{"Service":"api","State":"running","Health":"","Publishers":[{"PublishedPort":${apiPort}}]}`,
+    '{"Service":"db","State":"running","Health":""}',
+    `{"Service":"web","State":"running","Health":"","Publishers":[{"PublishedPort":${remotePort}}]}`,
+  ].join('\n')
+  writeDockerStub(bin, { portLine: `127.0.0.1:${apiPort}`, json, services: 'api\ndb\nweb' })
+  writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  db:\n  api:\n  web:\n')
+  writeFileSync(path.join(dir, '.env'), doctorEnvFile(apiPort, { remote: remotePort }))
+  try {
+    const listeners = readListenerRows(remotePort)
+    assert.ok(listeners.some((row) => row.command && !String(row.command).includes('docker-proxy')), JSON.stringify(listeners))
+    assert.equal(classifyPortHolder({
+      port: remotePort,
+      listeners,
+      publishedPorts: [remotePort],
+      containerPids: [],
+      dockerOk: true,
+      portInUse: true,
+    }), 'stack')
+    const result = await runDoctor(dir, {
+      MC_DOCTOR_DOCKER: '1',
+      MC_DOCTOR_HEALTH_SECONDS: '0',
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+    })
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 0, text)
+    assert.match(text, new RegExp(`^pass ports: Port ${apiPort} is already running\\.$`, 'm'))
+    assert.match(text, /^pass health: The health check says the database is up\.$/m)
+    assert.doesNotMatch(text, /another program/)
+    assert.doesNotMatch(text, /not running/)
+    assert.doesNotMatch(text, /still starting/)
+    assert.doesNotMatch(text, new RegExp(`Port ${remotePort} is used`))
+    assert.equal(hasDashPunctuation(text), false)
+  } finally {
+    await close(api)
+    await close(remote)
     rmSync(dir, { recursive: true, force: true })
   }
 })
