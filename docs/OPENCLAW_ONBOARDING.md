@@ -36,7 +36,7 @@ See [API.md](API.md#42-events-post-events).
 
 ### 4.3 The bridge (recommended for snapshots)
 
-The bridge also posts `devices.snapshot` from `openclaw devices list` and `openclaw nodes list`. See [API.md](API.md#43-the-bridge-recommended-for-snapshots).
+The bridge also posts `devices.snapshot` from `openclaw devices list` and `openclaw nodes list`. A steady state run starts `openclaw` once, for sessions. Agents, cron, devices, nodes, the models list, and the CLI version are cached and fetched again when `openclaw.json` changes, a value is missing, or once an hour. `--profile` prints the time, CPU, peak memory, and `openclaw` calls. A new agent or cron change can take up to an hour to show. See [A light run](../bridge/README.md#a-light-run). See [API.md](API.md#43-the-bridge-recommended-for-snapshots).
 
 ### 4.4 Tickets: your units of work
 

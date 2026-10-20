@@ -117,7 +117,7 @@ python3 bridge/mc-bridge-sync.py --dry-run
 python3 bridge/mc-bridge-sync.py
 ```
 
-With no `openclaw` binary, `--dry-run` exits 0 and posts nothing. That was verified. A real sync needs the CLI and a non blank `INGEST_TOKEN`.
+With no `openclaw` binary, `--dry-run` exits 0 and posts nothing. That was verified. A real sync needs the CLI and a non blank `INGEST_TOKEN`. A steady state run starts `openclaw` once, for sessions. Agents, cron, devices, nodes, the models list, and the CLI version are cached and fetched again when `openclaw.json` changes, a value is missing, or once an hour. `--profile` prints the time, CPU, peak memory, and `openclaw` calls. See [A light run](bridge/README.md#a-light-run).
 
 `bash install.sh` already schedules that command when `openclaw` is on PATH. Do not add a second cron line. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The schedule PATH includes the `openclaw` directory and the `python3` directory. `bash install.sh --uninstall-schedule` removes the schedule, removes the sync timestamp, and leaves every other cron line and service unit alone. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). A missing timestamp is an info line. A stale timestamp is also an info line when no schedule is installed.
 
