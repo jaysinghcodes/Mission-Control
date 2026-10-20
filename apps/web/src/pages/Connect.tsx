@@ -50,7 +50,8 @@ function setupLineWidth(progress: Record<number, string>): string {
   }
   if (prefix <= 1) return '0px'
   const fraction = (prefix - 1) / (STEP_DATA.length - 1)
-  return `calc(${fraction * 100}% - ${fraction * 2}rem)`
+  // --dot-inset is the distance from the edge of the row to the first dot center, set per breakpoint on the list.
+  return `calc(${fraction} * (100% - 2 * var(--dot-inset)))`
 }
 
 async function probeApi(): Promise<{ ok: boolean; detail: string }> {
@@ -147,15 +148,18 @@ export default function Connect() {
   }
 
   return (
-    <div className="flex h-full min-h-0 justify-center overflow-y-auto bg-mc-bg px-4 py-8">
-      <div className="mc-card flex w-full max-w-[760px] flex-col px-5 py-8 sm:px-10">
+    <div className="flex h-full min-h-0 items-start justify-center overflow-y-auto bg-mc-bg px-4 py-8">
+      <div className="mc-card flex w-full min-w-0 max-w-[760px] flex-col px-5 py-8 [overflow-wrap:anywhere] sm:px-10">
         <img src="/logo.svg" alt="" className="mx-auto h-14 w-14" />
         <p className="mt-3 text-center text-[13px] font-semibold text-mc-sub">Set up Mission Control</p>
 
-        <ol className="relative mx-auto mt-6 flex w-full max-w-[640px] justify-between" aria-label="Setup steps">
-          <span className="absolute left-4 right-4 top-[10px] h-0.5 bg-mc-track" aria-hidden />
+        <ol
+          className="relative mx-auto mt-6 flex w-full max-w-[640px] justify-between [overflow-wrap:normal] [--dot-inset:0.75rem] sm:[--dot-inset:1rem]"
+          aria-label="Setup steps"
+        >
+          <span className="absolute left-[var(--dot-inset)] right-[var(--dot-inset)] top-[10px] h-0.5 bg-mc-track" aria-hidden />
           <span
-            className="absolute left-4 top-[10px] h-0.5 bg-mc-green"
+            className="absolute left-[var(--dot-inset)] top-[10px] h-0.5 bg-mc-green"
             style={{ width: setupLineWidth(progress) }}
             aria-hidden
           />
@@ -163,7 +167,7 @@ export default function Connect() {
             const done = !!progress[s.id]
             const current = i === index
             return (
-              <li key={s.id} className="relative z-10 flex w-16 flex-col items-center">
+              <li key={s.id} className="relative z-10 flex w-6 flex-col items-center sm:w-16">
                 <button
                   type="button"
                   onClick={() => setIndex(i)}
@@ -175,7 +179,7 @@ export default function Connect() {
                 >
                   {done && !current ? '✓' : s.id}
                 </button>
-                <span className={`mt-2 text-center text-[11px] leading-tight ${current ? 'font-semibold text-mc-text' : 'text-mc-sub'}`}>{SHORT[i]}</span>
+                <span className={`mt-2 hidden whitespace-nowrap text-center text-[11px] leading-tight sm:block ${current ? 'font-semibold text-mc-text' : 'text-mc-sub'}`}>{SHORT[i]}</span>
               </li>
             )
           })}
@@ -276,7 +280,7 @@ export default function Connect() {
           )}
         </div>
 
-        <div className="mt-8 flex items-center justify-between border-t border-mc-sep pt-4">
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-mc-sep pt-4">
           <button
             type="button"
             onClick={() => setIndex((i) => Math.max(0, i - 1))}
@@ -285,7 +289,7 @@ export default function Connect() {
           >
             Back
           </button>
-          <span className="text-[12px] text-mc-sub">Steps match ONBOARDING.md</span>
+          <span className="order-last w-full text-center text-[12px] text-mc-sub sm:order-none sm:w-auto">Steps match ONBOARDING.md</span>
           <button type="button" onClick={() => void continueStep()} className="h-9 rounded-[10px] bg-mc-accent-fill px-5 text-[14px] font-semibold text-white">
             {index === STEP_DATA.length - 1 ? 'Enter the dashboard' : 'Continue'}
           </button>

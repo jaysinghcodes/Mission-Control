@@ -163,6 +163,7 @@ test('each required failure names the next command and exits non zero', () => {
       name: 'env',
       facts: facts({ envExists: false }),
       includes: FIX_ENV,
+      command: FIX_ENV,
     },
     {
       name: 'database',
@@ -170,6 +171,7 @@ test('each required failure names the next command and exits non zero', () => {
         database: { state: 'unreachable', migrations: 'unknown', pending: [], detail: '127.0.0.1:5432' },
       }),
       includes: FIX_DATABASE,
+      command: FIX_DATABASE,
     },
     {
       name: 'migrations',
@@ -182,16 +184,19 @@ test('each required failure names the next command and exits non zero', () => {
         },
       }),
       includes: FIX_MIGRATIONS,
+      command: FIX_MIGRATIONS,
     },
     {
       name: 'token',
       facts: facts({ env: { HOST: '127.0.0.1', NODE_ENV: 'production', PORT: '3000' } }),
       includes: FIX_TOKEN,
+      command: FIX_TOKEN,
     },
     {
       name: 'bridge',
       facts: facts({ bridge: { state: 'stale', limit: 600, scheduled: true } }),
-      includes: 'The last OpenClaw sync is older than 600 seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.',
+      includes: 'The last OpenClaw sync is older than 600 seconds. Confirm the schedule is installed, then sync now with:',
+      command: 'python3 bridge/mc-bridge-sync.py',
     },
     {
       name: 'health',
@@ -204,15 +209,22 @@ test('each required failure names the next command and exits non zero', () => {
         },
       }),
       includes: FIX_HEALTH,
+      command: FIX_HEALTH,
     },
   ]
   for (const item of cases) {
     const result = report(item.facts)
     assert.equal(result.code, 1, item.name)
-    const line = result.lines.find((entry) => entry.startsWith(`fail ${item.name}:`))
-    assert.ok(line, item.name)
+    const at = result.lines.findIndex((entry) => entry.startsWith(`fail ${item.name}:`))
+    assert.ok(at >= 0, item.name)
+    const line = result.lines[at]
     if (item.exact) assert.equal(line, item.exact)
-    assert.match(line, new RegExp(item.includes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    const block = result.lines.slice(at, at + 2).join('\n')
+    assert.match(block, new RegExp(item.includes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    if (item.command) {
+      assert.match(line, /:$/, item.name)
+      assert.equal(result.lines[at + 1], `${COMMAND_INDENT}${item.command}`, item.name)
+    }
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false, item.name)
     if (item.name === 'ports') {
       assert.equal(
@@ -308,7 +320,7 @@ test('a foreign 500 fails with the port message whether the database is up or do
       assert.equal(result.code, 1)
       assert.doesNotMatch(result.lines[1], /already running/)
       assert.equal(
-        result.lines[7],
+        result.lines.find((entry) => entry.startsWith('info health:')),
         'info health: Skipped because the API port is used by another program.',
       )
       assert.doesNotMatch(result.lines.join('\n'), /npm run dev/)
@@ -332,10 +344,10 @@ test('a raw TCP listener with no HTTP fails with the port message', async () => 
     assert.equal(result.code, 1)
     assert.equal(result.lines[1], otherProgram(port))
     assert.equal(
-      result.lines[7],
+      result.lines.find((entry) => entry.startsWith('info health:')),
       'info health: Skipped because the API port is used by another program.',
     )
-    assert.doesNotMatch(result.lines[7], /npm run dev/)
+    assert.doesNotMatch(result.lines.find((entry) => entry.startsWith('info health:')), /npm run dev/)
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
   } finally {
     await close(server)
@@ -358,9 +370,10 @@ test('API up and database down passes the port and fails the database', async ()
     }))
     assert.equal(result.code, 1)
     assert.equal(result.lines[1], `pass ports: Port ${port} is already running.`)
-    assert.match(result.lines[3], /^fail database:/)
-    assert.match(result.lines[3], /docker compose up -d db/)
-    assert.equal(result.lines[7], 'fail health: The health check says the database is down.')
+    assert.match(result.lines[3], /^fail database: .*with:$/)
+    assert.equal(result.lines[4], `${COMMAND_INDENT}docker compose up -d db`)
+    assert.ok(result.lines.includes('fail health: The health check says the database is down.'), result.lines.join('\n'))
+    assertDoctorShape(result.lines)
     assert.doesNotMatch(result.lines.join('\n'), /another program/)
     assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
   } finally {
@@ -621,8 +634,10 @@ test('compose doctor names the missing Docker socket permission', async () => {
       PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
     })
     assert.equal(result.code, 0, result.lines.join('\n'))
-    const line = result.lines.find((item) => item.startsWith('info gateway:'))
+    const at = result.lines.findIndex((item) => item.startsWith('info gateway:'))
+    const line = result.lines.slice(at, at + 2).join('\n')
     assert.equal(line, denied)
+    assert.equal(result.lines[at + 1], `${COMMAND_INDENT}sudo usermod -aG docker "$USER"`)
     assert.doesNotMatch(line, /Run the bridge to check it/)
     for (const item of result.lines) assert.equal(hasDashPunctuation(item), false, item)
   } finally {
@@ -803,8 +818,10 @@ test('bridge sync: a stale timestamp fails doctor', async () => {
     assert.equal(result.code, 1, result.lines.join('\n'))
     const fails = result.lines.filter((line) => line.startsWith('fail '))
     assert.deepEqual(fails, [
-      'fail bridge: The last OpenClaw sync is older than 600 seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.',
+      'fail bridge: The last OpenClaw sync is older than 600 seconds. Confirm the schedule is installed, then sync now with:',
     ])
+    const at = result.lines.indexOf(fails[0])
+    assert.equal(result.lines[at + 1], `${COMMAND_INDENT}python3 bridge/mc-bridge-sync.py`)
     assert.match(result.lines[7], /^info openclaw:/)
     for (const line of result.lines) assert.equal(hasDashPunctuation(line), false, line)
   } finally {
@@ -1378,12 +1395,54 @@ function assertDoctorShape(lines) {
   for (const [i, line] of lines.entries()) {
     assert.equal(line.includes('\n'), false, line)
     if (line.startsWith(COMMAND_INDENT)) {
-      assert.match(lines[i - 1] ?? '', /^fail (ports|health): .* with:$/, lines.join('\n'))
+      assert.match(lines[i - 1] ?? '', /^(fail|info) [a-z]+: .*:$/, lines.join('\n'))
+      assert.doesNotMatch(line, /\.$/, line)
+      assert.equal(line.slice(COMMAND_INDENT.length).startsWith(' '), false, line)
       continue
     }
     assert.match(line, /^(pass|fail|info) [a-z]+: /, line)
+    assert.doesNotMatch(line, / with: \S/, line)
+    assert.doesNotMatch(line, / run: \S/, line)
   }
 }
+
+test('every fix doctor prints is a sentence ending in a colon, then the command on its own line', () => {
+  const env = { HOST: '127.0.0.1', INGEST_TOKEN: 'change-me', PORT: '3000' }
+  const down = { badPort: false, api: 3000, apiState: 'free', health: { reachable: false, db: null, url: 'http://127.0.0.1:3000/health' } }
+  const cases = [
+    [{ envExists: false }, FIX_ENV],
+    [{ database: { state: 'missing-url', migrations: 'unknown', pending: [], detail: '' } }, FIX_ENV],
+    [{ database: { state: 'bad-url', migrations: 'unknown', pending: [], detail: '' } }, 'npm run doctor'],
+    [{ database: { state: 'no-client', migrations: 'unknown', pending: [], detail: '' } }, 'npm ci'],
+    [{ database: { state: 'missing-db', database: 'mission_control', migrations: 'unknown', pending: [], detail: '127.0.0.1:5432' } }, FIX_DATABASE],
+    [{ database: { state: 'auth', migrations: 'unknown', pending: [], detail: '127.0.0.1:5432' } }, 'npm run doctor'],
+    [{ database: { state: 'unreachable', migrations: 'unknown', pending: [], detail: '127.0.0.1:5432' } }, FIX_DATABASE],
+    [{ database: { state: 'ok', migrations: 'pending', pending: ['20261006040100_run_ticket_id'], detail: '127.0.0.1:5432' } }, FIX_MIGRATIONS],
+    [{ env: { HOST: '0.0.0.0', PORT: '3000', DASHBOARD_PASSWORD_HASH: 'scrypt:1', SESSION_SECRET: 'ab' } }, FIX_TOKEN],
+    [{ env: { HOST: '127.0.0.1', NODE_ENV: 'production', PORT: '3000' } }, FIX_TOKEN],
+    [{ env: { HOST: '0.0.0.0', INGEST_TOKEN: 'change-me', PORT: '3000' } }, 'bash install.sh'],
+    [{ ports: { ...down, badPort: true } }, 'npm run doctor'],
+    [{ ports: down }, FIX_HEALTH],
+    [{ env: { ...env, MC_DOCTOR_DOCKER: '1', DASHBOARD_PASSWORD_HASH: 'scrypt:1', SESSION_SECRET: 'ab' }, database: { state: 'docker', migrations: 'docker', pending: [], detail: '' }, ports: down }, 'docker compose up -d'],
+    [{ bridge: { state: 'stale', limit: 600, scheduled: true } }, 'python3 bridge/mc-bridge-sync.py'],
+    [{ bridge: { state: 'unreadable', limit: 600, scheduled: true } }, 'python3 bridge/mc-bridge-sync.py'],
+  ]
+  for (const [overrides, command] of cases) {
+    const result = report(facts(overrides))
+    const text = result.lines.join('\n')
+    assert.equal(result.code, 1, text)
+    assertDoctorShape(result.lines)
+    assert.ok(printedCommands(result.lines).includes(command), `${command}\n${text}`)
+    assert.equal(hasDashPunctuation(text), false, text)
+    assert.equal(/[→←⇒]|->/.test(text), false, text)
+  }
+  const denied = gatewayLine(
+    { MC_DOCTOR_DOCKER: '1' },
+    { state: 'unknown', host: '127.0.0.1', port: 18789, dockerDenied: true },
+  ).split('\n')
+  assertDoctorShape(denied)
+  assert.deepEqual(printedCommands(denied), ['sudo usermod -aG docker "$USER"'])
+})
 
 test('a stopped api and a paused web print two problems, each sentence then its command', async () => {
   const apiStopped = ['The api service is not running. Start it with:', '  docker compose start api']
@@ -1683,7 +1742,7 @@ test('compose mode does not suggest npm run dev when health is unreachable', () 
     },
   }))
   const text = result.lines.join('\n')
-  assert.match(text, /^fail health: The API health endpoint is not reachable at http:\/\/127\.0\.0\.1:3000\/health\. Start the stack with: docker compose up -d$/m)
+  assert.match(text, /^fail health: The API health endpoint is not reachable at http:\/\/127\.0\.0\.1:3000\/health\. Start the stack with:\n  docker compose up -d$/m)
   assert.doesNotMatch(text, /npm run dev/)
   assert.equal(hasDashPunctuation(text), false)
 })
