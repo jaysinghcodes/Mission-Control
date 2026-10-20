@@ -17,6 +17,7 @@ import {
 } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadEnvFiles } from '../src/load-env.js'
 
 const SCRYPT_N = 16384
 const SCRYPT_R = 8
@@ -24,12 +25,17 @@ const SCRYPT_P = 1
 const SCRYPT_KEY_LEN = 32
 const UNREADABLE_VERSION = Number.MAX_SAFE_INTEGER
 const here = dirname(fileURLToPath(import.meta.url))
-const repoRoot = resolve(here, '..', '..')
+const apiDir = resolve(here, '..')
+const repoRoot = resolve(apiDir, '..')
+const insideCompose = process.env.MC_COMPOSE === '1'
 
-if (hostComposeIsRunning()) {
+loadEnvFiles(apiDir, process.env)
+
+if (!insideCompose && hostComposeStoreExists()) {
   console.error('Could not reset the dashboard password.')
-  console.error('The Compose API is running. This command has to run inside that container.')
-  console.error('Under Compose: docker compose exec api npm run password:reset')
+  console.error('This checkout has a Compose API. A reset on the host does not change the password that API reads.')
+  console.error('Run docker compose start api')
+  console.error('Then run docker compose exec api npm run password:reset')
   process.exit(1)
 }
 
@@ -52,22 +58,41 @@ console.log('Every session was revoked.')
 function statePath() {
   const raw = process.env.SESSION_STATE_PATH
   if (typeof raw === 'string' && raw.trim() !== '') return resolve(raw.trim())
-  return resolve(here, '..', 'data', 'session-state.json')
+  return resolve(apiDir, 'data', 'session-state.json')
 }
 
-function hostComposeIsRunning() {
-  if (process.env.MC_COMPOSE === '1') return false
-  const explicit = process.env.SESSION_STATE_PATH
-  if (typeof explicit === 'string' && explicit.trim() !== '') return false
-  const result = spawnSync(
-    'docker',
-    ['compose', 'ps', '--status', 'running', '--services'],
-    { cwd: repoRoot, encoding: 'utf8', timeout: 5000 },
-  )
+function hostComposeStoreExists() {
+  return composeListsApi() || composeAuthVolumeExists()
+}
+
+function composeListsApi() {
+  const result = spawnSync('docker', ['compose', 'ps', '-a', '--services'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: 5000,
+  })
   if (result.error || result.status !== 0) return false
   return String(result.stdout || '')
     .split('\n')
     .some((line) => line.trim() === 'api')
+}
+
+function composeAuthVolumeExists() {
+  const result = spawnSync(
+    'docker',
+    [
+      'volume',
+      'ls',
+      '-q',
+      '--filter',
+      'label=com.docker.compose.volume=mc-auth',
+      '--filter',
+      `label=com.docker.compose.project.working_dir=${repoRoot}`,
+    ],
+    { encoding: 'utf8', timeout: 5000 },
+  )
+  if (result.error || result.status !== 0) return false
+  return String(result.stdout || '').trim() !== ''
 }
 
 function hashPassword(value) {

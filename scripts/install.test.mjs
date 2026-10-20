@@ -50,12 +50,15 @@ function outputOf(result) {
 const SUMMARY_INGEST =
   'INGEST_TOKEN is in .env. The dashboard password is printed once when it is created.'
 const SUMMARY_OPENCLAW = 'OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md.'
+const SUMMARY_REMOTE = 'Remote access is in docs/REMOTE.md.'
+const SUMMARY_TUNNEL =
+  /^Tunnel port \d+\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL below\.$/
 
 function summaryFrom(text) {
   const lines = text.replace(/\s+$/, '').split('\n')
   let start = -1
   for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (lines[i].startsWith('Tunnel port ')) {
+    if (lines[i].startsWith('Tunnel port ') || lines[i] === SUMMARY_REMOTE) {
       start = i
       break
     }
@@ -64,14 +67,20 @@ function summaryFrom(text) {
   return lines.slice(start)
 }
 
-function assertFirstInstallSummary(text, { reset, url }) {
+function assertSummaryLead(summary, native) {
+  if (native) {
+    assert.equal(summary[0], SUMMARY_REMOTE)
+    assert.equal(summary.some((line) => line.startsWith('Tunnel port ')), false)
+  } else {
+    assert.match(summary[0], SUMMARY_TUNNEL)
+  }
+}
+
+function assertFirstInstallSummary(text, { reset, url, native = false }) {
   const summary = summaryFrom(text)
   assert.ok(summary.length <= 7, summary.join('\n'))
   assert.equal(summary.length, 6, summary.join('\n'))
-  assert.match(
-    summary[0],
-    /^Tunnel port \d+\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL below\.$/,
-  )
+  assertSummaryLead(summary, native)
   assert.equal(summary[1], SUMMARY_INGEST)
   assert.equal(summary[2], SUMMARY_OPENCLAW)
   assert.equal(summary[3], url)
@@ -81,6 +90,20 @@ function assertFirstInstallSummary(text, { reset, url }) {
   assert.equal(summary.at(-2), summary[4])
   assert.equal(summary.at(-1), summary[5])
   assert.equal(text.includes('This install does not start the OpenClaw gateway'), false)
+}
+
+function assertRerunSummary(text, { reset, url, native = false }) {
+  const summary = summaryFrom(text)
+  assert.ok(summary.length <= 7, summary.join('\n'))
+  assert.equal(summary.length, 5, summary.join('\n'))
+  assertSummaryLead(summary, native)
+  assert.equal(summary[1], SUMMARY_INGEST)
+  assert.equal(summary[2], SUMMARY_OPENCLAW)
+  assert.equal(summary[3], url)
+  assert.equal(summary[4], `Reset the dashboard password with: ${reset}`)
+  assert.equal(summary.at(-2), url)
+  assert.equal(summary.at(-1), summary[4])
+  assert.equal(text.includes('Dashboard password, shown once:'), false)
 }
 
 function assignments(text) {
@@ -628,6 +651,10 @@ test('a fresh install ends with the URL and password, and a rerun does not print
     const second = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_NOISE: 'marker-113-rerun' })
     const again = outputOf(second)
     const againLines = again.replace(/\s+$/, '').split('\n')
+    assertRerunSummary(again, {
+      reset: 'docker compose exec api npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
     assert.match(againLines.at(-2) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
     assert.equal(againLines.at(-1), 'Reset the dashboard password with: docker compose exec api npm run password:reset')
     assert.doesNotMatch(again, /Dashboard password, shown once:/)
@@ -913,6 +940,18 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     assertFirstInstallSummary(text, {
       reset: 'npm run password:reset',
       url: 'Open http://localhost:5173/#/tasks',
+      native: true,
+    })
+    const second = runInstall(fx.repo, {
+      ...fx.env,
+      PATH: fx.env.PATH,
+      NATIVE_LOG: nativeLog,
+      MC_INSTALL_READY_SECONDS: '0',
+    })
+    assertRerunSummary(outputOf(second), {
+      reset: 'npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+      native: true,
     })
     const nativeLines = text.replace(/\s+$/, '').split('\n')
     assert.doesNotMatch(nativeLines.at(-1) ?? '', /docker compose exec/)

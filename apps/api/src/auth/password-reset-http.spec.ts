@@ -225,7 +225,10 @@ function runReset(
   compose: boolean,
 ): Promise<{ status: number | null; stdout: string }> {
   return new Promise((resolvePromise) => {
-    const env = { ...process.env, SESSION_STATE_PATH: statePath };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      SESSION_STATE_PATH: statePath,
+    };
     if (compose) env.MC_COMPOSE = '1';
     else delete env.MC_COMPOSE;
     const child = spawn(process.execPath, [script], {

@@ -96,7 +96,7 @@ Then open the URL the script prints. The default is **http://localhost:5173/#/ta
 
 OpenClaw is optional. The command above does not start the OpenClaw gateway. A fresh setup does not load sample data. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. After `npm ci`, `npm run seed:demo` writes the sample bots, tickets, and usage in the sample shots above, and it does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. `npm run doctor` checks the local setup. On Compose it checks `MC_API_PORT`, `MC_WEB_PORT`, `MC_DB_PORT`, and `MC_REMOTE_PORT`, and it names a missing, stopped, or paused web service the same way as db and api. A missing OpenClaw command does not fail that command.
 
-`bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes a random `INGEST_TOKEN`, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. Long build output goes to `install.log`. The screen shows one progress line and names that file. The run ends with the URL, the password on the first install, and the reset command. A second run does not print or change the password. The file stores only the hash. A second run keeps values already in `.env`. The script does not print the ingest token or the session secret.
+`bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes a random `INGEST_TOKEN`, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. Long build output goes to `install.log`. The screen shows one progress line and names that file. The run ends with the URL, the password on the first install, and the reset command. On Compose the summary names the tunnel port. On the native path that line points at docs/REMOTE.md, because nothing listens on the tunnel port. A second run does not print or change the password. The file stores only the hash. A second run keeps values already in `.env`. The script does not print the ingest token or the session secret.
 
 Reset a lost or shared password from the checkout:
 
@@ -110,7 +110,7 @@ Under Compose, run this on the host. npm runs inside the api container. The host
 docker compose exec api npm run password:reset
 ```
 
-The command prints the new password once and revokes every session.
+The command prints the new password once and revokes every session. If the api container is stopped, run `docker compose start api` first. A host `npm run password:reset` exits nonzero when this checkout has a Compose API container or the mc-auth volume, and it does not write a password the API will not read.
 
 When the `openclaw` command is on PATH, the installer adds a bridge schedule and names the scheduler it used. Remove only that schedule with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer prints a skip line and continues.
 

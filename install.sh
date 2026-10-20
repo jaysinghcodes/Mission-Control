@@ -1780,10 +1780,11 @@ print_install_summary() {
   url="http://localhost:$(web_port)/#/tasks"
   if [[ "${USE_DOCKER:-0}" == "1" ]]; then
     reset="docker compose exec api npm run password:reset"
+    echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL below."
   else
     reset="npm run password:reset"
+    echo "Remote access is in docs/REMOTE.md."
   fi
-  echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL below."
   echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
   echo "OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md."
   echo "Open ${url}"

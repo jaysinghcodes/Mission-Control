@@ -198,8 +198,10 @@ test('compose password reset is docker compose exec and does not call host node'
   const command = 'docker compose exec api npm run password:reset'
   const dockerfile = read('apps/api/Dockerfile')
   assert.match(dockerfile, /COPY --from=build \/app\/apps\/api\/scripts\/password-reset\.mjs/)
+  assert.match(dockerfile, /COPY --from=build \/app\/apps\/api\/src\/load-env\.js/)
   assert.equal(existsSync(path.join(root, 'apps/api/scripts/password-reset.mjs')), true)
   const resetScript = read('apps/api/scripts/password-reset.mjs')
+  assert.match(resetScript, /loadEnvFiles/)
   assert.doesNotMatch(resetScript, /\/auth\/password-reset/)
   assert.doesNotMatch(resetScript, /node:http/)
   assert.doesNotMatch(read('apps/api/src/auth/auth.controller.ts'), /password-reset/)
