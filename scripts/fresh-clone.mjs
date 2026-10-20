@@ -412,6 +412,19 @@ export function installMode(env = process.env) {
   throw new Error('FRESH_INSTALL_MODE must be compose or native.')
 }
 
+export const COMPOSE_PASSWORD_RESET = 'docker compose exec api npm run password:reset'
+
+/**
+ * Empty when npm or node runs inside docker compose exec or run.
+ * Otherwise the host tool name, or empty when the command uses neither.
+ */
+export function hostNodeInvocation(command) {
+  const trimmed = String(command).trim()
+  if (/^docker compose (exec|run)\b/.test(trimmed)) return ''
+  const hit = trimmed.match(/\b(node|npm|npx)\b/)
+  return hit ? hit[1] : ''
+}
+
 export function parseDashboardPassword(text) {
   const match = String(text).match(/^Dashboard password, shown once: ([^\r\n]+)$/m)
   return match ? match[1] : ''

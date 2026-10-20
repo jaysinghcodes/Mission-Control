@@ -40,8 +40,24 @@ describe('socket loopback and the tunnel listener', () => {
     expect(sessionStatus(req)).toEqual({
       authenticated: false,
       loginRequired: true,
+      compose: false,
     });
     expect(peerAddress(req)).toBe('127.0.0.1');
+  });
+
+  it('names compose on the session status when MC_COMPOSE is set', () => {
+    process.env.MC_COMPOSE = '1';
+    const remote = call('203.0.113.10');
+    expect(sessionStatus(remote)).toEqual({
+      authenticated: false,
+      loginRequired: true,
+      compose: true,
+    });
+    const local = call('127.0.0.1');
+    expect(sessionStatus(local).compose).toBe(true);
+    expect(sessionStatus(local).loginRequired).toBe(false);
+    delete process.env.MC_COMPOSE;
+    expect(sessionStatus(remote).compose).toBe(false);
   });
 
   it('keeps a real loopback socket open even when the header names someone else', () => {

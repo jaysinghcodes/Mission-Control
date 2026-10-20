@@ -194,6 +194,28 @@ test('compose, nginx, and the install docs have no dash punctuation or arrows', 
   }
 })
 
+test('compose password reset is docker compose exec and does not call host node', () => {
+  const command = 'docker compose exec api npm run password:reset'
+  const dockerfile = read('apps/api/Dockerfile')
+  assert.match(dockerfile, /COPY --from=build \/app\/apps\/api\/scripts\/password-reset\.mjs/)
+  assert.equal(existsSync(path.join(root, 'apps/api/scripts/password-reset.mjs')), true)
+  for (const rel of ['README.md', 'docs/REMOTE.md', 'docs/API.md', 'install.sh']) {
+    assert.match(read(rel), new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+  assert.match(command, /^docker compose exec /)
+  assert.equal(/^(node|npm|npx)\b/.test(command), false)
+  const install = read('install.sh')
+  const resetLines = install.split('\n').filter((line) => line.includes('password:reset'))
+  assert.ok(resetLines.length > 0)
+  for (const line of resetLines) {
+    assert.match(line, /echo |reset=/)
+    assert.doesNotMatch(line.trim(), /^(node|npm|npx)\b/)
+  }
+  const marked = install.split('# compose-host-free:start').slice(1).map((part) => part.split('# compose-host-free:end')[0]).join('\n')
+  assert.doesNotMatch(marked, /password:reset/)
+  assert.doesNotMatch(marked, /\b(npm|npx)\b/)
+})
+
 test('the remote access guide matches the shipped tunnel listener', () => {
   const text = read('docs/REMOTE.md')
   const guides = text.split(/^## /m).filter((part) => /^(SSH tunnel|Tailscale Serve|Cloudflare Tunnel)\n/.test(part))

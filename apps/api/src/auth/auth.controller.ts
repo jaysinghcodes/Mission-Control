@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
@@ -88,6 +89,32 @@ export class AuthController {
     }
     resetLoginLimits();
     res.status(204).send();
+  }
+
+  /**
+   * Sets a new random password and revokes every session.
+   * The socket itself must be loopback. A session cookie is not enough.
+   * npm run password:reset calls this on 127.0.0.1. Under Compose that
+   * command runs inside the api container:
+   * docker compose exec api npm run password:reset
+   */
+  @Post('password-reset')
+  resetPassword(@Req() req: Request, @Res() res: Response): void {
+    if (!isLoopbackAddress(req.socket?.remoteAddress)) {
+      res.status(401).json({ statusCode: 401, message: 'unauthorized' });
+      return;
+    }
+    const password = randomBytes(18).toString('base64url');
+    try {
+      changePasswordHash(hashPassword(password));
+    } catch {
+      res
+        .status(500)
+        .json({ statusCode: 500, message: 'could not reset password' });
+      return;
+    }
+    this.live.dropRevokedSockets();
+    res.status(200).json({ password });
   }
 
   @Post('logout')

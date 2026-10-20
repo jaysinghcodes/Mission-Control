@@ -1,3 +1,4 @@
+import { rmSync } from 'fs';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -8,6 +9,7 @@ import {
   type RegisteredWriteRoute,
 } from './write-routes';
 import { isAuthRoute, isIngestWrite } from './route-class';
+import { sessionStatePath } from './session-state';
 
 /**
  * Route coverage for ingest auth and for dashboard writes on loopback.
@@ -57,6 +59,7 @@ describe('write route coverage', () => {
   }, 30000);
 
   afterAll(async () => {
+    rmSync(sessionStatePath(), { force: true });
     process.env = { ...saved };
     if (app) await app.close();
   });

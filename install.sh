@@ -10,10 +10,16 @@
 # A new shell MC_DB_PORT updates a stock DATABASE_URL and that port line.
 # A custom DATABASE_URL is left as is.
 # A missing dashboard password hash or session secret is filled. Other keys stay.
-# The ingest token is not printed. A new dashboard password is printed once.
+# The ingest token is not printed. A new dashboard password is printed once, in the final summary.
+# A second run does not print or change that password.
+# Long build output goes to install.log. The screen shows one progress line and names that file.
+# The run ends with the dashboard URL, the password on the first install, and the reset command.
 # Before Compose starts, the host docs directory is created as this user.
 
 set -euo pipefail
+
+MC_NEW_PASSWORD=""
+MC_SUMMARY_PRINTED=0
 
 enter_repo() {
   local src dir
@@ -748,9 +754,6 @@ ensure_env() {
       mv "$tmp" .env
       umask "$old_umask"
       echo "Added the missing dashboard login values to .env."
-      if [[ -n "$MC_NEW_PASSWORD" ]]; then
-        echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
-      fi
       return 0
     fi
     if [[ "$MC_DB_PORT_UPDATED" -eq 1 || "$MC_DATABASE_URL_UPDATED" -eq 1 ]]; then
@@ -794,7 +797,6 @@ ensure_env() {
     exit 1
   fi
   echo "Wrote INGEST_TOKEN to .env."
-  echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
 }
 
 have_docker() {
@@ -878,7 +880,20 @@ ensure_repo_bind() {
   fi
 }
 
+install_log_file() {
+  printf '%s' "$(pwd)/install.log"
+}
+
+# One progress line. The long output of the next command goes to install.log.
+note_build_log() {
+  local log
+  log="$(install_log_file)"
+  : >> "$log"
+  echo "Building. The log is ${log}."
+}
+
 start_docker() {
+  local log
   echo "Starting the stack with Docker Compose."
   ensure_repo_bind DOCS_ROOT "data/docs"
   ensure_repo_bind OPENCLAW_LOG_DIR "/tmp/openclaw"
@@ -887,21 +902,18 @@ start_docker() {
     GIT_SHA="$(git rev-parse HEAD)"
     export GIT_SHA
   fi
-  local up_log
-  up_log="$(mktemp "${TMPDIR:-/tmp}/mc-compose.XXXXXX")"
-  if ! docker compose up -d --build >"$up_log" 2>&1; then
-    if compose_bind_conflict "$up_log"; then
-      cat "$up_log" >&2
-      rm -f "$up_log"
+  note_build_log
+  log="$(install_log_file)"
+  if ! docker compose up -d --build >>"$log" 2>&1; then
+    if compose_bind_conflict "$log"; then
+      cat "$log" >&2
       echo "Docker Compose did not start the stack." >&2
       exit 1
     fi
-    cat "$up_log" >&2
-    rm -f "$up_log"
+    cat "$log" >&2
     echo "Docker Compose did not start the stack." >&2
     exit 1
   fi
-  rm -f "$up_log"
   echo "Waiting for the API health check on port $(docker_api_port)."
   wait_on_port "$(docker_api_port)"
 }
@@ -1092,12 +1104,18 @@ wait_ready() {
 }
 
 start_native() {
-  local shell_port shell_web shell_api
+  local shell_port shell_web shell_api log
   echo "Docker was not found. Using the native path. This needs Node.js 20.17 or later and Postgres 16."
   require_native_node
   require_postgres_16
   echo "Installing dependencies and starting the API and the web app."
-  npm ci
+  note_build_log
+  log="$(install_log_file)"
+  if ! npm ci >>"$log" 2>&1; then
+    echo "npm ci failed. The log is ${log}." >&2
+    cat "$log" >&2
+    exit 1
+  fi
   # Resolve before sourcing .env. A file PORT=3000 must not hide a shell port.
   shell_port="${PORT-}"
   shell_web="${MC_WEB_PORT-}"
@@ -1116,8 +1134,16 @@ start_native() {
     MC_API_PORT="$shell_api"
     export MC_API_PORT
   fi
-  (cd apps/api && npx prisma generate)
-  (cd apps/api && npx prisma migrate deploy)
+  if ! (cd apps/api && npx prisma generate) >>"$log" 2>&1; then
+    echo "prisma generate failed. The log is ${log}." >&2
+    cat "$log" >&2
+    exit 1
+  fi
+  if ! (cd apps/api && npx prisma migrate deploy) >>"$log" 2>&1; then
+    echo "prisma migrate deploy failed. The log is ${log}." >&2
+    cat "$log" >&2
+    exit 1
+  fi
   if health_ok; then
     echo "The API is already up. Leaving that process running."
   else
@@ -1748,8 +1774,42 @@ uninstall_schedule() {
   echo "The bridge schedule is uninstalled."
 }
 
+# Last lines on screen. The password is included only when this run created it.
+print_install_summary() {
+  local url reset
+  url="http://localhost:$(web_port)/#/tasks"
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+    reset="docker compose exec api npm run password:reset"
+  else
+    reset="npm run password:reset"
+  fi
+  echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL above."
+  echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw. Run npm ci in the checkout before npm run seed:demo or npm run seed:clear. Without that install, prisma is not found and the seed command fails."
+  else
+    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
+  fi
+  echo "Open ${url}"
+  if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
+    echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+  fi
+  echo "Reset the dashboard password with: ${reset}"
+  MC_SUMMARY_PRINTED=1
+}
+
+# A failed run still shows a new password. The hash is not recoverable later.
+on_exit() {
+  if [[ "${MC_SUMMARY_PRINTED:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
+    echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+  fi
+}
+
 finish() {
-  local doctor_code url
+  local doctor_code
   doctor_code=0
   if [[ "${USE_DOCKER:-0}" == "1" ]]; then
     set +e
@@ -1770,20 +1830,13 @@ finish() {
   else
     echo "info doctor: Node is not on PATH, so doctor did not run. Docker installs don't need Node."
   fi
-  url="http://localhost:$(web_port)/#/tasks"
-  echo "Open ${url}"
-  echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL above."
-  echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
-  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
-    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw. Run npm ci in the checkout before npm run seed:demo or npm run seed:clear. Without that install, prisma is not found and the seed command fails."
-  else
-    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
-  fi
+  print_install_summary
   exit "$doctor_code"
 }
 
 main() {
   local action
+  trap on_exit EXIT
   action="install"
   if [[ "${1:-}" == "--uninstall-schedule" ]]; then
     action="uninstall"

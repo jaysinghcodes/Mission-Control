@@ -9,7 +9,16 @@ import { API_URL } from './apiBase'
 export interface SessionInfo {
   authenticated: boolean
   loginRequired: boolean
+  compose: boolean
 }
+
+/** Sign in help when the API is not the Compose process. */
+export const NATIVE_LOGIN_HELP =
+  'Use the password from install. Reset it with npm run password:reset. Loopback on this machine does not ask.'
+
+/** Sign in help under Compose. This install asks on this machine too. */
+export const COMPOSE_LOGIN_HELP =
+  'Use the password from install. Reset it with docker compose exec api npm run password:reset. This install asks on this machine too.'
 
 interface SessionValue {
   info: SessionInfo
@@ -23,7 +32,7 @@ export function useSession(): SessionValue {
   const value = useContext(SessionContext)
   if (!value) {
     return {
-      info: { authenticated: true, loginRequired: false },
+      info: { authenticated: true, loginRequired: false, compose: false },
       end: async () => {},
       refresh: async () => {},
     }
@@ -39,6 +48,7 @@ async function readSession(): Promise<SessionInfo | null> {
     return {
       authenticated: body.authenticated === true,
       loginRequired: body.loginRequired === true,
+      compose: body.compose === true,
     }
   } catch {
     return null
@@ -131,7 +141,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
   }
 
   const value: SessionValue = {
-    info: info ?? { authenticated: false, loginRequired: true },
+    info: info ?? { authenticated: false, loginRequired: true, compose: false },
     end,
     refresh,
   }
@@ -163,7 +173,12 @@ export function SessionGate({ children }: { children: ReactNode }) {
   if (info && info.loginRequired && !info.authenticated) {
     return (
       <SessionContext.Provider value={value}>
-        <Login busy={busy} error={error} onSubmit={(password) => void onSubmit(password)} />
+        <Login
+          busy={busy}
+          error={error}
+          compose={info.compose === true}
+          onSubmit={(password) => void onSubmit(password)}
+        />
       </SessionContext.Provider>
     )
   }
@@ -174,10 +189,12 @@ export function SessionGate({ children }: { children: ReactNode }) {
 function Login({
   busy,
   error,
+  compose,
   onSubmit,
 }: {
   busy: boolean
   error: string | null
+  compose: boolean
   onSubmit: (password: string) => void
 }) {
   const [password, setPassword] = useState('')
@@ -193,8 +210,8 @@ function Login({
       >
         <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-mc-faint">Mission Control</p>
         <h1 className="mt-2 text-[28px] font-bold tracking-[-0.02em] text-mc-text">Sign in</h1>
-        <p className="mt-2 text-[15px] leading-relaxed text-mc-sub">
-          This dashboard needs a password when the request is not from this machine. The installer printed it once.
+        <p className="mt-2 text-[15px] leading-relaxed text-mc-sub" data-login-help="true">
+          {compose ? COMPOSE_LOGIN_HELP : NATIVE_LOGIN_HELP}
         </p>
         <label className="mt-6 block text-[13px] font-semibold text-mc-text" htmlFor="dashboard-password">
           Password

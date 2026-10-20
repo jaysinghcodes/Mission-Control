@@ -133,6 +133,9 @@ if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  if [ -n "\${DOCKER_STUB_NOISE:-}" ]; then
+    echo "compose build output \${DOCKER_STUB_NOISE}"
+  fi
   if [ "\${DOCKER_STUB_BIND:-}" = "1" ]; then
     echo "listen tcp 127.0.0.1:\${DOCKER_STUB_BIND_PORT}: bind: address already in use" >&2
     exit 1
@@ -543,6 +546,8 @@ test('a rerun keeps existing tokens and every other .env value', () => {
     const second = runInstall(fx.repo, fx.env)
     const text = outputOf(second)
     assert.match(text, /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.doesNotMatch(text, /Dashboard password, shown once:/)
+    assert.equal(text.includes(assignments(before.toString('utf8')).DASHBOARD_PASSWORD_HASH), false)
     assert.deepEqual(readFileSync(envPath), before)
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
     assert.equal(text.includes(assignments(before.toString('utf8')).INGEST_TOKEN), false)
@@ -551,6 +556,46 @@ test('a rerun keeps existing tokens and every other .env value', () => {
     assert.doesNotMatch(text, /Created .+ for the Compose docs bind\./)
     assert.equal(existsSync(path.join(fx.repo, 'data', 'docs')), true)
     assert.equal(mode, 0o600)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('a fresh install ends with the URL and password, and a rerun does not print or change it', () => {
+  const fx = freshDir()
+  try {
+    const first = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_NOISE: 'marker-113' })
+    const text = outputOf(first)
+    const envPath = path.join(fx.repo, '.env')
+    const env = assignments(readFileSync(envPath, 'utf8'))
+    const before = readFileSync(envPath)
+    const lines = text.replace(/\s+$/, '').split('\n')
+    const password = lines.at(-2)
+    const reset = lines.at(-1)
+    const url = lines.at(-3)
+    assert.match(url ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
+    assert.match(password ?? '', /^Dashboard password, shown once: \S+$/)
+    assert.equal(reset, 'Reset the dashboard password with: docker compose exec api npm run password:reset')
+    assert.equal(text.split('Dashboard password, shown once:').length - 1, 1)
+    const shown = password.match(/Dashboard password, shown once: (\S+)/)
+    assert.ok(shown)
+    assert.equal(passwordMatchesHash(shown[1], env.DASHBOARD_PASSWORD_HASH), true)
+    assert.match(text, /Building\. The log is .+\/install\.log\./)
+    const buildLog = readFileSync(path.join(fx.repo, 'install.log'), 'utf8')
+    assert.match(buildLog, /compose build output marker-113/)
+    assert.equal(text.includes('compose build output marker-113'), false)
+    assert.equal(text.includes(env.DASHBOARD_PASSWORD_HASH), false)
+    assert.equal(text.includes(env.SESSION_SECRET), false)
+    const second = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_NOISE: 'marker-113' })
+    const again = outputOf(second)
+    const againLines = again.replace(/\s+$/, '').split('\n')
+    assert.match(againLines.at(-2) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
+    assert.equal(againLines.at(-1), 'Reset the dashboard password with: docker compose exec api npm run password:reset')
+    assert.doesNotMatch(again, /Dashboard password, shown once:/)
+    assert.equal(again.includes(shown[1]), false)
+    assert.deepEqual(readFileSync(envPath), before)
+    assert.match(again, /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.match(again, /Building\. The log is .+\/install\.log\./)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
   }
@@ -822,6 +867,11 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     assert.doesNotMatch(text, /is not a supported native runtime/)
     assert.doesNotMatch(text, /The API is already up/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
+    const nativeLines = text.replace(/\s+$/, '').split('\n')
+    assert.match(nativeLines.at(-3) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
+    assert.match(nativeLines.at(-2) ?? '', /^Dashboard password, shown once: \S+$/)
+    assert.equal(nativeLines.at(-1), 'Reset the dashboard password with: npm run password:reset')
+    assert.doesNotMatch(nativeLines.at(-1) ?? '', /docker compose exec/)
     assertReadableDoctor(text)
     const ci = log.indexOf('npm ci')
     const generate = log.indexOf('npx prisma generate')

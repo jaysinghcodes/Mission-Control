@@ -144,7 +144,11 @@ describe('dashboard session', () => {
       .get('/auth/session')
       .set('x-test-peer', REMOTE);
     expect(status.status).toBe(200);
-    expect(status.body).toEqual({ authenticated: false, loginRequired: true });
+    expect(status.body).toEqual({
+      authenticated: false,
+      loginRequired: true,
+      compose: false,
+    });
 
     const login = await request(app.getHttpServer())
       .post('/auth/login')
@@ -168,6 +172,7 @@ describe('dashboard session', () => {
     expect(loopback.body).toEqual({
       authenticated: true,
       loginRequired: false,
+      compose: false,
     });
 
     const logout = await request(app.getHttpServer())
@@ -410,6 +415,7 @@ describe('dashboard session', () => {
       expect(status.body).toEqual({
         authenticated: false,
         loginRequired: true,
+        compose: false,
       });
       for (let i = 0; i < 5; i += 1) {
         const wrong = await request(app.getHttpServer())
@@ -649,6 +655,51 @@ describe('dashboard session', () => {
       changePasswordHash(original);
     }
   });
+
+  it('password:reset sets a new password and revokes every session', async () => {
+    const original = process.env.DASHBOARD_PASSWORD_HASH ?? '';
+    try {
+      const first = await loginCookie(app);
+      const second = await loginCookie(app);
+      const denied = await request(app.getHttpServer())
+        .post('/auth/password-reset')
+        .set('x-test-peer', REMOTE);
+      expect(denied.status).toBe(401);
+      const still = await request(app.getHttpServer())
+        .get('/sessions')
+        .set('x-test-peer', REMOTE)
+        .set('Cookie', first);
+      expect(still.status).not.toBe(401);
+
+      const reset = await request(app.getHttpServer()).post(
+        '/auth/password-reset',
+      );
+      expect(reset.status).toBe(200);
+      const password = passwordField(reset.body);
+      expect(password).not.toBe('');
+      expect(password).not.toBe(PASSWORD);
+      expect(JSON.stringify(reset.body)).not.toContain(
+        process.env.DASHBOARD_PASSWORD_HASH ?? 'hash',
+      );
+      for (const cookie of [first, second]) {
+        const dead = await request(app.getHttpServer())
+          .get('/sessions')
+          .set('x-test-peer', REMOTE)
+          .set('Cookie', cookie);
+        expect(dead.status).toBe(401);
+        expect(freshProcessAccepts(cookie)).toBe(false);
+      }
+      const oldPassword = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('x-test-peer', REMOTE)
+        .send({ password: PASSWORD });
+      expect(oldPassword.status).toBe(401);
+      const cookie = await loginCookie(app, password);
+      expect(freshProcessAccepts(cookie)).toBe(true);
+    } finally {
+      changePasswordHash(original);
+    }
+  });
 });
 
 async function loginCookie(
@@ -689,6 +740,12 @@ function freshProcessAccepts(cookieHeader: string): boolean {
     );
   }
   return result.status === 0;
+}
+
+function passwordField(body: unknown): string {
+  if (typeof body !== 'object' || body === null) return '';
+  const value = (body as Record<string, unknown>).password;
+  return typeof value === 'string' ? value : '';
 }
 
 function headerLine(value: unknown): string {

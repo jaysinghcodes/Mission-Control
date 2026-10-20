@@ -17,6 +17,8 @@ const DEFAULT_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 export interface SessionStatus {
   authenticated: boolean;
   loginRequired: boolean;
+  /** True when the API is the Compose process (MC_COMPOSE=1). */
+  compose: boolean;
 }
 
 export function sessionMaxAgeSeconds(
@@ -80,10 +82,11 @@ export function sessionStatus(
   req: LoopbackRequest,
   env: NodeJS.ProcessEnv = process.env,
 ): SessionStatus {
+  const compose = env.MC_COMPOSE === '1';
   const loopback = requestLoopback(req, env);
   const authenticated = validSession(req.headers.cookie, env);
-  if (loopback) return { authenticated: true, loginRequired: false };
-  return { authenticated, loginRequired: true };
+  if (loopback) return { authenticated: true, loginRequired: false, compose };
+  return { authenticated, loginRequired: true, compose };
 }
 
 export function loginWithPassword(

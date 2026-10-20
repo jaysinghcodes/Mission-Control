@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { buildInstallScript, docsOwnerError, finishFreshInstall, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
+import { COMPOSE_PASSWORD_RESET, buildInstallScript, docsOwnerError, finishFreshInstall, hostNodeInvocation, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -82,6 +82,25 @@ test('installer mode is compose, native, or the fresh clone default', () => {
   assert.equal(installMode({ FRESH_INSTALL_MODE: 'compose' }), 'compose')
   assert.equal(installMode({ FRESH_INSTALL_MODE: 'native' }), 'native')
   assert.throws(() => installMode({ FRESH_INSTALL_MODE: 'windows' }), /compose or native/)
+})
+
+test('the compose password reset runs inside the api container', () => {
+  const readme = readFileSync(path.join(root, 'README.md'), 'utf8')
+  const remote = readFileSync(path.join(root, 'docs/REMOTE.md'), 'utf8')
+  const install = readFileSync(path.join(root, 'install.sh'), 'utf8')
+  assert.match(readme, new RegExp(`^${COMPOSE_PASSWORD_RESET}$`, 'm'))
+  assert.match(remote, new RegExp(`^${COMPOSE_PASSWORD_RESET}$`, 'm'))
+  assert.match(install, new RegExp(COMPOSE_PASSWORD_RESET.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.equal(hostNodeInvocation(COMPOSE_PASSWORD_RESET), '')
+  assert.equal(hostNodeInvocation('npm run password:reset'), 'npm')
+  assert.equal(hostNodeInvocation('npx prisma generate'), 'npx')
+  assert.equal(hostNodeInvocation('node scripts/password-reset.mjs'), 'node')
+  const resetLines = install.split('\n').filter((line) => line.includes('password:reset'))
+  assert.ok(resetLines.length > 0)
+  for (const line of resetLines) {
+    assert.match(line, /echo |reset=/)
+    assert.doesNotMatch(line.trim(), /^(node|npm|npx)\b/)
+  }
 })
 
 test('the installer log yields the password and the dashboard URL', () => {
