@@ -1162,12 +1162,12 @@ test('a stopped or paused compose service is a failure, not a slow start or a po
   ].join('\n'))
   assert.equal(composeServiceReady(running[0]), true)
   assert.equal(composeServiceFailure(running), '')
-  const dbStopped = 'The db service is not running. Start it with: docker compose start db'
-  const apiStopped = 'The api service is not running. Start it with: docker compose start api'
-  const apiPaused = 'The api service is paused. Unpause it with: docker compose unpause api'
-  const webStopped = 'The web service is not running. Start it with: docker compose start web'
-  const webPaused = 'The web service is paused. Unpause it with: docker compose unpause web'
-  const webMissing = 'The web service is not running. Start it with: docker compose up -d web'
+  const dbStopped = 'The db service is not running. Start it with: docker compose start db.'
+  const apiStopped = 'The api service is not running. Start it with: docker compose start api.'
+  const apiPaused = 'The api service is paused. Unpause it with: docker compose unpause api.'
+  const webStopped = 'The web service is not running. Start it with: docker compose start web.'
+  const webPaused = 'The web service is paused. Unpause it with: docker compose unpause web.'
+  const webMissing = 'The web service is not running. Start it with: docker compose up -d web.'
   const up = '{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}'
   assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}\n${webUp}`)), dbStopped)
   assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}\n${webUp}`)), apiStopped)
@@ -1181,19 +1181,19 @@ test('a stopped or paused compose service is a failure, not a slow start or a po
   assert.equal(composeServiceFailure([], []), '')
   assert.equal(
     composeServiceFailure([], ['db', 'api', 'web']),
-    'The db, api, and web services are not running. Start them with: docker compose up -d db api web',
+    'The db, api, and web services are not running. Start them with: docker compose up -d db api web.',
   )
   assert.equal(
     composeServiceFailure([], ['db', 'api']),
-    'The db and api services are not running. Start them with: docker compose up -d db api',
+    'The db and api services are not running. Start them with: docker compose up -d db api.',
   )
-  const dbMissing = 'The db service is not running. Start it with: docker compose up -d db'
-  const apiMissing = 'The api service is not running. Start it with: docker compose up -d api'
+  const dbMissing = 'The db service is not running. Start it with: docker compose up -d db.'
+  const apiMissing = 'The api service is not running. Start it with: docker compose up -d api.'
   assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"api","State":"running","Status":"Up"}\n${webUp}`)), dbMissing)
   assert.equal(composeServiceFailure(parseComposeServiceRows(`{"Service":"db","State":"running","Status":"Up"}\n${webUp}`)), apiMissing)
   assert.equal(
     composeServiceFailure(parseComposeServiceRows('{"Service":"web","State":"running","Status":"Up"}')),
-    'The db and api services are not running. Start them with: docker compose up -d db api',
+    'The db and api services are not running. Start them with: docker compose up -d db api.',
   )
   for (const line of [dbStopped, apiStopped, apiPaused, webStopped, webPaused, webMissing, dbMissing, apiMissing]) {
     assert.equal(hasDashPunctuation(line), false)
@@ -1224,7 +1224,7 @@ async function doctorWithServices(json, services, env = {}) {
 }
 
 test('doctor fails when the db container is stopped', async () => {
-  const message = 'The db service is not running. Start it with: docker compose start db'
+  const message = 'The db service is not running. Start it with: docker compose start db.'
   const { result } = await doctorWithServices(
     '{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'api\ndb',
@@ -1239,7 +1239,7 @@ test('doctor fails when the db container is stopped', async () => {
 })
 
 test('doctor fails when the api container is stopped', async () => {
-  const message = 'The api service is not running. Start it with: docker compose start api'
+  const message = 'The api service is not running. Start it with: docker compose start api.'
   const { result } = await doctorWithServices(
     '{"Service":"api","State":"exited","Status":"Exited (137)"}\n{"Service":"db","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'api\ndb',
@@ -1254,7 +1254,7 @@ test('doctor fails when the api container is stopped', async () => {
 })
 
 test('a paused api is detected as this stack and fails with unpause', async () => {
-  const message = 'The api service is paused. Unpause it with: docker compose unpause api'
+  const message = 'The api service is paused. Unpause it with: docker compose unpause api.'
   const { result } = await doctorWithServices(
     '{"Service":"api","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'api\ndb',
@@ -1305,7 +1305,7 @@ test('a created api on a busy port is a conflict, not a start command', async ()
 })
 
 test('a removed api is still Compose and names docker compose up', async () => {
-  const message = 'The api service is not running. Start it with: docker compose up -d api'
+  const message = 'The api service is not running. Start it with: docker compose up -d api.'
   const { result } = await doctorWithServices(
     '{"Service":"db","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'db\nweb',
@@ -1320,7 +1320,7 @@ test('a removed api is still Compose and names docker compose up', async () => {
 })
 
 test('a removed db is still Compose and names docker compose up', async () => {
-  const message = 'The db service is not running. Start it with: docker compose up -d db'
+  const message = 'The db service is not running. Start it with: docker compose up -d db.'
   const { result } = await doctorWithServices(
     '{"Service":"api","State":"running","Status":"Up"}\n{"Service":"web","State":"running","Status":"Up"}',
     'api\nweb',
@@ -1336,7 +1336,7 @@ test('a removed db is still Compose and names docker compose up', async () => {
 })
 
 test('doctor fails when the web container is stopped', async () => {
-  const message = 'The web service is not running. Start it with: docker compose start web'
+  const message = 'The web service is not running. Start it with: docker compose start web.'
   const { result } = await doctorWithServices(
     '{"Service":"web","State":"exited","Status":"Exited (0)"}\n{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}',
     'api\ndb\nweb',
@@ -1353,7 +1353,7 @@ test('doctor fails when the web container is stopped', async () => {
 })
 
 test('a paused web is named with docker compose unpause', async () => {
-  const message = 'The web service is paused. Unpause it with: docker compose unpause web'
+  const message = 'The web service is paused. Unpause it with: docker compose unpause web.'
   const { result } = await doctorWithServices(
     '{"Service":"web","State":"paused","Status":"Paused"}\n{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}',
     'api\ndb\nweb',
@@ -1368,8 +1368,45 @@ test('a paused web is named with docker compose unpause', async () => {
   assert.equal(hasDashPunctuation(text), false)
 })
 
+test('a stopped api and a paused web print two separate sentences, each on its own line', async () => {
+  const apiStopped = 'The api service is not running. Start it with: docker compose start api.'
+  const webPaused = 'The web service is paused. Unpause it with: docker compose unpause web.'
+  assert.equal(
+    composeServiceFailure(parseComposeServiceRows('{"Service":"api","State":"exited","Status":"Exited (0)"}\n{"Service":"web","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}')),
+    `${apiStopped}\n${webPaused}`,
+  )
+  const { result } = await doctorWithServices(
+    '{"Service":"api","State":"exited","Status":"Exited (0)"}\n{"Service":"web","State":"paused","Status":"Paused"}\n{"Service":"db","State":"running","Status":"Up"}',
+    'api\ndb\nweb',
+  )
+  assert.equal(result.code, 1)
+  for (const line of result.lines) {
+    assert.equal(line.includes('\n'), false, line)
+    assert.doesNotMatch(line, /docker compose [a-z -]+ [a-z]+ The /, line)
+  }
+  for (const check of ['ports', 'health']) {
+    assert.equal(result.lines.filter((line) => line === `fail ${check}: ${apiStopped}`).length, 1, result.lines.join('\n'))
+    assert.equal(result.lines.filter((line) => line === `fail ${check}: ${webPaused}`).length, 1, result.lines.join('\n'))
+    const first = result.lines.indexOf(`fail ${check}: ${apiStopped}`)
+    assert.equal(result.lines[first + 1], `fail ${check}: ${webPaused}`)
+  }
+  assert.equal(hasDashPunctuation(result.lines.join('\n')), false)
+})
+
+test('three kinds of service problems print three lines in start, up, unpause order', () => {
+  const text = composeServiceFailure(
+    parseComposeServiceRows('{"Service":"db","State":"exited","Status":"Exited (0)"}\n{"Service":"web","State":"paused","Status":"Paused"}'),
+    ['db', 'api', 'web'],
+  )
+  assert.deepEqual(text.split('\n'), [
+    'The db service is not running. Start it with: docker compose start db.',
+    'The api service is not running. Start it with: docker compose up -d api.',
+    'The web service is paused. Unpause it with: docker compose unpause web.',
+  ])
+})
+
 test('a removed web container is named with docker compose up', async () => {
-  const message = 'The web service is not running. Start it with: docker compose up -d web'
+  const message = 'The web service is not running. Start it with: docker compose up -d web.'
   const { result } = await doctorWithServices(
     '{"Service":"api","State":"running","Status":"Up"}\n{"Service":"db","State":"running","Status":"Up"}',
     'api\ndb',
@@ -1386,7 +1423,7 @@ test('a removed web container is named with docker compose up', async () => {
 })
 
 test('a missing web container is named with docker compose up', async () => {
-  const message = 'The web service is not running. Start it with: docker compose up -d web'
+  const message = 'The web service is not running. Start it with: docker compose up -d web.'
   const dir = mkdtempSync(path.join(tmpdir(), 'mc-doctor-web-missing-'))
   const bin = path.join(dir, 'bin')
   const server = http.createServer((req, res) => {
@@ -1686,8 +1723,8 @@ test('an inside doctor uses the compose snapshot for a stopped db', async () => 
     })
     const text = result.lines.join('\n')
     assert.equal(result.code, 1, text)
-    assert.match(text, /^fail ports: The db service is not running\. Start it with: docker compose start db$/m)
-    assert.match(text, /^fail health: The db service is not running\. Start it with: docker compose start db$/m)
+    assert.match(text, /^fail ports: The db service is not running\. Start it with: docker compose start db\.$/m)
+    assert.match(text, /^fail health: The db service is not running\. Start it with: docker compose start db\.$/m)
     assert.doesNotMatch(text, /still starting/)
     assert.equal(readFileSync(log, 'utf8'), '')
   } finally {
