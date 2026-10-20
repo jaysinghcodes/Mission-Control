@@ -44,6 +44,13 @@ Design rules (why the code looks the way it does):
   * Secrets: INGEST_TOKEN comes from the environment or the repo-root .env.
     It is sent only as the x-ingest-token header and is NEVER printed, even
     with --dry-run.
+  * LIGHT ON A 1 CORE VM (#118). A steady state run starts `openclaw` once,
+    for sessions. Agents, cron, devices, nodes, the models list, and the
+    CLI version are cached in MC_BRIDGE_CACHE_FILE and fetched again when
+    openclaw.json changes, a value is missing, the sessions call fails, or
+    MC_BRIDGE_REFRESH_SECONDS (default 3600) pass. Memory files are reused
+    by mtime and size. A cached run posts the same bytes as a full run.
+    --profile prints time, CPU and peak memory with children, and calls.
   * MC_BRIDGE_REGISTER=1 also POSTs /agents/register for each mapped agent.
     Leave it unset and this script only posts agents.snapshot. OpenClaw
     stays optional either way.
@@ -51,6 +58,7 @@ Design rules (why the code looks the way it does):
 Usage:
   python3 bridge/mc-bridge-sync.py              # collect + post
   python3 bridge/mc-bridge-sync.py --dry-run    # collect + print payloads, post nothing
+  python3 bridge/mc-bridge-sync.py --profile    # also print time, CPU, memory and openclaw calls
   python3 bridge/mc-bridge-sync.py --from-dir bridge/examples   # use JSON files instead of the CLI
   python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw-memory
 """
@@ -72,7 +80,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # ── Paths / config ──────────────────────────────────────────────────────────
 
@@ -97,6 +105,18 @@ HOT_WINDOW_MS = 10 * 60 * 1000
 def log(msg: str) -> None:
     """All diagnostics go to stderr so stdout stays clean for --dry-run JSON."""
     print(f"[mc-bridge] {msg}", file=sys.stderr)
+
+
+# Every `openclaw` call this run, by its arguments. --profile prints it.
+OPENCLAW_CALLS: Dict[str, int] = {}
+
+
+def run_cli(argv: List[str], timeout: int) -> "subprocess.CompletedProcess[str]":
+    """subprocess.run for a source command. Counts each `openclaw` call."""
+    if argv and os.path.basename(argv[0]) == "openclaw":
+        key = " ".join(argv[1:])
+        OPENCLAW_CALLS[key] = OPENCLAW_CALLS.get(key, 0) + 1
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
 
 
 def _valid_port(raw: str) -> Optional[int]:
@@ -177,7 +197,7 @@ class Sources:
     def _cli(self, argv: List[str]) -> Optional[Any]:
         """Run a command expected to print JSON. Never raises."""
         try:
-            proc = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+            proc = run_cli(argv, 60)
         except FileNotFoundError:
             log(f"`{argv[0]}` not found on PATH — skipping {' '.join(argv[1:3])}")
             return None
@@ -258,12 +278,7 @@ class Sources:
 
     def _models_list_text(self) -> Optional[str]:
         try:
-            proc = subprocess.run(
-                ["openclaw", "models", "list"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            proc = run_cli(["openclaw", "models", "list"], 60)
         except FileNotFoundError:
             log("`openclaw` not found on PATH. Skipping models list")
             return None
@@ -916,7 +931,7 @@ def gateway_listen_port() -> int:
     return 18789
 
 
-def probe_gateway() -> Dict[str, Any]:
+def probe_gateway(version_of: Optional[Callable[[], Optional[str]]] = None) -> Dict[str, Any]:
     """TCP check of the gateway on this machine. The bridge runs on the host.
 
     Stock OpenClaw listens on 127.0.0.1, which a container cannot reach.
@@ -938,7 +953,7 @@ def probe_gateway() -> Dict[str, Any]:
         "checkedAt": int(time.time() * 1000),
         "latencyMs": int((time.monotonic() - started) * 1000) if up else None,
     }
-    version = openclaw_cli_version()
+    version = version_of() if version_of is not None else openclaw_cli_version()
     if version:
         payload["version"] = version
     return payload
@@ -947,12 +962,7 @@ def probe_gateway() -> Dict[str, Any]:
 def openclaw_cli_version() -> Optional[str]:
     """First line of `openclaw --version`, or None when the CLI is missing."""
     try:
-        proc = subprocess.run(
-            ["openclaw", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
+        proc = run_cli(["openclaw", "--version"], 20)
     except FileNotFoundError:
         return None
     except subprocess.TimeoutExpired:
@@ -963,7 +973,12 @@ def openclaw_cli_version() -> Optional[str]:
     return version_line(proc.stdout or proc.stderr)
 
 
-def collect_models(src: Sources, from_dir: Optional[Path]) -> Optional[Dict[str, Any]]:
+def collect_models(
+    src: Sources,
+    from_dir: Optional[Path],
+    catalog_of: Optional[Callable[[], Optional[List[Dict[str, str]]]]] = None,
+    version_of: Optional[Callable[[], Optional[str]]] = None,
+) -> Optional[Dict[str, Any]]:
     """models.snapshot payload, or None when the source was not readable.
 
     A readable config with no models, and no CLI list, still returns empty
@@ -985,13 +1000,13 @@ def collect_models(src: Sources, from_dir: Optional[Path]) -> Optional[Dict[str,
     else:
         payload = {"agents": [], "models": [], "openclawVersion": None}
     if not payload["agents"]:
-        listed = src.model_catalog()
+        listed = catalog_of() if catalog_of is not None else src.model_catalog()
         if listed:
             payload["models"] = listed
         elif not file_ok:
             return None
     if from_dir is None:
-        version = openclaw_cli_version()
+        version = version_of() if version_of is not None else openclaw_cli_version()
         if version:
             payload["openclawVersion"] = version
     if not payload.get("openclawVersion"):
@@ -1790,19 +1805,85 @@ def _read_memory_text(path: Path) -> Optional[str]:
     try:
         size = path.stat().st_size
     except OSError as exc:
-        log(f"{path}: {exc} — skipping")
+        log(f"{path}: {exc}. Skipping")
         return None
     if size > MAX_MEMORY_BYTES:
-        log(f"{path}: over 1MB — skipping")
+        log(f"{path}: over 1MB. Skipping")
         return None
+    # Read in chunks and stop past the cap, so a file that grew after the
+    # stat cannot load more than 1MB. Newlines match text mode reads.
+    chunks: List[bytes] = []
+    total = 0
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        with path.open("rb") as handle:
+            while total <= MAX_MEMORY_BYTES:
+                chunk = handle.read(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
     except OSError as exc:
-        log(f"{path}: {exc} — skipping")
+        log(f"{path}: {exc}. Skipping")
         return None
+    if total > MAX_MEMORY_BYTES:
+        log(f"{path}: over 1MB. Skipping")
+        return None
+    text = b"".join(chunks).decode("utf-8", errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+class MemoryMemo:
+    """Memory entries from the last run, keyed by file path (#118).
+
+    A file whose mtime, size, agent, kind, day, and timezone match the
+    stored row is not read again. Every other file is read and stored.
+    """
+
+    def __init__(self, stored: Any = None) -> None:
+        self.old: Dict[str, Any] = stored if isinstance(stored, dict) else {}
+        self.new: Dict[str, Any] = {}
+        self.reads = 0
+        self.reused = 0
+
+
+def _zone_key(tz: Optional[datetime.tzinfo]) -> str:
+    if tz is None:
+        return ""
+    return str(getattr(tz, "key", None) or tz)
 
 
 def entry_from_file(
+    agent_id: str,
+    agent_name: str,
+    workspace: Path,
+    path: Path,
+    kind: str,
+    day: Optional[str] = None,
+    tz: Optional[datetime.tzinfo] = None,
+    memo: Optional[MemoryMemo] = None,
+) -> Optional[Dict[str, Any]]:
+    if memo is None:
+        return _entry_from_file(agent_id, agent_name, workspace, path, kind, day, tz)
+    try:
+        st = path.stat()
+    except OSError as exc:
+        log(f"{path}: {exc}. Skipping")
+        return None
+    key = str(path)
+    sig = [st.st_mtime_ns, st.st_size, agent_id, agent_name, str(workspace), kind, day, _zone_key(tz)]
+    hit = memo.old.get(key)
+    if isinstance(hit, dict) and hit.get("sig") == sig and isinstance(hit.get("entry"), dict):
+        memo.new[key] = hit
+        memo.reused += 1
+        return dict(hit["entry"])
+    memo.reads += 1
+    row = _entry_from_file(agent_id, agent_name, workspace, path, kind, day, tz)
+    if row is not None:
+        memo.new[key] = {"sig": sig, "entry": row}
+    return row
+
+
+def _entry_from_file(
     agent_id: str,
     agent_name: str,
     workspace: Path,
@@ -1842,6 +1923,7 @@ def collect_memory(
     agents: List[Dict[str, Any]],
     base: Optional[Path] = None,
     tz: Optional[datetime.tzinfo] = None,
+    memo: Optional[MemoryMemo] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Read each agent's MEMORY.md and memory/YYYY-MM-DD*.md.
@@ -1869,7 +1951,7 @@ def collect_memory(
         agent_name = str(first(agent, "identityName", "name", "id") or agent_id)
         long_term = workspace / "MEMORY.md"
         if long_term.is_file():
-            row = entry_from_file(agent_id, agent_name, workspace, long_term, "long-term", tz=tz)
+            row = entry_from_file(agent_id, agent_name, workspace, long_term, "long-term", tz=tz, memo=memo)
             if row:
                 by_id[row["id"]] = row
         daily_dir = workspace / "memory"
@@ -1881,7 +1963,7 @@ def collect_memory(
             match = DAILY_NOTE.match(path.name)
             if not match or not is_real_day(match.group(1)):
                 continue
-            row = entry_from_file(agent_id, agent_name, workspace, path, "daily", match.group(1), tz)
+            row = entry_from_file(agent_id, agent_name, workspace, path, "daily", match.group(1), tz, memo)
             if row:
                 by_id[row["id"]] = row
     if readable == 0:
@@ -2148,6 +2230,145 @@ def record_sync() -> None:
         log(f"could not record the sync time ({exc})")
 
 
+# ── Slow changing data cache (#118) ────────────────────────────────────────
+
+CACHE_VERSION = 1
+DEFAULT_REFRESH_SECONDS = 3600
+
+
+def refresh_seconds() -> int:
+    """MC_BRIDGE_REFRESH_SECONDS, default 3600. Invalid uses the default."""
+    raw = os.environ.get("MC_BRIDGE_REFRESH_SECONDS", "").strip()
+    if raw.isdigit():
+        return int(raw)
+    return DEFAULT_REFRESH_SECONDS
+
+
+def cache_path_for(state_file: Path) -> Path:
+    """MC_BRIDGE_CACHE_FILE, or cli-cache.json next to the state file."""
+    raw = os.environ.get("MC_BRIDGE_CACHE_FILE", "").strip()
+    if raw:
+        return Path(raw)
+    return state_file.with_name("cli-cache.json")
+
+
+def config_signature(path: Optional[Path]) -> Optional[List[int]]:
+    """mtime and size of openclaw.json, or None when there is no file."""
+    if path is None:
+        return None
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return [st.st_mtime_ns, st.st_size]
+
+
+class SlowData:
+    """Agents, cron, devices, nodes, the models list, and the CLI version.
+
+    These change slowly, so a steady state run reuses the values stored by
+    an earlier run instead of starting `openclaw` again. All of them are
+    fetched again when openclaw.json changes, when the stored values are
+    older than refresh_seconds(), or when this run's sessions call failed.
+    A value that is missing, because it was never stored or its call
+    failed, is fetched on the next run. A failed call is never stored, so
+    a skipped snapshot is not replayed. --from-dir never caches CLI data.
+    Memory rows share the file and are keyed by file mtime.
+    """
+
+    def __init__(self, path: Path, now_s: int, config_sig: Optional[List[int]], use_cli_cache: bool) -> None:
+        self.path = path
+        self.now_s = now_s
+        self.config_sig = config_sig
+        self.use_cli_cache = use_cli_cache
+        stored: Dict[str, Any] = {}
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            if isinstance(loaded, dict) and loaded.get("version") == CACHE_VERSION:
+                stored = loaded
+        except (OSError, ValueError):
+            stored = {}
+        self.memory = MemoryMemo(stored.get("memory"))
+        values = stored.get("values")
+        fetched_at = stored.get("fetchedAt")
+        fresh = (
+            use_cli_cache
+            and isinstance(values, dict)
+            and isinstance(fetched_at, int)
+            and stored.get("config") == config_sig
+            and 0 <= now_s - fetched_at < refresh_seconds()
+        )
+        self.values: Dict[str, Any] = dict(values) if fresh else {}
+        self.fetched_at: int = fetched_at if fresh else now_s
+        self.refreshed = not fresh
+        self.from_cache: List[str] = []
+
+    def full_refresh(self) -> None:
+        """Drop the stored values. Later getters call the CLI again."""
+        self.values = {}
+        self.fetched_at = self.now_s
+        self.refreshed = True
+
+    def get(self, key: str, fetch: Callable[[], Any]) -> Any:
+        if self.use_cli_cache and key in self.values:
+            self.from_cache.append(key)
+            return self.values[key]
+        value = fetch()
+        if self.use_cli_cache and value is not None:
+            self.values[key] = value
+        return value
+
+    def save(self) -> None:
+        if not self.values and not self.memory.new and not self.path.exists():
+            return
+        body = {
+            "version": CACHE_VERSION,
+            "config": self.config_sig,
+            "fetchedAt": self.fetched_at,
+            "values": self.values if self.use_cli_cache else {},
+            "memory": self.memory.new,
+        }
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(body), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            log(f"could not save the bridge cache ({exc})")
+
+
+def _rss_mb(raw: int) -> float:
+    """ru_maxrss is kilobytes on Linux and bytes on macOS."""
+    return raw / (1024 * 1024) if sys.platform == "darwin" else raw / 1024
+
+
+def profile_lines(started: float, slow: Optional["SlowData"]) -> List[str]:
+    """--profile output: wall time, CPU and peak memory with every child."""
+    import resource
+
+    me = resource.getrusage(resource.RUSAGE_SELF)
+    kids = resource.getrusage(resource.RUSAGE_CHILDREN)
+    cpu_self = me.ru_utime + me.ru_stime
+    cpu_kids = kids.ru_utime + kids.ru_stime
+    mem_self = _rss_mb(me.ru_maxrss)
+    mem_kids = _rss_mb(kids.ru_maxrss)
+    calls = sum(OPENCLAW_CALLS.values())
+    lines = [
+        f"profile: wall {time.monotonic() - started:.2f} s",
+        f"profile: CPU {cpu_self + cpu_kids:.2f} s (bridge {cpu_self:.2f} s, child processes {cpu_kids:.2f} s)",
+        f"profile: peak memory {mem_self + mem_kids:.1f} MB (bridge {mem_self:.1f} MB, largest child process {mem_kids:.1f} MB)",
+        f"profile: openclaw calls {calls}",
+    ]
+    for key in sorted(OPENCLAW_CALLS):
+        lines.append(f"profile: openclaw {key}: {OPENCLAW_CALLS[key]}")
+    if slow is not None and slow.use_cli_cache:
+        state = "refreshed this run" if slow.refreshed else "read from the cache"
+        lines.append(f"profile: slow changing data {state}")
+    if slow is not None:
+        lines.append(f"profile: memory files read {slow.memory.reads}, reused {slow.memory.reused}")
+    return lines
+
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -2159,7 +2380,23 @@ def main() -> int:
         type=Path,
         help="read an OpenClaw memory tree (one workspace, or one subdirectory per agent)",
     )
+    ap.add_argument(
+        "--profile",
+        action="store_true",
+        help="print wall time, CPU and peak memory with child processes, and openclaw calls by command",
+    )
     args = ap.parse_args()
+    started = time.monotonic()
+    holder: Dict[str, Any] = {}
+    try:
+        return run_sync(args, holder)
+    finally:
+        if args.profile:
+            for line in profile_lines(started, holder.get("slow")):
+                log(line)
+
+
+def run_sync(args: argparse.Namespace, holder: Dict[str, Any]) -> int:
 
     # Repo-root .env is the single source of truth for INGEST_TOKEN (same file
     # docker compose reads). Real env vars override it.
@@ -2180,10 +2417,24 @@ def main() -> int:
     zone = resolve_tz(api_zone)
     events: List[Tuple[str, Dict[str, Any]]] = []
 
-    sessions_rows = as_list(src.sessions(), "sessions")
+    state_file = Path(os.environ.get("MC_BRIDGE_STATE_FILE", DEFAULT_STATE_FILE))
+    slow = SlowData(
+        cache_path_for(state_file),
+        now_ms // 1000,
+        config_signature(config_path_for(args.from_dir)),
+        use_cli_cache=args.from_dir is None,
+    )
+    holder["slow"] = slow
+
+    raw_sessions = src.sessions()
+    if raw_sessions is None:
+        # A failed sessions call means the CLI may be gone. Do not replay
+        # stored values. Ask every source again, as a first run would.
+        slow.full_refresh()
+    sessions_rows = as_list(raw_sessions, "sessions")
     sessions = map_sessions(sessions_rows, now_ms) if sessions_rows is not None else None
 
-    agents_rows = as_list(src.agents(), "agents")
+    agents_rows = as_list(slow.get("agents", src.agents), "agents")
     register_bodies: List[Dict[str, Any]] = []
     if agents_rows is not None:
         mapped_agents = map_agents(agents_rows, sessions or [])
@@ -2193,8 +2444,7 @@ def main() -> int:
     if sessions is not None:
         events.append(("sessions.snapshot", {"sessions": strip_private(sessions)}))
 
-    cron_rows = as_list(src.cron(), "jobs", "cron")
-    state_file = Path(os.environ.get("MC_BRIDGE_STATE_FILE", DEFAULT_STATE_FILE))
+    cron_rows = as_list(slow.get("cron", src.cron), "jobs", "cron")
     state: Dict[str, Any] = {}
     prior_state: Dict[str, Any] = {}
     run_calls: List[Dict[str, Any]] = []
@@ -2223,8 +2473,8 @@ def main() -> int:
         if usage_payload["points"]:
             events.append(("usage.snapshot", usage_payload))
 
-    device_rows = map_openclaw_devices(src.devices())
-    node_rows = map_openclaw_nodes(src.nodes())
+    device_rows = map_openclaw_devices(slow.get("devices", src.devices))
+    node_rows = map_openclaw_nodes(slow.get("nodes", src.nodes))
     machines: Dict[str, Any] = {}
     if device_rows is not None:
         machines["devices"] = device_rows
@@ -2252,13 +2502,21 @@ def main() -> int:
         elif len(mem_agents) == 0:
             log(f"memory dir {args.memory_dir} has no agent workspaces — skipping memory.snapshot")
         else:
-            memory_entries = collect_memory(mem_agents, tz=zone)
+            memory_entries = collect_memory(mem_agents, tz=zone, memo=slow.memory)
     elif agents_rows is not None:
-        memory_entries = collect_memory(agents_rows, base=args.from_dir, tz=zone)
+        memory_entries = collect_memory(agents_rows, base=args.from_dir, tz=zone, memo=slow.memory)
     if memory_entries is not None:
         events.append(("memory.snapshot", {"entries": memory_entries}))
 
-    models_payload = collect_models(src, args.from_dir)
+    def cli_version() -> Optional[str]:
+        return slow.get("version", openclaw_cli_version)
+
+    models_payload = collect_models(
+        src,
+        args.from_dir,
+        catalog_of=lambda: slow.get("models", src.model_catalog),
+        version_of=cli_version,
+    )
     if models_payload is not None:
         events.append(("models.snapshot", models_payload))
 
@@ -2266,7 +2524,7 @@ def main() -> int:
     # It is not an OpenClaw snapshot, so it does not refresh the sync stamp
     # and a rejected check does not fail the sync. The next run tries again.
     openclaw_events = len(events)
-    gateway_payload = probe_gateway()
+    gateway_payload = probe_gateway(cli_version)
     if openclaw_events == 0:
         log("no OpenClaw sources available. Posting the gateway check only")
 
@@ -2276,7 +2534,9 @@ def main() -> int:
         print(json.dumps({"type": "gateway.snapshot", "payload": gateway_payload}))
         for body in register_bodies:
             print(json.dumps({"call": "POST /agents/register", "body": body}))
-        return 0  # dry-run never writes the state file either
+        return 0  # dry-run never writes the state file or the cache either
+
+    slow.save()
 
     event_failures = sum(0 if post(api_url, token, t, p) else 1 for t, p in events)
     gateway_ok = post(api_url, token, "gateway.snapshot", gateway_payload)
