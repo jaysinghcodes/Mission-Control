@@ -148,10 +148,12 @@ if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
     *json*)
       printf '%s\\n' '{"Service":"api","State":"running","Status":"Up"}'
       printf '%s\\n' '{"Service":"db","State":"running","Status":"Up"}'
+      printf '%s\\n' '{"Service":"web","State":"running","Status":"Up"}'
       ;;
     *)
       printf '%s\\n' 'api running'
       printf '%s\\n' 'db running'
+      printf '%s\\n' 'web running'
       ;;
   esac
   exit 0
@@ -162,9 +164,10 @@ if [ "$1" = "compose" ] && { [ "$2" = "exec" ] || [ "$2" = "run" ]; }; then
       unset MC_DOCTOR_INSIDE
       unset MC_DOCTOR_PROBE_PORT
       # The host may already listen on the Compose defaults. This stub is the
-      # host, so an unset web or db port would look like an outside holder.
+      # host, so an unset web, db, or tunnel port would look like an outside holder.
       if [ -z "\${MC_WEB_PORT:-}" ]; then MC_WEB_PORT=18173; export MC_WEB_PORT; fi
       if [ -z "\${MC_DB_PORT:-}" ]; then MC_DB_PORT=18132; export MC_DB_PORT; fi
+      if [ -z "\${MC_REMOTE_PORT:-}" ]; then MC_REMOTE_PORT=18175; export MC_REMOTE_PORT; fi
       exec ${shellQuote(nodeBin)} scripts/doctor.mjs
       ;;
   esac

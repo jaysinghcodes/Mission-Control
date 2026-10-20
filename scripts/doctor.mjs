@@ -15,11 +15,12 @@
  * file whose native API is not already answering. MC_DOCTOR_DOCKER=0 keeps
  * the native check. A checkout that is already serving mission-control, with
  * no Compose container, stays native too. In Compose mode the order is
- * fixed: an outside holder of the API, web, or database port, then a
+ * fixed: an outside holder of the API, web, database, or tunnel port, then a
  * missing, stopped, or paused service, then a slow start. The port line
- * names MC_API_PORT, MC_WEB_PORT, or MC_DB_PORT, including when no container
- * exists. A slow start is only when those ports are free, db and api are
- * running or starting, and the probe has not answered. The Compose installer
+ * names MC_API_PORT, MC_WEB_PORT, MC_DB_PORT, or MC_REMOTE_PORT, including
+ * when no container exists. A slow start is only when those ports are free,
+ * db, api, and web are running or starting, and the probe has not answered.
+ * The Compose installer
  * runs this file inside the api container. npm run doctor still runs it on the host.
  */
 
@@ -143,7 +144,7 @@ export function loadEnvFile(file) {
   return out
 }
 
-const MC_PORT_KEYS = ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT']
+const MC_PORT_KEYS = ['MC_API_PORT', 'MC_WEB_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT']
 const MC_BLANK_FALLTHROUGH = [
   ...MC_PORT_KEYS,
   'MC_BRIDGE_STALE_SECONDS',
@@ -691,9 +692,16 @@ export function composeServiceReady(row) {
   return false
 }
 
+function listNames(names) {
+  if (names.length <= 1) return names[0] || ''
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
+}
+
 function serviceFailureSentence(names, kind) {
   if (names.length === 0) return ''
-  const subject = names.length === 1 ? `The ${names[0]} service` : `The ${names.join(' and ')} services`
+  const listed = listNames(names)
+  const subject = names.length === 1 ? `The ${listed} service` : `The ${listed} services`
   const command = kind === 'paused' ? 'unpause' : kind === 'missing' ? 'up -d' : 'start'
   if (kind === 'paused') {
     const state = names.length === 1 ? 'is paused' : 'are paused'
@@ -706,16 +714,16 @@ function serviceFailureSentence(names, kind) {
 }
 
 /**
- * Empty when db and api are both ready, or when there is nothing to name.
+ * Empty when db, api, and web are ready, or when there is nothing to name.
  * A removed or never created service names docker compose up -d.
  * An exited, created, or restarting service names docker compose start.
  * A paused service names docker compose unpause.
  * An outside holder of a configured port is reported by the caller first.
- * serviceNames, when the compose file lists any, limits db and api to that file.
+ * serviceNames, when the compose file lists any, limits db, api, and web to that file.
  */
 export function composeServiceFailure(rows, serviceNames) {
   const list = Array.isArray(rows) ? rows : []
-  const required = ['db', 'api']
+  const required = ['db', 'api', 'web']
   let expected
   if (Array.isArray(serviceNames)) {
     if (serviceNames.length === 0 && list.length === 0) return ''
@@ -874,6 +882,7 @@ const COMPOSE_PORT_SPECS = [
   { key: 'MC_API_PORT', fallback: 3000, api: true },
   { key: 'MC_WEB_PORT', fallback: 5173, api: false },
   { key: 'MC_DB_PORT', fallback: 5432, api: false },
+  { key: 'MC_REMOTE_PORT', fallback: 3011, api: false },
 ]
 
 export function composePortConflictLine(port, key) {
