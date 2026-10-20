@@ -105,7 +105,7 @@ Under Compose the session file is on the mc-auth volume inside the api container
 docker compose exec api npm run password:reset
 ```
 
-That does not call Node on the host and it does not write a host file. If the api is not running, or Docker cannot run that command, the host command exits nonzero and tells you to run `docker compose up -d` first. The new password is printed only after the new hash is read back and every session is revoked. The installer prints the reset command in its last lines. The password itself is printed only on the first install.
+That does not call Node on the host and it does not write a host file. If the api is not running, or Docker cannot run that command, the host command exits nonzero and tells you to run `docker compose up -d` first. With no `MC_INSTALL_MODE` in `.env`, a host `npm run password:reset` asks Docker for this checkout's Compose containers and its mc-auth volume. If it finds either, or Docker cannot answer, it refuses, writes nothing, and asks you to run `bash install.sh` again. A machine with no docker command, or with no Compose trace, keeps the native reset. If the new hash cannot be read back, the command exits 3 and says the password may have changed. Run the reset again to set a new one. The new password is printed only after the new hash is read back and every session is revoked. The installer prints the reset command in its last lines. The password itself is printed only on the first install.
 
 ## Gateway status
 
