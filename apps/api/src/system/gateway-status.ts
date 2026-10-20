@@ -9,7 +9,9 @@
  * OPENCLAW_GATEWAY_PORT is the port for whichever path is active. The bridge
  * always checks 127.0.0.1 on that port.
  *
- * A missing report, or one older than GATEWAY_STATUS_MAX_AGE_MS, is unknown.
+ * A missing report, one older than GATEWAY_STATUS_MAX_AGE_MS, or one stored
+ * before this API process started is unknown. A recreated API container
+ * shows Unknown until the next bridge report.
  * A future checkedAt is limited to the time the API stored the row, so a
  * fast bridge clock cannot keep the gateway up past the max age.
  * Unknown is not down. Down is only a real check.
@@ -94,17 +96,23 @@ export function gatewayStatusFromProbe(
   };
 }
 
+/** Unix ms when this API process started. */
+export const API_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
+
 /**
  * Bridge report. No report, a report that is not a real check, or a report
  * older than maxAgeMs is unknown. Age equal to maxAgeMs is still fresh.
  * A future checkedAt is limited to receivedAt. An earlier checkedAt still
- * ages from that earlier time.
+ * ages from that earlier time. When startedAt is given, a report the API
+ * stored before that instant is unknown too. Without receivedAt, checkedAt
+ * is compared instead.
  */
 export function gatewayStatusFromReport(
   report: GatewayReport | null,
   now: number,
   maxAgeMs: number,
   fallbackPort: number,
+  startedAt?: number,
 ): GatewayStatus {
   const port = reportPort(report, fallbackPort);
   const unknown = (checkedAt: number | null): GatewayStatus => ({
@@ -124,6 +132,14 @@ export function gatewayStatusFromReport(
     receivedAt == null ? checkedAt : Math.min(checkedAt, receivedAt);
   const age = now - basis;
   if (age > maxAgeMs) return unknown(checkedAt);
+  const stored = receivedAt ?? checkedAt;
+  if (
+    typeof startedAt === 'number' &&
+    Number.isFinite(startedAt) &&
+    stored < startedAt
+  ) {
+    return unknown(checkedAt);
+  }
   const host =
     typeof report.host === 'string' && isGatewayHost(report.host)
       ? report.host

@@ -108,3 +108,70 @@ class ModelsSnapshotTest(unittest.TestCase):
         mod = load()
         self.assertEqual(mod.version_line("OpenClaw 2026.10.15\n"), "OpenClaw 2026.10.15")
         self.assertIsNone(mod.version_line("  \n"))
+
+
+class OpenClawVersionEnvTest(unittest.TestCase):
+    """The version is what the binary prints. GIT_SHA never leaks in."""
+
+    def _fake_openclaw(self, tmp: Path) -> Path:
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        exe = bin_dir / "openclaw"
+        # Mimics OpenClaw: an env commit wins over the built one, and a .git
+        # in the working directory would be read next.
+        exe.write_text(
+            "#!/bin/sh\n"
+            'commit="${GIT_COMMIT:-${GIT_SHA:-}}"\n'
+            'if [ -z "$commit" ] && [ -d .git ]; then commit=checkout; fi\n'
+            'if [ -z "$commit" ]; then commit=0790d9f; fi\n'
+            'echo "OpenClaw 2026.7.1-2 ($commit)"\n',
+            encoding="utf-8",
+        )
+        exe.chmod(0o755)
+        return bin_dir
+
+    def test_cli_version_ignores_git_sha_git_commit_and_the_checkout(self):
+        mod = load()
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            bin_dir = self._fake_openclaw(tmp)
+            home = tmp / "home"
+            home.mkdir()
+            checkout = tmp / "checkout"
+            (checkout / ".git").mkdir(parents=True)
+            saved = {k: mod.os.environ.get(k) for k in ("PATH", "HOME", "GIT_SHA", "GIT_COMMIT")}
+            saved_cwd = mod.os.getcwd()
+            try:
+                mod.os.environ["PATH"] = f"{bin_dir}:{saved['PATH'] or ''}"
+                mod.os.environ["HOME"] = str(home)
+                mod.os.environ["GIT_SHA"] = "06f341394b97deafb44ee5a964b932592bc26eeb"
+                mod.os.environ["GIT_COMMIT"] = "06f341394b97deafb44ee5a964b932592bc26eeb"
+                mod.os.chdir(checkout)
+                version = mod.openclaw_cli_version()
+                self.assertEqual(mod.os.environ["GIT_SHA"], "06f341394b97deafb44ee5a964b932592bc26eeb")
+            finally:
+                mod.os.chdir(saved_cwd)
+                for key, value in saved.items():
+                    if value is None:
+                        mod.os.environ.pop(key, None)
+                    else:
+                        mod.os.environ[key] = value
+        self.assertEqual(version, "OpenClaw 2026.7.1-2 (0790d9f)")
+
+    def test_openclaw_env_drops_only_the_commit_keys(self):
+        mod = load()
+        saved = {k: mod.os.environ.get(k) for k in ("GIT_SHA", "GIT_COMMIT", "MC_TEST_KEEP")}
+        try:
+            mod.os.environ["GIT_SHA"] = "abc1234"
+            mod.os.environ["GIT_COMMIT"] = "abc1234"
+            mod.os.environ["MC_TEST_KEEP"] = "1"
+            env = mod.openclaw_env()
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    mod.os.environ.pop(key, None)
+                else:
+                    mod.os.environ[key] = value
+        self.assertNotIn("GIT_SHA", env)
+        self.assertNotIn("GIT_COMMIT", env)
+        self.assertEqual(env["MC_TEST_KEEP"], "1")
