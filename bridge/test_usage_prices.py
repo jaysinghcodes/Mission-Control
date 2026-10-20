@@ -173,5 +173,74 @@ class UsagePriceLinesTest(unittest.TestCase):
         self.assertNotIn("openai", names)
 
 
+class ModelProviderKeyTest(unittest.TestCase):
+    """OpenClaw sends modelProvider and a bare model. Usage prices provider/model."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = load()
+
+    def lines(self, rows):
+        sessions = self.mod.map_sessions(rows, NOW)
+        payload, _state = self.mod.usage_points_from_sessions(sessions, NOW, None, None, UTC)
+        return {line["model"]: line for line in payload["points"][0]["providers"]}, sessions
+
+    def row(self, key, provider, model):
+        return {
+            "key": key,
+            "agentId": "speedy",
+            "modelProvider": provider,
+            "model": model,
+            "updatedAt": NOW,
+            "inputTokens": 1000,
+            "outputTokens": 250,
+        }
+
+    def test_a_bare_model_gets_its_provider_in_front(self):
+        lines, sessions = self.lines([
+            self.row("agent:speedy:main", "deepseek", "deepseek-v4-flash"),
+            self.row("agent:quill:main", "openai", "gpt-4.1"),
+        ])
+        self.assertIn("deepseek/deepseek-v4-flash", lines)
+        self.assertEqual(lines["deepseek/deepseek-v4-flash"]["provider"], "deepseek")
+        self.assertIn("openai/gpt-4.1", lines)
+        # The session row keeps the model as OpenClaw sent it.
+        self.assertEqual(sorted(s["model"] for s in sessions), ["deepseek-v4-flash", "gpt-4.1"])
+
+    def test_an_openrouter_run_is_keyed_to_the_openrouter_row(self):
+        lines, _sessions = self.lines([
+            self.row("agent:a:main", "openrouter", "deepseek/deepseek-v4-flash"),
+            self.row("agent:b:main", "openrouter", "deepseek-v4-flash"),
+        ])
+        self.assertIn("openrouter/deepseek/deepseek-v4-flash", lines)
+        self.assertEqual(lines["openrouter/deepseek/deepseek-v4-flash"]["provider"], "openrouter")
+        self.assertIn("openrouter/deepseek-v4-flash", lines)
+        self.assertNotIn("deepseek/deepseek-v4-flash", lines)
+
+    def test_a_prefixed_name_is_kept_as_is(self):
+        lines, _sessions = self.lines([
+            self.row("agent:a:main", "openrouter", "openrouter/deepseek/deepseek-v4-flash"),
+            self.row("agent:b:main", "anthropic", "anthropic/claude-sonnet-4-6"),
+            {"key": "agent:c:main", "agentId": "c", "model": "openai/gpt-4.1", "updatedAt": NOW, "inputTokens": 5, "outputTokens": 5},
+        ])
+        self.assertEqual(
+            sorted(lines),
+            ["anthropic/claude-sonnet-4-6", "openai/gpt-4.1", "openrouter/deepseek/deepseek-v4-flash"],
+        )
+
+    def test_price_model_rules(self):
+        pm = self.mod.price_model
+        self.assertEqual(pm("deepseek", "deepseek-v4-flash"), "deepseek/deepseek-v4-flash")
+        self.assertEqual(pm("openrouter", "deepseek/deepseek-v4-flash"), "openrouter/deepseek/deepseek-v4-flash")
+        self.assertEqual(pm("OpenRouter", "openrouter/auto"), "openrouter/auto")
+        self.assertEqual(pm(None, "gpt-4.1"), "gpt-4.1")
+        self.assertEqual(pm("", "openai/gpt-4.1"), "openai/gpt-4.1")
+        self.assertIsNone(pm("openai", None))
+
+    def test_a_bare_local_model_is_still_local(self):
+        lines, _sessions = self.lines([self.row("agent:a:main", "ollama", "llama3.1")])
+        self.assertTrue(lines["ollama/llama3.1"].get("local"))
+
+
 if __name__ == "__main__":
     unittest.main()

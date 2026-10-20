@@ -52,7 +52,7 @@ POST /runs and PATCH /runs/<id> are the run calls. [PASTE_IN.md](PASTE_IN.md) sh
 
 ### 4.7 Models and spend
 
-The bridge posts `models.snapshot` from `~/.openclaw/openclaw.json`. System lists the provider and model for each agent. Usage prices session tokens from `config/prices.json`. A reported `costUsd` wins. See [API.md](API.md#47-models-and-spend).
+The bridge posts `models.snapshot` from `~/.openclaw/openclaw.json`. System lists the provider and model for each agent. Usage prices session tokens from `config/prices.json`, which includes `deepseek-v4-flash` and current OpenAI, Anthropic, Gemini, and OpenRouter defaults. A reported `costUsd` wins. When some models in the period are priced and others are not, the System header and Usage show the known total and `Price not set for some models`. When no model is priced, they show only `Price not set`. See [API.md](API.md#47-models-and-spend).
 
 ### 4.8 Memory
 

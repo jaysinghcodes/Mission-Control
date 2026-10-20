@@ -70,7 +70,7 @@ On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or 
 * Memory notes, from seeded rows. Docs do not use the bridge. The seed writes sample markdown under `data/docs`.
 * Team mission, from `GET /mission`. People come from the seeded roster and show a Sample tag until a real bot is registered. Devices come from the seed until `devices.snapshot` replaces them. There is no dashboard form that adds a device.
 * Custom tools, one seeded tool on `/#/system/tools`.
-* Office, Calendar, Approvals, and Usage for Today, the last 7 days, and the month. The seed writes 30 days of tokens. Dollars are computed on read from `config/prices.json`. Office seats each demo bot by agent id.
+* Office, Calendar, Approvals, and Usage for Today, the last 7 days, and the month. The seed writes 30 days of tokens. Dollars are computed on read from `config/prices.json`. System and Usage share one cost display. When some models are priced and others are not, `Price not set for some models` sits next to the known total. When no model is priced, the total reads `Price not set` with no note. Office seats each demo bot by agent id.
 
 Sessions and gateway logs stay empty until a real bridge posts them.
 

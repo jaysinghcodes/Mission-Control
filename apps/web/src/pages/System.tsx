@@ -9,6 +9,8 @@ import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import { providerLabel } from '../lib/provider-label'
+import { costSummary, costText, dayCostText, spendPhrase, type CostDay } from '../lib/cost'
+import { shortSha } from '../lib/git-sha'
 import { gatewayLine, systemHeadline, systemSummaryLead } from '../lib/gateway-status'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
@@ -24,6 +26,10 @@ import CustomTools from './CustomTools'
  * the timezone saved in Settings. A short range shows the API note (for example
  * "Showing 3 days of data so far") and only the days that were collected.
  * Dollars come from the price table unless OpenClaw reported a cost.
+ * The header and the period cards use lib/cost.ts, the same cost display as
+ * Usage. When some models are priced and some are not they show the known
+ * total and "Price not set for some models". With nothing priced they show
+ * "Price not set" alone.
  */
 
 interface HealthResp {
@@ -70,6 +76,7 @@ interface Usage {
   period: string
   totalCost: number
   priceLabel?: string | null
+  priceNote?: string | null
   tokensIn: number
   tokensOut: number
   providers: Provider[] | Record<string, Provider> | null
@@ -77,7 +84,7 @@ interface Usage {
 interface UsageResp {
   usage: Usage | null
   note?: string | null
-  days?: { day: string; totalCost: number }[]
+  days?: ({ day: string } & CostDay)[]
 }
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
 
@@ -102,13 +109,6 @@ function ingestFact(iso: string | null | undefined): { value: string; ok: boolea
   const mins = Math.max(0, Math.round(age / 60000))
   const when = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`
   return { value: `Last ingest ${when}`, ok: age < STALE_MS }
-}
-
-function money(n: number | null | undefined, label?: string | null): string {
-  if (label === 'Price not set') return 'Price not set'
-  if (typeof n !== 'number' || !Number.isFinite(n)) return 'No data'
-  if (n === 0) return '$0'
-  return `$${n.toFixed(2)}`
 }
 
 function shown(value: string | null | undefined): string {
@@ -142,10 +142,10 @@ function barLabel(day: string, count: number): string {
   return `${name} ${date}`
 }
 
-function SpendBars({ days, label }: { days: { day: string; totalCost: number }[]; label: string }) {
+function SpendBars({ days, label }: { days: ({ day: string } & CostDay)[]; label: string }) {
   if (days.length === 0) return null
   const max = Math.max(...days.map((d) => d.totalCost), 0)
-  const summary = days.map((d) => `${barLabel(d.day, days.length)} ${money(d.totalCost)}`).join(', ')
+  const summary = days.map((d) => `${barLabel(d.day, days.length)} ${dayCostText(d)}`).join('; ')
   return (
     <div className="px-4 pb-3" role="img" aria-label={`Daily spend for ${label}. ${summary}`}>
       <div className="flex h-16 items-end gap-1">
@@ -202,13 +202,15 @@ export default function System() {
     return [...names]
   }, [day.data, week.data, month.data])
 
-  const periodSpend = selected?.totalCost
+  const periodCost = selected ? costSummary(selected) : null
   const periodName = PERIODS[period].label.toLowerCase()
+  const spend = periodCost ? spendPhrase(periodCost, periodName) : any ? '' : ' · no spend reported'
   const summary = health.data
-    ? `${systemSummaryLead(health.data.status === 'ok', sys.data?.gateway)}${typeof periodSpend === 'number' ? ` · ${money(periodSpend)} spent ${periodName}` : any ? '' : ' · no spend reported'}`
+    ? `${systemSummaryLead(health.data.status === 'ok', sys.data?.gateway)}${spend}`
     : 'Checking health…'
   const headline = systemHeadline(health.data ? health.data.status === 'ok' : null, sys.data?.gateway)
   const bridge = ingestFact(health.data?.lastIngestAt)
+  const gitSha = shortSha(health.data?.gitSha)
 
   const issue = (activity.data?.events ?? [])
     .map((event) => ({ event, line: activityRailLine(event, roster, [], [], naming) }))
@@ -272,7 +274,7 @@ export default function System() {
       <SoftCard className="mt-4 px-6 py-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Fact label="App version" value={shown(health.data?.version)} />
-          <Fact label="Git" value={shown(health.data?.gitSha)} wrap />
+          <Fact label="Git" value={gitSha.text} title={gitSha.title} />
           <Fact label="OpenClaw" value={shown(health.data?.openclawVersion)} wrap />
           <Fact label="Gateway" value={gateway.value} ok={gateway.ok} wrap />
         </div>
@@ -358,11 +360,13 @@ export default function System() {
               const snap = snaps[i]
               const on = i === period
               const tok = snap ? (snap.tokensIn ?? 0) + (snap.tokensOut ?? 0) : null
+              const cost = snap ? costSummary(snap) : null
               return (
                 <button key={p.id} type="button" onClick={() => setPeriod(i)} className={`rounded-xl px-3 py-2 text-left ${on ? 'bg-mc-sel' : ''}`}>
                   <div className="text-[12.5px] font-semibold text-mc-sub">{p.label}</div>
-                  <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{snap ? money(snap.totalCost, snap.priceLabel) : 'No data'}</div>
+                  <div className="mt-1 whitespace-nowrap text-[28px] font-bold tracking-tight">{cost ? cost.text : 'No data'}</div>
                   <div className="text-[12.5px] text-mc-sub">{tok === null ? 'No data yet' : tokenWords(tok)}</div>
+                  {cost?.note ? <div className="text-[12.5px] font-semibold text-mc-text">{cost.note}</div> : null}
                 </button>
               )
             })}
@@ -393,7 +397,7 @@ export default function System() {
                         <div key={p.id} className="flex items-baseline justify-between gap-4 text-[13px]">
                           <span className="shrink-0">{p.label}</span>
                           <span className={`shrink-0 whitespace-nowrap tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
-                            {cells[i] ? money(cells[i]?.cost, cells[i]?.priceLabel) : 'No data'}
+                            {cells[i] ? costText(cells[i]?.cost, cells[i]?.priceLabel, 'No data') : 'No data'}
                           </span>
                         </div>
                       ))}
@@ -404,7 +408,7 @@ export default function System() {
                     </div>
                     {open && (
                       <p className="mt-3 text-[13px] text-mc-sub">
-                        Cost is tokens times the price table, unless OpenClaw reports a cost. Ollama and any local provider are $0. Days follow the server clock. Open Usage for each day, bot, and model.
+                        Cost is tokens times the price table, unless OpenClaw reports a cost. Ollama and any local provider are $0.00. Days follow the server clock. Open Usage for each day, bot, and model.
                       </p>
                     )}
                   </div>
@@ -444,14 +448,14 @@ export default function System() {
                           <td className="whitespace-nowrap px-4 py-3 text-right text-[14px]">{tokens((focus?.tokensIn ?? 0) + (focus?.tokensOut ?? 0))}</td>
                           {cells.map((c, i) => (
                             <td key={PERIODS[i].id} className={`whitespace-nowrap px-4 py-3 text-right text-[14px] tabular-nums ${i === period ? 'font-semibold text-mc-text' : 'text-mc-sub2'}`}>
-                              {c ? money(c.cost, c.priceLabel) : 'No data'}
+                              {c ? costText(c.cost, c.priceLabel, 'No data') : 'No data'}
                             </td>
                           ))}
                         </tr>
                         {open && (
                           <tr className="border-t border-mc-sep bg-mc-bg">
                             <td colSpan={5} className="px-4 py-3 text-[13px] text-mc-sub">
-                              Cost is tokens times the price table, unless OpenClaw reports a cost. Ollama and any local provider are $0. Days follow the server clock. Open Usage for each day, bot, and model.
+                              Cost is tokens times the price table, unless OpenClaw reports a cost. Ollama and any local provider are $0.00. Days follow the server clock. Open Usage for each day, bot, and model.
                             </td>
                           </tr>
                         )}
@@ -464,7 +468,7 @@ export default function System() {
           </div>
           <p className="px-4 py-3 text-[12.5px] text-mc-sub">
             Costs use the price table unless OpenClaw reports one. Showing <span className="font-semibold text-mc-text">{PERIODS[period].label}</span>
-            {selected ? ` · ${money(selected.totalCost, selected.priceLabel)}` : ''}.
+            {periodCost ? ` · ${periodCost.text}${periodCost.note ? `, ${periodCost.note}` : ''}` : ''}.
           </p>
         </SoftCard>
       )}
@@ -498,14 +502,28 @@ export default function System() {
   )
 }
 
-function Fact({ label, value, ok = true, wrap = false }: { label: string; value: string; ok?: boolean; wrap?: boolean }) {
+function Fact({
+  label,
+  value,
+  ok = true,
+  wrap = false,
+  title = null,
+}: {
+  label: string
+  value: string
+  ok?: boolean
+  wrap?: boolean
+  title?: string | null
+}) {
   return (
     <div className="min-w-[140px]">
       <div className="flex items-center gap-1.5 text-[12px] font-semibold text-mc-sub">
         <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-mc-green' : 'bg-mc-gray'}`} />
         {label}
       </div>
-      <div className={`mt-0.5 text-[13px] ${wrap ? 'break-all' : 'whitespace-nowrap'}`}>{value}</div>
+      <div className={`mt-0.5 text-[13px] ${wrap ? 'break-all' : 'whitespace-nowrap'}`} title={title ?? undefined}>
+        {value}
+      </div>
     </div>
   )
 }
