@@ -199,6 +199,10 @@ test('compose password reset is docker compose exec and does not call host node'
   const dockerfile = read('apps/api/Dockerfile')
   assert.match(dockerfile, /COPY --from=build \/app\/apps\/api\/scripts\/password-reset\.mjs/)
   assert.equal(existsSync(path.join(root, 'apps/api/scripts/password-reset.mjs')), true)
+  const resetScript = read('apps/api/scripts/password-reset.mjs')
+  assert.doesNotMatch(resetScript, /\/auth\/password-reset/)
+  assert.doesNotMatch(resetScript, /node:http/)
+  assert.doesNotMatch(read('apps/api/src/auth/auth.controller.ts'), /password-reset/)
   for (const rel of ['README.md', 'docs/REMOTE.md', 'docs/API.md', 'install.sh']) {
     assert.match(read(rel), new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }

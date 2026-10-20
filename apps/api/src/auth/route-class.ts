@@ -51,7 +51,6 @@ export function isAuthRoute(method: string, url: string | undefined): boolean {
   if (m === 'POST' && path === '/auth/login') return true;
   if (m === 'POST' && path === '/auth/logout') return true;
   if (m === 'POST' && path === '/auth/login-reset') return true;
-  if (m === 'POST' && path === '/auth/password-reset') return true;
   if (m === 'GET' && path === '/auth/session') return true;
   return false;
 }

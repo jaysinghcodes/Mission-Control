@@ -47,6 +47,42 @@ function outputOf(result) {
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`
 }
 
+const SUMMARY_INGEST =
+  'INGEST_TOKEN is in .env. The dashboard password is printed once when it is created.'
+const SUMMARY_OPENCLAW = 'OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md.'
+
+function summaryFrom(text) {
+  const lines = text.replace(/\s+$/, '').split('\n')
+  let start = -1
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].startsWith('Tunnel port ')) {
+      start = i
+      break
+    }
+  }
+  assert.ok(start >= 0, text)
+  return lines.slice(start)
+}
+
+function assertFirstInstallSummary(text, { reset, url }) {
+  const summary = summaryFrom(text)
+  assert.ok(summary.length <= 7, summary.join('\n'))
+  assert.equal(summary.length, 6, summary.join('\n'))
+  assert.match(
+    summary[0],
+    /^Tunnel port \d+\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL below\.$/,
+  )
+  assert.equal(summary[1], SUMMARY_INGEST)
+  assert.equal(summary[2], SUMMARY_OPENCLAW)
+  assert.equal(summary[3], url)
+  assert.match(summary[4], /^Dashboard password, shown once: \S+$/)
+  assert.equal(summary[5], `Reset the dashboard password with: ${reset}`)
+  assert.equal(summary.at(-3), url)
+  assert.equal(summary.at(-2), summary[4])
+  assert.equal(summary.at(-1), summary[5])
+  assert.equal(text.includes('This install does not start the OpenClaw gateway'), false)
+}
+
 function assignments(text) {
   const out = {}
   for (const line of String(text).split(/\n/)) {
@@ -367,6 +403,7 @@ function freshDir() {
   copyFixture(path.join(dir, 'repo'))
   dockerStub(bin)
   writeFileSync(log, '')
+  writeFileSync(path.join(dir, 'repo', 'install.log'), 'stale build output from an older run\n')
   return {
     dir,
     repo: path.join(dir, 'repo'),
@@ -570,12 +607,13 @@ test('a fresh install ends with the URL and password, and a rerun does not print
     const env = assignments(readFileSync(envPath, 'utf8'))
     const before = readFileSync(envPath)
     const lines = text.replace(/\s+$/, '').split('\n')
+    assertFirstInstallSummary(text, {
+      reset: 'docker compose exec api npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
     const password = lines.at(-2)
     const reset = lines.at(-1)
     const url = lines.at(-3)
-    assert.match(url ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
-    assert.match(password ?? '', /^Dashboard password, shown once: \S+$/)
-    assert.equal(reset, 'Reset the dashboard password with: docker compose exec api npm run password:reset')
     assert.equal(text.split('Dashboard password, shown once:').length - 1, 1)
     const shown = password.match(/Dashboard password, shown once: (\S+)/)
     assert.ok(shown)
@@ -583,10 +621,11 @@ test('a fresh install ends with the URL and password, and a rerun does not print
     assert.match(text, /Building\. The log is .+\/install\.log\./)
     const buildLog = readFileSync(path.join(fx.repo, 'install.log'), 'utf8')
     assert.match(buildLog, /compose build output marker-113/)
+    assert.equal(buildLog.includes('stale build output from an older run'), false)
     assert.equal(text.includes('compose build output marker-113'), false)
     assert.equal(text.includes(env.DASHBOARD_PASSWORD_HASH), false)
     assert.equal(text.includes(env.SESSION_SECRET), false)
-    const second = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_NOISE: 'marker-113' })
+    const second = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_NOISE: 'marker-113-rerun' })
     const again = outputOf(second)
     const againLines = again.replace(/\s+$/, '').split('\n')
     assert.match(againLines.at(-2) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
@@ -596,6 +635,10 @@ test('a fresh install ends with the URL and password, and a rerun does not print
     assert.deepEqual(readFileSync(envPath), before)
     assert.match(again, /Keeping the existing \.env\. Tokens and other values were not changed\./)
     assert.match(again, /Building\. The log is .+\/install\.log\./)
+    const rerunLog = readFileSync(path.join(fx.repo, 'install.log'), 'utf8')
+    assert.match(rerunLog, /compose build output marker-113-rerun/)
+    assert.equal(rerunLog.includes('stale build output from an older run'), false)
+    assert.equal(rerunLog.split('marker-113').length - 1, 1)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
   }
@@ -867,10 +910,11 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     assert.doesNotMatch(text, /is not a supported native runtime/)
     assert.doesNotMatch(text, /The API is already up/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
+    assertFirstInstallSummary(text, {
+      reset: 'npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
     const nativeLines = text.replace(/\s+$/, '').split('\n')
-    assert.match(nativeLines.at(-3) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
-    assert.match(nativeLines.at(-2) ?? '', /^Dashboard password, shown once: \S+$/)
-    assert.equal(nativeLines.at(-1), 'Reset the dashboard password with: npm run password:reset')
     assert.doesNotMatch(nativeLines.at(-1) ?? '', /docker compose exec/)
     assertReadableDoctor(text)
     const ci = log.indexOf('npm ci')
@@ -998,7 +1042,8 @@ test('docker install waits for a custom MC_API_PORT and doctor exits 0 without h
     assert.match(text, /pass health: The health check says the database is up\./)
     assert.equal(/\bfail /.test(text), false, text)
     assert.doesNotMatch(text, /^npm ci$/m)
-    assert.match(text, /Run npm ci in the checkout before npm run seed:demo or npm run seed:clear\. Without that install, prisma is not found and the seed command fails\./)
+    assert.match(text, /OpenClaw is optional\. See docs\/OPENCLAW_ONBOARDING\.md\./)
+    assert.doesNotMatch(text, /Run npm ci in the checkout before npm run seed:demo/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assert.equal(existsSync(path.join(fx.repo, 'node_modules')), false)
   } finally {
@@ -1239,7 +1284,11 @@ test('default ports wait on 3000 and print localhost:5173', async () => {
     assert.match(text, /Waiting for the API health check on port 3000\./)
     assert.match(text, /pass ports: Port 3000 is already running\./)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
-    assert.match(text, /Tunnel port 3011\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL above\./)
+    assert.match(text, /Tunnel port 3011\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL below\./)
+    assertFirstInstallSummary(text, {
+      reset: 'docker compose exec api npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
     assert.doesNotMatch(written, /^MC_API_PORT=/m)
     assert.doesNotMatch(written, /^MC_WEB_PORT=/m)
     assert.doesNotMatch(written, /^MC_DB_PORT=/m)

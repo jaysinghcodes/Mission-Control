@@ -1,7 +1,16 @@
 import { spawn } from 'node:child_process';
-import { createServer, type Server } from 'node:http';
-import { readFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { passwordMatches } from './password';
 
 const script = join(__dirname, '..', '..', 'scripts', 'password-reset.mjs');
 
@@ -22,88 +31,92 @@ describe('password:reset command', () => {
     expect(rootPkg.scripts?.['password:reset']).toContain('password:reset');
   });
 
-  it('prints the new password once when the loopback API returns it', async () => {
-    const seen: string[] = [];
-    const server = await listen((req, res) => {
-      seen.push(`${req.method ?? ''} ${req.url ?? ''}`);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ password: 'fresh-pass-1' }));
-    });
+  it('does not call an HTTP route', () => {
+    const source = readFileSync(script, 'utf8');
+    expect(source).not.toContain('/auth/password-reset');
+    expect(source).not.toContain('node:http');
+    expect(source).not.toContain('node:https');
+    expect(source).not.toMatch(/\bfetch\s*\(/);
+    const controller = readFileSync(
+      join(__dirname, 'auth.controller.ts'),
+      'utf8',
+    );
+    expect(controller).not.toContain('password-reset');
+    expect(controller).not.toContain('resetPassword');
+  });
+
+  it('writes a new hash and prints the password once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mc-pw-'));
+    const file = join(dir, 'session-state.json');
+    writeFileSync(file, `${JSON.stringify({ version: 4 })}\n`, { mode: 0o600 });
     try {
-      const result = await runReset(server.port);
+      const result = await runReset({
+        SESSION_STATE_PATH: file,
+        MC_COMPOSE: '1',
+      });
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain(
-        'Dashboard password, shown once: fresh-pass-1',
-      );
-      expect(result.stdout.split('fresh-pass-1').length - 1).toBe(1);
+      const password = shownPassword(result.stdout);
+      expect(password).not.toBe('');
+      expect(result.stdout.split(password).length - 1).toBe(1);
+      expect(result.stderr).not.toContain(password);
       expect(result.stdout).toContain('Every session was revoked.');
-      expect(result.stderr).not.toContain('fresh-pass-1');
-      expect(seen).toEqual(['POST /auth/password-reset']);
+      const stored = JSON.parse(readFileSync(file, 'utf8')) as {
+        version: number;
+        passwordHash: string;
+      };
+      expect(stored.version).toBe(5);
+      expect(passwordMatches(password, stored.passwordHash)).toBe(true);
+      expect((readFileSync(file) as Buffer).includes(password)).toBe(false);
     } finally {
-      await closeServer(server.server);
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('tells the operator to use docker compose exec when the API refuses', async () => {
-    const server = await listen((_req, res) => {
-      res.writeHead(401);
-      res.end();
-    });
+  it('refuses on the host when the Compose api container is running', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mc-pw-docker-'));
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, 'docker'),
+      '#!/bin/sh\nif [ "$1" = "compose" ] && [ "$2" = "ps" ]; then printf "%s\\n" api; exit 0; fi\nexit 0\n',
+    );
+    chmodSync(join(bin, 'docker'), 0o755);
+    const fallback = join(__dirname, '..', '..', 'data', 'session-state.json');
+    const before = existsSync(fallback) ? readFileSync(fallback) : null;
     try {
-      const result = await runReset(server.port);
+      const result = await runReset({
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        SESSION_STATE_PATH: '',
+      });
       expect(result.status).toBe(1);
+      expect(result.stdout).not.toContain('Dashboard password');
       expect(result.stderr).toContain(
         'Could not reset the dashboard password.',
       );
       expect(result.stderr).toContain(
         'docker compose exec api npm run password:reset',
       );
-      expect(result.stdout).not.toContain('Dashboard password');
+      const after = existsSync(fallback) ? readFileSync(fallback) : null;
+      expect(after).toEqual(before);
     } finally {
-      await closeServer(server.server);
+      rmSync(dir, { recursive: true, force: true });
     }
-  });
-
-  it('fails when nothing is listening', async () => {
-    const result = await runReset(1);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('The API did not answer');
-    expect(result.stderr).toContain(
-      'docker compose exec api npm run password:reset',
-    );
   });
 });
 
-function listen(
-  onRequest: (
-    req: import('node:http').IncomingMessage,
-    res: import('node:http').ServerResponse,
-  ) => void,
-): Promise<{ server: Server; port: number }> {
-  const server = createServer(onRequest);
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      resolve({ server, port });
-    });
-  });
+function shownPassword(stdout: string): string {
+  const match = stdout.match(/^Dashboard password, shown once: (\S+)$/m);
+  return match?.[1] ?? '';
 }
 
-function closeServer(server: Server): Promise<void> {
-  return new Promise((resolve) => {
-    server.close(() => resolve());
-  });
-}
-
-function runReset(port: number): Promise<{
+function runReset(env: NodeJS.ProcessEnv): Promise<{
   status: number | null;
   stdout: string;
   stderr: string;
 }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [script], {
-      env: { ...process.env, PORT: String(port) },
+      env: { ...process.env, ...env },
     });
     let stdout = '';
     let stderr = '';

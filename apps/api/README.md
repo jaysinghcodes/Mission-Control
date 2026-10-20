@@ -18,7 +18,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Not part of a fresh setup. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run seed:clear` | Deletes only the rows `seed:demo` created. Registered, snapshot, and API created rows stay. Idempotent. Same production guard. |
 | `npm run login:reset` | Clears login lockouts in the API on this machine. It calls `POST /auth/login-reset` on `127.0.0.1`. Under Compose run `docker compose exec api npm run login:reset`. |
-| `npm run password:reset` | Sets a new random dashboard password, prints it once, and revokes every session. It calls `POST /auth/password-reset` on `127.0.0.1`. Under Compose run `docker compose exec api npm run password:reset`. |
+| `npm run password:reset` | Writes a new scrypt hash to the session file, prints the password once, and revokes every session. There is no HTTP route. Under Compose run `docker compose exec api npm run password:reset`. |
 | `npm run lint` | ESLint |
 
 Schema: `npx prisma migrate deploy` from this directory, and again on API boot (`apps/api/src/boot.ts`). Schema changes are human reviewed. Boot applies those reviewed migrations. It does not create new ones.

@@ -89,23 +89,23 @@ docker compose exec api npm run login:reset
 
 That command clears every bucket. It does not restore a revoked session. Restarting the API clears the wait too.
 
+On a tunnel other than Cloudflare, a client that sends a new spoofed `CF-Connecting-IP` on each try gets a new bucket and avoids the lockout. Use Cloudflare Tunnel, or a long password.
+
 ## Password reset
 
-`npm run password:reset` sets a new random password, prints it once, and revokes every session. Old cookies stop working, including after a restart. Run it from the checkout on a native install:
+`npm run password:reset` writes a new scrypt hash to the session file, prints the password once, and revokes every session. Old cookies stop working, including after a restart. There is no HTTP route for this reset. Run it from the checkout on a native install:
 
 ```bash
 npm run password:reset
 ```
 
-Under Compose the API sees the Docker network, so the same command on the host is refused. Run it inside the api container. That does not call Node on the host:
+Under Compose the session file is on the mc-auth volume inside the api container. Run the command there. That does not call Node on the host:
 
 ```bash
 docker compose exec api npm run password:reset
 ```
 
 The installer prints that command in its last lines. The password itself is printed only on the first install.
-
-On a tunnel other than Cloudflare, a client that sends a new spoofed `CF-Connecting-IP` on each try gets a new bucket and avoids the lockout. Use Cloudflare Tunnel, or a long password.
 
 ## Gateway status
 

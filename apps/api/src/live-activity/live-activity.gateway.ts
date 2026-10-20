@@ -1,12 +1,17 @@
+import { OnModuleDestroy } from '@nestjs/common';
 import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
 } from '@nestjs/websockets';
+import { mkdirSync, watch, type FSWatcher } from 'fs';
+import { dirname } from 'path';
 import { Server, Socket } from 'socket.io';
 import { webOrigins } from '../cors-origins';
 import { requestLoopback, validSession } from '../auth/session';
+import { sessionStatePath } from '../auth/session-state';
 
 /**
  * Event types the gateway may broadcast. Union type so callers can't
@@ -70,7 +75,11 @@ export type ActivityEventType =
   },
 })
 export class LiveActivityGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnGatewayInit,
+    OnModuleDestroy
 {
   /** Socket.IO server instance — used to broadcast to all connected clients. */
   @WebSocketServer()
@@ -78,6 +87,45 @@ export class LiveActivityGateway
 
   /** Connected client ids — a Set is enough; per-client state comes later. */
   private readonly connectedClients = new Set<string>();
+
+  /** Closes remote sockets when password:reset replaces the session file. */
+  private sessionWatch: FSWatcher | null = null;
+
+  afterInit(): void {
+    this.watchSessionState();
+  }
+
+  onModuleDestroy(): void {
+    this.sessionWatch?.close();
+    this.sessionWatch = null;
+  }
+
+  /**
+   * password:reset writes the session file from another process.
+   * A change drops remote sockets the same way a password change does.
+   */
+  private watchSessionState(): void {
+    const file = sessionStatePath();
+    const dir = dirname(file);
+    try {
+      mkdirSync(dir, { recursive: true });
+      const watcher = watch(dir, () => {
+        try {
+          this.dropRevokedSockets();
+        } catch {
+          // The next request still reads the new version from the file.
+        }
+      });
+      watcher.on('error', () => {
+        watcher.close();
+        if (this.sessionWatch === watcher) this.sessionWatch = null;
+      });
+      watcher.unref();
+      this.sessionWatch = watcher;
+    } catch {
+      this.sessionWatch = null;
+    }
+  }
 
   /**
    * Fired on every new socket connection. Rejects unauthenticated clients in

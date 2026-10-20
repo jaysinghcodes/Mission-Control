@@ -888,7 +888,7 @@ install_log_file() {
 note_build_log() {
   local log
   log="$(install_log_file)"
-  : >> "$log"
+  : > "$log"
   echo "Building. The log is ${log}."
 }
 
@@ -1783,13 +1783,9 @@ print_install_summary() {
   else
     reset="npm run password:reset"
   fi
-  echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL above."
+  echo "Tunnel port $(remote_port). Cloudflare Tunnel and Tailscale Serve use that port. SSH uses the local port in the URL below."
   echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
-  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
-    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw. Run npm ci in the checkout before npm run seed:demo or npm run seed:clear. Without that install, prisma is not found and the seed command fails."
-  else
-    echo "OpenClaw is optional. This install does not start the OpenClaw gateway. When the openclaw command is on PATH, the bridge schedule is installed. npm run seed:demo fills sample data without OpenClaw."
-  fi
+  echo "OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md."
   echo "Open ${url}"
   if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
     echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
