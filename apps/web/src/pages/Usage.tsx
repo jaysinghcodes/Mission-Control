@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useApi } from '../hooks/useApi'
 import { EmptyState, PageHeader, Segmented, SoftCard } from '../components/shell'
+import { costSummary, costText } from '../lib/cost'
 
 /**
  * Cost so far. GET /usage prices tokens from config/prices.json.
  * A provider costUsd wins. Local providers are $0. Unknown models say
- * "Price not set". The page does not read a live balance.
+ * "Price not set". When any model has no price, the known total shows with
+ * "Price not set for some models", the same note as the System header.
+ * Formatting is lib/cost.ts. The page does not read a live balance.
  */
 
 interface UsageGroup {
@@ -23,6 +26,7 @@ interface Usage {
   period: string
   totalCost: number
   priceLabel?: string | null
+  priceNote?: string | null
   tokensIn: number
   tokensOut: number
   groups?: UsageGroup[]
@@ -39,15 +43,6 @@ const PERIODS = [
   { id: '7d', label: 'Last 7 days' },
   { id: 'month', label: 'Month to date' },
 ] as const
-
-function costText(cost: number | null | undefined, label?: string | null): string {
-  if (label === 'Price not set') return 'Price not set'
-  if (typeof cost !== 'number' || !Number.isFinite(cost)) return 'Price not set'
-  if (cost === 0) return '$0.00'
-  const abs = Math.abs(cost)
-  if (abs < 0.01) return `$${cost.toFixed(4)}`
-  return `$${cost.toFixed(2)}`
-}
 
 function tokenCount(n: number | undefined): string {
   if (typeof n !== 'number' || !Number.isFinite(n)) return '0'
@@ -71,7 +66,7 @@ export default function Usage() {
   const { data, error } = useApi<UsageResp>(`/usage?period=${id}`, { pollMs: 30000 })
   const usage = data?.usage ?? null
   const groups = usage?.groups ?? []
-  const unpriced = groups.some((row) => row.priceLabel === 'Price not set')
+  const cost = costSummary(usage)
 
   return (
     <div>
@@ -105,7 +100,7 @@ export default function Usage() {
         <>
           <SoftCard className="px-6 py-5">
             <div className="text-[12px] font-semibold text-mc-sub">{PERIODS[period].label}</div>
-            <div className="mt-1 text-[32px] font-bold tracking-tight">{costText(usage.totalCost, usage.priceLabel)}</div>
+            <div className="mt-1 text-[32px] font-bold tracking-tight">{cost.text}</div>
             <div className="mt-1 text-[13px] text-mc-sub">
               {tokenCount(usage.tokensIn)} tokens in, {tokenCount(usage.tokensOut)} tokens out
             </div>
@@ -113,10 +108,13 @@ export default function Usage() {
               Days follow the timezone in Settings{data.timeZone ? ` (${data.timeZone})` : ''}. Ollama and any local provider are $0.00.
             </p>
             {data.note ? <p className="mt-2 text-[13px] text-mc-sub">{data.note}</p> : null}
-            {unpriced ? (
-              <p className="mt-2 text-[13px] text-mc-sub">
-                Some models have no price. Their tokens are listed and they are not added into the total.
-              </p>
+            {cost.note ? (
+              <>
+                <p className="mt-2 text-[13px] font-semibold text-mc-text">{cost.note}</p>
+                <p className="mt-1 text-[13px] text-mc-sub">
+                  The total is the known cost. Tokens for those models are listed below and are not added into the total.
+                </p>
+              </>
             ) : null}
           </SoftCard>
 

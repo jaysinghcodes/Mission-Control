@@ -40,6 +40,14 @@ export interface AggregatedUsage {
   totalCost: number;
   /** Set when every line is unpriced. The number is then not a guess. */
   priceLabel?: string | null;
+  /**
+   * Exactly "Price not set for some models" when any model in the period has
+   * no price. totalCost is then the known total only. Null when every model
+   * is priced or local.
+   */
+  priceNote?: string | null;
+  /** Models in the period with no price, sorted. Empty when all are priced. */
+  unpricedModels?: string[];
   tokensIn: number;
   tokensOut: number;
   providers: UsageProvider[];
