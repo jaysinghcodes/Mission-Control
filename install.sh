@@ -284,6 +284,30 @@ write_env_key() {
   mv "$tmp2" "$file"
 }
 
+install_mode_name() {
+  if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+    printf '%s' compose
+  else
+    printf '%s' native
+  fi
+}
+
+# First install and every rerun. A matching value leaves the file untouched.
+persist_install_mode() {
+  local file mode current previous
+  file="${1:-.env}"
+  mode="$(install_mode_name)"
+  current="$(file_env_value "$file" MC_INSTALL_MODE)"
+  if [[ "$current" == "$mode" ]]; then
+    return 0
+  fi
+  previous="$(env_file_mode "$file")"
+  write_env_key "$file" MC_INSTALL_MODE "$mode"
+  if [[ -n "$previous" ]]; then
+    chmod "$previous" "$file" || true
+  fi
+}
+
 # The port already stored in the file, or 5432 when that line is missing.
 stored_db_port() {
   local file value
@@ -754,6 +778,7 @@ ensure_env() {
       mv "$tmp" .env
       umask "$old_umask"
       echo "Added the missing dashboard login values to .env."
+      persist_install_mode .env
       return 0
     fi
     if [[ "$MC_DB_PORT_UPDATED" -eq 1 || "$MC_DATABASE_URL_UPDATED" -eq 1 ]]; then
@@ -764,6 +789,7 @@ ensure_env() {
     else
       echo "Keeping the existing .env. Tokens and other values were not changed."
     fi
+    persist_install_mode .env
     return 0
   fi
   if [[ ! -f .env.example ]]; then
@@ -797,6 +823,7 @@ ensure_env() {
     exit 1
   fi
   echo "Wrote INGEST_TOKEN to .env."
+  persist_install_mode .env
 }
 
 have_docker() {

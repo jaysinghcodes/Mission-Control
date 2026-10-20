@@ -121,6 +121,10 @@ function nonTokenLines(text) {
     .filter((line) => !/^(?:export\s+)?(INGEST_TOKEN|SOCKET_TOKEN|DASHBOARD_PASSWORD_HASH|SESSION_SECRET)=/.test(line))
 }
 
+function linesIgnoringInstallMode(text) {
+  return nonTokenLines(text).filter((line) => !/^(?:#\s*)?MC_INSTALL_MODE=/.test(line))
+}
+
 function pathWithout(names) {
   return (process.env.PATH ?? '')
     .split(':')
@@ -508,9 +512,11 @@ test('a fresh run writes unique random tokens, calls compose, and prints the URL
       if (key === 'INGEST_TOKEN' || key === 'SOCKET_TOKEN' || key === 'DASHBOARD_PASSWORD_HASH' || key === 'SESSION_SECRET') continue
       assert.equal(envA[key], example[key], key)
     }
+    assert.equal(envA.MC_INSTALL_MODE, 'compose')
+    assert.equal(envB.MC_INSTALL_MODE, 'compose')
     assert.deepEqual(
-      nonTokenLines(readFileSync(path.join(first.repo, '.env'), 'utf8')),
-      nonTokenLines(readFileSync(path.join(root, '.env.example'), 'utf8')),
+      linesIgnoringInstallMode(readFileSync(path.join(first.repo, '.env'), 'utf8')),
+      linesIgnoringInstallMode(readFileSync(path.join(root, '.env.example'), 'utf8')),
     )
     assert.equal(statSync(path.join(first.repo, '.env')).mode & 0o777, 0o600)
     for (const text of [textA, textB]) {
@@ -589,6 +595,37 @@ test('a docs path that is a file stops the installer', () => {
     const result = runInstall(fx.repo, fx.env)
     assert.notEqual(result.status, 0)
     assert.match(outputOf(result), /Path .+\/data\/docs exists and is not a directory\./)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('a rerun writes a missing install marker and leaves tokens unchanged', () => {
+  const fx = freshDir()
+  try {
+    const envPath = path.join(fx.repo, '.env')
+    const token = 'ab'.repeat(24)
+    const hash = 'scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    const secret = 'ef'.repeat(32)
+    writeFileSync(
+      envPath,
+      [`INGEST_TOKEN=${token}`, `DASHBOARD_PASSWORD_HASH=${hash}`, `SESSION_SECRET=${secret}`, 'PORT=3000', ''].join('\n'),
+      { mode: 0o640 },
+    )
+    const result = runInstall(fx.repo, fx.env)
+    const text = outputOf(result)
+    const written = readFileSync(envPath, 'utf8')
+    const env = assignments(written)
+    assert.equal(env.MC_INSTALL_MODE, 'compose')
+    assert.equal(env.INGEST_TOKEN, token)
+    assert.equal(env.DASHBOARD_PASSWORD_HASH, hash)
+    assert.equal(env.SESSION_SECRET, secret)
+    assert.match(text, /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.equal(statSync(envPath).mode & 0o777, 0o640)
+    const before = readFileSync(envPath)
+    const second = runInstall(fx.repo, fx.env)
+    assert.deepEqual(readFileSync(envPath), before)
+    assert.match(outputOf(second), /Keeping the existing \.env\. Tokens and other values were not changed\./)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
   }
@@ -961,7 +998,9 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     const migrate = log.indexOf('npx prisma migrate deploy')
     const dev = log.indexOf('npm run dev')
     assert.ok(ci >= 0 && generate > ci && migrate > generate && dev > migrate, log)
-    assert.equal(text.includes(assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8')).INGEST_TOKEN), false)
+    const nativeEnv = assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8'))
+    assert.equal(nativeEnv.MC_INSTALL_MODE, 'native')
+    assert.equal(text.includes(nativeEnv.INGEST_TOKEN), false)
   } finally {
     plain?.child.kill()
     rmSync(fx.dir, { recursive: true, force: true })
@@ -1152,6 +1191,7 @@ test('Run B: ports already in .env are kept and used', async () => {
       MC_API_PORT: '3881',
       MC_WEB_PORT: '15881',
       MC_DB_PORT: '15581',
+      MC_INSTALL_MODE: 'compose',
     })
     const before = readFileSync(envFile)
     const result = runInstall(fx.repo, {
@@ -1254,6 +1294,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@db.example.internal:6543/otherdb?sslmode=require',
       'PORT=3000',
+      'MC_INSTALL_MODE=compose',
       '',
     ].join('\n')
     writeFileSync(envPath, external)
@@ -1285,6 +1326,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@localhost/otherdb',
       'PORT=3000',
+      'MC_INSTALL_MODE=compose',
       '',
     ].join('\n')
     writeFileSync(envPath, portless)
@@ -1752,6 +1794,7 @@ test('bridge schedule: shell interval and register win over .env', () => {
       'MC_BRIDGE_REGISTER=1',
       'PORT=3000',
       'HOST=127.0.0.1',
+      'MC_INSTALL_MODE=compose',
       '',
     ].join('\n')
     writeFileSync(envFile, custom, { mode: 0o600 })

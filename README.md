@@ -32,7 +32,7 @@ The dashboard does not pick a vendor. The bridge reports the provider and model 
 
 A reported `costUsd` wins, including 0. A provider marked local is $0.00. `config/prices.local.json` is gitignored and merged on each read, so a price edit does not need a rebuild. The field tables are in [docs/API.md](docs/API.md#47-models-and-spend).
 
-**Security.** Login is required when the caller is not on loopback. Compose always asks, because the API sees the Docker network. The installer ends with the URL and, on the first install, the password. A second run does not print or change that password. `npm run password:reset` writes a new hash to the session file, prints the password once, and revokes every session. There is no HTTP route for that reset. Under Compose, `docker compose exec api npm run password:reset` runs that inside the api container. SSH uses the owner port (default 5173). Cloudflare Tunnel and Tailscale Serve use tunnel port 3011 (`MC_REMOTE_PORT`). The laptop steps are in [docs/REMOTE.md](docs/REMOTE.md). Agent ingest still uses the `x-ingest-token` header when `INGEST_TOKEN` is set. That split is issue 36. The long note is [docs/SECURITY.md](docs/SECURITY.md).
+**Security.** Login is required when the caller is not on loopback. Compose always asks, because the API sees the Docker network. The installer ends with the URL and, on the first install, the password. A second run does not print or change that password. `npm run password:reset` writes a new hash to the session file, prints the password once, and revokes every session. There is no HTTP route for that reset. Under Compose, `bash install.sh` sets `MC_INSTALL_MODE=compose`, and a host `npm run password:reset` runs `docker compose exec api npm run password:reset` inside the api container. SSH uses the owner port (default 5173). Cloudflare Tunnel and Tailscale Serve use tunnel port 3011 (`MC_REMOTE_PORT`). The laptop steps are in [docs/REMOTE.md](docs/REMOTE.md). Agent ingest still uses the `x-ingest-token` header when `INGEST_TOKEN` is set. That split is issue 36. The long note is [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Screenshots
 
@@ -110,7 +110,7 @@ Under Compose, run this on the host. npm runs inside the api container. The host
 docker compose exec api npm run password:reset
 ```
 
-The command prints the new password once and revokes every session. If the api container is stopped, run `docker compose start api` first. A host `npm run password:reset` exits nonzero when this checkout has a Compose API container or the mc-auth volume, and it does not write a password the API will not read.
+The command prints the new password once and revokes every session. It prints that password only after the new hash is read back and every session is revoked. `bash install.sh` writes `MC_INSTALL_MODE=compose` or `MC_INSTALL_MODE=native` in `.env`. On compose, a host `npm run password:reset` runs `docker compose exec api npm run password:reset` and does not write a host file. If the api is not running, or Docker cannot run that command, it exits nonzero and tells you to run `docker compose up -d` first.
 
 When the `openclaw` command is on PATH, the installer adds a bridge schedule and names the scheduler it used. Remove only that schedule with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer prints a skip line and continues.
 

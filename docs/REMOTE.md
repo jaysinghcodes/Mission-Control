@@ -99,14 +99,13 @@ On a tunnel other than Cloudflare, a client that sends a new spoofed `CF-Connect
 npm run password:reset
 ```
 
-Under Compose the session file is on the mc-auth volume inside the api container. Run the command there. That does not call Node on the host. If the api container is stopped, start it first:
+Under Compose the session file is on the mc-auth volume inside the api container. `bash install.sh` sets `MC_INSTALL_MODE=compose` in `.env`. A host `npm run password:reset` then runs only inside the api container:
 
 ```bash
-docker compose start api
 docker compose exec api npm run password:reset
 ```
 
-A host `npm run password:reset` exits nonzero when this checkout has a Compose API container in any state, or the mc-auth volume still exists. It does not write a file the API will not read. The installer prints the reset command in its last lines. The password itself is printed only on the first install.
+That does not call Node on the host and it does not write a host file. If the api is not running, or Docker cannot run that command, the host command exits nonzero and tells you to run `docker compose up -d` first. The new password is printed only after the new hash is read back and every session is revoked. The installer prints the reset command in its last lines. The password itself is printed only on the first install.
 
 ## Gateway status
 
