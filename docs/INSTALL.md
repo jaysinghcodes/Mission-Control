@@ -10,7 +10,7 @@ Prerequisites: git, bash, curl, and Docker with the Docker Compose plugin. When 
 curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
 ```
 
-From a checkout you already have, run `bash install.sh` in the repo root. That is the same installer. It clones into `./mission-control` when you use the one line above. Step 2 of `/#/connect` shows the clone and `bash install.sh` as two commands and links here for the details.
+From a checkout you already have, run `bash install.sh` in the repo root. That is the same installer. It clones into `./mission-control` when you use the one line above. Step 2 of `/#/connect` shows the clone, the `cd` into it, and `bash install.sh` as three lines and links here for the details.
 
 Then open the URL the script prints. The default is **http://localhost:5173/#/tasks** (`MC_WEB_PORT`). A native API listens on `PORT` (default 3000). `MC_API_PORT` is the Compose host port (default 3000). On a native install it is accepted when `PORT` is unset. When both are set, `PORT` wins. The api container still listens on 3000.
 
@@ -18,11 +18,11 @@ Then open the URL the script prints. The default is **http://localhost:5173/#/ta
 
 Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`, and `MC_REMOTE_PORT` from the environment are written into a new `.env`. A shell `PORT`, or a shell `MC_API_PORT` when `PORT` is unset, is written into `PORT` on that new file so a native process listens there. `MC_REMOTE_PORT` defaults to 3011. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. A rerun writes that key when it is missing and does not change tokens. A shell `PORT` or `MC_WEB_PORT` still wins for that run. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL uses `localhost` or `127.0.0.1` and its port is the previous `MC_DB_PORT`, or 5432 when none was stored. That same run updates the `MC_DB_PORT` line. A custom URL, including another host or a URL with no port, is left as is and the installer says so. Tokens and secrets are not rotated. A shell value still wins for that run.
 
-OpenClaw is optional. The command above does not start the OpenClaw gateway. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. After `npm ci`, `npm run seed:demo` writes sample bots, tickets, and usage. `npm run seed:clear` deletes only those sample rows. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw.
+OpenClaw is optional. The command above does not start the OpenClaw gateway. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. [Demo data](#demo-data) has the steps for both paths.
 
 ## Bridge schedule
 
-When the `openclaw` command is on PATH, `bash install.sh` installs a bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The installer names the scheduler it used. The interval is `MC_BRIDGE_INTERVAL_SECONDS` from the shell, then `.env`, then 300. The job runs `bridge/mc-bridge-sync.py` and sets `MC_BRIDGE_REGISTER` from the shell, then `.env`, then 1. A steady state run starts `openclaw` once, for sessions. Agents, cron, devices, nodes, the models list, and the CLI version are cached and fetched again when `openclaw.json` changes, a value is missing, or once an hour. `--profile` prints the time, CPU, peak memory, and `openclaw` calls. See [A light run](../bridge/README.md#a-light-run). Its PATH includes the `openclaw` directory, the `python3` directory, and the PATH from install time, so a later run can find `openclaw`. Remove only that schedule with `bash install.sh --uninstall-schedule`. That flag also removes the sync timestamp. It does not stop Docker, does not delete `.env`, and does not change other cron lines or other service units. If `openclaw` is not on PATH, the installer prints a skip line and continues. A second run installs the same schedule again without duplicating it.
+When the `openclaw` command is on PATH, `bash install.sh` installs a bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The installer names the scheduler it used. The interval is `MC_BRIDGE_INTERVAL_SECONDS` from the shell, then `.env`, then 300. The job runs `bridge/mc-bridge-sync.py` and sets `MC_BRIDGE_REGISTER` from the shell, then `.env`, then 1. A steady state run starts `openclaw` once, for sessions. Agents, cron, devices, nodes, the models list, and the CLI version are cached and fetched again when `openclaw.json` changes, a value is missing, or once an hour. `--profile` prints the time, CPU, peak memory, and `openclaw` calls. See [A light run](../bridge/README.md#a-light-run). Its PATH includes the `openclaw` directory, the `python3` directory, and the PATH from install time, so a later run can find `openclaw`. Remove only that schedule with `bash install.sh --uninstall-schedule`. That flag also removes the sync timestamp. It does not stop Docker, does not delete `.env`, and does not change other cron lines or other service units. If `openclaw` is not on PATH, the installer prints a skip line and continues. On the native path that line ends with a colon and `npm run seed:demo` follows on its own line. On Compose it prints no command and points to [Demo data](#demo-data). A second run installs the same schedule again without duplicating it.
 
 Doctor reads the sync timestamp at `MC_BRIDGE_STAMP_FILE` (default `bridge/.state/last-sync`). A missing timestamp is an info line. A timestamp older than `MC_BRIDGE_STALE_SECONDS` (default 600) is a failing line when a schedule is installed. With no schedule, that age is an info line. A missing `openclaw` command is still an info line and does not by itself fail doctor. Doctor also reports the gateway. Under Compose, with `OPENCLAW_GATEWAY_HOST` unset, that line uses the bridge report and says Unknown when the report is missing or older than `GATEWAY_STATUS_MAX_AGE_MS` (default 600000). A future checkedAt is counted from the time the API stored the report. If this user lacks permission to use the Docker socket, that Unknown line says to add the user to the docker group and start a new login session. A native install, or an explicit host, is a direct probe of `127.0.0.1` or that host on `OPENCLAW_GATEWAY_PORT` (default 18789). The line is info. OpenClaw does not have to be running. The installer also offers `bridge/openclaw.starter.json`. Merge that file into `~/.openclaw/openclaw.json` if you want it. The installer does not edit that file.
 
@@ -34,7 +34,7 @@ nginx on the web port proxies `/api` and `/socket.io` to the API. The page and t
 
 `docker compose logs api` should end with `mission-control api listening on 0.0.0.0:3000`. That is the port inside the container. The host port is `MC_API_PORT`. Data lives in the named volume `mc-db` and stays across `docker compose restart`.
 
-Before Compose starts, `bash install.sh` creates the host docs directory as the user running the installer. The path is `DOCS_ROOT` from the shell, then `.env`, then `data/docs`. That user can delete the checkout, including `data/docs`. `npm run seed:demo` on the host writes sample markdown as that same user. The api container runs as root, so a seed command started inside that container writes root-owned files in `data/docs`. Session files stay in the named volume `mc-auth`.
+Before Compose starts, `bash install.sh` creates the host docs directory as the user running the installer. The path is `DOCS_ROOT` from the shell, then `.env`, then `data/docs`. That user can delete the checkout, including `data/docs`. `npm run seed:demo` on the host writes sample markdown as that same user. The api image does not include the seed scripts, so the seed runs on the host, as [Demo data](#demo-data) says. Session files stay in the named volume `mc-auth`.
 
 The API image includes the default config: `config/crew.json`, `config/prices.json`, and `config/timezones.json`. A plain `docker run` of that image serves `GET /settings` without a config mount. Compose mounts `./config` over `/app/config`, and that mount overrides the files in the image.
 
@@ -105,6 +105,25 @@ The web address is `http://127.0.0.1:<MC_WEB_PORT>`. `http://localhost:<MC_WEB_P
 6. The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent's own name, then confirms the detected provider. Skip finishes that open. Each choice is saved on the settings row. Change them later under System, then Settings. Office uses the naming choice as soon as it is saved. `npm run seed:demo` does not finish setup and does not choose names. If crew mode is already saved, a new demo agent takes a seat by the rules in [How crew seats work](../README.md#how-crew-seats-work). `npm run seed:clear` drops those seats. Crew names come from `config/crew.json`. Usage and memory count days in the saved timezone. The names are `config/timezones.json`. A legacy name such as `Asia/Calcutta` is saved as its current name. With no saved timezone, that is `TZ` when that name is in the list, otherwise the host zone.
 
 A fresh setup does not load sample data. `npm run dev` after migrate shows empty states. That is a valid first run, not a crash.
+
+## Demo data
+
+A fresh setup does not load sample data. `npm run seed:demo` loads it and does not need OpenClaw. It runs from the repo root on the host and writes through the `DATABASE_URL` in `.env`.
+
+On the native path `bash install.sh` already ran `npm ci`, so run:
+
+```bash
+npm run seed:demo
+```
+
+On the Compose path the host has no `node_modules`, and the api image does not include the seed scripts, so `docker compose exec api npm run seed:demo` fails with `Cannot find module './seed-demo.ts'`. Install Node.js 20.17 or later on the host, then run these two from the repo root:
+
+```bash
+npm ci
+npm run seed:demo
+```
+
+Without `npm ci`, prisma is not found and the seed command fails. A Compose install writes `DATABASE_URL` with `localhost` and `MC_DB_PORT`, and Compose publishes the database there, so the host seed writes to the Compose database. When `openclaw` is not on PATH, the installer skip line on Compose prints no command and points here. On the native path that line prints `npm run seed:demo` on its own line.
 
 `npm run seed:demo` writes sample agents, cron jobs, tickets, projects, runs, activity, approvals, memories, docs, devices, usage, a mission line, and one custom tool. It is idempotent. It refuses to run when `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. Demo tickets, demo runs, activity, memory, doc authors, and usage agent lists store the agent id. The usage `bot` column stays the display name. A second run rewrites a demo row that still has a crew name or a legacy name. A registered bot named Forge does not take the seat, sticker, or status of the crew bot whose id is `forge`.
 

@@ -980,13 +980,16 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     writeExe(path.join(fx.bin, 'psql'), '#!/bin/sh\nprintf \'16.4\\n\'\nexit 0\n')
     const result = runInstall(fx.repo, {
       ...fx.env,
-      PATH: fx.env.PATH,
+      PATH: `${fx.bin}:${pathWithout(['openclaw'])}`,
       NATIVE_LOG: nativeLog,
       MC_INSTALL_READY_SECONDS: '0',
     })
     const text = outputOf(result)
     const log = waitForLog(nativeLog, 'npm run dev')
     assert.match(text, /Docker was not found\. Using the native path/)
+    // Native keeps the pastable seed command: npm ci already ran in this checkout.
+    assert.match(text, /\nOpenClaw was not found on PATH\. Skipping the bridge schedule\. Sample data does not need OpenClaw\. Fill it with:\n  npm run seed:demo\n/)
+    assert.doesNotMatch(text, /Demo data in docs\/INSTALL\.md/)
     assert.doesNotMatch(text, /is not a supported native runtime/)
     assert.doesNotMatch(text, /The API is already up/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
@@ -1601,7 +1604,18 @@ test('bridge schedule: missing OpenClaw skips with exit 0', async () => {
     })
     const text = outputOf(result)
     assert.equal(result.status, 0, text)
-    assert.match(text, /OpenClaw was not found on PATH\. Skipping the bridge schedule\. Sample data does not need OpenClaw\. Fill it with:\n  npm run seed:demo\n/)
+    // Compose: the api image has no seed scripts, so the skip line prints no command and names the doc.
+    assert.match(
+      text,
+      /\nOpenClaw was not found on PATH\. Skipping the bridge schedule\. Sample data does not need OpenClaw\. To load it on a Compose install, see Demo data in docs\/INSTALL\.md\.\n/,
+    )
+    assert.doesNotMatch(text, /Fill it with:/)
+    assert.doesNotMatch(text, /^ *npm /m, 'Compose prints no bare npm command')
+    assert.doesNotMatch(text, /npm ci/)
+    assert.doesNotMatch(text, /docker compose exec api npm run seed:demo/)
+    const docs = readFileSync(path.join(root, 'docs/INSTALL.md'), 'utf8')
+    assert.match(docs, /^## Demo data$/m)
+    assertPastableCommands(text)
     assert.doesNotMatch(text, /Installed the bridge schedule/)
     assert.equal(readFileSync(fx.cronFile, 'utf8'), FOREIGN_CRON)
     assert.equal(existsSync(path.join(fx.systemdDir, 'mission-control-bridge.timer')), false)
