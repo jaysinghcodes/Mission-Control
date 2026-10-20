@@ -925,13 +925,17 @@ start_docker() {
   ensure_repo_bind DOCS_ROOT "data/docs"
   ensure_repo_bind OPENCLAW_LOG_DIR "/tmp/openclaw"
   # The API image has no .git. Pass the commit so /health can show it.
-  if [[ -z "${GIT_SHA:-}" ]] && command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    GIT_SHA="$(git rev-parse HEAD)"
-    export GIT_SHA
+  # Only the compose build sees it. It is not exported, so the bridge run
+  # later in this install never hands it to `openclaw --version`, which
+  # would print this commit in place of its own.
+  local sha
+  sha="${GIT_SHA:-}"
+  if [[ -z "$sha" ]] && command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    sha="$(git rev-parse HEAD)"
   fi
   note_build_log
   log="$(install_log_file)"
-  if ! docker compose up -d --build >>"$log" 2>&1; then
+  if ! GIT_SHA="$sha" docker compose up -d --build >>"$log" 2>&1; then
     if compose_bind_conflict "$log"; then
       cat "$log" >&2
       echo "Docker Compose did not start the stack." >&2
