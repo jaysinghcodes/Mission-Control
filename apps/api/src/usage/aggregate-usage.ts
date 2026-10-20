@@ -33,6 +33,10 @@ export interface UsagePoint {
 export interface UsageDayTotal {
   day: string;
   totalCost: number;
+  /** "Price not set" when the day has usage and no line on it is priced. */
+  priceLabel?: string | null;
+  /** "Price not set for some models" when any line on the day has no price. */
+  priceNote?: string | null;
 }
 
 export interface AggregatedUsage {

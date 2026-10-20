@@ -78,6 +78,127 @@ describe('shipped config/prices.json', () => {
     }
   });
 
+  it('charges an OpenRouter run the OpenRouter row, with a bare or a vendor model', () => {
+    const direct = lookupPrice(
+      SHIPPED,
+      'deepseek/deepseek-v4-flash',
+      'deepseek',
+    );
+    const routed = lookupPrice(
+      SHIPPED,
+      'openrouter/deepseek/deepseek-v4-flash',
+      'openrouter',
+    );
+    const bare = lookupPrice(
+      SHIPPED,
+      'openrouter/deepseek-v4-flash',
+      'openrouter',
+    );
+    expect(direct).toEqual({ input: 0.3, output: 1.2 });
+    expect(routed).toEqual({ input: 0.091, output: 0.182 });
+    expect(bare).toEqual(routed);
+    expect(lookupPrice(SHIPPED, 'deepseek-v4-flash', 'openrouter')).toEqual(
+      routed,
+    );
+    expect(
+      lookupPrice(SHIPPED, 'openrouter/no-such-model', 'openrouter'),
+    ).toBeNull();
+  });
+
+  it('a bare model under a router stays unpriced when two vendors share the name', () => {
+    const table = {
+      models: {
+        'openrouter/a/m': { input: 1, output: 1 },
+        'openrouter/b/m': { input: 2, output: 2 },
+      },
+    };
+    expect(lookupPrice(table, 'openrouter/m', 'openrouter')).toBeNull();
+  });
+
+  it('drops the retired deepseek-chat name and dates the Gemini 4 Argon price', () => {
+    expect(SHIPPED.models['deepseek/deepseek-chat']).toBeUndefined();
+    expect(
+      lookupPrice(SHIPPED, 'deepseek/deepseek-chat', 'deepseek'),
+    ).toBeNull();
+    expect(SHIPPED.models['google/gemini-4-argon']).toEqual({
+      input: 2,
+      output: 10,
+    });
+    const raw = JSON.parse(
+      readFileSync(join(CONFIG, 'prices.json'), 'utf8'),
+    ) as { notes?: string };
+    expect(raw.notes).toMatch(
+      /Gemini 4 Argon row is \$2 input and \$10 output through Nov 30 2026/,
+    );
+    expect(raw.notes).toMatch(/\$4 and \$20 from Dec 1 2026/);
+    expect(raw.notes).not.toMatch(/end of 2026/);
+  });
+
+  it('marks each spend day Price not set when nothing on it is priced', () => {
+    const point = (at: string, providers: UsageProvider[]) => ({
+      at,
+      totalCost: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      providers,
+    });
+    const agg = aggregateUsage(
+      [
+        point('2026-10-19T16:00:00.000Z', [
+          {
+            name: 'deepseek',
+            provider: 'deepseek',
+            model: 'deepseek/deepseek-v4-flash',
+            bot: 'Speedy',
+            tokensIn: 1_000_000,
+            tokensOut: 250_000,
+          },
+          {
+            name: 'acme',
+            provider: 'acme',
+            model: 'acme/house-model',
+            bot: 'Speedy',
+            tokensIn: 10,
+            tokensOut: 10,
+          },
+        ]),
+        point('2026-10-20T16:00:00.000Z', [
+          {
+            name: 'acme',
+            provider: 'acme',
+            model: 'acme/house-model',
+            bot: 'Speedy',
+            tokensIn: 10,
+            tokensOut: 10,
+          },
+          {
+            name: 'openrouter',
+            provider: 'openrouter',
+            model: 'openrouter/auto',
+            bot: 'Speedy',
+            tokensIn: 10,
+            tokensOut: 10,
+          },
+        ]),
+      ] as never,
+      '7d',
+      NOW,
+      'UTC',
+    );
+    const days = applyUsagePrices(agg, SHIPPED, new Set()).days;
+    const byDay = Object.fromEntries(days.map((d) => [d.day, d]));
+    expect(byDay['2026-10-19']).toMatchObject({
+      totalCost: 0.6,
+      priceLabel: null,
+      priceNote: PRICE_NOT_SET_SOME,
+    });
+    expect(byDay['2026-10-20']).toMatchObject({
+      totalCost: 0,
+      priceLabel: PRICE_NOT_SET,
+      priceNote: PRICE_NOT_SET_SOME,
+    });
+  });
+
   it('loads through loadPriceTable with the shipped dir', () => {
     expect(
       lookupPrice(loadPriceTable(CONFIG), 'deepseek-v4-flash', 'deepseek'),

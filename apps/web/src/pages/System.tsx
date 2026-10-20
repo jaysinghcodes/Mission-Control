@@ -9,7 +9,7 @@ import type { Agent, AgentsResp } from '../types'
 import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import { providerLabel } from '../lib/provider-label'
-import { costSummary, costText } from '../lib/cost'
+import { costSummary, costText, dayCostText, spendPhrase, type CostDay } from '../lib/cost'
 import { gatewayLine, systemHeadline, systemSummaryLead } from '../lib/gateway-status'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
@@ -82,7 +82,7 @@ interface Usage {
 interface UsageResp {
   usage: Usage | null
   note?: string | null
-  days?: { day: string; totalCost: number }[]
+  days?: ({ day: string } & CostDay)[]
 }
 interface EventApi { type: string; payload: { name?: string; summary?: string; agent?: string } | null; ts: string }
 
@@ -140,10 +140,10 @@ function barLabel(day: string, count: number): string {
   return `${name} ${date}`
 }
 
-function SpendBars({ days, label }: { days: { day: string; totalCost: number }[]; label: string }) {
+function SpendBars({ days, label }: { days: ({ day: string } & CostDay)[]; label: string }) {
   if (days.length === 0) return null
   const max = Math.max(...days.map((d) => d.totalCost), 0)
-  const summary = days.map((d) => `${barLabel(d.day, days.length)} ${costText(d.totalCost, null, 'No data')}`).join(', ')
+  const summary = days.map((d) => `${barLabel(d.day, days.length)} ${dayCostText(d)}`).join('; ')
   return (
     <div className="px-4 pb-3" role="img" aria-label={`Daily spend for ${label}. ${summary}`}>
       <div className="flex h-16 items-end gap-1">
@@ -202,9 +202,7 @@ export default function System() {
 
   const periodCost = selected ? costSummary(selected) : null
   const periodName = PERIODS[period].label.toLowerCase()
-  const spend = periodCost
-    ? ` · ${periodCost.text} spent ${periodName}${periodCost.note ? ` · ${periodCost.note}` : ''}`
-    : any ? '' : ' · no spend reported'
+  const spend = periodCost ? spendPhrase(periodCost, periodName) : any ? '' : ' · no spend reported'
   const summary = health.data
     ? `${systemSummaryLead(health.data.status === 'ok', sys.data?.gateway)}${spend}`
     : 'Checking health…'
