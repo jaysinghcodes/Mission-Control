@@ -698,6 +698,9 @@ function listNames(names) {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
 }
 
+/** A printed command sits on its own line with this indent and no ending period, so it pastes as is. */
+export const COMMAND_INDENT = '  '
+
 function serviceFailureSentence(names, kind) {
   if (names.length === 0) return ''
   const listed = listNames(names)
@@ -706,11 +709,11 @@ function serviceFailureSentence(names, kind) {
   if (kind === 'paused') {
     const state = names.length === 1 ? 'is paused' : 'are paused'
     const verb = names.length === 1 ? 'Unpause it' : 'Unpause them'
-    return `${subject} ${state}. ${verb} with: docker compose ${command} ${names.join(' ')}`
+    return `${subject} ${state}. ${verb} with:\n${COMMAND_INDENT}docker compose ${command} ${names.join(' ')}`
   }
   const state = names.length === 1 ? 'is not running' : 'are not running'
   const verb = names.length === 1 ? 'Start it' : 'Start them'
-  return `${subject} ${state}. ${verb} with: docker compose ${command} ${names.join(' ')}`
+  return `${subject} ${state}. ${verb} with:\n${COMMAND_INDENT}docker compose ${command} ${names.join(' ')}`
 }
 
 /**
@@ -720,6 +723,11 @@ function serviceFailureSentence(names, kind) {
  * A paused service names docker compose unpause.
  * An outside holder of a configured port is reported by the caller first.
  * serviceNames, when the compose file lists any, limits db, api, and web to that file.
+ * One message per problem. A problem can name several services, for example
+ * "The api and web services are not running." Each sentence ends with a colon
+ * and the command follows on its own indented line with no ending period, so
+ * it copies and runs as is. Messages are joined with a newline. The report
+ * prints each sentence on its own fail line and each command line as is.
  */
 export function composeServiceFailure(rows, serviceNames) {
   const list = Array.isArray(rows) ? rows : []
@@ -748,7 +756,18 @@ export function composeServiceFailure(rows, serviceNames) {
     serviceFailureSentence(buckets.start, 'start'),
     serviceFailureSentence(buckets.missing, 'missing'),
     serviceFailureSentence(buckets.paused, 'paused'),
-  ].filter(Boolean).join(' ')
+  ].filter(Boolean).join('\n')
+}
+
+/**
+ * One report line per problem, each with the same check prefix. An indented
+ * command line is printed as is, under the sentence it belongs to.
+ */
+function serviceLines(prefix, message) {
+  return String(message)
+    .split('\n')
+    .filter(Boolean)
+    .map((text) => (text.startsWith(COMMAND_INDENT) ? text : `${prefix}${text}`))
 }
 
 function decodeComposePs(env) {
@@ -1023,7 +1042,7 @@ export async function inspectApiPort(port, host = '127.0.0.1', options = {}) {
           state: 'other',
           url: probeUrl,
           db: null,
-          conflict: hits.map((hit) => composePortConflictLine(hit.port, hit.key)).join(' '),
+          conflict: hits.map((hit) => composePortConflictLine(hit.port, hit.key)).join('\n'),
           conflictApi: hits.some((hit) => hit.api),
         }
       }
@@ -1111,10 +1130,10 @@ function portLine(ports, docker = false) {
   if (ports.badPort) {
     return `fail ports: ${label} is not a valid port number. Set ${label} in .env to a free port, then run npm run doctor again.`
   }
-  if (ports.conflict) return `fail ports: ${ports.conflict}`
+  if (ports.conflict) return serviceLines('fail ports: ', ports.conflict)
   if (ports.apiState === 'free') return `pass ports: Port ${ports.api} is free.`
   if (ports.apiState === 'ours') return `pass ports: Port ${ports.api} is already running.`
-  if (ports.apiState === 'down') return `fail ports: ${ports.downMessage}`
+  if (ports.apiState === 'down') return serviceLines('fail ports: ', ports.downMessage)
   if (ports.apiState === 'starting') return `info ports: ${STARTING_NOTE}`
   return `fail ports: Port ${ports.api} is used by another program. Stop it or set ${label} in .env.`
 }
@@ -1322,7 +1341,7 @@ function bridgeLine(bridge) {
 function healthLine(ports, docker = false) {
   const url = ports.health?.url ?? 'http://127.0.0.1:3000/health'
   if (!ports.badPort && ports.apiState === 'down') {
-    return `fail health: ${ports.downMessage}`
+    return serviceLines('fail health: ', ports.downMessage)
   }
   if (!ports.badPort && ports.apiState === 'starting') {
     return `info health: ${STARTING_NOTE}`
@@ -1370,6 +1389,9 @@ export function report(facts) {
     bridgeLine(facts.bridge),
     gatewayLine(facts.env, facts.gateway),
   )
+  const flat = lines.flat()
+  lines.length = 0
+  lines.push(...flat)
   const code = lines.some((line) => line.startsWith('fail ')) ? 1 : 0
   return { lines, code }
 }
