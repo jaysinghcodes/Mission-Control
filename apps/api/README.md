@@ -18,7 +18,7 @@ Run from the repo root with `-w apps/api`, or from this directory.
 | `npm run seed:demo` | Sample data. Also `npm run seed:demo` from the root. Not part of a fresh setup. Refuses `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. |
 | `npm run seed:clear` | Deletes only the rows `seed:demo` created. Registered, snapshot, and API created rows stay. Idempotent. Same production guard. |
 | `npm run login:reset` | Clears login lockouts in the API on this machine. It calls `POST /auth/login-reset` on `127.0.0.1`. Under Compose run `docker compose exec api npm run login:reset`. |
-| `npm run password:reset` | Writes a new scrypt hash to the session file, prints the password once, and revokes every session. It prints that password only after the new hash is read back. There is no HTTP route. When `MC_INSTALL_MODE=compose`, this runs `docker compose exec api npm run password:reset` and does not write a host file. If the api is not running, it exits nonzero and tells you to run `docker compose up -d` first. |
+| `npm run password:reset` | Writes a new scrypt hash to the session file, prints the password once, and revokes every session. It prints that password only after the new hash is read back. There is no HTTP route. When `MC_INSTALL_MODE=compose`, this runs `docker compose exec api npm run password:reset` and does not write a host file. If the api is not running, it exits nonzero and tells you to run `docker compose up -d` first. With no `MC_INSTALL_MODE` in `.env`, a host `npm run password:reset` asks Docker for this checkout's Compose containers and its mc-auth volume. If it finds either, or Docker cannot answer, it refuses, writes nothing, and asks you to run `bash install.sh` again. A machine with no docker command, or with no Compose trace, keeps the native reset. If the new hash cannot be read back, the command exits 3 and says the password may have changed. Run the reset again to set a new one. |
 | `npm run lint` | ESLint |
 
 Schema: `npx prisma migrate deploy` from this directory, and again on API boot (`apps/api/src/boot.ts`). Schema changes are human reviewed. Boot applies those reviewed migrations. It does not create new ones.
@@ -37,7 +37,7 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `DASHBOARD_PASSWORD_HASH` | empty | scrypt hash of the dashboard password. Blank on loopback leaves the dashboard open. Required when `HOST` is not loopback, including Compose |
 | `SESSION_SECRET` | empty | Signs the `mc_session` cookie. Required with the hash when `HOST` is not loopback |
 | `SESSION_STATE_PATH` | `apps/api/data/session-state.json` | Session version and a changed password hash. Compose uses `/data/auth/session-state.json` on the `mc-auth` volume. A stored hash overrides `DASHBOARD_PASSWORD_HASH` on startup |
-| `MC_INSTALL_MODE` | unset | `bash install.sh` sets `compose` or `native`. On `compose`, `npm run password:reset` runs inside the api container |
+| `MC_INSTALL_MODE` | unset | `bash install.sh` sets `compose` or `native`. On `compose`, `npm run password:reset` runs inside the api container. Unset with a Compose trace, or with a Docker that cannot answer, the reset refuses until `bash install.sh` runs again |
 | `LOGIN_FAIL_LIMIT` | `5` | Wrong passwords per client IP before a wait. Loopback is exempt. Ingest is exempt |
 | `LOGIN_WINDOW_SECONDS` | `60` | Failure window and the first wait, in seconds |
 | `LOGIN_BACKOFF_MAX_SECONDS` | `900` | Longest wait, in seconds. Later lockouts double until this cap |

@@ -110,13 +110,17 @@ Under Compose, run this on the host. npm runs inside the api container. The host
 docker compose exec api npm run password:reset
 ```
 
-The command prints the new password once and revokes every session. It prints that password only after the new hash is read back and every session is revoked. `bash install.sh` writes `MC_INSTALL_MODE=compose` or `MC_INSTALL_MODE=native` in `.env`. On compose, a host `npm run password:reset` runs `docker compose exec api npm run password:reset` and does not write a host file. If the api is not running, or Docker cannot run that command, it exits nonzero and tells you to run `docker compose up -d` first.
+The command prints the new password once and revokes every session. It prints that password only after the new hash is read back and every session is revoked. `bash install.sh` writes `MC_INSTALL_MODE=compose` or `MC_INSTALL_MODE=native` in `.env`. On compose, a host `npm run password:reset` runs `docker compose exec api npm run password:reset` and does not write a host file. If the api is not running, or Docker cannot run that command, it exits nonzero and tells you to run `docker compose up -d` first. With no `MC_INSTALL_MODE` in `.env`, a host `npm run password:reset` asks Docker for this checkout's Compose containers and its mc-auth volume. If it finds either, or Docker cannot answer, it refuses, writes nothing, and asks you to run `bash install.sh` again. A machine with no docker command, or with no Compose trace, keeps the native reset. If the new hash cannot be read back, the command exits 3 and says the password may have changed. Run the reset again to set a new one.
 
 When the `openclaw` command is on PATH, the installer adds a bridge schedule and names the scheduler it used. Remove only that schedule with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer prints a skip line and continues.
 
 CI runs `bash install.sh` on the free GitHub hosted runners. Ubuntu runs the Docker Compose install and the native install. macOS runs the native install only, because Docker on that runner is unreliable. Each of those jobs posts `bridge/examples/fresh-install` with `bridge/mc-bridge-sync.py`. The fresh clone job runs the advanced path below on Node.js 20, Node.js 22, and Node.js 24.
 
 Host ports are `MC_WEB_PORT`, `PORT` (native API listen), `MC_API_PORT` (Compose host API port, and the native listen port when `PORT` is unset), `MC_DB_PORT`, and `MC_REMOTE_PORT`. The shell wins, then `.env`, then the default. The env file, doctor, and the bridge schedule are written out in [docs/INSTALL.md](docs/INSTALL.md).
+
+### Upgrading
+
+After updating past #132, run `bash install.sh` once so `.env` records `MC_INSTALL_MODE`. Until then, `npm run password:reset` on a Compose install refuses and asks for that run.
 
 ### Advanced: Node and Postgres
 
