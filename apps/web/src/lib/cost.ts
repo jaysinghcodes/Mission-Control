@@ -5,9 +5,10 @@
  *
  * totalCost is the known total. When any model in the period has no price,
  * the API sets priceNote to exactly "Price not set for some models" and the
- * page shows that note next to the known total. When no model is priced the
- * total reads "Price not set". A plain $0.00 means every model is priced or
- * local.
+ * page shows that note next to the known total, but only when at least one
+ * model is priced. When no model is priced the total reads "Price not set"
+ * and the note is hidden, because the headline already says it. A plain
+ * $0.00 means every model is priced or local.
  */
 
 export const PRICE_NOT_SET = 'Price not set'
@@ -40,11 +41,15 @@ function rows(usage: CostUsage): PricedRow[] {
   return [...list, ...(usage.groups ?? [])]
 }
 
-/** The note for a period, or null when every model is priced or local. */
+/**
+ * The note for a period. It shows only when some models are priced and some
+ * are not. Null when every model is priced or local, and null when no model
+ * is priced, since the total already reads "Price not set".
+ */
 export function priceNote(usage: CostUsage | null | undefined): string | null {
   if (!usage) return null
+  if (usage.priceLabel === PRICE_NOT_SET) return null
   if (usage.priceNote) return PRICE_NOT_SET_SOME
-  if (usage.priceLabel === PRICE_NOT_SET) return PRICE_NOT_SET_SOME
   return rows(usage).some((row) => row.priceLabel === PRICE_NOT_SET) ? PRICE_NOT_SET_SOME : null
 }
 
@@ -73,10 +78,11 @@ export function costSummary(usage: CostUsage | null | undefined): { text: string
 
 /**
  * The spend part of the System header: "$1.32 spent today", plus the note
- * when some models have no price. With nothing priced the total reads
- * "Price not set for today", still followed by the note.
+ * when some models have no price. With nothing priced it reads
+ * "Price not set for today" and the note is not repeated.
  */
 export function spendPhrase(cost: { text: string; note: string | null }, periodName: string): string {
   const lead = cost.text === PRICE_NOT_SET ? `${PRICE_NOT_SET} for ${periodName}` : `${cost.text} spent ${periodName}`
-  return ` · ${lead}${cost.note ? ` · ${cost.note}` : ''}`
+  const note = cost.note && cost.text !== PRICE_NOT_SET ? ` · ${cost.note}` : ''
+  return ` · ${lead}${note}`
 }
