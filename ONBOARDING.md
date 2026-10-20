@@ -44,7 +44,7 @@ bash install.sh
 
 That writes the ingest token and dashboard login values when `.env` is missing, starts the stack, runs doctor, and prints the URL. The password is printed once. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. A later run updates `DATABASE_URL` only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. Do not print the token or the password hash. Tell the operator the token lives in `.env`.
 
-If `openclaw` is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The interval comes from `MC_BRIDGE_INTERVAL_SECONDS` (default 300). Remove it with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer says so and continues. `npm run seed:demo` still works.
+If `openclaw` is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The interval comes from `MC_BRIDGE_INTERVAL_SECONDS` (default 300). Remove it with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer says so and continues. `npm run seed:demo` still works. On Compose, run `npm ci` in the checkout first, as [Demo data](docs/INSTALL.md#demo-data) says.
 
 `npm ci` runs only on the native path, when Docker is missing. It may warn that `@prisma/engines`, `prisma`, and `unrs-resolver` have install scripts not yet covered by allowScripts. `npx prisma generate` still succeeded after that warning on npm 11.17.0.
 

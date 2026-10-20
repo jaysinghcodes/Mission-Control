@@ -1759,8 +1759,13 @@ run_bridge_now() {
 install_bridge_schedule() {
   local script py scheduler
   if ! command -v openclaw >/dev/null 2>&1; then
-    echo "OpenClaw was not found on PATH. Skipping the bridge schedule. Sample data does not need OpenClaw. Fill it with:"
-    echo "  npm run seed:demo"
+    if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+      # The api image has no seed scripts, so no command pastes as is here.
+      echo "OpenClaw was not found on PATH. Skipping the bridge schedule. Sample data does not need OpenClaw. To load it on a Compose install, see Demo data in docs/INSTALL.md."
+    else
+      echo "OpenClaw was not found on PATH. Skipping the bridge schedule. Sample data does not need OpenClaw. Fill it with:"
+      echo "  npm run seed:demo"
+    fi
     return 0
   fi
   script="$(bridge_script)"
