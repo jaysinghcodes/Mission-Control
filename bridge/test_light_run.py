@@ -4,14 +4,18 @@ The fixture is 10 agents, 5,000 sessions and 500 memory files behind a
 stub `openclaw` that logs each call. The parity hashes were taken from the
 bridge on main (814727c) with the same fixture, the same stub outputs and
 the same pinned clocks: a first run, a steady state run 5 minutes later,
-and a run 61 minutes after the first. Set MC_PARITY_MAIN_BRIDGE to the
-path of a main bridge copy to compare the bytes directly instead.
+and a run 61 minutes after the first. When git can show main's bridge at that
+commit, or MC_PARITY_MAIN_BRIDGE names a copy, the test runs it live on the
+same fixture and compares the bytes directly instead. Each run
+uses a copy of the bridge with no repo root .env, so a fresh clone with a
+.env gets the same bytes.
 """
 import hashlib
 import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -37,6 +41,33 @@ FIRST_RUN_CALLS = sorted([
     "--version",
 ])
 STEADY_CALLS = ["sessions --all-agents --json"]
+
+
+MAIN_COMMIT = "814727c"
+
+
+def main_bridge_copy(into: Path):
+    """Main's bridge, live: MC_PARITY_MAIN_BRIDGE, else git show MAIN_COMMIT.
+
+    None when neither is there (a shallow CI clone); the pinned hashes then
+    stand in for main.
+    """
+    named = os.environ.get("MC_PARITY_MAIN_BRIDGE", "").strip()
+    if named:
+        return Path(named)
+    try:
+        shown = subprocess.run(
+            ["git", "-C", str(HERE), "show", f"{MAIN_COMMIT}:bridge/mc-bridge-sync.py"],
+            capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if shown.returncode != 0 or not shown.stdout:
+        return None
+    target = into / "main" / "bridge" / "mc-bridge-sync.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(shown.stdout)
+    return target
 
 
 def profile_numbers(stderr: str):
@@ -75,21 +106,21 @@ class LightRunTest(unittest.TestCase):
         self.assertIn("profile: memory files read 0, reused 500", steady["stderr"])
 
     def test_payload_is_byte_identical_to_main(self):
-        main_bridge = os.environ.get("MC_PARITY_MAIN_BRIDGE", "").strip()
-        expected = {}
-        if main_bridge:
-            other = Path(tempfile.mkdtemp(prefix="mc-light-main-"))
-            paths = lf.build(other)
-            state = other / "state"
-            state.mkdir()
+        with tempfile.TemporaryDirectory(prefix="mc-light-main-") as tmp:
+            other = Path(tmp)
+            main_bridge = main_bridge_copy(other)
+            expected = dict(MAIN_HASHES)
+            if main_bridge is not None:
+                paths = lf.build(other / "fixture")
+                state = other / "state"
+                state.mkdir()
+                for offset in (0, 300, 3700):
+                    ran = lf.run(paths, offset, state, bridge=main_bridge)
+                    self.assertEqual(ran["code"], 0, ran["stderr"])
+                    expected[offset] = hashlib.sha256(lf.wire(ran)).hexdigest()
             for offset in (0, 300, 3700):
-                ran = lf.run(paths, offset, state, bridge=Path(main_bridge))
-                expected[offset] = hashlib.sha256(lf.wire(ran)).hexdigest()
-        else:
-            expected = MAIN_HASHES
-        for offset in (0, 300, 3700):
-            got = hashlib.sha256(lf.wire(self.run_at(offset))).hexdigest()
-            self.assertEqual(got, expected[offset], f"run at +{offset} s")
+                got = hashlib.sha256(lf.wire(self.run_at(offset))).hexdigest()
+                self.assertEqual(got, expected[offset], f"run at +{offset} s")
 
     def test_openclaw_json_change_triggers_a_full_refresh(self):
         self.run_at(0)

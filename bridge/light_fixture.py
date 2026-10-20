@@ -7,6 +7,7 @@ byte. Nothing here touches the network beyond a local capture server.
 """
 from __future__ import annotations
 
+import hashlib
 import http.server
 import json
 import os
@@ -176,6 +177,28 @@ class _Capture(http.server.BaseHTTPRequestHandler):
         self._reply(200, {"ok": True})
 
 
+def _hermetic_copy(paths: Dict[str, Path], bridge: Path) -> Path:
+    """Run a copy of the bridge in a bare repo under the fixture root.
+
+    The bridge reads the repo root .env, and a fresh clone has one. A copy
+    with only config/timezones.json beside it keeps every run the same on
+    every machine.
+    """
+    source = Path(bridge).resolve()
+    tag = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:12]
+    repo = paths["root"] / f"repo-{tag}"
+    copy = repo / "bridge" / source.name
+    if not copy.is_file():
+        (repo / "bridge").mkdir(parents=True, exist_ok=True)
+        (repo / "config").mkdir(parents=True, exist_ok=True)
+        shutil.copy(source, copy)
+        zones = source.parent.parent / "config" / "timezones.json"
+        if not zones.is_file():
+            zones = HERE.parent / "config" / "timezones.json"
+        shutil.copy(zones, repo / "config" / "timezones.json")
+    return copy
+
+
 def run(
     paths: Dict[str, Path],
     offset_s: int,
@@ -185,6 +208,7 @@ def run(
     extra_env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """One bridge run with the clock pinned to BASE_S + offset_s."""
+    bridge = _hermetic_copy(paths, bridge)
     _Capture.log = []
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Capture)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
