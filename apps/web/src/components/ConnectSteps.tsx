@@ -110,14 +110,14 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and prints the URL. The password is shown once.',
+      'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and ends with the URL. Build output goes to install.log. The password is shown once, on the first install. A second run does not print or change it. Reset it with npm run password:reset. Under Compose the reset is docker compose exec api npm run password:reset.',
       'The Compose health wait polls /health with curl. If curl is missing on the host, it runs curl inside the api container with docker compose exec. That wait does not call host Node.',
       'The Compose install runs doctor inside the api container with docker compose exec, with or without Node on the host. That check does not call host Node, npm, or npx. On Compose it checks MC_API_PORT, MC_WEB_PORT, MC_DB_PORT, and MC_REMOTE_PORT, and it names a missing, stopped, or paused web service the same way as db and api.',
       'The README opens with that installer on one line. From a directory that is not this checkout, that line clones into mission-control and runs bash install.sh.',
       'CI runs this installer with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker.',
       'Before Compose starts, the installer creates `data/docs` as the user running the script. That user can delete the checkout. `npm run seed:demo` on the host writes sample docs as that same user.',
       'On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails.',
-      'A second run keeps the existing `.env`. It fills a missing dashboard password or session secret and does not replace other values.',
+      'A second run keeps the existing `.env`. It fills a missing dashboard password or session secret and does not replace other values. It does not print a password that is already set.',
       'When the openclaw command is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that timer is not available. macOS uses launchd. Remove it with `bash install.sh --uninstall-schedule`.',
     ],
     commands: [
@@ -150,7 +150,7 @@ export const STEP_DATA: ConnectStep[] = [
       },
       {
         name: 'DASHBOARD_PASSWORD_HASH',
-        desc: 'scrypt hash of the dashboard password. `bash install.sh` writes it and prints the password once. The file stores the hash only. Leave it blank on a loopback `npm run dev` and the dashboard stays open. Compose requires it because the API sees the Docker network, not loopback.',
+        desc: 'scrypt hash of the dashboard password. `bash install.sh` writes it and prints the password once, in the final summary. The file stores the hash only. A second run does not print or change it. `npm run password:reset` sets a new one and revokes every session. Under Compose that command is `docker compose exec api npm run password:reset`. Leave it blank on a loopback `npm run dev` and the dashboard stays open. Compose requires it because the API sees the Docker network, not loopback.',
       },
       {
         name: 'SESSION_SECRET',
@@ -212,7 +212,7 @@ export const STEP_DATA: ConnectStep[] = [
       `Open \`http://localhost:${WEB_PORT}/#/tasks\`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.`,
       'The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent\'s own name, then confirms the detected provider. Skip finishes that open. Change each one later under System, then Settings. Crew seats are saved by agent id. Open Tasks for the board and System for health.',
       'Health on this same origin shows uptime, client count, and database state. Empty states show actions.',
-      'Dot stays red? The API is down, or this browser has no session. On Compose, sign in with the password the installer printed.',
+      'Dot stays red? The API is down, or this browser has no session. On Compose, sign in with the password from install. Reset it with docker compose exec api npm run password:reset. This install asks on this machine too.',
     ],
     probe: 'health',
     confirmable: false,

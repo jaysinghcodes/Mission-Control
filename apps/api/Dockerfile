@@ -42,6 +42,9 @@ COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 # Loopback only. Under Compose: docker compose exec api npm run login:reset
 COPY --from=build /app/apps/api/scripts/login-reset.mjs ./apps/api/scripts/login-reset.mjs
+# Writes the session file. Under Compose: docker compose exec api npm run password:reset
+COPY --from=build /app/apps/api/scripts/password-reset.mjs ./apps/api/scripts/password-reset.mjs
+COPY --from=build /app/apps/api/src/load-env.js ./apps/api/src/load-env.js
 # Compose install runs doctor here so the host does not need Node.
 # Runtime workdir is /app/apps/api, so the command is: node scripts/doctor.mjs
 COPY --from=build /app/scripts/doctor.mjs ./apps/api/scripts/doctor.mjs

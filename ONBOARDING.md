@@ -12,7 +12,7 @@ Without OpenClaw, `npm run seed:demo` fills sample data and the task board still
 
 The web app uses hash routes. Open `http://localhost:5173/#/tasks`. `/` redirects there. A URL with no `#` is not a client route.
 
-Docker Compose is the default. The browser uses one port. The API loads the root `.env` and runs `prisma migrate deploy` on boot. The one command is `bash install.sh` from the repo root, or the curl one liner in the README. It writes a random `INGEST_TOKEN`, a dashboard password hash, and a session secret into `.env` when that file is missing, starts the stack, runs doctor, and prints the URL. It prints the dashboard password once and does not print the ingest token. A plain second run leaves `.env` unchanged. `DATABASE_URL` on a new file uses the resolved `MC_DB_PORT` (the shell, then `.env`, then 5432). A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. Tokens and secrets are not rotated. If the hash or the session secret is missing, that run fills only the missing one. If Docker is missing, the script says so and uses Node.js 20.17 or later and Postgres 16. Docker installs do not need Node on the host. Doctor on that path runs inside the api container. Do not invent a second install.
+Docker Compose is the default. The browser uses one port. The API loads the root `.env` and runs `prisma migrate deploy` on boot. The one command is `bash install.sh` from the repo root, or the curl one liner in the README. It writes a random `INGEST_TOKEN`, a dashboard password hash, and a session secret into `.env` when that file is missing, starts the stack, runs doctor, and prints the URL. It prints the dashboard password once and does not print the ingest token. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. `DATABASE_URL` on a new file uses the resolved `MC_DB_PORT` (the shell, then `.env`, then 5432). A later run updates that URL only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. Tokens and secrets are not rotated. If the hash or the session secret is missing, that run fills only the missing one. If Docker is missing, the script says so and uses Node.js 20.17 or later and Postgres 16. Docker installs do not need Node on the host. Doctor on that path runs inside the api container. Do not invent a second install.
 
 Guide the operator one step at a time.
 
@@ -42,7 +42,7 @@ cd mission-control
 bash install.sh
 ```
 
-That writes the ingest token and dashboard login values when `.env` is missing, starts the stack, runs doctor, and prints the URL. The password is printed once. A plain second run leaves `.env` unchanged. A later run updates `DATABASE_URL` only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. Do not print the token or the password hash. Tell the operator the token lives in `.env`.
+That writes the ingest token and dashboard login values when `.env` is missing, starts the stack, runs doctor, and prints the URL. The password is printed once. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. A later run updates `DATABASE_URL` only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. Do not print the token or the password hash. Tell the operator the token lives in `.env`.
 
 If `openclaw` is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The interval comes from `MC_BRIDGE_INTERVAL_SECONDS` (default 300). Remove it with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer says so and continues. `npm run seed:demo` still works.
 
@@ -73,7 +73,7 @@ Walk each variable. Ask the operator for real values. Do not invent one.
 
 ### Step 4. Start the stack
 
-`bash install.sh` already starts the stack. Running it again is safe. A plain second run leaves `.env` unchanged. It updates a stock `DATABASE_URL` when a new `MC_DB_PORT` is passed, and it leaves a custom URL as is. Default, with Docker. Those commands do not load sample data. Leave `VITE_API_URL` unset. The browser uses port 5173, and nginx proxies `/api` and `/socket.io`.
+`bash install.sh` already starts the stack. Running it again is safe. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. It updates a stock `DATABASE_URL` when a new `MC_DB_PORT` is passed, and it leaves a custom URL as is. Default, with Docker. Those commands do not load sample data. Leave `VITE_API_URL` unset. The browser uses port 5173, and nginx proxies `/api` and `/socket.io`.
 
 ```sh
 docker compose up -d --build

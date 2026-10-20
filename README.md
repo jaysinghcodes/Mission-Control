@@ -32,7 +32,7 @@ The dashboard does not pick a vendor. The bridge reports the provider and model 
 
 A reported `costUsd` wins, including 0. A provider marked local is $0.00. `config/prices.local.json` is gitignored and merged on each read, so a price edit does not need a rebuild. The field tables are in [docs/API.md](docs/API.md#47-models-and-spend).
 
-**Security.** Login is required when the caller is not on loopback. Compose always asks, because the API sees the Docker network. The installer prints the password once. SSH uses the owner port (default 5173). Cloudflare Tunnel and Tailscale Serve use tunnel port 3011 (`MC_REMOTE_PORT`). The laptop steps are in [docs/REMOTE.md](docs/REMOTE.md). Agent ingest still uses the `x-ingest-token` header when `INGEST_TOKEN` is set. That split is issue 36. The long note is [docs/SECURITY.md](docs/SECURITY.md).
+**Security.** Login is required when the caller is not on loopback. Compose always asks, because the API sees the Docker network. The installer ends with the URL and, on the first install, the password. A second run does not print or change that password. `npm run password:reset` writes a new hash to the session file, prints the password once, and revokes every session. There is no HTTP route for that reset. Under Compose, `bash install.sh` sets `MC_INSTALL_MODE=compose`, and a host `npm run password:reset` runs `docker compose exec api npm run password:reset` inside the api container. SSH uses the owner port (default 5173). Cloudflare Tunnel and Tailscale Serve use tunnel port 3011 (`MC_REMOTE_PORT`). The laptop steps are in [docs/REMOTE.md](docs/REMOTE.md). Agent ingest still uses the `x-ingest-token` header when `INGEST_TOKEN` is set. That split is issue 36. The long note is [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Screenshots
 
@@ -96,7 +96,21 @@ Then open the URL the script prints. The default is **http://localhost:5173/#/ta
 
 OpenClaw is optional. The command above does not start the OpenClaw gateway. A fresh setup does not load sample data. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. After `npm ci`, `npm run seed:demo` writes the sample bots, tickets, and usage in the sample shots above, and it does not need OpenClaw. `npm run seed:clear` deletes only those sample rows. `npm run doctor` checks the local setup. On Compose it checks `MC_API_PORT`, `MC_WEB_PORT`, `MC_DB_PORT`, and `MC_REMOTE_PORT`, and it names a missing, stopped, or paused web service the same way as db and api. A missing OpenClaw command does not fail that command.
 
-`bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes a random `INGEST_TOKEN`, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. The password is printed once. The file stores only the hash. A second run keeps values already in `.env`. The script does not print the ingest token or the session secret.
+`bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes a random `INGEST_TOKEN`, plus `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. Long build output goes to `install.log`. The screen shows one progress line and names that file. The run ends with the URL, the password on the first install, and the reset command. On Compose the summary names the tunnel port. On the native path that line points at docs/REMOTE.md, because nothing listens on the tunnel port. A second run does not print or change the password. The file stores only the hash. A second run keeps values already in `.env`. The script does not print the ingest token or the session secret.
+
+Reset a lost or shared password from the checkout:
+
+```bash
+npm run password:reset
+```
+
+Under Compose, run this on the host. npm runs inside the api container. The host does not need Node.
+
+```bash
+docker compose exec api npm run password:reset
+```
+
+The command prints the new password once and revokes every session. It prints that password only after the new hash is read back and every session is revoked. `bash install.sh` writes `MC_INSTALL_MODE=compose` or `MC_INSTALL_MODE=native` in `.env`. On compose, a host `npm run password:reset` runs `docker compose exec api npm run password:reset` and does not write a host file. If the api is not running, or Docker cannot run that command, it exits nonzero and tells you to run `docker compose up -d` first.
 
 When the `openclaw` command is on PATH, the installer adds a bridge schedule and names the scheduler it used. Remove only that schedule with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer prints a skip line and continues.
 
@@ -246,6 +260,10 @@ Tasks, projects, pipeline, memory, docs, team, custom tools, Office, Calendar, A
 Shipped: the pages in the table above, `POST /events`, idempotent `seed:demo` and `seed:clear`, and the optional `bridge/` sync.
 
 Still open: there is no dashboard form that adds a device. `GET /usage?period=30d` is not a window and stays empty. Live provider balances are not in this build.
+
+## Known limitations
+
+Anyone holding the shared ingest token can name any agent as the actor in Activity. Per agent tokens are planned (#104).
 
 ## Security notes
 

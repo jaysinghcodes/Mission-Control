@@ -17,6 +17,7 @@
     "seed:demo": "npm run seed:demo --workspace api",
     "seed:clear": "npm run seed:clear --workspace api",
     "login:reset": "npm run login:reset --workspace api",
+    "password:reset": "npm run password:reset --workspace api",
     "doctor": "node scripts/doctor.mjs"
   },
   "devDependencies": {

@@ -4,7 +4,7 @@ A laptop reaches a VPS install in three ways. All three are free. OpenClaw is op
 
 Run the tunnel program on the VPS. Compose publishes the owner port and the tunnel port on `127.0.0.1` only. Point each program at that address. Do not publish port 3011 on a public interface.
 
-`bash install.sh` prints the owner URL and the tunnel port. The owner port is `MC_WEB_PORT` (default 5173). The tunnel port is `MC_REMOTE_PORT` (default 3011). Use `127.0.0.1`, not a name that might resolve to another address. The published sockets are IPv4 loopback only.
+On Compose, `bash install.sh` prints the owner URL and the tunnel port. On the native path it prints the owner URL and a pointer to this file, because that path does not listen on the tunnel port. The owner port is `MC_WEB_PORT` (default 5173). The Compose tunnel port is `MC_REMOTE_PORT` (default 3011). Use `127.0.0.1`, not a name that might resolve to another address. The published sockets are IPv4 loopback only.
 
 Leave `TRUSTED_PROXY` unset. These paths do not set it. The tunnel listener does not read it.
 
@@ -90,6 +90,22 @@ docker compose exec api npm run login:reset
 That command clears every bucket. It does not restore a revoked session. Restarting the API clears the wait too.
 
 On a tunnel other than Cloudflare, a client that sends a new spoofed `CF-Connecting-IP` on each try gets a new bucket and avoids the lockout. Use Cloudflare Tunnel, or a long password.
+
+## Password reset
+
+`npm run password:reset` writes a new scrypt hash to the session file, prints the password once, and revokes every session. Old cookies stop working, including after a restart. There is no HTTP route for this reset. Run it from the checkout on a native install:
+
+```bash
+npm run password:reset
+```
+
+Under Compose the session file is on the mc-auth volume inside the api container. `bash install.sh` sets `MC_INSTALL_MODE=compose` in `.env`. A host `npm run password:reset` then runs only inside the api container:
+
+```bash
+docker compose exec api npm run password:reset
+```
+
+That does not call Node on the host and it does not write a host file. If the api is not running, or Docker cannot run that command, the host command exits nonzero and tells you to run `docker compose up -d` first. The new password is printed only after the new hash is read back and every session is revoked. The installer prints the reset command in its last lines. The password itself is printed only on the first install.
 
 ## Gateway status
 

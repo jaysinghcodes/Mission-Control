@@ -144,7 +144,11 @@ describe('dashboard session', () => {
       .get('/auth/session')
       .set('x-test-peer', REMOTE);
     expect(status.status).toBe(200);
-    expect(status.body).toEqual({ authenticated: false, loginRequired: true });
+    expect(status.body).toEqual({
+      authenticated: false,
+      loginRequired: true,
+      compose: false,
+    });
 
     const login = await request(app.getHttpServer())
       .post('/auth/login')
@@ -168,6 +172,7 @@ describe('dashboard session', () => {
     expect(loopback.body).toEqual({
       authenticated: true,
       loginRequired: false,
+      compose: false,
     });
 
     const logout = await request(app.getHttpServer())
@@ -410,6 +415,7 @@ describe('dashboard session', () => {
       expect(status.body).toEqual({
         authenticated: false,
         loginRequired: true,
+        compose: false,
       });
       for (let i = 0; i < 5; i += 1) {
         const wrong = await request(app.getHttpServer())

@@ -47,6 +47,65 @@ function outputOf(result) {
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`
 }
 
+const SUMMARY_INGEST =
+  'INGEST_TOKEN is in .env. The dashboard password is printed once when it is created.'
+const SUMMARY_OPENCLAW = 'OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md.'
+const SUMMARY_REMOTE = 'Remote access is in docs/REMOTE.md.'
+const SUMMARY_TUNNEL =
+  /^Tunnel port \d+\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL below\.$/
+
+function summaryFrom(text) {
+  const lines = text.replace(/\s+$/, '').split('\n')
+  let start = -1
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].startsWith('Tunnel port ') || lines[i] === SUMMARY_REMOTE) {
+      start = i
+      break
+    }
+  }
+  assert.ok(start >= 0, text)
+  return lines.slice(start)
+}
+
+function assertSummaryLead(summary, native) {
+  if (native) {
+    assert.equal(summary[0], SUMMARY_REMOTE)
+    assert.equal(summary.some((line) => line.startsWith('Tunnel port ')), false)
+  } else {
+    assert.match(summary[0], SUMMARY_TUNNEL)
+  }
+}
+
+function assertFirstInstallSummary(text, { reset, url, native = false }) {
+  const summary = summaryFrom(text)
+  assert.ok(summary.length <= 7, summary.join('\n'))
+  assert.equal(summary.length, 6, summary.join('\n'))
+  assertSummaryLead(summary, native)
+  assert.equal(summary[1], SUMMARY_INGEST)
+  assert.equal(summary[2], SUMMARY_OPENCLAW)
+  assert.equal(summary[3], url)
+  assert.match(summary[4], /^Dashboard password, shown once: \S+$/)
+  assert.equal(summary[5], `Reset the dashboard password with: ${reset}`)
+  assert.equal(summary.at(-3), url)
+  assert.equal(summary.at(-2), summary[4])
+  assert.equal(summary.at(-1), summary[5])
+  assert.equal(text.includes('This install does not start the OpenClaw gateway'), false)
+}
+
+function assertRerunSummary(text, { reset, url, native = false }) {
+  const summary = summaryFrom(text)
+  assert.ok(summary.length <= 7, summary.join('\n'))
+  assert.equal(summary.length, 5, summary.join('\n'))
+  assertSummaryLead(summary, native)
+  assert.equal(summary[1], SUMMARY_INGEST)
+  assert.equal(summary[2], SUMMARY_OPENCLAW)
+  assert.equal(summary[3], url)
+  assert.equal(summary[4], `Reset the dashboard password with: ${reset}`)
+  assert.equal(summary.at(-2), url)
+  assert.equal(summary.at(-1), summary[4])
+  assert.equal(text.includes('Dashboard password, shown once:'), false)
+}
+
 function assignments(text) {
   const out = {}
   for (const line of String(text).split(/\n/)) {
@@ -60,6 +119,10 @@ function nonTokenLines(text) {
   return String(text)
     .split(/\n/)
     .filter((line) => !/^(?:export\s+)?(INGEST_TOKEN|SOCKET_TOKEN|DASHBOARD_PASSWORD_HASH|SESSION_SECRET)=/.test(line))
+}
+
+function linesIgnoringInstallMode(text) {
+  return nonTokenLines(text).filter((line) => !/^(?:#\s*)?MC_INSTALL_MODE=/.test(line))
 }
 
 function pathWithout(names) {
@@ -133,6 +196,9 @@ if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  if [ -n "\${DOCKER_STUB_NOISE:-}" ]; then
+    echo "compose build output \${DOCKER_STUB_NOISE}"
+  fi
   if [ "\${DOCKER_STUB_BIND:-}" = "1" ]; then
     echo "listen tcp 127.0.0.1:\${DOCKER_STUB_BIND_PORT}: bind: address already in use" >&2
     exit 1
@@ -364,6 +430,7 @@ function freshDir() {
   copyFixture(path.join(dir, 'repo'))
   dockerStub(bin)
   writeFileSync(log, '')
+  writeFileSync(path.join(dir, 'repo', 'install.log'), 'stale build output from an older run\n')
   return {
     dir,
     repo: path.join(dir, 'repo'),
@@ -445,9 +512,11 @@ test('a fresh run writes unique random tokens, calls compose, and prints the URL
       if (key === 'INGEST_TOKEN' || key === 'SOCKET_TOKEN' || key === 'DASHBOARD_PASSWORD_HASH' || key === 'SESSION_SECRET') continue
       assert.equal(envA[key], example[key], key)
     }
+    assert.equal(envA.MC_INSTALL_MODE, 'compose')
+    assert.equal(envB.MC_INSTALL_MODE, 'compose')
     assert.deepEqual(
-      nonTokenLines(readFileSync(path.join(first.repo, '.env'), 'utf8')),
-      nonTokenLines(readFileSync(path.join(root, '.env.example'), 'utf8')),
+      linesIgnoringInstallMode(readFileSync(path.join(first.repo, '.env'), 'utf8')),
+      linesIgnoringInstallMode(readFileSync(path.join(root, '.env.example'), 'utf8')),
     )
     assert.equal(statSync(path.join(first.repo, '.env')).mode & 0o777, 0o600)
     for (const text of [textA, textB]) {
@@ -531,6 +600,37 @@ test('a docs path that is a file stops the installer', () => {
   }
 })
 
+test('a rerun writes a missing install marker and leaves tokens unchanged', () => {
+  const fx = freshDir()
+  try {
+    const envPath = path.join(fx.repo, '.env')
+    const token = 'ab'.repeat(24)
+    const hash = 'scrypt:16384:8:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    const secret = 'ef'.repeat(32)
+    writeFileSync(
+      envPath,
+      [`INGEST_TOKEN=${token}`, `DASHBOARD_PASSWORD_HASH=${hash}`, `SESSION_SECRET=${secret}`, 'PORT=3000', ''].join('\n'),
+      { mode: 0o640 },
+    )
+    const result = runInstall(fx.repo, fx.env)
+    const text = outputOf(result)
+    const written = readFileSync(envPath, 'utf8')
+    const env = assignments(written)
+    assert.equal(env.MC_INSTALL_MODE, 'compose')
+    assert.equal(env.INGEST_TOKEN, token)
+    assert.equal(env.DASHBOARD_PASSWORD_HASH, hash)
+    assert.equal(env.SESSION_SECRET, secret)
+    assert.match(text, /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.equal(statSync(envPath).mode & 0o777, 0o640)
+    const before = readFileSync(envPath)
+    const second = runInstall(fx.repo, fx.env)
+    assert.deepEqual(readFileSync(envPath), before)
+    assert.match(outputOf(second), /Keeping the existing \.env\. Tokens and other values were not changed\./)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
 test('a rerun keeps existing tokens and every other .env value', () => {
   const fx = freshDir()
   try {
@@ -543,6 +643,8 @@ test('a rerun keeps existing tokens and every other .env value', () => {
     const second = runInstall(fx.repo, fx.env)
     const text = outputOf(second)
     assert.match(text, /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.doesNotMatch(text, /Dashboard password, shown once:/)
+    assert.equal(text.includes(assignments(before.toString('utf8')).DASHBOARD_PASSWORD_HASH), false)
     assert.deepEqual(readFileSync(envPath), before)
     assert.equal(statSync(envPath).mode & 0o777, 0o640)
     assert.equal(text.includes(assignments(before.toString('utf8')).INGEST_TOKEN), false)
@@ -551,6 +653,56 @@ test('a rerun keeps existing tokens and every other .env value', () => {
     assert.doesNotMatch(text, /Created .+ for the Compose docs bind\./)
     assert.equal(existsSync(path.join(fx.repo, 'data', 'docs')), true)
     assert.equal(mode, 0o600)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('a fresh install ends with the URL and password, and a rerun does not print or change it', () => {
+  const fx = freshDir()
+  try {
+    const first = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_NOISE: 'marker-113' })
+    const text = outputOf(first)
+    const envPath = path.join(fx.repo, '.env')
+    const env = assignments(readFileSync(envPath, 'utf8'))
+    const before = readFileSync(envPath)
+    const lines = text.replace(/\s+$/, '').split('\n')
+    assertFirstInstallSummary(text, {
+      reset: 'docker compose exec api npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
+    const password = lines.at(-2)
+    const reset = lines.at(-1)
+    const url = lines.at(-3)
+    assert.equal(text.split('Dashboard password, shown once:').length - 1, 1)
+    const shown = password.match(/Dashboard password, shown once: (\S+)/)
+    assert.ok(shown)
+    assert.equal(passwordMatchesHash(shown[1], env.DASHBOARD_PASSWORD_HASH), true)
+    assert.match(text, /Building\. The log is .+\/install\.log\./)
+    const buildLog = readFileSync(path.join(fx.repo, 'install.log'), 'utf8')
+    assert.match(buildLog, /compose build output marker-113/)
+    assert.equal(buildLog.includes('stale build output from an older run'), false)
+    assert.equal(text.includes('compose build output marker-113'), false)
+    assert.equal(text.includes(env.DASHBOARD_PASSWORD_HASH), false)
+    assert.equal(text.includes(env.SESSION_SECRET), false)
+    const second = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_NOISE: 'marker-113-rerun' })
+    const again = outputOf(second)
+    const againLines = again.replace(/\s+$/, '').split('\n')
+    assertRerunSummary(again, {
+      reset: 'docker compose exec api npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
+    assert.match(againLines.at(-2) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
+    assert.equal(againLines.at(-1), 'Reset the dashboard password with: docker compose exec api npm run password:reset')
+    assert.doesNotMatch(again, /Dashboard password, shown once:/)
+    assert.equal(again.includes(shown[1]), false)
+    assert.deepEqual(readFileSync(envPath), before)
+    assert.match(again, /Keeping the existing \.env\. Tokens and other values were not changed\./)
+    assert.match(again, /Building\. The log is .+\/install\.log\./)
+    const rerunLog = readFileSync(path.join(fx.repo, 'install.log'), 'utf8')
+    assert.match(rerunLog, /compose build output marker-113-rerun/)
+    assert.equal(rerunLog.includes('stale build output from an older run'), false)
+    assert.equal(rerunLog.split('marker-113').length - 1, 1)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
   }
@@ -822,13 +974,33 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     assert.doesNotMatch(text, /is not a supported native runtime/)
     assert.doesNotMatch(text, /The API is already up/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
+    assertFirstInstallSummary(text, {
+      reset: 'npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+      native: true,
+    })
+    const second = runInstall(fx.repo, {
+      ...fx.env,
+      PATH: fx.env.PATH,
+      NATIVE_LOG: nativeLog,
+      MC_INSTALL_READY_SECONDS: '0',
+    })
+    assertRerunSummary(outputOf(second), {
+      reset: 'npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+      native: true,
+    })
+    const nativeLines = text.replace(/\s+$/, '').split('\n')
+    assert.doesNotMatch(nativeLines.at(-1) ?? '', /docker compose exec/)
     assertReadableDoctor(text)
     const ci = log.indexOf('npm ci')
     const generate = log.indexOf('npx prisma generate')
     const migrate = log.indexOf('npx prisma migrate deploy')
     const dev = log.indexOf('npm run dev')
     assert.ok(ci >= 0 && generate > ci && migrate > generate && dev > migrate, log)
-    assert.equal(text.includes(assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8')).INGEST_TOKEN), false)
+    const nativeEnv = assignments(readFileSync(path.join(fx.repo, '.env'), 'utf8'))
+    assert.equal(nativeEnv.MC_INSTALL_MODE, 'native')
+    assert.equal(text.includes(nativeEnv.INGEST_TOKEN), false)
   } finally {
     plain?.child.kill()
     rmSync(fx.dir, { recursive: true, force: true })
@@ -948,7 +1120,8 @@ test('docker install waits for a custom MC_API_PORT and doctor exits 0 without h
     assert.match(text, /pass health: The health check says the database is up\./)
     assert.equal(/\bfail /.test(text), false, text)
     assert.doesNotMatch(text, /^npm ci$/m)
-    assert.match(text, /Run npm ci in the checkout before npm run seed:demo or npm run seed:clear\. Without that install, prisma is not found and the seed command fails\./)
+    assert.match(text, /OpenClaw is optional\. See docs\/OPENCLAW_ONBOARDING\.md\./)
+    assert.doesNotMatch(text, /Run npm ci in the checkout before npm run seed:demo/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
     assert.equal(existsSync(path.join(fx.repo, 'node_modules')), false)
   } finally {
@@ -1018,6 +1191,7 @@ test('Run B: ports already in .env are kept and used', async () => {
       MC_API_PORT: '3881',
       MC_WEB_PORT: '15881',
       MC_DB_PORT: '15581',
+      MC_INSTALL_MODE: 'compose',
     })
     const before = readFileSync(envFile)
     const result = runInstall(fx.repo, {
@@ -1120,6 +1294,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@db.example.internal:6543/otherdb?sslmode=require',
       'PORT=3000',
+      'MC_INSTALL_MODE=compose',
       '',
     ].join('\n')
     writeFileSync(envPath, external)
@@ -1151,6 +1326,7 @@ test('a rerun leaves an external DATABASE_URL and a URL with no port unchanged',
       'MC_DB_PORT=15494',
       'DATABASE_URL=postgresql://app:pw@localhost/otherdb',
       'PORT=3000',
+      'MC_INSTALL_MODE=compose',
       '',
     ].join('\n')
     writeFileSync(envPath, portless)
@@ -1189,7 +1365,11 @@ test('default ports wait on 3000 and print localhost:5173', async () => {
     assert.match(text, /Waiting for the API health check on port 3000\./)
     assert.match(text, /pass ports: Port 3000 is already running\./)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
-    assert.match(text, /Tunnel port 3011\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL above\./)
+    assert.match(text, /Tunnel port 3011\. Cloudflare Tunnel and Tailscale Serve use that port\. SSH uses the local port in the URL below\./)
+    assertFirstInstallSummary(text, {
+      reset: 'docker compose exec api npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
     assert.doesNotMatch(written, /^MC_API_PORT=/m)
     assert.doesNotMatch(written, /^MC_WEB_PORT=/m)
     assert.doesNotMatch(written, /^MC_DB_PORT=/m)
@@ -1614,6 +1794,7 @@ test('bridge schedule: shell interval and register win over .env', () => {
       'MC_BRIDGE_REGISTER=1',
       'PORT=3000',
       'HOST=127.0.0.1',
+      'MC_INSTALL_MODE=compose',
       '',
     ].join('\n')
     writeFileSync(envFile, custom, { mode: 0o600 })
