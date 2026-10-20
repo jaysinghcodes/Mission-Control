@@ -43,6 +43,9 @@ export interface ConnectStep {
   confirmable: boolean // static steps get the "Mark done. I did this" chip
 }
 
+/** The install internals that step 2 leaves out: env keys, ports, doctor, the bridge schedule, and CI. */
+export const INSTALL_GUIDE = 'https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/INSTALL.md'
+
 /** SSH to the configured owner port. The browser stays on that port. */
 export function sshTunnel(port: string): string {
   return `ssh -L ${port}:127.0.0.1:${port} ubuntu@<your-server-ip>`
@@ -110,21 +113,16 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'One command writes a random ingest token and a dashboard password, starts the stack, runs doctor, and ends with the URL. Build output goes to install.log. The password is shown once, on the first install. A second run does not print or change it. Reset it with npm run password:reset. Under Compose the reset is docker compose exec api npm run password:reset.',
-      'The Compose health wait polls /health with curl. If curl is missing on the host, it runs curl inside the api container with docker compose exec. That wait does not call host Node.',
-      'The Compose install runs doctor inside the api container with docker compose exec, with or without Node on the host. That check does not call host Node, npm, or npx. On Compose it checks MC_API_PORT, MC_WEB_PORT, MC_DB_PORT, and MC_REMOTE_PORT, and it names a missing, stopped, or paused web service the same way as db and api. Each problem prints on its own line.',
-      'The README opens with that installer on one line. From a directory that is not this checkout, that line clones into mission-control and runs bash install.sh.',
-      'CI runs this installer with Docker Compose on Ubuntu, and on the native path on Ubuntu and macOS. The macOS runner does not use Docker.',
-      'Before Compose starts, the installer creates `data/docs` as the user running the script. That user can delete the checkout. `npm run seed:demo` on the host writes sample docs as that same user.',
-      'On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails.',
-      'A second run keeps the existing `.env`. It fills a missing dashboard password or session secret and does not replace other values. It does not print a password that is already set.',
-      'When the openclaw command is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that timer is not available. macOS uses launchd. Remove it with `bash install.sh --uninstall-schedule`.',
+      'The installer sets everything up, starts the stack, and prints the address and the dashboard password. The password is shown once, on the first install.',
     ],
     commands: [
       {
         label: 'Clone and install',
-        cmd: 'git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control && cd mission-control && bash install.sh',
+        cmd: 'git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control\ncd mission-control\nbash install.sh',
       },
+    ],
+    links: [
+      { label: 'How install works', to: INSTALL_GUIDE, external: true },
     ],
     confirmable: true,
   },
@@ -297,7 +295,7 @@ export function fmt(text: string): ReactNode[] {
     if (!seg) continue
     if (seg.startsWith('`') && seg.endsWith('`')) {
       out.push(
-        <code key={key++} className="rounded bg-mc-inner px-1 py-px font-mono text-[12px] text-mc-text">
+        <code key={key++} className="rounded bg-mc-inner px-1 py-px font-mono text-[12px] text-mc-text [overflow-wrap:anywhere]">
           {seg.slice(1, -1)}
         </code>,
       )
@@ -331,7 +329,7 @@ export function CodeBlock({ cmd, label }: { cmd: string; label?: string }) {
     <div className="mt-3">
       {label && <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-mc-faint">{label}</div>}
       <div className="relative">
-        <pre className="whitespace-pre-wrap overflow-x-auto rounded-lg bg-mc-inner p-4 pr-16 font-mono text-[13px] leading-relaxed text-mc-text">
+        <pre className="whitespace-pre-wrap rounded-lg bg-mc-inner p-4 pr-16 font-mono text-[13px] leading-relaxed text-mc-text [overflow-wrap:anywhere]">
           {cmd}
         </pre>
         {canCopy && (
@@ -375,7 +373,7 @@ export function SecretsCallout({ vars }: { vars: StepVar[] }) {
         <div className="mt-2.5 space-y-2.5">
           {vars.map((v) => (
             <div key={v.name}>
-              <div className="font-mono text-[12.5px] font-semibold text-mc-text">{v.name}</div>
+              <div className="font-mono text-[12.5px] font-semibold text-mc-text [overflow-wrap:anywhere]">{v.name}</div>
               <p className="mt-0.5 text-[12px] leading-relaxed text-mc-sub">{fmt(v.desc)}</p>
             </div>
           ))}
