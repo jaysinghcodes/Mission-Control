@@ -500,7 +500,8 @@ compose_dashboard_secrets() {
       return 0
     fi
   fi
-  echo "Could not generate a dashboard password. Install OpenSSL 3 or Python 3, then run bash install.sh again." >&2
+  echo "Could not generate a dashboard password. Install OpenSSL 3 or Python 3, then run the installer again with:" >&2
+  echo "  bash install.sh" >&2
   return 1
 }
 
@@ -705,7 +706,8 @@ generate_dashboard_secrets() {
   if accept_dashboard_secrets "$raw"; then
     return 0
   fi
-  echo "Could not generate a dashboard password. Install Node.js or Python 3, then run bash install.sh again." >&2
+  echo "Could not generate a dashboard password. Install Node.js or Python 3, then run the installer again with:" >&2
+  echo "  bash install.sh" >&2
   return 1
 }
 
@@ -890,7 +892,8 @@ ensure_repo_bind() {
   if [[ -d "$dir" ]]; then
     uid="$(dir_uid "$dir")"
     if [[ "$uid" != "$(id -u)" && "$(id -u)" != "0" ]]; then
-      echo "Directory ${dir} is owned by uid ${uid}. Remove it as that user, then run bash install.sh again." >&2
+      echo "Directory ${dir} is owned by uid ${uid}. Remove it as that user, then run the installer again with:" >&2
+      echo "  bash install.sh" >&2
     fi
     return 0
   fi
@@ -899,7 +902,8 @@ ensure_repo_bind() {
     exit 1
   fi
   if ! mkdir -p "$dir"; then
-    echo "Could not create ${dir}. Create that directory as your user, then run bash install.sh again." >&2
+    echo "Could not create ${dir}. Create that directory as your user, then run the installer again with:" >&2
+    echo "  bash install.sh" >&2
     exit 1
   fi
   if [[ "$key" == "DOCS_ROOT" ]]; then
@@ -1013,11 +1017,13 @@ require_postgres_16() {
   local port ver
   port="$(db_port)"
   if ! command -v pg_isready >/dev/null 2>&1; then
-    echo "pg_isready is not on PATH. The native path needs Postgres 16. Install the Postgres 16 client tools, then run bash install.sh again."
+    echo "pg_isready is not on PATH. The native path needs Postgres 16. Install the Postgres 16 client tools, then run the installer again with:"
+    echo "  bash install.sh"
     exit 1
   fi
   if ! pg_isready -h 127.0.0.1 -p "$port" >/dev/null 2>&1; then
-    echo "Postgres is not accepting connections on 127.0.0.1:${port}. The native path needs Postgres 16. Start it, then run bash install.sh again."
+    echo "Postgres is not accepting connections on 127.0.0.1:${port}. The native path needs Postgres 16. Start it, then run the installer again with:"
+    echo "  bash install.sh"
     exit 1
   fi
   if ! command -v psql >/dev/null 2>&1; then
@@ -1521,7 +1527,8 @@ install_cron_schedule() {
     return 0
   fi
   rm -f "$tmp"
-  echo "Installed the bridge schedule with cron. It runs every $(bridge_interval) seconds, rounded up to whole minutes by cron. Remove it with: bash install.sh --uninstall-schedule"
+  echo "Installed the bridge schedule with cron. It runs every $(bridge_interval) seconds, rounded up to whole minutes by cron. Remove it with:"
+  echo "  bash install.sh --uninstall-schedule"
 }
 
 remove_systemd_units() {
@@ -1614,7 +1621,8 @@ install_systemd_schedule() {
   fi
   remove_cron_block
   remove_launchd_agent
-  echo "Installed the bridge schedule with a systemd user timer. It runs every $(bridge_interval) seconds. Remove it with: bash install.sh --uninstall-schedule"
+  echo "Installed the bridge schedule with a systemd user timer. It runs every $(bridge_interval) seconds. Remove it with:"
+  echo "  bash install.sh --uninstall-schedule"
 }
 
 remove_launchd_agent() {
@@ -1711,7 +1719,8 @@ install_launchd_schedule() {
   launchctl enable "${domain}/${label}" >/dev/null 2>&1 || true
   remove_cron_block
   remove_systemd_units
-  echo "Installed the bridge schedule with launchd. It runs every $(bridge_interval) seconds. Remove it with: bash install.sh --uninstall-schedule"
+  echo "Installed the bridge schedule with launchd. It runs every $(bridge_interval) seconds. Remove it with:"
+  echo "  bash install.sh --uninstall-schedule"
 }
 
 offer_starter() {
@@ -1750,7 +1759,8 @@ run_bridge_now() {
 install_bridge_schedule() {
   local script py scheduler
   if ! command -v openclaw >/dev/null 2>&1; then
-    echo "OpenClaw was not found on PATH. Skipping the bridge schedule. npm run seed:demo still fills sample data."
+    echo "OpenClaw was not found on PATH. Skipping the bridge schedule. Sample data does not need OpenClaw. Fill it with:"
+    echo "  npm run seed:demo"
     return 0
   fi
   script="$(bridge_script)"
@@ -1818,7 +1828,8 @@ print_install_summary() {
   if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
     echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
   fi
-  echo "Reset the dashboard password with: ${reset}"
+  echo "Reset the dashboard password with:"
+  echo "  ${reset}"
   MC_SUMMARY_PRINTED=1
 }
 
@@ -1870,12 +1881,16 @@ main() {
     shift
   fi
   if [[ $# -gt 0 ]]; then
-    echo "Unknown argument. Run bash install.sh to install, or bash install.sh --uninstall-schedule to remove the bridge schedule." >&2
+    echo "Unknown argument. Install with:" >&2
+    echo "  bash install.sh" >&2
+    echo "Remove the bridge schedule with:" >&2
+    echo "  bash install.sh --uninstall-schedule" >&2
     exit 1
   fi
   if ! enter_repo; then
     if [[ "$action" == "uninstall" ]]; then
-      echo "Run bash install.sh --uninstall-schedule from a Mission Control checkout." >&2
+      echo "Run this from a Mission Control checkout:" >&2
+      echo "  bash install.sh --uninstall-schedule" >&2
       exit 1
     fi
     clone_and_reexec
