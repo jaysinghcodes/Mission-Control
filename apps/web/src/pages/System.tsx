@@ -10,6 +10,7 @@ import { activityRailLine } from '../lib/activity-rail'
 import { pluralize } from '../lib/pluralize'
 import { providerLabel } from '../lib/provider-label'
 import { costSummary, costText, dayCostText, spendPhrase, type CostDay } from '../lib/cost'
+import { shortSha } from '../lib/git-sha'
 import { gatewayLine, systemHeadline, systemSummaryLead } from '../lib/gateway-status'
 import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
@@ -26,8 +27,9 @@ import CustomTools from './CustomTools'
  * "Showing 3 days of data so far") and only the days that were collected.
  * Dollars come from the price table unless OpenClaw reported a cost.
  * The header and the period cards use lib/cost.ts, the same cost display as
- * Usage. When any model has no price they show the known total and
- * "Price not set for some models".
+ * Usage. When some models are priced and some are not they show the known
+ * total and "Price not set for some models". With nothing priced they show
+ * "Price not set" alone.
  */
 
 interface HealthResp {
@@ -208,6 +210,7 @@ export default function System() {
     : 'Checking health…'
   const headline = systemHeadline(health.data ? health.data.status === 'ok' : null, sys.data?.gateway)
   const bridge = ingestFact(health.data?.lastIngestAt)
+  const gitSha = shortSha(health.data?.gitSha)
 
   const issue = (activity.data?.events ?? [])
     .map((event) => ({ event, line: activityRailLine(event, roster, [], [], naming) }))
@@ -271,7 +274,7 @@ export default function System() {
       <SoftCard className="mt-4 px-6 py-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Fact label="App version" value={shown(health.data?.version)} />
-          <Fact label="Git" value={shown(health.data?.gitSha)} wrap />
+          <Fact label="Git" value={gitSha.text} title={gitSha.title} />
           <Fact label="OpenClaw" value={shown(health.data?.openclawVersion)} wrap />
           <Fact label="Gateway" value={gateway.value} ok={gateway.ok} wrap />
         </div>
@@ -499,14 +502,28 @@ export default function System() {
   )
 }
 
-function Fact({ label, value, ok = true, wrap = false }: { label: string; value: string; ok?: boolean; wrap?: boolean }) {
+function Fact({
+  label,
+  value,
+  ok = true,
+  wrap = false,
+  title = null,
+}: {
+  label: string
+  value: string
+  ok?: boolean
+  wrap?: boolean
+  title?: string | null
+}) {
   return (
     <div className="min-w-[140px]">
       <div className="flex items-center gap-1.5 text-[12px] font-semibold text-mc-sub">
         <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-mc-green' : 'bg-mc-gray'}`} />
         {label}
       </div>
-      <div className={`mt-0.5 text-[13px] ${wrap ? 'break-all' : 'whitespace-nowrap'}`}>{value}</div>
+      <div className={`mt-0.5 text-[13px] ${wrap ? 'break-all' : 'whitespace-nowrap'}`} title={title ?? undefined}>
+        {value}
+      </div>
     </div>
   )
 }

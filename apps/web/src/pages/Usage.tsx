@@ -6,8 +6,9 @@ import { costSummary, costText } from '../lib/cost'
 /**
  * Cost so far. GET /usage prices tokens from config/prices.json.
  * A provider costUsd wins. Local providers are $0. Unknown models say
- * "Price not set". When any model has no price, the known total shows with
- * "Price not set for some models", the same note as the System header.
+ * "Price not set". When some models are priced and some are not, the known
+ * total shows with "Price not set for some models", the same note as the
+ * System header. With nothing priced the total is "Price not set" alone.
  * Formatting is lib/cost.ts. The page does not read a live balance.
  */
 

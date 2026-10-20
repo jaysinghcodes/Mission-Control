@@ -14,7 +14,7 @@ The gateway check is optional. Under Compose the bridge checks 127.0.0.1 and pos
 
 The bridge posts each agent provider and model from `~/.openclaw/openclaw.json`. When that file has no model, it runs `openclaw models list`. System shows those rows. With no bridge, the page says "No providers found yet. Run the bridge to detect them."
 
-Usage prices session tokens from `config/prices.json`. Copy a model into `config/prices.local.json` to change that price without a rebuild. A provider `costUsd` wins when OpenClaw reports one. Ollama costs $0.00. A model with no price shows `Price not set`. When any model in the period has no price, the System header and Usage show the known total and `Price not set for some models`. `deepseek-v4-flash` is priced in the shipped file.
+Usage prices session tokens from `config/prices.json`. Copy a model into `config/prices.local.json` to change that price without a rebuild. A provider `costUsd` wins when OpenClaw reports one. Ollama costs $0.00. A model with no price shows `Price not set`. When some models in the period are priced and others are not, the System header and Usage show the known total and `Price not set for some models`. When no model is priced, they show only `Price not set`. `deepseek-v4-flash` is priced in the shipped file.
 
 ## Report the URL
 
