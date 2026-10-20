@@ -5,6 +5,7 @@ import request from 'supertest';
 import { responseJson } from '../../test/lint-helpers';
 import { AppModule } from '../app.module';
 import { PrismaService } from '../prisma/prisma.service';
+import { API_STARTED_AT } from './gateway-status';
 
 interface GatewayBody {
   gateway: {
@@ -197,6 +198,36 @@ describe('GET /system gateway report', () => {
     const agedGateway = responseJson<GatewayBody>(aged).gateway;
     expect(agedGateway.state).toBe('unknown');
     expect(agedGateway.up).toBe(false);
+  });
+
+  it('shows Unknown for a report stored before this API started until the next report', async () => {
+    const now = Date.now();
+    await post({
+      up: true,
+      host: '127.0.0.1',
+      port: 18789,
+      checkedAt: now,
+      latencyMs: 2,
+    });
+    await prisma.activityEvent.updateMany({
+      where: { type: 'gateway.snapshot' },
+      data: { ts: new Date(API_STARTED_AT - 1000) },
+    });
+    const restarted = await request(app.getHttpServer()).get('/system');
+    const restartedGateway = responseJson<GatewayBody>(restarted).gateway;
+    expect(restartedGateway.state).toBe('unknown');
+    expect(restartedGateway.up).toBe(false);
+    expect(restartedGateway.source).toBe('bridge');
+
+    await post({
+      up: true,
+      host: '127.0.0.1',
+      port: 18789,
+      checkedAt: Date.now(),
+      latencyMs: 2,
+    });
+    const next = await request(app.getHttpServer()).get('/system');
+    expect(responseJson<GatewayBody>(next).gateway.state).toBe('up');
   });
 
   it('treats a max age of 0 as 10 minutes and keeps an explicit port on the bridge report', async () => {

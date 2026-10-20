@@ -1,4 +1,5 @@
 import {
+  API_STARTED_AT,
   DEFAULT_GATEWAY_MAX_AGE_MS,
   configuredGatewayPort,
   gatewayMaxAgeMs,
@@ -199,6 +200,73 @@ describe('gateway status', () => {
     );
     expect(staleOnArrival.state).toBe('unknown');
     expect(staleOnArrival.checkedAt).toBe(NOW - 600001);
+  });
+
+  it('shows Unknown for a report stored before the API process started', () => {
+    const started = NOW - 30_000;
+    const beforeStart = gatewayStatusFromReport(
+      {
+        up: true,
+        checkedAt: NOW - 60_000,
+        port: 18789,
+        receivedAt: started - 1,
+      },
+      NOW,
+      600000,
+      18789,
+      started,
+    );
+    expect(beforeStart.state).toBe('unknown');
+    expect(beforeStart.up).toBe(false);
+    expect(beforeStart.checkedAt).toBe(NOW - 60_000);
+
+    const afterStart = gatewayStatusFromReport(
+      { up: true, checkedAt: NOW - 60_000, port: 18789, receivedAt: started },
+      NOW,
+      600000,
+      18789,
+      started,
+    );
+    expect(afterStart.state).toBe('up');
+
+    const noRow = gatewayStatusFromReport(
+      { up: false, checkedAt: started - 1, port: 18789 },
+      NOW,
+      600000,
+      18789,
+      started,
+    );
+    expect(noRow.state).toBe('unknown');
+
+    const downAfterStart = gatewayStatusFromReport(
+      { up: false, checkedAt: NOW, port: 18789, receivedAt: NOW },
+      NOW,
+      600000,
+      18789,
+      started,
+    );
+    expect(downAfterStart.state).toBe('down');
+  });
+
+  it('still shows Unknown past 10 minutes when the API started earlier', () => {
+    const status = gatewayStatusFromReport(
+      {
+        up: true,
+        checkedAt: NOW - 600001,
+        port: 18789,
+        receivedAt: NOW - 600001,
+      },
+      NOW,
+      600000,
+      18789,
+      NOW - 86_400_000,
+    );
+    expect(status.state).toBe('unknown');
+  });
+
+  it('records the API start time once, at or before now', () => {
+    expect(API_STARTED_AT).toBeLessThanOrEqual(Date.now());
+    expect(Number.isFinite(API_STARTED_AT)).toBe(true);
   });
 
   it('does not call a bad report Down', () => {

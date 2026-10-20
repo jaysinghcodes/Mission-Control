@@ -111,12 +111,19 @@ def log(msg: str) -> None:
 OPENCLAW_CALLS: Dict[str, int] = {}
 
 
-def run_cli(argv: List[str], timeout: int) -> "subprocess.CompletedProcess[str]":
+def run_cli(
+    argv: List[str],
+    timeout: int,
+    env: Optional[Dict[str, str]] = None,
+    cwd: Optional[str] = None,
+) -> "subprocess.CompletedProcess[str]":
     """subprocess.run for a source command. Counts each `openclaw` call."""
     if argv and os.path.basename(argv[0]) == "openclaw":
         key = " ".join(argv[1:])
         OPENCLAW_CALLS[key] = OPENCLAW_CALLS.get(key, 0) + 1
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(
+        argv, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd
+    )
 
 
 def _valid_port(raw: str) -> Optional[int]:
@@ -169,6 +176,27 @@ def load_dotenv(path: Path) -> None:
             os.environ[key] = val
 
 
+# OpenClaw prints `GIT_COMMIT` or `GIT_SHA` from its environment in place of
+# its own build commit. Mission Control uses GIT_SHA for its own commit, so
+# every OpenClaw command runs without both. The System page then shows what
+# `openclaw --version` prints on the host.
+OPENCLAW_ENV_DROP = ("GIT_SHA", "GIT_COMMIT")
+
+
+def openclaw_env() -> Dict[str, str]:
+    """os.environ without GIT_SHA and GIT_COMMIT."""
+    return {k: v for k, v in os.environ.items() if k not in OPENCLAW_ENV_DROP}
+
+
+def openclaw_cwd() -> Optional[str]:
+    """Home, so OpenClaw never reads this checkout's .git for its commit."""
+    try:
+        home = Path.home()
+    except (KeyError, RuntimeError):
+        return None
+    return str(home) if home.is_dir() else None
+
+
 # ── Sources ─────────────────────────────────────────────────────────────────
 
 class Sources:
@@ -197,7 +225,7 @@ class Sources:
     def _cli(self, argv: List[str]) -> Optional[Any]:
         """Run a command expected to print JSON. Never raises."""
         try:
-            proc = run_cli(argv, 60)
+            proc = run_cli(argv, 60, env=openclaw_env())
         except FileNotFoundError:
             log(f"`{argv[0]}` not found on PATH — skipping {' '.join(argv[1:3])}")
             return None
@@ -278,7 +306,7 @@ class Sources:
 
     def _models_list_text(self) -> Optional[str]:
         try:
-            proc = run_cli(["openclaw", "models", "list"], 60)
+            proc = run_cli(["openclaw", "models", "list"], 60, env=openclaw_env())
         except FileNotFoundError:
             log("`openclaw` not found on PATH. Skipping models list")
             return None
@@ -960,9 +988,16 @@ def probe_gateway(version_of: Optional[Callable[[], Optional[str]]] = None) -> D
 
 
 def openclaw_cli_version() -> Optional[str]:
-    """First line of `openclaw --version`, or None when the CLI is missing."""
+    """First line of `openclaw --version`, or None when the CLI is missing.
+
+    Runs without GIT_SHA and GIT_COMMIT, from home, so the line is exactly
+    what the binary prints on the host. Mission Control's own commit is
+    never mixed in.
+    """
     try:
-        proc = run_cli(["openclaw", "--version"], 20)
+        proc = run_cli(
+            ["openclaw", "--version"], 20, env=openclaw_env(), cwd=openclaw_cwd()
+        )
     except FileNotFoundError:
         return None
     except subprocess.TimeoutExpired:
