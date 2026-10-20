@@ -199,6 +199,9 @@ test('compose password reset is docker compose exec and does not call host node'
   const dockerfile = read('apps/api/Dockerfile')
   assert.match(dockerfile, /COPY --from=build \/app\/apps\/api\/scripts\/password-reset\.mjs/)
   assert.match(dockerfile, /COPY --from=build \/app\/apps\/api\/src\/load-env\.js/)
+  const nestCli = JSON.parse(read('apps/api/nest-cli.json'))
+  const assets = nestCli.compilerOptions?.assets ?? []
+  assert.ok(assets.includes('load-env.js'), 'nest build must copy load-env.js next to dist/boot.js')
   assert.equal(existsSync(path.join(root, 'apps/api/scripts/password-reset.mjs')), true)
   const resetScript = read('apps/api/scripts/password-reset.mjs')
   assert.match(resetScript, /loadEnvFiles/)
