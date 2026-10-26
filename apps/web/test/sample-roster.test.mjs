@@ -197,6 +197,40 @@ test('issue 117: counts beside the floor skip work owned by hidden sample bots',
   assert.match(office, /shownTickets\.filter\(\(ticket\) => stageIndexForStatus/)
   assert.doesNotMatch(office, /stageCounts\(ticketRows\)/)
   const system = await readFile(new URL('../src/pages/System.tsx', import.meta.url), 'utf8')
-  assert.match(system, /hidden\.has\(sticker\.agent\.id\)/)
+  assert.match(system, /visibleAgentKeys\(roster, hidden, \[\.\.\.named, \.\.\.fromSessions\]\)/)
   assert.equal((system.match(/agentsFor\(model, focus, roster, sessions\.data\?\.sessions \?\? \[\], hiddenBots\)/g) ?? []).length, 2)
+})
+
+test('issue 117: System model agents with the demo usage shape keep only visible bots', () => {
+  // GET /usage after seed:demo rolls providers up by line.bot, so agents are labels.
+  const providers = [
+    { name: 'openai', model: 'openai/gpt-4.1', agents: ['Quill'] },
+    { name: 'anthropic', model: 'anthropic/claude-sonnet-4-6', agents: ['Sage'] },
+    { name: 'deepseek', model: 'deepseek/deepseek-chat', agents: ['Nova'] },
+    { name: 'google', model: 'google/gemini-2.5-flash', agents: ['Lens'] },
+    { name: 'ollama', model: 'ollama/llama3.1', agents: ['Local'] },
+  ]
+  const mixed = [...seeded.map((agent) => ({ ...agent, name: agent.id[0].toUpperCase() + agent.id.slice(1) })), registered('ribbon', { name: 'Ribbon' })]
+  const hidden = roster.hiddenAgentIds(mixed, false)
+  assert.ok(hidden.has('quill'))
+  for (const p of providers) {
+    assert.deepEqual(roster.visibleAgentKeys(mixed, hidden, p.agents), [], `${p.model} should show No agent tagged`)
+  }
+  // Exact ids drop the same way (sessions.snapshot sends ids).
+  assert.deepEqual(roster.visibleAgentKeys(mixed, hidden, ['quill', 'speedy']), [])
+
+  // A visible bot stays by id or display name, ignoring case, once.
+  assert.deepEqual(roster.visibleAgentKeys(mixed, hidden, ['Ribbon', 'ribbon', 'RIBBON', ' ', null, 'Quill']), ['ribbon'])
+  assert.equal(roster.visibleBotFor(mixed, hidden, 'rIbBoN')?.id, 'ribbon')
+  assert.equal(roster.visibleBotFor(mixed, hidden, 'Quill'), undefined)
+  assert.equal(roster.visibleBotFor(mixed, hidden, 'Sage'), undefined)
+
+  // A registered bot that is named Sage keeps the Sage usage line.
+  const withSage = [...mixed, registered('sage_bot', { name: 'Sage' })]
+  assert.deepEqual(roster.visibleAgentKeys(withSage, roster.hiddenAgentIds(withSage, false), ['Sage', 'Quill']), ['sage_bot'])
+
+  // Show sample bots on, or a seed only roster: every label stays as sent.
+  const labels = providers.flatMap((p) => p.agents)
+  assert.deepEqual(roster.visibleAgentKeys(mixed, roster.hiddenAgentIds(mixed, true), labels), labels)
+  assert.deepEqual(roster.visibleAgentKeys(seeded, roster.hiddenAgentIds(seeded, false), labels), labels)
 })
