@@ -188,3 +188,31 @@ test('orderByPosition sorts by position then id', () => {
   ])
   assert.deepEqual(ordered.map((row) => row.id), ['c', 'a', 'b'])
 })
+
+test('switching back to crew restores stored seats, drops deleted ids, and seats new agents', () => {
+  const shipped = [{ id: 'speedy' }, { id: 'atlas' }, { id: 'pixel' }, { id: 'quill' }]
+  const agents = [
+    { id: 'helper', position: 0 },
+    { id: 'pixel', position: 1 },
+    { id: 'nova', position: 2 },
+    { id: 'later', position: 5 },
+    { id: 'quill', position: 6 },
+  ]
+  const stored = { helper: 'atlas', pixel: '', nova: 'speedy', gone: 'pixel' }
+  assert.deepEqual(crew.restoreCrewMap(agents, shipped, stored), {
+    helper: 'atlas',
+    nova: 'speedy',
+    quill: 'quill',
+    later: 'pixel',
+    pixel: '',
+  })
+  assert.deepEqual(crew.restoreCrewMap(agents.slice(0, 1), shipped, {}), { helper: 'speedy' })
+})
+
+test('own names keeps the stored map in the form and says so', async () => {
+  const screen = await readFile(new URL('../src/components/NamingChoice.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /restoreCrewMap\(ordered, seats, prev\)/)
+  assert.match(screen, /Your crew seats stay saved\. Choosing the crew again restores them\./)
+  assert.match(screen, />No seat yet</)
+  assert.equal(screen.includes("if (mode === 'own') return {}"), false)
+})

@@ -174,6 +174,30 @@ export function assignCrewSeats(
   return map
 }
 
+/**
+ * Switching back to crew. Ids no longer on the roster drop out. A saved
+ * seat or Own name stays. Agents with no saved choice take free seats,
+ * matching id first, then join order. The API runs the same fill on save.
+ */
+export function restoreCrewMap(
+  agents: readonly { id: string; position?: number | null }[],
+  seats: readonly { id: string }[],
+  stored: Record<string, string>,
+): Record<string, string> {
+  const living = new Set(agents.map((agent) => agent.id))
+  const known = new Set(seats.map((seat) => seat.id))
+  const saved: Record<string, string> = {}
+  const own = new Set<string>()
+  for (const [id, seat] of Object.entries(stored)) {
+    if (!living.has(id)) continue
+    if (seat === '') own.add(id)
+    else if (known.has(seat)) saved[id] = seat
+  }
+  const next = assignCrewSeats(agents, seats, saved, own)
+  for (const id of own) next[id] = ''
+  return next
+}
+
 /** Refetch settings after a roster change that can move the crew map. Heartbeats do not. */
 export function namingRefreshTs(
   seenTs: number,
