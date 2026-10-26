@@ -16,6 +16,10 @@ ENV VITE_OPERATOR_NAME=$VITE_OPERATOR_NAME
 # Optional operator-owned Discord server id (channel deep links). Blank → none.
 ARG VITE_DISCORD_GUILD_ID=
 ENV VITE_DISCORD_GUILD_ID=$VITE_DISCORD_GUILD_ID
+# Owner port the /connect page prints. Compose passes MC_WEB_PORT. nginx
+# still listens on 5173 inside the container.
+ARG MC_WEB_PORT=5173
+ENV MC_WEB_PORT=$MC_WEB_PORT
 RUN cd apps/web && npm run build
 
 FROM nginx:alpine

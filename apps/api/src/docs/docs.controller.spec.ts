@@ -246,4 +246,44 @@ describe('Docs API', () => {
 
     process.env.DOCS_ROOT = root;
   });
+
+  it('names the host docs folder on Compose, never /data/docs (issue 117)', async () => {
+    const saved = {
+      MC_COMPOSE: process.env.MC_COMPOSE,
+      MC_DOCS_HOST_PATH: process.env.MC_DOCS_HOST_PATH,
+      DOCS_ROOT: process.env.DOCS_ROOT,
+    };
+    const empty = await mkdtemp(path.join(tmpdir(), 'mc-docs-compose-'));
+    try {
+      process.env.MC_COMPOSE = '1';
+      process.env.DOCS_ROOT = empty;
+      process.env.MC_DOCS_HOST_PATH = '/srv/mission-control/data/docs';
+      const host = await request(app.getHttpServer()).get('/docs').expect(200);
+      expect(docList(host).total).toBe(0);
+      expect(responseJson<{ dir: string }>(host).dir).toBe(
+        '/srv/mission-control/data/docs',
+      );
+      expect(JSON.stringify(host.body)).not.toContain(empty);
+
+      process.env.MC_DOCS_HOST_PATH = './data/docs';
+      const relative = await request(app.getHttpServer())
+        .get('/docs')
+        .expect(200);
+      expect(responseJson<{ dir: string }>(relative).dir).toBe('data/docs');
+
+      for (const value of ['', '/data/docs', '/data/docs/']) {
+        process.env.MC_DOCS_HOST_PATH = value;
+        const none = await request(app.getHttpServer())
+          .get('/docs')
+          .expect(200);
+        expect(responseJson<{ dir: string | null }>(none).dir).toBeNull();
+        expect(JSON.stringify(none.body)).not.toContain('/data/docs');
+      }
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
 });

@@ -1,7 +1,13 @@
 import { mkdir, mkdtemp, symlink, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { DocsPathError, openDocsRoot, resolveDocFile } from './docs-path';
+import {
+  configuredDocsRoot,
+  docsHostDir,
+  DocsPathError,
+  openDocsRoot,
+  resolveDocFile,
+} from './docs-path';
 
 async function tempRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'mc-docs-path-'));
@@ -88,5 +94,31 @@ describe('docs path sandbox', () => {
     ).toBeNull();
     const empty = await mkdtemp(path.join(tmpdir(), 'mc-docs-empty-'));
     expect(openDocsRoot(empty)).toBeTruthy();
+  });
+
+  it('names a host folder for the empty state (issue 117)', () => {
+    expect(docsHostDir({ DOCS_ROOT: '/srv/docs' })).toBe('/srv/docs');
+    expect(docsHostDir({})).toBe(configuredDocsRoot());
+    const compose = { MC_COMPOSE: '1', DOCS_ROOT: '/data/docs' };
+    expect(
+      docsHostDir({ ...compose, MC_DOCS_HOST_PATH: '/home/jay/mc/data/docs' }),
+    ).toBe('/home/jay/mc/data/docs');
+    expect(docsHostDir({ ...compose, MC_DOCS_HOST_PATH: '/srv/notes//' })).toBe(
+      '/srv/notes',
+    );
+    expect(docsHostDir({ ...compose, MC_DOCS_HOST_PATH: './data/docs' })).toBe(
+      'data/docs',
+    );
+    expect(docsHostDir({ ...compose, MC_DOCS_HOST_PATH: 'notes/' })).toBe(
+      'notes',
+    );
+    expect(docsHostDir({ ...compose, MC_DOCS_HOST_PATH: '../outside' })).toBe(
+      '../outside',
+    );
+    expect(docsHostDir({ ...compose, MC_DOCS_HOST_PATH: '' })).toBeNull();
+    expect(
+      docsHostDir({ ...compose, MC_DOCS_HOST_PATH: '/data/docs' }),
+    ).toBeNull();
+    expect(docsHostDir(compose)).toBeNull();
   });
 });

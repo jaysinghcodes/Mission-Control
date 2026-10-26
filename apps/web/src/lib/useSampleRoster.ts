@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  hiddenAgentIds,
   readShowSampleBots,
   SHOW_SAMPLE_BOTS_EVENT,
   visibleAgents,
@@ -48,8 +49,9 @@ export function useNow(intervalMs = 1000): number {
   return now
 }
 
-export function useRosterView<T extends RosterSource>(agents: readonly T[]): {
+export function useRosterView<T extends RosterSource & { id: string }>(agents: readonly T[]): {
   visible: T[]
+  hidden: Set<string>
   now: number
   showSampleBots: boolean
 } {
@@ -59,5 +61,9 @@ export function useRosterView<T extends RosterSource>(agents: readonly T[]): {
     () => visibleAgents(agents, showSampleBots),
     [agents, showSampleBots],
   )
-  return { visible, now, showSampleBots }
+  const hidden = useMemo(
+    () => hiddenAgentIds(agents, showSampleBots),
+    [agents, showSampleBots],
+  )
+  return { visible, hidden, now, showSampleBots }
 }

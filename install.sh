@@ -872,6 +872,18 @@ dir_uid() {
   stat -f '%u' "$1"
 }
 
+# Absolute host path of a Compose bind. A relative value is from this checkout,
+# the same folder docker compose resolves it against.
+compose_host_abs() {
+  local dir
+  dir="$(compose_host_path "$1" "$2")"
+  case "$dir" in
+    /*) ;;
+    *) dir="$(pwd)/${dir#./}" ;;
+  esac
+  printf '%s' "$dir"
+}
+
 # Docker creates a missing bind-mount directory as root. A folder inside this
 # checkout would then stay owned by root, and the operator could not delete it.
 # Create repo-local binds as this user before `docker compose up`.
@@ -879,12 +891,8 @@ ensure_repo_bind() {
   local key default dir root uid
   key="$1"
   default="$2"
-  dir="$(compose_host_path "$key" "$default")"
+  dir="$(compose_host_abs "$key" "$default")"
   root="$(pwd)"
-  case "$dir" in
-    /*) ;;
-    *) dir="${root}/${dir#./}" ;;
-  esac
   case "$dir" in
     "$root"/*) ;;
     *) return 0 ;;
@@ -928,6 +936,10 @@ start_docker() {
   echo "Starting the stack with Docker Compose."
   ensure_repo_bind DOCS_ROOT "data/docs"
   ensure_repo_bind OPENCLAW_LOG_DIR "/tmp/openclaw"
+  # The api sees the docs at /data/docs. The Docs empty state names this
+  # host folder instead.
+  MC_DOCS_HOST_PATH="$(compose_host_abs DOCS_ROOT "data/docs")"
+  export MC_DOCS_HOST_PATH
   # The API image has no .git. Pass the commit so /health can show it.
   # Only the compose build sees it. It is not exported, so the bridge run
   # later in this install never hands it to `openclaw --version`, which
@@ -1140,6 +1152,37 @@ wait_ready() {
   wait_on_port "$(api_port)"
 }
 
+# Native only. The web dev server answers on MC_WEB_PORT.
+native_web_ok() {
+  node -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/").then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))' "$1" >/dev/null 2>&1
+}
+
+# A native install prints only ports that answer. The summary prints the
+# web URL only after this succeeds. MC_INSTALL_READY_SECONDS=0 skips the
+# wait, the same as the API wait above.
+wait_on_web() {
+  local port seconds start now
+  port="$1"
+  seconds="${MC_INSTALL_READY_SECONDS:-90}"
+  if [[ "$seconds" == "0" ]]; then
+    return 0
+  fi
+  if [[ ! "$seconds" =~ ^[0-9]+$ ]]; then
+    seconds=90
+  fi
+  start="$(install_now)"
+  while true; do
+    if native_web_ok "$port"; then
+      return 0
+    fi
+    now="$(install_now)"
+    if [[ $((now - start)) -ge "$seconds" ]]; then
+      return 1
+    fi
+    install_pause
+  done
+}
+
 start_native() {
   local shell_port shell_web shell_api log
   echo "Docker was not found. Using the native path. This needs Node.js 20.17 or later and Postgres 16."
@@ -1187,6 +1230,10 @@ start_native() {
     nohup npm run dev >> install-dev.log 2>&1 < /dev/null &
     echo "$!" > install-dev.pid
     wait_ready
+  fi
+  MC_WEB_ANSWERED=0
+  if wait_on_web "$(web_port)"; then
+    MC_WEB_ANSWERED=1
   fi
 }
 
@@ -1833,7 +1880,12 @@ print_install_summary() {
   fi
   echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
   echo "OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md."
-  echo "Open ${url}"
+  if [[ "${USE_DOCKER:-0}" != "1" && "${MC_WEB_ANSWERED:-1}" != "1" ]]; then
+    # Native: no URL for a port that does not answer.
+    echo "The web app did not answer yet, so no URL is printed. Its log is install-dev.log."
+  else
+    echo "Open ${url}"
+  fi
   if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
     echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
   fi

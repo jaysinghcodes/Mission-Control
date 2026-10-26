@@ -14,7 +14,7 @@ import { pluralize } from '../lib/pluralize'
 import { deriveLiveWork, type LiveRun, type LiveTicket } from '../lib/live-work'
 import { useRosterLive } from '../lib/useRosterLive'
 import { useWorkLive } from '../lib/useWorkLive'
-import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
+import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag, withoutHiddenBots } from '../lib/sample-roster'
 import { useRosterView } from '../lib/useSampleRoster'
 import {
   activityAge,
@@ -90,7 +90,7 @@ export default function Office() {
   const refetchApprovals = approvalsQ.refetch
   const naming = useNaming()
   const agents = agentsQ.data?.agents ?? []
-  const { visible: roster, now } = useRosterView(agents)
+  const { visible: roster, hidden, now } = useRosterView(agents)
   const pending = approvalsQ.data?.approvals ?? []
   const ticketRows = ticketsQ.data?.tickets ?? []
   const runRows = runsQ.data?.runs ?? []
@@ -151,7 +151,10 @@ export default function Office() {
       : `${pluralize(roster.length, 'agent')} · ${pluralize(working, 'working', 'working')}${needsCount === 0 ? '' : ` · ${pluralize(needsCount, 'needs you', 'need you')}`}`
     : 'Loading the floor…'
 
-  const pipe = stageCounts(ticketRows)
+  // Side cards count only work the floor can show. A ticket owned by a
+  // hidden sample bot is not counted (issue 117).
+  const shownTickets = withoutHiddenBots(ticketRows, hidden)
+  const pipe = stageCounts(shownTickets)
   const events = (activityQ.data?.events ?? [])
     .map((event, index) => {
       const line = activityRailLine(event, agents, ticketRows, runRows, naming)
@@ -177,7 +180,7 @@ export default function Office() {
 
   const focusMeta = ROOMS.find((room) => room.id === focus) ?? null
   const focusTickets = focusMeta
-    ? ticketRows.filter((ticket) => stageIndexForStatus(ticket.status) === ROOMS.findIndex((room) => room.id === focusMeta.id))
+    ? shownTickets.filter((ticket) => stageIndexForStatus(ticket.status) === ROOMS.findIndex((room) => room.id === focusMeta.id))
     : []
 
   return (

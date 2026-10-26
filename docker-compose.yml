@@ -103,6 +103,11 @@ services:
       # means ./data/docs) and the api read the same files. A missing folder is
       # an empty Docs page, not a crash.
       DOCS_ROOT: /data/docs
+      # Display only. The host side of the docs bind below, so the Docs
+      # empty state names a folder you can open, not /data/docs.
+      # bash install.sh exports the absolute path. Without it this is the
+      # project .env DOCS_ROOT, or ./data/docs from this checkout.
+      MC_DOCS_HOST_PATH: ${MC_DOCS_HOST_PATH:-${DOCS_ROOT:-./data/docs}}
       # Compose marker. A blank gateway host means status comes from the
       # bridge, which runs on the host and checks 127.0.0.1. Set the host
       # to probe that address from this container instead.
@@ -156,6 +161,10 @@ services:
         # nginx proxies /api and /socket.io. Set a full origin only when the
         # page should call a different API, then rebuild web.
         VITE_API_URL: ${VITE_API_URL:-}
+        # Owner port shown on the /connect page (SSH command and the
+        # dashboard URL). Same value as the host side of the first port
+        # below. Change it, then rebuild web with docker compose up -d --build.
+        MC_WEB_PORT: ${MC_WEB_PORT:-5173}
     restart: unless-stopped
     depends_on:
       - api

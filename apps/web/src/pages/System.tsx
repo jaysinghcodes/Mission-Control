@@ -12,7 +12,7 @@ import { providerLabel } from '../lib/provider-label'
 import { costSummary, costText, dayCostText, spendPhrase, type CostDay } from '../lib/cost'
 import { shortSha } from '../lib/git-sha'
 import { gatewayLine, systemHeadline, systemSummaryLead } from '../lib/gateway-status'
-import { SHOW_SAMPLE_BOTS_LABEL } from '../lib/sample-roster'
+import { SHOW_SAMPLE_BOTS_LABEL, hiddenAgentIds } from '../lib/sample-roster'
 import { useShowSampleBots } from '../lib/useSampleRoster'
 import Logs from './Logs'
 import Sessions from './Sessions'
@@ -193,6 +193,8 @@ export default function System() {
   const selectedDays = responses[period]?.days ?? []
   const any = snaps.some(Boolean)
   const roster = rosterQ.data?.agents ?? []
+  // A model card counts only bots that are on screen (issue 117).
+  const hiddenBots = useMemo(() => hiddenAgentIds(rosterQ.data?.agents ?? [], showSampleBots), [rosterQ.data, showSampleBots])
   const modelRows = modelsQ.data ? (modelsQ.data.models ?? []) : null
   const gateway = gatewayLine(sys.data?.gateway)
 
@@ -380,7 +382,7 @@ export default function System() {
               {models.map((model) => {
                 const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
                 const focus = cells[period]
-                const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
+                const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [], hiddenBots)
                 const open = modelOpen === model
                 return (
                   <div key={model} className="border-t border-mc-sep px-4 py-3">
@@ -430,7 +432,7 @@ export default function System() {
                   {models.map((model) => {
                     const cells = snaps.map((snap) => providersOf(snap).find((p) => (p.model || p.name) === model))
                     const focus = cells[period]
-                    const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [])
+                    const who = agentsFor(model, focus, roster, sessions.data?.sessions ?? [], hiddenBots)
                     const open = modelOpen === model
                     return (
                       <Fragment key={model}>
@@ -533,7 +535,13 @@ function IssueFace({ roster, actorId }: { roster: Agent[]; actorId: string | nul
   return <Face agent={sticker.agent} agents={sticker.agents} px={34} />
 }
 
-function agentsFor(model: string, provider: Provider | undefined, roster: Agent[], sessions: { agent: string; model: string | null }[]) {
+function agentsFor(
+  model: string,
+  provider: Provider | undefined,
+  roster: Agent[],
+  sessions: { agent: string; model: string | null }[],
+  hidden: ReadonlySet<string>,
+) {
   const named = provider?.agents ?? []
   const fromSessions = sessions.filter((s) => s.model && (s.model === model || s.model.endsWith(`/${model}`) || model.endsWith(s.model))).map((s) => s.agent)
   const keys = [...named, ...fromSessions]
@@ -541,6 +549,7 @@ function agentsFor(model: string, provider: Provider | undefined, roster: Agent[
   for (const key of keys) {
     if (!key.trim()) continue
     const sticker = resolveSticker(roster, key)
+    if (sticker.matched && hidden.has(sticker.agent.id)) continue
     if (!out.some((row) => row.agent.id === sticker.agent.id)) out.push(sticker)
   }
   return out

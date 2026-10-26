@@ -191,7 +191,7 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      `\`bash install.sh\` already starts Postgres, the API, and the web UI. The browser uses port ${WEB_PORT} (\`MC_WEB_PORT\`). Leave \`VITE_API_URL\` unset. nginx proxies \`/api\` and \`/socket.io\` to the API.`,
+      `\`bash install.sh\` already starts Postgres, the API, and the web UI. The browser uses port ${WEB_PORT} (\`MC_WEB_PORT\`). This page shows the port from the install. Compose bakes it into the web image, so rebuild with \`docker compose up -d --build\` after you change it. Leave \`VITE_API_URL\` unset. nginx proxies \`/api\` and \`/socket.io\` to the API.`,
       `The API loads the root \`.env\` and runs \`prisma migrate deploy\` before it listens. A native install listens on port ${API_PORT} (\`PORT\`, or \`MC_API_PORT\` when \`PORT\` is unset). Inside Compose the log line stays \`mission-control api listening on 0.0.0.0:3000\`. The host API port is \`MC_API_PORT\`.`,
       'No Docker? The installer says so and uses Node.js 20.17 or later and Postgres 16. The advanced path is also in the README. No OpenClaw? `npm run seed:demo` fills sample data.',
     ],

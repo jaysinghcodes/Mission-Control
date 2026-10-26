@@ -87,3 +87,26 @@ test('dev and preview bind MC_WEB_PORT and the proxy uses PORT', async () => {
     }
   }
 })
+
+test('a build bakes MC_WEB_PORT for the /connect page (issue 117)', async () => {
+  const previous = { MC_WEB_PORT: process.env.MC_WEB_PORT }
+  try {
+    process.env.MC_WEB_PORT = '5273'
+    const custom = await resolveConfig({ configFile, root }, 'build')
+    assert.equal(custom.define.__MC_WEB_PORT__, JSON.stringify('5273'))
+    delete process.env.MC_WEB_PORT
+    const plain = await resolveConfig({ configFile, root }, 'build')
+    assert.equal(plain.define.__MC_WEB_PORT__, JSON.stringify('5173'))
+  } finally {
+    if (previous.MC_WEB_PORT === undefined) delete process.env.MC_WEB_PORT
+    else process.env.MC_WEB_PORT = previous.MC_WEB_PORT
+  }
+  const turbo = await import('node:fs').then((fs) => fs.readFileSync(path.join(root, '..', '..', 'turbo.json'), 'utf8'))
+  const buildEnv = turbo.slice(turbo.indexOf('"build"'), turbo.indexOf('"dev"'))
+  for (const key of ['MC_WEB_PORT', 'PORT', 'MC_API_PORT']) {
+    assert.match(buildEnv, new RegExp(`"${key}"`), key)
+  }
+  const steps = await import('node:fs').then((fs) => fs.readFileSync(path.join(root, 'src', 'components', 'ConnectSteps.tsx'), 'utf8'))
+  assert.match(steps, /http:\/\/localhost:\$\{WEB_PORT\}\/#\/tasks/)
+  assert.doesNotMatch(steps, /localhost:5173/)
+})

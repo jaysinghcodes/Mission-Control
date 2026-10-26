@@ -437,6 +437,27 @@ export function parseInstallerUrl(text) {
   return `http://127.0.0.1:${match[1]}/`
 }
 
+/**
+ * Every port number the installer output names (issue 117). A native install
+ * must print only ports that answer, and never the tunnel port.
+ */
+export function parsePrintedPorts(text) {
+  const ports = new Set()
+  for (const match of String(text).matchAll(/(?:localhost|127\.0\.0\.1):(\d+)|\b[Pp]ort (\d+)/g)) {
+    ports.add(Number(match[1] ?? match[2]))
+  }
+  return [...ports]
+}
+
+async function portAnswers(port) {
+  try {
+    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(3000) })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function ipv4First(env) {
   const current = String(env.NODE_OPTIONS || '')
   if (current.includes('ipv4first')) return env
@@ -727,6 +748,16 @@ export async function freshInstall({ source = ROOT, mode, keep = false } = {}) {
     await waitForApi(apiUrl, mode, cloneDir, env)
     await assertInstallAuth({ apiUrl, token, mode })
     await waitFor(webUrl, (res) => res.ok && res.text.includes('Mission Control'), 180000)
+    if (mode === 'native') {
+      if (/Tunnel port|MC_REMOTE_PORT/.test(log)) {
+        throw new Error('The native install printed the tunnel port.')
+      }
+      for (const port of parsePrintedPorts(log)) {
+        if (!(await portAnswers(port))) {
+          throw new Error(`The native install printed port ${port}, and nothing answers there.`)
+        }
+      }
+    }
     const bridgeEnv = {
       ...env,
       PATH: hostPath,

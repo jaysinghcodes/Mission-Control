@@ -64,6 +64,35 @@ export function visibleAgents<T extends RosterSource>(
   return agents.filter((agent) => !isSampleSource(agent.source))
 }
 
+/**
+ * Ids of the sample bots that visibleAgents dropped (issue 117). Empty
+ * while every default is on screen.
+ */
+export function hiddenAgentIds<T extends RosterSource & { id: string }>(
+  agents: readonly T[],
+  showSampleBots: boolean,
+): Set<string> {
+  const shown = new Set(visibleAgents(agents, showSampleBots).map((agent) => agent.id))
+  return new Set(agents.filter((agent) => !shown.has(agent.id)).map((agent) => agent.id))
+}
+
+/**
+ * Work rows minus those owned by a hidden sample bot, so a count beside
+ * the floor matches the bots on it. A ticket's owner is `assignee`, a
+ * run's is `agent`, both an agent id. Unassigned rows and rows for the
+ * operator or an unknown id stay.
+ */
+export function withoutHiddenBots<T extends { assignee?: string | null; agent?: string | null }>(
+  rows: readonly T[],
+  hidden: ReadonlySet<string>,
+): T[] {
+  if (hidden.size === 0) return rows.slice()
+  return rows.filter((row) => {
+    const owner = (row.assignee ?? row.agent ?? '').trim()
+    return !owner || !hidden.has(owner)
+  })
+}
+
 export function showSampleTag(agent: RosterSource): boolean {
   return isSampleSource(agent.source)
 }
