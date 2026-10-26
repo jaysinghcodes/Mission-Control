@@ -15,6 +15,7 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, openSync, closeSync, statSync } from 'node:fs'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -449,13 +450,19 @@ export function parsePrintedPorts(text) {
   return [...ports]
 }
 
-async function portAnswers(port) {
-  try {
-    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(3000) })
-    return true
-  } catch {
-    return false
-  }
+/** TCP connect, so a printed Postgres port (MC_DB_PORT) counts as answering. */
+export function portAnswers(port, host = '127.0.0.1', timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const socket = connect({ port, host })
+    const done = (ok) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(ok)
+    }
+    socket.setTimeout(timeoutMs, () => done(false))
+    socket.once('connect', () => done(true))
+    socket.once('error', () => done(false))
+  })
 }
 
 function ipv4First(env) {

@@ -5,7 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { COMPOSE_PASSWORD_RESET, buildInstallScript, docsOwnerError, finishFreshInstall, hostNodeInvocation, installMode, parseDashboardPassword, parseInstallerUrl, parsePrintedPorts, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
+import { createServer } from 'node:net'
+import { COMPOSE_PASSWORD_RESET, buildInstallScript, docsOwnerError, finishFreshInstall, hostNodeInvocation, installMode, parseDashboardPassword, parseInstallerUrl, parsePrintedPorts, portAnswers, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -287,4 +288,17 @@ test('a README without npm run dev is rejected', () => {
     }),
     /npm run dev/,
   )
+})
+
+test('issue 117: the printed port check is a TCP connect, so a non HTTP listener answers', async () => {
+  // A raw TCP server that never speaks HTTP, like Postgres on MC_DB_PORT.
+  const server = createServer((socket) => socket.end())
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  try {
+    assert.equal(await portAnswers(port), true)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+  assert.equal(await portAnswers(port, '127.0.0.1', 1000), false)
 })

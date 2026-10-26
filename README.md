@@ -225,7 +225,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agent
 
 `204` is the native loopback result. On Compose the same command returns 401, because the API does not see loopback. Delete the agent from the UI, or send a session cookie. Settings can remove any agent. A snapshot agent comes back only when a later snapshot includes it. If register returns 401, run `npm run doctor` and send the token that check is using. Field tables: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
 
-Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. Turn on Show sample bots on System to bring them back. Counts follow the visible bots. While sample bots are hidden, the Office Pipeline card and room ticket list skip tickets assigned to a hidden sample bot, and a System model card counts only visible bots. They show the Sample tag. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed. The row is not deleted.
+Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. Turn on Show sample bots on System to bring them back. Counts follow the visible bots. While sample bots are hidden, the Office Pipeline card and room ticket list skip tickets assigned to a hidden sample bot, and a System model card counts only visible bots. Sample bots that are on screen show the Sample tag. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed. The row is not deleted.
 
 Optional bridge, with no `openclaw` binary on `PATH`:
 
