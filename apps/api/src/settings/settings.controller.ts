@@ -11,6 +11,7 @@ import { SETTING_ID } from '../team/mission';
 import { resolveTimeZone, serverTimeZone } from '../usage/zone-time';
 import { mergeNamedCrewMap, withCrewLock } from './crew-map';
 import {
+  crewMapsEqual,
   readCrew,
   readStoredMap,
   readStoredMode,
@@ -28,9 +29,11 @@ import { readSettingsPatch } from './settings-patch';
  * crewMap is agent id to seat id. An empty string is Own name.
  * The web applies seats only when the mode is crew. A matching id
  * takes a free seat. A saved seat stays. Own name stays until a
- * later save changes that agent. A seat that opens goes to the
- * earliest agent with no saved choice. A save changes only the
- * agents it names. PUT is a dashboard write. Loopback stays open.
+ * later save changes that agent. A save changes only the agents it
+ * names. After a save in crew mode, every agent with no saved choice
+ * takes a free seat, so an agent the save unseated is seated again in
+ * the same response. Saving own names keeps the stored map, and
+ * switching back to crew restores it. PUT is a dashboard write. Loopback stays open.
  * Any other peer needs the session cookie. A crewMap key that is not
  * an agent id is 400 and changes nothing.
  */
@@ -74,18 +77,16 @@ export class SettingsController {
           : (existing?.namingMode ?? null);
       const touchesNames =
         patch.namingMode !== undefined || patch.crewMap !== undefined;
+      // Own names keeps the stored map, so switching back restores it.
+      // In crew mode every save drops ids that left the roster and
+      // fills free seats for agents with no saved choice.
       let crewMap = previous;
-      if (patch.namingMode === 'own') {
-        crewMap = {};
-      } else if (
-        patch.crewMap &&
-        (patch.namingMode === 'crew' ||
-          (patch.namingMode === undefined &&
-            readStoredMode(existing?.namingMode) === 'crew'))
-      ) {
+      if (readStoredMode(namingMode) === 'crew') {
         const agents = await tx.agent.findMany();
-        crewMap = mergeNamedCrewMap(agents, seats, previous, patch.crewMap);
+        const named = patch.namingMode === 'crew' ? (patch.crewMap ?? {}) : {};
+        crewMap = mergeNamedCrewMap(agents, seats, previous, named);
       }
+      const writesMap = touchesNames || !crewMapsEqual(crewMap, previous);
       const timezone =
         patch.timezone !== undefined
           ? patch.timezone
@@ -108,7 +109,7 @@ export class SettingsController {
           ...(patch.namingMode !== undefined
             ? { namingMode: patch.namingMode }
             : {}),
-          ...(touchesNames ? { crewMap } : {}),
+          ...(writesMap ? { crewMap } : {}),
           ...(patch.timezone !== undefined ? { timezone: patch.timezone } : {}),
           ...(patch.setupDone !== undefined
             ? { setupDone: patch.setupDone }

@@ -6,7 +6,6 @@ import {
   readCrew,
   readStoredMap,
   readStoredMode,
-  registrationOrder,
   type SeatAgent,
 } from './naming';
 
@@ -20,8 +19,11 @@ import {
  * agent. Register, delete, restart, and sync do not seat that agent.
  * An agent with no saved choice takes the next free seat, earliest
  * registration first. A Settings save changes only the agents it names.
- * Agents it leaves out keep their seat or choice. A seat that save frees
- * goes to the earliest agent with no saved choice. Display names are not read.
+ * Agents it leaves out keep their seat or choice. At the end of that save
+ * every agent with no saved choice takes a free seat, matching id first,
+ * then registration order. That includes an agent the save just unseated.
+ * Own names mode leaves the map alone, so switching back to crew restores
+ * it. Display names are not read.
  */
 
 export interface CrewSeatChange {
@@ -126,7 +128,9 @@ function isSeat(seat: string, known: ReadonlySet<string>): boolean {
  * If the save gives a seat to one agent while another holds it, the
  * named agent gets the seat and the holder loses it. The holder then
  * has no saved choice, unless this save sets the holder to Own name.
- * A seat this save frees goes to the earliest agent with no saved choice.
+ * Ids no longer on the roster drop out. Then every agent with no saved
+ * choice takes a free seat in this same save, matching id first, then
+ * registration order. If no seat is free, that agent waits for one.
  */
 export function mergeNamedCrewMap(
   agents: readonly SeatAgent[],
@@ -134,8 +138,7 @@ export function mergeNamedCrewMap(
   stored: Record<string, string>,
   named: Record<string, string>,
 ): Record<string, string> {
-  const order = seats.map((seat) => seat.id);
-  const known = new Set(order);
+  const known = new Set(seats.map((seat) => seat.id));
   const living = new Set(agents.map((agent) => agent.id));
   const next: Record<string, string> = {};
   for (const [id, seat] of Object.entries(stored)) {
@@ -161,26 +164,9 @@ export function mergeNamedCrewMap(
     }
     next[id] = seat;
   }
-  const used = new Set(
-    Object.values(next).filter((seat) => isSeat(seat, known)),
-  );
-  const heldBefore = new Set(
-    Object.values(stored).filter((seat) => isSeat(seat, known)),
-  );
-  const released = order.filter(
-    (seat) => heldBefore.has(seat) && !used.has(seat),
-  );
-  const waiting = registrationOrder(agents).filter(
-    (agent) => !(agent.id in next),
-  );
-  let cursor = 0;
-  for (const agent of waiting) {
-    const seat = released[cursor];
-    if (!seat) break;
-    cursor += 1;
-    next[agent.id] = seat;
-  }
-  return next;
+  // Every agent with no saved choice fills a free seat in this save,
+  // the same fill a sync runs. Own name stays unseated.
+  return fillOpenSeats(agents, seats, next);
 }
 
 /**
