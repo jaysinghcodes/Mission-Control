@@ -191,10 +191,17 @@ async function taskOf(id) {
   return { status: res.status, task: res.json?.agent?.currentTask, agentStatus: res.json?.agent?.status }
 }
 
+// Done tickets the Office counts with sample bots hidden (issue 117): once a
+// real bot exists, tickets owned by a sample bot (source default) drop out.
 async function doneTickets() {
   const res = await apiSend('GET', '/tickets')
   if (res.status !== 200) throw new Error(`GET /tickets returned ${res.status}`)
-  return (res.json?.tickets ?? []).filter((row) => row.status === 'done').length
+  const roster = await apiSend('GET', '/agents')
+  if (roster.status !== 200) throw new Error(`GET /agents returned ${roster.status}`)
+  const agents = roster.json?.agents ?? []
+  const real = agents.some((agent) => agent.source === 'registered' || agent.source === 'snapshot')
+  const hidden = new Set(real ? agents.filter((agent) => agent.source === 'default').map((agent) => agent.id) : [])
+  return (res.json?.tickets ?? []).filter((row) => row.status === 'done' && !hidden.has((row.assignee ?? '').trim())).length
 }
 
 async function waitRail(page, text, timeoutMs = 2000) {
