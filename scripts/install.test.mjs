@@ -1226,7 +1226,9 @@ test('native install prints no web URL when the web app does not answer (issue 1
     assert.ok(at > 0, text)
     assert.equal(summary[at - 1], SUMMARY_OPENCLAW)
     assert.match(summary.at(-1) ?? '', /^Reset the dashboard password with: npm run password:reset$/)
-    assert.equal(readFileSync(clock, 'utf8').trim(), '3')
+    // The API wait may spend a tick before the dev process binds, so the web wait
+    // used at least its full budget of 3.
+    assert.ok(Number(readFileSync(clock, 'utf8').trim()) >= 3)
     for (const port of printedPorts(text)) {
       assert.equal(await answers(port), true, `port ${port} was printed but does not answer\n${text}`)
     }
