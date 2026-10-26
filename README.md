@@ -229,7 +229,7 @@ Optional bridge, with no `openclaw` binary on `PATH`:
 python3 bridge/mc-bridge-sync.py --dry-run
 ```
 
-That skips the CLI and posts nothing. A real sync is the same command without `--dry-run`. The screenshots above used `--from-dir` on the fixtures in `bridge/examples`.
+That skips the CLI and posts nothing. A real sync is the same command without `--dry-run`. A steady state run starts `openclaw` once, for sessions. Agents, cron, devices, nodes, the models list, and the CLI version are cached and fetched again when `openclaw.json` changes, a value is missing, or once an hour. `--profile` prints the time, CPU, peak memory, and `openclaw` calls. See [A light run](bridge/README.md#a-light-run). The screenshots above used `--from-dir` on the fixtures in `bridge/examples`.
 
 ## Scripts
 

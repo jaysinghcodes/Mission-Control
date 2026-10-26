@@ -6,6 +6,7 @@ the root README used to point at, so a fresh clone ships with the integration.
 
 - **One file:** `mc-bridge-sync.py`. Python 3.8+, **stdlib only** (no pip install).
 - **One run = one sync.** Collect once, POST, exit. The default interval is 300 seconds.
+- **Light.** A steady state run starts `openclaw` once, for sessions. See [A light run](#a-light-run).
 - **Optional.** Without OpenClaw, use `npm run seed:demo` for sample data instead.
 
 ## Quick start
@@ -52,13 +53,16 @@ file is an info line. A stale file is an info line when no schedule is installed
 | `MC_BRIDGE_STAMP_FILE` | `bridge/.state/last-sync` | Unix timestamp written after a successful sync. |
 | `MC_BRIDGE_APPROVALS_CMD` | unset | Optional command printing pending approvals as JSON (see below). Unset means approvals stay untouched. |
 | `MC_BRIDGE_STATE_FILE` | `bridge/.state/last-run.json` | Where run-diff state is kept (git-ignored). |
+| `MC_BRIDGE_CACHE_FILE` | `cli-cache.json` next to the state file | Slow changing CLI output and memory rows from the last run (git-ignored). Delete it to force a full refresh. |
+| `MC_BRIDGE_REFRESH_SECONDS` | `3600` | How old the cached slow changing data may get before a run fetches it again. `0` fetches it every run. |
 
 > **Token gotcha:** if `INGEST_TOKEN` is blank in `.env`, compose leaves it
 > blank. In production the api then returns 401 on ingest, and the bridge
 > refuses to guess and exits 2. Set the value explicitly in `.env` and both
 > sides agree.
 
-Flags: `--dry-run` (print events as JSON lines, post nothing, write no state),
+Flags: `--dry-run` (print events as JSON lines, post nothing, write no state or cache; it still reads the cache),
+`--profile` (print wall time, CPU and peak memory for the bridge plus its child processes, and the `openclaw` calls by command, to stderr),
 `--from-dir DIR` (read `DIR/{agents,sessions,cron,approvals,devices,nodes}.json` instead of the
 CLI. `bridge/examples/` holds illustrative inputs for testing the mapping. `bridge/examples/fresh-install/` is the fixture the installer CI posts to a running API), and
 `--memory-dir DIR` (read an OpenClaw memory tree: one workspace, or one
@@ -67,6 +71,24 @@ subdirectory per agent). `bridge/examples/openclaw-memory/` is a sample.
 ```bash
 python3 bridge/mc-bridge-sync.py --dry-run --memory-dir bridge/examples/openclaw-memory
 ```
+
+## A light run
+
+The bridge is sized for a 1 core, 4 GB VM. The target per run is under 10 s CPU and under 150 MB peak memory, counting the bridge and every `openclaw` process it starts.
+
+- **Sessions every run.** `openclaw sessions --all-agents --json` runs on every sync. Usage comes from those token counts.
+- **Slow changing data is cached.** Agents, cron, devices, nodes, the models list, and `openclaw --version` are stored in `MC_BRIDGE_CACHE_FILE` and reused. They are fetched again when `openclaw.json` changes, when a stored value is missing, when the stored values are older than `MC_BRIDGE_REFRESH_SECONDS` (default one hour), or when the sessions call fails. A failed call is not stored, so the next run tries it again. So a new agent, a new cron job, a cron run result, or a device change can take up to an hour to show, unless `openclaw.json` changes first.
+- **Fallbacks are skipped when the primary works.** `openclaw models list` runs only when `openclaw.json` has no agent model, and its plain text form only when `--json` printed no rows. `openclaw --version` runs once per refresh, for both the gateway and the models snapshot.
+- **Memory files are read by mtime.** A file whose mtime and size did not change since the last run is not read again. Each file is read in chunks and skipped past 1MB.
+- **Same payload.** For the same CLI output, every snapshot a cached run posts matches what a full run posts, byte for byte.
+
+A steady state run therefore makes one `openclaw` call. The gateway check is a TCP connect, not a CLI call. `--profile` shows the numbers:
+
+```bash
+python3 bridge/mc-bridge-sync.py --profile
+```
+
+On the synthetic fixture in `bridge/light_fixture.py` (10 agents, 5,000 sessions, 500 memory files), `bridge/test_light_run.py` checks the call counts on a first and a steady state run, the refresh rules, the byte for byte payload against the previous bridge, and both targets.
 
 ## Event contract
 
@@ -87,7 +109,7 @@ also persisted to `ActivityEvent` and broadcast on the socket.**
 | `memory.snapshot` | `{ entries: [{ id, title, body, agent, createdAt, kind: "long-term"\|"daily"\|"other", source?, ref? }] }` | Upserts by stable `id`. Deletes only rows with `source=bridge` (and legacy `openclaw`) for agents present in the payload. Demo rows are left alone. A payload with no `entries` array is ignored. An empty `entries` array clears bridge rows only | Each agent's workspace: `MEMORY.md` (long-term, `createdAt` is the file mtime) and `memory/YYYY-MM-DD.md` plus `memory/YYYY-MM-DD-<slug>.md` (daily). The daily calendar day is the filename in the timezone from `GET /settings`, then `MC_TIMEZONE`, then `TZ`, then the host zone named by the `/etc/localtime` symlink. The clock is the file mtime when that mtime falls on the filename date; otherwise a standalone `Time: HH:MM` line, otherwise 12:00 in that timezone. `id` is a hash of agent id + relative path. `source` is `bridge` |
 | `models.snapshot` | `{ agents: [{ id, name, provider, model, local? }], models?: [{ provider, model, local? }], openclawVersion? }` | Replaces every model row. Stores `openclawVersion` on the settings row when the string is non empty. `local` true marks a provider whose usage is $0.00. A payload with neither array is ignored | `~/.openclaw/openclaw.json`, or `OPENCLAW_CONFIG_PATH`. Fallback is `openclaw models list` when that file has no agent model. Ollama is always local. A provider with `local: true` or `api: ollama` is local too. `--from-dir` reads `<dir>/openclaw.json` and does not shell out |
 | `devices.snapshot` | `{ devices?: [{ id, name, type, online, lastSeenAt?, pairedAt?, requestedAt? }], nodes?: [{ id, name, type, online, lastSeenAt?, pairedAt?, requestedAt? }] }` | Replaces bridge rows for each array that is present and removes sample devices. A node with the same id replaces that device row. A payload with neither array is ignored. An empty array clears that kind only. `online` is a live connection. `pairedAt` is the pairing time. `requestedAt` is a pending request. A paired device with no connection and no last seen time is not online | `openclaw devices list --json` and `openclaw nodes list --json`. When paired nodes omit `connected`, the bridge also reads `openclaw nodes status --json`. `--from-dir` reads `<dir>/devices.json` and `<dir>/nodes.json` and does not shell out |
-| `gateway.snapshot` | `{ up, host, port, checkedAt, latencyMs, version? }` | Stored. Under Compose, `GET /system` uses the newest row. `up` must be a boolean and `checkedAt` a number | TCP connect to `127.0.0.1` on `OPENCLAW_GATEWAY_PORT` (default 18789). Posted on every run, including when no OpenClaw source was readable. A version is `openclaw --version` when that prints a line. This event does not refresh the sync stamp by itself |
+| `gateway.snapshot` | `{ up, host, port, checkedAt, latencyMs, version? }` | Stored. Under Compose, `GET /system` uses the newest row. `up` must be a boolean and `checkedAt` a number | TCP connect to `127.0.0.1` on `OPENCLAW_GATEWAY_PORT` (default 18789). Posted on every run, including when no OpenClaw source was readable. A version is `openclaw --version` when that prints a line, refreshed with the cached slow changing data. This event does not refresh the sync stamp by itself |
 | `run.queued` · `run.started` · `run.running` · `run.progress` · `run.completed` · `run.done` · `run.failed` | `{ name, …free-form (agent, job, status, progress, summary, ticketId?) }` | Persisted + broadcast (Live Activity, Office movement, Tickets refetch). When the cron job carries a string `ticketId` (or `meta.ticketId`), the bridge also calls `POST /runs` and `PATCH /runs/:id` with that id. Create success is 201. Update success is 200. A 404 for an unknown ticketId is retried once without ticketId, a warning is logged, and the run is still recorded so the job is not left running. Name is clipped to 200 characters and agent to 100 before POST, counting Unicode code points. One failed run does not block saving state for the runs that succeeded. Any other 400 or 404 is logged without the token and that job is retried next sync | Cron job state changes between bridge runs |
 
 Other accepted types (not sent by this bridge): `health.tick`, `hello`,
