@@ -3,8 +3,10 @@ import {
   Body,
   Controller,
   Get,
+  Optional,
   Put,
 } from '@nestjs/common';
+import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { offlineAfterMs } from '../time/runtime';
 import { SETTING_ID } from '../team/mission';
@@ -36,10 +38,17 @@ import { readSettingsPatch } from './settings-patch';
  * switching back to crew restores it. PUT is a dashboard write. Loopback stays open.
  * Any other peer needs the session cookie. A crewMap key that is not
  * an agent id is 400 and changes nothing.
+ * A saved PUT broadcasts settings.changed with the names of the fields it
+ * carried. Every open tab then loads GET /settings again, so Office,
+ * Agents and Team pick up a naming mode or seat change without a reload.
+ * A rejected PUT broadcasts nothing.
  */
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly live?: LiveActivityGateway,
+  ) {}
 
   @Get()
   async get() {
@@ -117,6 +126,9 @@ export class SettingsController {
         },
       });
     });
+    this.live?.broadcast('settings.changed', {
+      fields: changedFields(patch),
+    });
     return this.present(row);
   }
 
@@ -140,6 +152,17 @@ export class SettingsController {
       offlineAfterMs(),
     );
   }
+}
+
+/** Field names a saved PUT carried, in a fixed order. Never values. */
+export function changedFields(patch: {
+  namingMode?: unknown;
+  crewMap?: unknown;
+  timezone?: unknown;
+  setupDone?: unknown;
+}): string[] {
+  const order = ['namingMode', 'crewMap', 'timezone', 'setupDone'] as const;
+  return order.filter((key) => patch[key] !== undefined);
 }
 
 export function settingsBody(

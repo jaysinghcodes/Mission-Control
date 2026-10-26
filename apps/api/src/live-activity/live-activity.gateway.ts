@@ -25,6 +25,9 @@ import { sessionStatePath } from '../auth/session-state';
  * (chat), session.patch (session edits), command.new (slash commands), and
  * run.running / run.done aliases so hooks using the documented MC-212 names
  * are accepted alongside the legacy run.started / run.completed.
+ *
+ * settings.changed is sent only by PUT /settings. Ingest does not accept it,
+ * so an agent cannot make every open tab reload its settings.
  */
 export type ActivityEventType =
   | 'run.started'
@@ -51,7 +54,8 @@ export type ActivityEventType =
   | 'models.snapshot'
   | 'devices.snapshot'
   | 'gateway.snapshot'
-  | 'agent.status';
+  | 'agent.status'
+  | 'settings.changed';
 
 /**
  * LiveActivityGateway — realtime event bus for Mission Control.
