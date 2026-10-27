@@ -17,6 +17,12 @@ const script = join(__dirname, '..', '..', 'scripts', 'password-reset.mjs');
 const REFUSE =
   'Could not reset the dashboard password, so run docker compose up -d first and then npm run password:reset.';
 const EXEC_ARGS = 'compose exec -T api npm run password:reset';
+const LEGACY_REFUSE =
+  'This install has no install mode in .env, so the password was not reset. Run bash install.sh again to record it, then run npm run password:reset again.';
+const DOCKER_SILENT_REFUSE =
+  'This install has no install mode in .env and Docker did not answer, so the password was not reset. Start Docker or run bash install.sh again to record it, then run npm run password:reset again.';
+const MAY_HAVE_CHANGED =
+  'The new dashboard password could not be read back, so the password may have changed and the old one may no longer work.';
 
 describe('password:reset command', () => {
   it('is wired from the api package and the repo root', () => {
@@ -222,41 +228,149 @@ describe('password:reset command', () => {
     }
   });
 
-  it('keeps the native write when the install marker is absent', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mc-pw-native-'));
-    const tree = join(dir, 'repo');
-    const state = join(dir, 'native-session-state.json');
-    mkdirSync(join(tree, 'apps/api/scripts'), { recursive: true });
-    mkdirSync(join(tree, 'apps/api/src'), { recursive: true });
-    cpSync(script, join(tree, 'apps/api/scripts/password-reset.mjs'));
-    cpSync(
-      join(__dirname, '..', 'load-env.js'),
-      join(tree, 'apps/api/src/load-env.js'),
-    );
-    writeFileSync(join(tree, '.env'), `SESSION_STATE_PATH=${state}\n`, {
-      mode: 0o600,
-    });
-    const log = join(dir, 'docker-args.txt');
-    const bin = dockerBin(dir, 'down');
+  it('keeps the native write with no marker when the docker command is missing', async () => {
+    const tree = legacyTree('mc-pw-native-');
+    const empty = join(tree.dir, 'empty-bin');
+    mkdirSync(empty, { recursive: true });
     try {
-      const result = await runReset(
-        {
-          PATH: `${bin}:${process.env.PATH ?? ''}`,
-          DOCKER_ARGV_LOG: log,
-        },
-        join(tree, 'apps/api/scripts/password-reset.mjs'),
-        ['MC_INSTALL_MODE', 'MC_COMPOSE', 'SESSION_STATE_PATH'],
-      );
+      const result = await runReset({ PATH: empty }, tree.script, [
+        'MC_INSTALL_MODE',
+        'MC_COMPOSE',
+        'SESSION_STATE_PATH',
+      ]);
       expect(result.status).toBe(0);
-      expect(existsSync(log)).toBe(false);
+      expect(result.stderr).toBe('');
       const password = shownPassword(result.stdout);
       expect(password).not.toBe('');
       expect(result.stdout).toContain('Every session was revoked.');
-      const stored = JSON.parse(readFileSync(state, 'utf8')) as {
+      const stored = JSON.parse(readFileSync(tree.state, 'utf8')) as {
         version: number;
         passwordHash: string;
       };
       expect(passwordMatches(password, stored.passwordHash)).toBe(true);
+    } finally {
+      rmSync(tree.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the native write with no marker when Docker shows no Compose trace', async () => {
+    const tree = legacyTree('mc-pw-native-docker-');
+    const log = join(tree.dir, 'docker-args.txt');
+    const bin = traceBin(tree.dir, 'none');
+    try {
+      const result = await runReset(
+        { PATH: `${bin}:${process.env.PATH ?? ''}`, DOCKER_ARGV_LOG: log },
+        tree.script,
+        ['MC_INSTALL_MODE', 'MC_COMPOSE', 'SESSION_STATE_PATH', 'DOCKER_HOST'],
+      );
+      expect(result.status).toBe(0);
+      const password = shownPassword(result.stdout);
+      expect(password).not.toBe('');
+      const stored = JSON.parse(readFileSync(tree.state, 'utf8')) as {
+        passwordHash: string;
+      };
+      expect(passwordMatches(password, stored.passwordHash)).toBe(true);
+      const calls = readFileSync(log, 'utf8');
+      expect(calls).toContain('compose config --format json');
+      expect(calls).toContain('compose ps --all --quiet');
+      expect(calls).toContain('volume ls --quiet --filter name=^repo_mc-auth$');
+      expect(calls).not.toContain('exec');
+    } finally {
+      rmSync(tree.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses with no marker when this checkout has Compose containers', async () => {
+    await expectLegacyRefusal('containers');
+  });
+
+  it('refuses with no marker when only the mc-auth volume is left', async () => {
+    await expectLegacyRefusal('volume');
+  });
+
+  it('refuses with no marker when the Docker daemon cannot be reached', async () => {
+    await expectLegacyRefusal('unreachable');
+  });
+
+  it('refuses with no marker when compose config fails', async () => {
+    await expectLegacyRefusal('config-fails');
+  });
+
+  it('says the password may have changed when the read back fails inside the container', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mc-pw-readback-'));
+    const file = join(dir, 'session-state.json');
+    writeFileSync(file, `${JSON.stringify({ version: 4 })}\n`, { mode: 0o600 });
+    const preload = staleReadPreload(dir);
+    try {
+      const result = await runReset(
+        {
+          SESSION_STATE_PATH: file,
+          MC_COMPOSE: '1',
+          NODE_OPTIONS: `--import ${preload}`,
+        },
+        script,
+      );
+      expect(result.status).toBe(3);
+      expect(result.stdout).toBe('');
+      expect(result.stderr.trim()).toBe(
+        `${MAY_HAVE_CHANGED} Run docker compose exec api npm run password:reset again to set a new one.`,
+      );
+      expect(result.stderr).not.toContain('Under Compose');
+      expect(result.stderr).not.toContain('Could not write the session file.');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('says the password may have changed when the native read back fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mc-pw-readback-native-'));
+    const file = join(dir, 'session-state.json');
+    writeFileSync(file, `${JSON.stringify({ version: 4 })}\n`, { mode: 0o600 });
+    const preload = staleReadPreload(dir);
+    try {
+      const result = await runReset(
+        {
+          SESSION_STATE_PATH: file,
+          MC_INSTALL_MODE: 'native',
+          NODE_OPTIONS: `--import ${preload}`,
+        },
+        script,
+        ['MC_COMPOSE'],
+      );
+      expect(result.status).toBe(3);
+      expect(result.stdout).toBe('');
+      expect(result.stderr.trim()).toBe(
+        `${MAY_HAVE_CHANGED} Run npm run password:reset again to set a new one.`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('relays an unconfirmed container reset from the host without the up hint', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mc-pw-relay-'));
+    const target = join(dir, 'should-not-exist.json');
+    const log = join(dir, 'docker-args.txt');
+    const bin = dockerBin(dir, 'unconfirmed');
+    try {
+      const result = await runReset(
+        {
+          PATH: `${bin}:${process.env.PATH ?? ''}`,
+          MC_INSTALL_MODE: 'compose',
+          SESSION_STATE_PATH: target,
+          DOCKER_ARGV_LOG: log,
+        },
+        script,
+        ['MC_COMPOSE'],
+      );
+      expect(readFileSync(log, 'utf8').trim()).toBe(EXEC_ARGS);
+      expect(result.status).toBe(3);
+      expect(result.stdout).toBe('');
+      expect(result.stderr.trim()).toBe(
+        `${MAY_HAVE_CHANGED} Run npm run password:reset again to set a new one.`,
+      );
+      expect(result.stderr).not.toContain('docker compose up -d');
+      expect(existsSync(target)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -335,7 +449,142 @@ async function expectComposeRefusal(mode: DockerMode): Promise<void> {
 }
 
 type DockerMode =
-  'success' | 'removed' | 'down' | 'down-v' | 'denied' | 'dead-host' | 'empty';
+  | 'success'
+  | 'removed'
+  | 'down'
+  | 'down-v'
+  | 'denied'
+  | 'dead-host'
+  | 'empty'
+  | 'unconfirmed';
+
+type TraceMode =
+  'none' | 'containers' | 'volume' | 'unreachable' | 'config-fails';
+
+async function expectLegacyRefusal(mode: TraceMode): Promise<void> {
+  const tree = legacyTree(`mc-pw-legacy-${mode}-`);
+  const log = join(tree.dir, 'docker-args.txt');
+  const bin = traceBin(tree.dir, mode);
+  try {
+    const result = await runReset(
+      { PATH: `${bin}:${process.env.PATH ?? ''}`, DOCKER_ARGV_LOG: log },
+      tree.script,
+      ['MC_INSTALL_MODE', 'MC_COMPOSE', 'SESSION_STATE_PATH', 'DOCKER_HOST'],
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr.trim()).toBe(
+      mode === 'unreachable' || mode === 'config-fails'
+        ? DOCKER_SILENT_REFUSE
+        : LEGACY_REFUSE,
+    );
+    expect(readFileSync(tree.state, 'utf8')).toBe(tree.original);
+    expect(
+      existsSync(join(tree.root, 'apps/api/data/session-state.json')),
+    ).toBe(false);
+    expect(readFileSync(log, 'utf8')).not.toContain('exec');
+  } finally {
+    rmSync(tree.dir, { recursive: true, force: true });
+  }
+}
+
+/** A checkout copy at <tmp>/repo whose .env has no MC_INSTALL_MODE. */
+function legacyTree(prefix: string): {
+  dir: string;
+  root: string;
+  script: string;
+  state: string;
+  original: string;
+} {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const root = join(dir, 'repo');
+  const state = join(dir, 'host-session-state.json');
+  const original = `${JSON.stringify({ version: 7, passwordHash: 'old' })}\n`;
+  mkdirSync(join(root, 'apps/api/scripts'), { recursive: true });
+  mkdirSync(join(root, 'apps/api/src'), { recursive: true });
+  cpSync(script, join(root, 'apps/api/scripts/password-reset.mjs'));
+  cpSync(
+    join(__dirname, '..', 'load-env.js'),
+    join(root, 'apps/api/src/load-env.js'),
+  );
+  writeFileSync(join(root, '.env'), `SESSION_STATE_PATH=${state}\n`, {
+    mode: 0o600,
+  });
+  writeFileSync(state, original, { mode: 0o600 });
+  return {
+    dir,
+    root,
+    script: join(root, 'apps/api/scripts/password-reset.mjs'),
+    state,
+    original,
+  };
+}
+
+/** Docker that answers the no marker queries. exec always fails. */
+function traceBin(dir: string, mode: TraceMode): string {
+  const bin = join(dir, 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    join(bin, 'docker'),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$DOCKER_ARGV_LOG"
+mode='${mode}'
+case "$*" in
+  "compose config --format json")
+    if [ "$mode" = "config-fails" ]; then
+      echo 'invalid compose project' >&2
+      exit 1
+    fi
+    printf '%s\\n' '{"name":"repo","volumes":{"mc-auth":{"name":"repo_mc-auth"}}}'
+    exit 0
+    ;;
+  "compose ps --all --quiet")
+    if [ "$mode" = "unreachable" ]; then
+      echo 'Cannot connect to the Docker daemon' >&2
+      exit 1
+    fi
+    if [ "$mode" = "containers" ]; then
+      echo 3f2a1b0c9d8e
+    fi
+    exit 0
+    ;;
+  "volume ls --quiet --filter name=^repo_mc-auth$")
+    if [ "$mode" = "volume" ]; then
+      echo repo_mc-auth
+    fi
+    exit 0
+    ;;
+esac
+echo "unexpected docker $*" >&2
+exit 1
+`,
+  );
+  chmodSync(join(bin, 'docker'), 0o755);
+  return bin;
+}
+
+/** Preload that makes the second read of SESSION_STATE_PATH return the old file. */
+function staleReadPreload(dir: string): string {
+  const file = join(dir, 'stale-read.mjs');
+  writeFileSync(
+    file,
+    `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const target = process.env.SESSION_STATE_PATH;
+const original = fs.readFileSync;
+let reads = 0;
+fs.readFileSync = function (path, ...rest) {
+  if (String(path) === target) {
+    reads += 1;
+    if (reads >= 2) return '{"version":4}\\n';
+  }
+  return original.call(this, path, ...rest);
+};
+syncBuiltinESMExports();
+`,
+  );
+  return file;
+}
 
 function dockerBin(dir: string, mode: DockerMode): string {
   const bin = join(dir, 'bin');
@@ -371,6 +620,10 @@ fi
 if [ "$mode" = "dead-host" ]; then
   echo 'Cannot connect to the Docker daemon' >&2
   exit 1
+fi
+if [ "$mode" = "unconfirmed" ]; then
+  echo 'The new dashboard password could not be read back, so the password may have changed and the old one may no longer work. Run docker compose exec api npm run password:reset again to set a new one.' >&2
+  exit 3
 fi
 exit 0
 `,
