@@ -1,7 +1,7 @@
 /**
  * robots.tsx — a roster of 12 hand-tuned cartoon robot avatars for Mission Control.
  *
- * Original artwork, pure inline SVG, no external assets. MIT License.
+ * Original artwork, pure inline SVG, no external assets. Apache License 2.0.
  *
  * Every robot is assembled from a small parts system:
  *   head shape × face × body × locomotion × arms × accessories × color
