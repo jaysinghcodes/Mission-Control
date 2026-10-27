@@ -8,6 +8,14 @@ On Compose, `bash install.sh` prints the owner URL and the tunnel port. On the n
 
 Leave `TRUSTED_PROXY` unset. These paths do not set it. The tunnel listener does not read it.
 
+## From the Connect page
+
+Step 7 of `/#/connect` is this guide in one line: forward the owner port over SSH and keep the session open. Login is required on a Compose install. The owner port is `MC_WEB_PORT`, and the command on the page already uses the configured web port. The page calls the API on that same origin.
+
+Pick the OS you are on. Every OS gets the same command. On macOS, open Terminal. On Windows, open PowerShell, which has OpenSSH built in. On Linux or any other system, open a terminal. Replace `your-server-ip` with your host.
+
+If the page check fails, keep the SSH session open, run the tunnel again, then retry. If the stack is not up, finish steps 1 to 4 on the host first. Tailscale Serve and Cloudflare Tunnel point at `127.0.0.1` on the tunnel port, `MC_REMOTE_PORT` (default 3011), as the sections below say. Leave `TRUSTED_PROXY` unset.
+
 ## SSH tunnel
 
 Login is required on the Compose install this guide is for.

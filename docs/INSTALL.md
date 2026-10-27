@@ -100,7 +100,7 @@ The web address is `http://127.0.0.1:<MC_WEB_PORT>`. `http://localhost:<MC_WEB_P
 1. `bash install.sh` starts Postgres, the API, and the web UI. `docker compose up -d --build` is the same Docker start when the tokens are already in `.env`. `npm run dev` is the advanced path and starts the API and the web app without Docker.
 2. Open the URL the installer printed (`http://localhost:<MC_WEB_PORT>/#/tasks`, default port 5173). `/` redirects to `/tasks`. The sidebar account chip says **Connected** plus the health latency when `GET /health` succeeds and the Socket.IO feed is up. **API only** means health is up and the socket is still reconnecting. **Offline** means the health probe failed.
 3. If the first health probe fails, the shell sends the browser to `/#/connect`. Later failures do not keep redirecting.
-4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, remote access, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks. Step 7 links to [REMOTE.md](REMOTE.md).
+4. `/#/connect` is an 8 step sheet: prerequisites, clone, root `.env`, start the stack, verify, OpenClaw bridge, remote access, smoke test. Progress is stored in this browser under `mc-setup-progress-v2`. Steps that say they probe health call `GET /health`. The other steps are marked done by the person at the keyboard. The last step returns to `/`, which lands on Tasks. Each step links to its part of [Connect page steps](#connect-page-steps), and step 7 links to [REMOTE.md](REMOTE.md#from-the-connect-page).
 5. `/#/` goes to Tasks. Health lives on `/#/system`. Trust the sidebar chip.
 6. The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent's own name, then confirms the detected provider. Skip finishes that open. Each choice is saved on the settings row. Change them later under System, then Settings. Office uses the naming choice as soon as it is saved. `npm run seed:demo` does not finish setup and does not choose names. If crew mode is already saved, a new demo agent takes a seat by the rules in [How crew seats work](../README.md#how-crew-seats-work). `npm run seed:clear` drops those seats. Crew names come from `config/crew.json`. Usage and memory count days in the saved timezone. The names are `config/timezones.json`. A legacy name such as `Asia/Calcutta` is saved as its current name. With no saved timezone, that is `TZ` when that name is in the list, otherwise the host zone.
 
@@ -128,3 +128,75 @@ Without `npm ci`, prisma is not found and the seed command fails. A Compose inst
 `npm run seed:demo` writes sample agents, cron jobs, tickets, projects, runs, activity, approvals, memories, docs, devices, usage, a mission line, and one custom tool. It is idempotent. It refuses to run when `NODE_ENV=production` unless `SEED_DEMO_ALLOW_PROD=1`. Demo tickets, demo runs, activity, memory, doc authors, and usage agent lists store the agent id. The usage `bot` column stays the display name. A second run rewrites a demo row that still has a crew name or a legacy name. A registered bot named Forge does not take the seat, sticker, or status of the crew bot whose id is `forge`.
 
 `npm run seed:clear` deletes only those sample rows. It matches the seeded ids, or the usage marker on a day nothing has overwritten. Registered bots, snapshot rows, and rows you created through the API stay. A mission you edited stays. A doc you edited stays. It is idempotent. Running it twice exits 0 both times. The same production guard applies.
+
+## Connect page steps
+
+`/#/connect` keeps each step to a title, one or two short sentences, and at most one command. Each step links to its section below, which holds the rest. Step 2 links to the top of this file and step 7 links to [REMOTE.md](REMOTE.md#from-the-connect-page).
+
+### Connect step 1: prerequisites
+
+You need Docker with the Compose plugin, git, curl, and bash. One command installs Mission Control, and the browser uses one port. With no Docker, the installer says so and uses Node.js 20.17 or later and Postgres 16. Docker installs do not need Node on the host. The step shows `git --version`, `docker compose version`, and `curl --version`, one per line. Each line prints a version, or an error when that tool is missing.
+
+OpenClaw is optional. A running OpenClaw instance is the live data source, through the bridge in step 6. Without it the tickets loop works, and `npm run seed:demo` fills sample data as [Demo data](#demo-data) says.
+
+### Connect step 3: the root .env
+
+If you ran the installer, the root `.env` already exists. Leave it. The tokens are already in that file. Docker Compose reads exactly one env file, the root `.env` next to `docker-compose.yml`. Copy the template with `cp .env.example .env` only when `.env` is missing and you are not using `bash install.sh`.
+
+Never invent or guess credentials. Ask the human who owns them. Pause and ask for every real secret, redact secrets in any echoed output, show the command before running it, and keep side effecting actions behind an approval. `.env` is git ignored. Never commit it.
+
+These are the variables in the root `.env`:
+
+* `DATABASE_URL`: keep the template default. The Compose Postgres matches it. Change it only if you override `POSTGRES_PASSWORD` in `.env`.
+* `INGEST_TOKEN`: the shared secret for agent ingest, which covers POST /events, register, heartbeat, and run writes. The dashboard does not send this header. `bash install.sh` writes a random value when `.env` is created and does not replace it later. You may generate one with `openssl rand -hex 24`. If it is blank and the API is on loopback, ingest stays open outside production and the API logs a warning. Production with no token returns 401 on ingest. If it is blank and the API binds anywhere else, the API refuses to start. Compose does not invent a token.
+* `DASHBOARD_PASSWORD_HASH`: the scrypt hash of the dashboard password. `bash install.sh` writes it and prints the password once, in the final summary. The file stores the hash only. A second run does not print or change it. `npm run password:reset` sets a new one and revokes every session. Under Compose that command is `docker compose exec api npm run password:reset`. Leave it blank on a loopback `npm run dev` and the dashboard stays open. Compose requires it, because the API sees the Docker network and not loopback.
+* `SESSION_SECRET`: signs the session cookie. `bash install.sh` writes a random value. A second run does not replace it.
+* `SESSION_STATE_PATH`: the file that stores the session version and a changed password hash. Log out and a password change bump the version, so an old cookie returns 401 after a restart. The default is `apps/api/data/session-state.json`. Compose uses `/data/auth/session-state.json` on the `mc-auth` volume. When the file has a hash, it overrides `DASHBOARD_PASSWORD_HASH` on startup.
+* `LOGIN_FAIL_LIMIT`: wrong dashboard passwords allowed from one IP inside the window. The default is 5. Loopback is not counted. Agent ingest is not counted.
+* `LOGIN_WINDOW_SECONDS`: the window for those failures, in seconds. The default is 60. The first wait after the limit matches this number.
+* `LOGIN_BACKOFF_MAX_SECONDS`: the longest login wait, in seconds. The default is 900, which is 15 minutes. Each later lockout doubles until it reaches this cap.
+* `TRUSTED_PROXY`: optional. Comma separated addresses of proxies whose `X-Forwarded-For` header is trusted for the login bucket only. Leave it blank. Do not set it to the Docker bridge. It does not skip login. Cloudflare Tunnel and Tailscale Serve do not need it, because they use the tunnel port.
+* `WEB_ORIGIN`: the template default covers `localhost` and `127.0.0.1`. Add your tunnel origin later if you reach the dashboard remotely.
+* `GITHUB_TOKEN`: optional. Ask the human to paste it only if they want pull request merge from Approvals. Everything else works without it.
+
+### Connect step 4: start the stack
+
+`bash install.sh` already starts Postgres, the API, and the web UI. `docker compose up -d --build` starts them again with Docker Compose, and `docker compose ps` shows the status of each service. The browser uses the web port, `MC_WEB_PORT` (default 5173). The Connect page shows the port from the install. Compose bakes it into the web image, so rebuild with `docker compose up -d --build` after you change it. Leave `VITE_API_URL` unset. nginx proxies `/api` and `/socket.io` to the API.
+
+The API loads the root `.env` and runs `prisma migrate deploy` before it listens. A native install listens on `PORT`, or on `MC_API_PORT` when `PORT` is unset (default 3000). Inside Compose the log line stays `mission-control api listening on 0.0.0.0:3000`. The host API port is `MC_API_PORT`. [Ports](#ports) has the full table.
+
+With no Docker, the installer says so and uses Node.js 20.17 or later and Postgres 16. The advanced path is [Advanced: Node and Postgres](#advanced-node-and-postgres), and it is also in the README. With no OpenClaw, `npm run seed:demo` fills sample data.
+
+### Connect step 5: verify the dashboard
+
+Open `http://localhost:<MC_WEB_PORT>/#/tasks`. The task board loads, and the sidebar shows a green Connected dot when the live socket is up. Open Tasks for the board and System for health. Health on this same origin shows uptime, client count, and database state. Empty states show actions.
+
+The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent's own name, then confirms the detected provider. Skip finishes that open. Change each one later under System, then Settings. Crew seats are saved by agent id.
+
+If the dot stays red, the API is down or this browser has no session. On Compose, sign in with the password from install. Reset it with `docker compose exec api npm run password:reset`. A Compose install asks for the password on the host machine too. When the step's API check fails, start the stack on the host with steps 1 to 4, then retry.
+
+### Connect step 6: the OpenClaw bridge
+
+This step is optional. Skip it when OpenClaw is not installed. `bash install.sh` skips the bridge schedule in that case and still exits 0. Instead, `npm run seed:demo` loads labeled sample agents, jobs, and tickets. It does not need OpenClaw, and tickets work with no OpenClaw. [Demo data](#demo-data) has the steps.
+
+The step shows `python3 bridge/mc-bridge-sync.py --dry-run`, then `python3 bridge/mc-bridge-sync.py`. The dry run previews the sync and the second line sends one. With no `openclaw` command, the dry run exits 0 and posts nothing. A 401 means the bridge and the API disagree on the token. Read `INGEST_TOKEN` from the root `.env`. The installer stores it there and does not print it.
+
+Paste [PASTE_IN.md](PASTE_IN.md) into OpenClaw and say yes. That file runs `bash install.sh`, reports the URL the installer prints, then registers and sends a heartbeat. It also shows the POST /tickets and POST /runs calls. It does not start the OpenClaw gateway. The 401 line is in [API.md](API.md#41-auth). The bridge itself is described in [bridge/README.md](../bridge/README.md).
+
+When the `openclaw` command is on PATH, `bash install.sh` schedules `bridge/mc-bridge-sync.py`, as [Bridge schedule](#bridge-schedule) says. That is a systemd user timer on Linux, cron when that timer is not available, or launchd on macOS. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300 seconds). The job sets `MC_BRIDGE_REGISTER` (default 1). Remove it with `bash install.sh --uninstall-schedule`. The token stays in the root `.env`.
+
+The bridge is `bridge/mc-bridge-sync.py`, written for Python 3 with the standard library only. It reads OpenClaw through the `openclaw` command and posts agents, sessions, calendar, usage, approvals, models, and devices snapshots, plus `run.*` events. Devices come from `openclaw devices list` and nodes from `openclaw nodes list`. Approvals stay empty until `MC_BRIDGE_APPROVALS_CMD` prints them. Models come from `~/.openclaw/openclaw.json`. When that file has no model, the bridge runs `openclaw models list`. Usage prices tokens from `config/prices.json`, and a reported `costUsd` wins. When a model has no price, System and Usage show the known total and Price not set for some models. The API URL comes from `MC_API_URL`, then `MC_API_PORT`, then `PORT`.
+
+Under Compose the bridge checks the gateway at 127.0.0.1 on the configured port and posts `gateway.snapshot` with `x-ingest-token`. System shows Unknown when that report is missing or older than `GATEWAY_STATUS_MAX_AGE_MS` (default 600000). A future checkedAt is counted from the time the API stored the report. A native install, or an explicit `OPENCLAW_GATEWAY_HOST`, probes that host directly on `OPENCLAW_GATEWAY_PORT` (default 18789). Gateway logs are read from `OPENCLAW_LOG_DIR`, which defaults to `/tmp/openclaw`.
+
+The bridge reads `INGEST_TOKEN` from the root `.env` and sends it as `x-ingest-token` on POST /events, register, heartbeat, and run writes. Dashboard routes use the session cookie instead. Set the token explicitly, because the bridge refuses a blank token. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). With no schedule, that age is an info line. If doctor says this user lacks permission to use the Docker socket, add the user to the docker group and start a new login session.
+
+Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json`, and do not replace the whole file. The Mission Control starter sets `agents.defaults.subagents.maxChildrenPerAgent` to 3 and `maxConcurrent` to 4. The API does not read these. They cap OpenClaw fan out. The installer offers this merge and does not edit the file.
+
+### Connect step 8: smoke test
+
+Tickets need no OpenClaw. There is no ticket delete route. Create a ticket on `/#/tickets`, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.
+
+After `npm run seed:demo`, Calendar, Team, Office, and Live Activity show labeled sample data with no OpenClaw. Open them at `/#/calendar`, `/#/team`, `/#/office`, and `/#/activity`.
+
+The step 6 bridge brings your real cron jobs to Calendar, the real roster to Team, Office bots that move on real `run.*` events, and live agent activity.
