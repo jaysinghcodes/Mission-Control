@@ -1656,6 +1656,7 @@ EOF
 Description=Mission Control OpenClaw bridge schedule
 
 [Timer]
+OnActiveSec=${interval}s
 OnBootSec=${interval}s
 OnUnitActiveSec=${interval}s
 Persistent=true
@@ -1680,6 +1681,12 @@ install_systemd_schedule() {
   if ! systemctl --user enable --now "${unit}.timer"; then
     echo "systemctl could not enable the bridge timer. The bridge schedule was not installed."
     return 0
+  fi
+  # OnActiveSec counts from when the timer starts. A restart rearms it on a rerun, so a
+  # timer that already elapsed on a long uptime host gets a next run without a manual start.
+  if ! systemctl --user restart "${unit}.timer"; then
+    echo "systemctl could not restart the bridge timer. Start it with:"
+    echo "  systemctl --user restart ${unit}.timer"
   fi
   remove_cron_block
   remove_launchd_agent
