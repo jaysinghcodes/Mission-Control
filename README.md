@@ -263,7 +263,7 @@ Tasks, projects, pipeline, memory, docs, team, custom tools, Office, Calendar, A
 
 Shipped: the pages in the table above, `POST /events`, idempotent `seed:demo` and `seed:clear`, and the optional `bridge/` sync.
 
-Still open: there is no dashboard form that adds a device. `GET /usage?period=30d` is not a window and stays empty. Live provider balances are not in this build.
+Still open: `GET /usage?period=30d` is not a window and stays empty. Live provider balances are not in this build.
 
 ## Known limitations
 

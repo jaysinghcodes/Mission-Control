@@ -33,6 +33,8 @@ const REQUIRED: RegisteredWriteRoute[] = [
   { method: 'POST', path: '/models' },
   { method: 'DELETE', path: '/models/:id' },
   { method: 'PUT', path: '/mission' },
+  { method: 'POST', path: '/devices' },
+  { method: 'DELETE', path: '/devices/:id' },
   { method: 'POST', path: '/approvals/:id/decide' },
   { method: 'POST', path: '/custom-tools' },
   { method: 'PATCH', path: '/custom-tools/:id' },

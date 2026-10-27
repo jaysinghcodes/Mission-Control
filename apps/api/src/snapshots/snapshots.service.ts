@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   asRosterAgent,
@@ -27,6 +27,8 @@ import { usageTimeZone } from '../usage/zone-time';
  */
 @Injectable()
 export class SnapshotsService {
+  private readonly logger = new Logger('SnapshotsService');
+
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly zones?: TimezoneService,
@@ -302,12 +304,27 @@ export class SnapshotsService {
    * because a bridge report replaces the seed only list. A devices array
    * does not delete node rows, and a nodes array does not delete device
    * rows, so one failed CLI cannot erase the other list.
+   *
+   * Manual rows (added on Team) are never deleted or overwritten. A bridge
+   * entry whose id matches a manual row is skipped and logged once per
+   * snapshot. The rest of the snapshot still applies.
    */
   async applyDevices(payload: Record<string, unknown>): Promise<void> {
     const parsed = deviceRowsFromPayload(payload);
     if (!parsed) return;
-    const { rows, sawDevices, sawNodes } = parsed;
+    const { sawDevices, sawNodes } = parsed;
+    const skipped: string[] = [];
     await this.prisma.$transaction(async (tx) => {
+      const manual = parsed.rows.length
+        ? await tx.device.findMany({
+            where: {
+              source: 'manual',
+              id: { in: parsed.rows.map((row) => row.id) },
+            },
+            select: { id: true },
+          })
+        : [];
+      const rows = keepManualDevices(parsed.rows, manual, skipped);
       await tx.device.deleteMany({ where: { source: 'demo' } });
       if (sawDevices) {
         await tx.device.deleteMany({
@@ -326,6 +343,11 @@ export class SnapshotsService {
         await tx.device.createMany({ data: rows });
       }
     });
+    if (skipped.length > 0) {
+      this.logger.warn(
+        `devices.snapshot skipped ${skipped.length} bridge ${skipped.length === 1 ? 'entry' : 'entries'} whose id matches a manual device: ${skipped.join(', ')}`,
+      );
+    }
   }
 }
 
@@ -426,6 +448,23 @@ export type DeviceSnapshot = {
   sawDevices: boolean;
   sawNodes: boolean;
 };
+
+/**
+ * Bridge rows that do not collide with a manual device. Colliding ids are
+ * pushed onto `skipped` so the caller can log them once.
+ */
+export function keepManualDevices(
+  rows: DeviceWrite[],
+  manual: readonly { id: string }[],
+  skipped: string[] = [],
+): DeviceWrite[] {
+  const taken = new Set(manual.map((row) => row.id));
+  return rows.filter((row) => {
+    if (!taken.has(row.id)) return true;
+    skipped.push(row.id);
+    return false;
+  });
+}
 
 /**
  * Rows for devices.snapshot, or null when the payload is not a snapshot.

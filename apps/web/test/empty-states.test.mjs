@@ -19,7 +19,8 @@ test('approvals, logs, docs, sessions, and devices explain an empty install', as
   const sessions = await source('../src/pages/Sessions.tsx')
   const team = await source('../src/pages/Team.tsx')
   const deviceStatus = await source('../src/lib/device-status.ts')
-  for (const text of [approvals, logs, docs, docsEmpty, sessions, team, deviceStatus]) {
+  const deviceForm = await source('../src/lib/device-form.ts')
+  for (const text of [approvals, logs, docs, docsEmpty, sessions, team, deviceStatus, deviceForm]) {
     assert.equal(DASH.test(text), false)
     assert.equal(text.includes('->'), false)
   }
@@ -34,8 +35,8 @@ test('approvals, logs, docs, sessions, and devices explain an empty install', as
   assert.match(docsEmpty, /DOCS_ROOT sets that folder/)
   assert.doesNotMatch(docs + docsEmpty, /\/data\/docs/)
   assert.match(sessions, /sessions\.snapshot/)
-  assert.match(team, /openclaw devices list/)
-  assert.match(team, /openclaw nodes list/)
+  assert.match(team, /DEVICE_COPY\.emptyBody/)
+  assert.match(deviceForm, /Add a device here with Pair a device, or wait for the bridge or npm run seed:demo\./)
   assert.match(deviceStatus, /Requested /)
   assert.match(deviceStatus, /Paired /)
   assert.match(deviceStatus, /Last seen /)
