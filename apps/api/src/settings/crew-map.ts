@@ -116,7 +116,7 @@ export async function withCrewLock<T>(
 }
 
 /** Own name. Stored on the agent id. It is not a seat id. */
-export const OWN_NAME = '';
+const OWN_NAME = '';
 
 function isSeat(seat: string, known: ReadonlySet<string>): boolean {
   return seat !== OWN_NAME && known.has(seat);

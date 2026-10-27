@@ -33,7 +33,7 @@ export function findApiDir(start: string = __dirname): string {
   );
 }
 
-export function runMigrate(
+function runMigrate(
   apiDir: string,
   env: NodeJS.ProcessEnv = process.env,
 ): void {

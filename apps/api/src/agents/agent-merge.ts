@@ -19,7 +19,7 @@ export type AgentSource = (typeof AGENT_SOURCES)[number];
 export const SNAPSHOT_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const AGENT_SLUG = /^[a-z0-9_]{1,64}$/;
+const AGENT_SLUG = /^[a-z0-9_]{1,64}$/;
 
 /** Same cap as run names (#43). Counted in Unicode code points. */
 export const NAME_MAX = 200;
@@ -141,7 +141,7 @@ export function backfillSource(id: string): 'default' | 'snapshot' {
   return SNAPSHOT_ID.test(id) ? 'snapshot' : 'default';
 }
 
-export function asSource(value: string): AgentSource {
+function asSource(value: string): AgentSource {
   if (value === 'snapshot' || value === 'registered' || value === 'default') {
     return value;
   }

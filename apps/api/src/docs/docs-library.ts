@@ -205,7 +205,7 @@ async function recordFromFile(root: string, file: FoundFile): Promise<Scanned> {
   };
 }
 
-export function splitFrontmatter(raw: string): {
+function splitFrontmatter(raw: string): {
   meta: Frontmatter;
   body: string;
 } {
@@ -276,7 +276,7 @@ function typeFrom(raw: string | undefined): DocType | null {
   return null;
 }
 
-export function previewText(body: string): string {
+function previewText(body: string): string {
   const noFence = body
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/```[\s\S]*$/g, ' ');

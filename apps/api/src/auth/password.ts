@@ -81,7 +81,7 @@ export function passwordMatches(password: string, stored: string): boolean {
 export const DASHBOARD_BIND_WARNING =
   'WARNING: DASHBOARD_PASSWORD_HASH is not set. The dashboard is open while the API listens on loopback only. Set a password before you expose this API.';
 
-export function dashboardRefuseMessage(host: string, missing: string): string {
+function dashboardRefuseMessage(host: string, missing: string): string {
   return (
     `Refusing to start. The API is bound to ${host}, which is not a loopback address, and ${missing} is not set. ` +
     'Run bash install.sh so it can write DASHBOARD_PASSWORD_HASH and SESSION_SECRET, or set both in .env, then start again.'

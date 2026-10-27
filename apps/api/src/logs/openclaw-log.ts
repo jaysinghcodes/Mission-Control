@@ -22,13 +22,13 @@ import { wireText } from '../wire-text';
  */
 
 /** Default directory the OpenClaw gateway writes. Override with OPENCLAW_LOG_DIR. */
-export const DEFAULT_OPENCLAW_LOG_DIR = '/tmp/openclaw';
+const DEFAULT_OPENCLAW_LOG_DIR = '/tmp/openclaw';
 
 /**
  * Log directory for this request. An absolute path in OPENCLAW_LOG_DIR wins.
  * A relative path, a blank value, or a `..` segment keeps the default.
  */
-export function openclawLogDir(env: NodeJS.ProcessEnv = process.env): string {
+function openclawLogDir(env: NodeJS.ProcessEnv = process.env): string {
   const raw = env.OPENCLAW_LOG_DIR?.trim() ?? '';
   if (!raw.startsWith('/')) return DEFAULT_OPENCLAW_LOG_DIR;
   if (raw.includes('\0') || raw.split('/').includes('..')) {

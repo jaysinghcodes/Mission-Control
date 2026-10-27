@@ -3,7 +3,7 @@
  * roster should load again. Polling stays as a fallback. This does not
  * change how a robot is drawn.
  */
-export function latestRosterEventTs(
+function latestRosterEventTs(
   events: readonly { type: string; ts: number }[],
 ): number {
   let latest = 0

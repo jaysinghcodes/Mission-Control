@@ -47,10 +47,6 @@ export const FIX_HEALTH = 'npm run dev'
 export const FIX_NODE =
   "Node 20.17 or later is needed for the native install. Docker installs don't need Node."
 
-export function portFix(port) {
-  return `lsof -nP -iTCP:${port} -sTCP:LISTEN`
-}
-
 /** Em dash and en dash are dash punctuation. CLI flags are not. */
 export function hasDashPunctuation(text) {
   return /[\u2012\u2013\u2014\u2015]/.test(text)

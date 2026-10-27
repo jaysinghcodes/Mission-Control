@@ -20,11 +20,3 @@ export function formatDocWhen(iso: string, now = new Date()): string {
   if (d >= startYesterday) return `Yesterday, ${clock(d)}`
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`
 }
-
-/** Local timestamp `daysAgo` before now, at a fixed clock time. */
-export function atLocal(daysAgo: number, hour: number, minute: number, now = new Date()): string {
-  const d = new Date(now)
-  d.setDate(d.getDate() - daysAgo)
-  d.setHours(hour, minute, 0, 0)
-  return d.toISOString()
-}

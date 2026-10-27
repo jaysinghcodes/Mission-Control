@@ -1,11 +1,8 @@
 /**
- * Ports baked by Vite from the process environment.
- * MC_WEB_PORT is the browser port. PORT is the native API listen port.
- * MC_API_PORT fills in when PORT is unset.
+ * The browser port Vite baked from MC_WEB_PORT at build time.
  */
 
 declare const __MC_WEB_PORT__: string;
-declare const __MC_API_PORT__: string;
 
 function configured(value: string, fallback: string): string {
   if (typeof value !== 'string') return fallback;
@@ -17,4 +14,3 @@ function configured(value: string, fallback: string): string {
 }
 
 export const WEB_PORT = configured(__MC_WEB_PORT__, '5173');
-export const API_PORT = configured(__MC_API_PORT__, '3000');

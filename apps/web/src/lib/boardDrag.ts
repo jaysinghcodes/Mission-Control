@@ -26,7 +26,7 @@ export function statusFromOverId(overId: string): string | null {
 }
 
 /** Board column for a ticket status. `inprogress` lives in Build. */
-export function columnKey(status: string): string | null {
+function columnKey(status: string): string | null {
   const col = BOARD_COLUMNS.find((c) => inColumn(status, c))
   return col ? col.status : null
 }
@@ -42,7 +42,7 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 /** Same sentences the status buttons already show. */
-export function moveFailureNotice(status: string, httpStatus: number, error: string): string {
+function moveFailureNotice(status: string, httpStatus: number, error: string): string {
   if (httpStatus === 404) return 'That ticket no longer exists. The board has been refreshed.'
   const what = STATUS_LABEL[status] ?? status
   return `Couldn't move ticket to ${what}. ${error}`
@@ -66,14 +66,14 @@ export interface BoardDragState<T extends { id: string; status: string }> {
   pending: Map<string, PendingMove[]>
 }
 
-export function emptyBoardDrag<T extends { id: string; status: string }>(
+function emptyBoardDrag<T extends { id: string; status: string }>(
   tickets: T[] = [],
 ): BoardDragState<T> {
   return { tickets, pending: new Map() }
 }
 
 /** Server list arrived. In-flight cards keep the column the user dragged them to. */
-export function acceptServer<T extends { id: string; status: string }>(
+function acceptServer<T extends { id: string; status: string }>(
   state: BoardDragState<T>,
   server: T[],
 ): BoardDragState<T> {
@@ -88,7 +88,7 @@ export function acceptServer<T extends { id: string; status: string }>(
   return { ...state, tickets }
 }
 
-export function beginDrag<T extends { id: string; status: string }>(
+function beginDrag<T extends { id: string; status: string }>(
   state: BoardDragState<T>,
   id: string,
   nextStatus: string,
@@ -125,7 +125,7 @@ export interface SettleResult<T extends { id: string; status: string }> {
  * `authoritative` is false for an earlier drag whose newer sibling is still
  * the one on screen: the status is left alone so a late body cannot win.
  */
-export function settleDrag<T extends { id: string; status: string }>(
+function settleDrag<T extends { id: string; status: string }>(
   state: BoardDragState<T>,
   id: string,
   seq: number,

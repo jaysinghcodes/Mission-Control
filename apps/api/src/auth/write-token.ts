@@ -71,7 +71,7 @@ export const WRITE_AUTH_WARNING =
 export const PRODUCTION_NO_TOKEN_LINE =
   'INGEST_TOKEN is not set. NODE_ENV is production, so ingest routes return 401 until you set INGEST_TOKEN. Example: INGEST_TOKEN=$(openssl rand -hex 24)';
 
-export function refuseMessage(host: string): string {
+function refuseMessage(host: string): string {
   return (
     `Refusing to start. The API is bound to ${host}, which is not a loopback address, and INGEST_TOKEN is not set. ` +
     'Set INGEST_TOKEN to a long random string, then start again. Example: INGEST_TOKEN=$(openssl rand -hex 24)'

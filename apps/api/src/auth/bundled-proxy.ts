@@ -101,9 +101,7 @@ export function bundledProxyTokens(
   return [DEFAULT_BUNDLED_PROXY_HOST];
 }
 
-export function bundledProxyConfigured(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+function bundledProxyConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   return bundledProxyTokens(env).length > 0;
 }
 
@@ -116,7 +114,7 @@ function isLiteralIp(token: string): boolean {
   return ip.includes(':') && /^[0-9a-f:]+$/.test(ip);
 }
 
-export function literalProxyPeers(raw: string | undefined): string[] {
+function literalProxyPeers(raw: string | undefined): string[] {
   const ips: string[] = [];
   for (const token of splitList(raw)) {
     if (!isLiteralIp(token)) continue;

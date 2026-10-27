@@ -17,7 +17,7 @@ import { configuredPasswordHash } from './password';
  * password hash in this file overrides DASHBOARD_PASSWORD_HASH on startup.
  */
 
-export const DEFAULT_SESSION_VERSION = 1;
+const DEFAULT_SESSION_VERSION = 1;
 
 /** A broken file matches no cookie. Sessions stay closed until it is replaced. */
 const UNREADABLE_VERSION = Number.MAX_SAFE_INTEGER;
@@ -65,7 +65,7 @@ export function readSessionState(
   }
 }
 
-export function writeSessionState(
+function writeSessionState(
   state: SessionState,
   env: NodeJS.ProcessEnv = process.env,
 ): void {

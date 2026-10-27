@@ -54,7 +54,7 @@ function readPoint(value: unknown): {
  * (`period: "7d"` and no timestamp) is ignored so the bridge cannot post
  * a separate 7 day or month number.
  */
-export function pointsFromPayload(payload: Record<string, unknown>) {
+function pointsFromPayload(payload: Record<string, unknown>) {
   if (Array.isArray(payload.points)) {
     return payload.points
       .map(readPoint)
