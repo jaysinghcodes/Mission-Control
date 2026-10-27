@@ -1586,6 +1586,10 @@ exit 1
     path.join(fx.bin, 'systemctl'),
     `#!/bin/sh
 printf '%s\\n' "$*" >> "$SYSTEMCTL_LOG"
+if [ "$1" = "--user" ] && [ "$2" = "restart" ] && [ "\${SYSTEMCTL_RESTART_FAIL:-}" = "1" ]; then
+  echo "restart failed" >&2
+  exit 1
+fi
 if [ "$1" = "--user" ] && [ "$2" = "show-environment" ]; then
   if [ "\${SYSTEMCTL_USER_DOWN:-}" = "1" ]; then
     echo "user manager is not running" >&2
@@ -1686,7 +1690,7 @@ function verifySystemd(servicePath, timerPath) {
   ]) {
     assert.equal(service.includes(key), true, key)
   }
-  for (const key of ['[Unit]', '[Timer]', 'OnBootSec=', 'OnUnitActiveSec=', 'Persistent=true', '[Install]', 'WantedBy=timers.target']) {
+  for (const key of ['[Unit]', '[Timer]', 'OnActiveSec=', 'OnBootSec=', 'OnUnitActiveSec=', 'Persistent=true', '[Install]', 'WantedBy=timers.target']) {
     assert.equal(timer.includes(key), true, key)
   }
   const analyze = spawnSync('systemd-analyze', ['verify', servicePath, timerPath], { encoding: 'utf8' })
@@ -1775,6 +1779,8 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
     const serviceText = readFileSync(service, 'utf8')
     const timerText = readFileSync(timer, 'utf8')
     assert.match(timerText, /OnUnitActiveSec=300s/)
+    // #154: OnActiveSec arms a next run from timer start, so a long uptime host whose OnBootSec already passed still schedules.
+    assert.match(timerText, /^OnActiveSec=300s$/m)
     assert.match(serviceText, /Environment="MC_BRIDGE_REGISTER=1"/)
     assert.match(serviceText, /Environment="MC_API_URL=http:\/\/127\.0\.0\.1:3000"/)
     assert.equal(serviceText.includes(`Environment="PATH=${fx.bin}`), true, serviceText)
@@ -1786,6 +1792,8 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
     assert.equal(readFileSync(fx.cronFile, 'utf8'), FOREIGN_CRON)
     assert.equal(readFileSync(path.join(fx.systemdDir, 'other.service'), 'utf8'), '[Unit]\nDescription=Keep this unit\n')
     assert.match(readFileSync(fx.systemctlLog, 'utf8'), /enable --now mission-control-bridge\.timer/)
+    // The restart comes after enable so a rerun rearms OnActiveSec on a timer that already elapsed.
+    assert.match(readFileSync(fx.systemctlLog, 'utf8'), /enable --now mission-control-bridge\.timer\n(?:.*\n)*?--user restart mission-control-bridge\.timer\n/)
     assert.equal(PUNCT.test(firstText), false)
 
     const second = runInstall(fx.repo, { ...fx.env, MC_BRIDGE_SCHEDULER: 'systemd' })
@@ -1794,6 +1802,7 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
     assert.equal(readFileSync(timer, 'utf8'), timerText)
     assert.equal(readFileSync(fx.cronFile, 'utf8'), FOREIGN_CRON)
     assert.equal((readFileSync(fx.systemctlLog, 'utf8').match(/enable --now/g) ?? []).length, 2)
+    assert.equal((readFileSync(fx.systemctlLog, 'utf8').match(/--user restart mission-control-bridge\.timer/g) ?? []).length, 2)
 
     const logBefore = readFileSync(fx.log, 'utf8')
     const removed = runInstall(fx.repo, fx.env, ['--uninstall-schedule'])
@@ -1801,6 +1810,8 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
     const logAfter = readFileSync(fx.log, 'utf8')
     assert.equal(removed.status, 0, removedText)
     assert.match(removedText, /The bridge schedule is uninstalled\./)
+    assert.match(readFileSync(fx.systemctlLog, 'utf8'), /--user disable --now mission-control-bridge\.timer/)
+    assert.match(readFileSync(fx.systemctlLog, 'utf8'), /--user stop mission-control-bridge\.service/)
     assert.equal(existsSync(service), false)
     assert.equal(existsSync(timer), false)
     assert.equal(readFileSync(path.join(fx.systemdDir, 'other.service'), 'utf8'), '[Unit]\nDescription=Keep this unit\n')
@@ -1811,6 +1822,20 @@ test('bridge schedule: systemd install and uninstall are idempotent', () => {
     assert.equal(again.status, 0, outputOf(again))
     assert.match(outputOf(again), /The bridge schedule is uninstalled\./)
     assert.equal(readFileSync(fx.cronFile, 'utf8'), FOREIGN_CRON)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('bridge schedule: systemd timer restart failure keeps the install and prints the command', () => {
+  const fx = scheduleFixture()
+  try {
+    const result = runInstall(fx.repo, { ...fx.env, MC_BRIDGE_SCHEDULER: 'systemd', SYSTEMCTL_RESTART_FAIL: '1' })
+    const text = outputOf(result)
+    assert.match(text, /\nsystemctl could not restart the bridge timer\. Start it with:\n  systemctl --user restart mission-control-bridge\.timer\n/)
+    assert.match(text, /Installed the bridge schedule with a systemd user timer\. It runs every 300 seconds\./)
+    assert.equal(existsSync(path.join(fx.systemdDir, 'mission-control-bridge.timer')), true)
+    assert.equal(PUNCT.test(text), false)
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
   }
