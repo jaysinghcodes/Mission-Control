@@ -31,6 +31,14 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+/** A printed command sits on its own line with this indent and no ending period, so it pastes as is. */
+export const COMMAND_INDENT = '  '
+
+/** A sentence that ends with a colon, then the command on its own indented line. */
+export function withCommand(sentence, command) {
+  return `${sentence}\n${COMMAND_INDENT}${command}`
+}
+
 export const FIX_ENV = 'cp .env.example .env'
 export const FIX_DATABASE = 'docker compose up -d db'
 export const FIX_MIGRATIONS = '(cd apps/api && npx prisma migrate deploy)'
@@ -698,9 +706,6 @@ function listNames(names) {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
 }
 
-/** A printed command sits on its own line with this indent and no ending period, so it pastes as is. */
-export const COMMAND_INDENT = '  '
-
 function serviceFailureSentence(names, kind) {
   if (names.length === 0) return ''
   const listed = listNames(names)
@@ -1128,7 +1133,7 @@ export async function gather(root, processEnv = process.env) {
 function portLine(ports, docker = false) {
   const label = docker ? 'MC_API_PORT' : 'PORT'
   if (ports.badPort) {
-    return `fail ports: ${label} is not a valid port number. Set ${label} in .env to a free port, then run npm run doctor again.`
+    return withCommand(`fail ports: ${label} is not a valid port number. Set ${label} in .env to a free port, then run doctor again with:`, 'npm run doctor')
   }
   if (ports.conflict) return serviceLines('fail ports: ', ports.conflict)
   if (ports.apiState === 'free') return `pass ports: Port ${ports.api} is free.`
@@ -1144,21 +1149,21 @@ function databaseLine(database) {
   }
   if (database.state === 'ok') return 'pass database: The database is reachable.'
   if (database.state === 'missing-url') {
-    return `fail database: DATABASE_URL is not set. Create .env with: ${FIX_ENV}`
+    return withCommand('fail database: DATABASE_URL is not set. Create .env with:', FIX_ENV)
   }
   if (database.state === 'bad-url') {
-    return 'fail database: DATABASE_URL could not be read. Set it to the value in .env.example, then run npm run doctor again.'
+    return withCommand('fail database: DATABASE_URL could not be read. Set it to the value in .env.example, then run doctor again with:', 'npm run doctor')
   }
   if (database.state === 'no-client') {
-    return 'fail database: The database client is not installed, so the database was not checked. Install dependencies with: npm ci'
+    return withCommand('fail database: The database client is not installed, so the database was not checked. Install dependencies with:', 'npm ci')
   }
   if (database.state === 'missing-db') {
-    return `fail database: The database ${database.database} does not exist at ${database.detail}. Start Postgres with: ${FIX_DATABASE}`
+    return withCommand(`fail database: The database ${database.database} does not exist at ${database.detail}. Start Postgres with:`, FIX_DATABASE)
   }
   if (database.state === 'auth') {
-    return 'fail database: The database rejected the login in DATABASE_URL. Use the local default from .env.example (user postgres, password postgres), or correct DATABASE_URL, then run npm run doctor again.'
+    return withCommand('fail database: The database rejected the login in DATABASE_URL. Use the local default from .env.example (user postgres, password postgres), or correct DATABASE_URL, then run doctor again with:', 'npm run doctor')
   }
-  return `fail database: The database is not reachable at ${database.detail}. Start Postgres with: ${FIX_DATABASE}`
+  return withCommand(`fail database: The database is not reachable at ${database.detail}. Start Postgres with:`, FIX_DATABASE)
 }
 
 function migrationsLine(database) {
@@ -1168,18 +1173,18 @@ function migrationsLine(database) {
   if (database.migrations === 'current') return 'pass migrations: Migrations are current.'
   if (database.migrations === 'pending') {
     const names = database.pending.join(', ')
-    return `fail migrations: Migrations are pending (${names}). Apply them with: ${FIX_MIGRATIONS}`
+    return withCommand(`fail migrations: Migrations are pending (${names}). Apply them with:`, FIX_MIGRATIONS)
   }
-  return `fail migrations: Migrations were not checked because the database is not reachable. After the database is up, run: ${FIX_MIGRATIONS}`
+  return withCommand('fail migrations: Migrations were not checked because the database is not reachable. After the database is up, apply them with:', FIX_MIGRATIONS)
 }
 
 function tokenLine(env) {
   const state = tokenState(env)
   if (state.kind === 'off-loopback') {
-    return `fail token: HOST is ${state.host}, which is not loopback, and INGEST_TOKEN is not set. The API refuses to start. Set INGEST_TOKEN in .env. Generate one with: ${FIX_TOKEN}`
+    return `fail token: HOST is ${state.host}, which is not loopback, and INGEST_TOKEN is not set. The API refuses to start. Set INGEST_TOKEN in .env. Generate one with:\n${COMMAND_INDENT}${FIX_TOKEN}`
   }
   if (state.kind === 'production') {
-    return `fail token: NODE_ENV is production and INGEST_TOKEN is not set. Ingest routes return 401. Set INGEST_TOKEN in .env. Generate one with: ${FIX_TOKEN}`
+    return `fail token: NODE_ENV is production and INGEST_TOKEN is not set. Ingest routes return 401. Set INGEST_TOKEN in .env. Generate one with:\n${COMMAND_INDENT}${FIX_TOKEN}`
   }
   if (state.kind === 'loopback-open') {
     return 'pass token: Token configuration is valid. HOST is loopback and INGEST_TOKEN is not set, so ingest stays open outside production.'
@@ -1190,7 +1195,7 @@ function tokenLine(env) {
 function loginLine(env) {
   const state = loginState(env)
   if (state.kind === 'exposed') {
-    return 'fail login: The dashboard is reachable beyond this machine and DASHBOARD_PASSWORD_HASH or SESSION_SECRET is not set. Run bash install.sh, or set both in .env.'
+    return withCommand('fail login: The dashboard is reachable beyond this machine and DASHBOARD_PASSWORD_HASH or SESSION_SECRET is not set. Set both in .env, or write them with:', 'bash install.sh')
   }
   if (state.kind === 'loopback-open') {
     return 'pass login: HOST is loopback, so the dashboard stays open without a password.'
@@ -1202,7 +1207,7 @@ const NATIVE_GATEWAY_HOST = '127.0.0.1'
 const DEFAULT_GATEWAY_PORT = 18789
 const GATEWAY_UNKNOWN_HINT = 'Gateway status comes from the bridge. Run the bridge to check it.'
 export const DOCKER_PERMISSION_HINT =
-  'This user lacks permission to use the Docker socket. Add the user to the docker group with sudo usermod -aG docker "$USER", start a new login session, then run npm run doctor again.'
+  withCommand('This user lacks permission to use the Docker socket. Add the user to the docker group, start a new login session, then run doctor again. Add the user with:', 'sudo usermod -aG docker "$USER"')
 
 /** Docker socket denial, including a user who is not in the docker group. */
 export function dockerPermissionDenied(text) {
@@ -1326,14 +1331,14 @@ function bridgeLine(bridge) {
   if (item.state === 'fresh') return 'pass bridge: The last OpenClaw sync is recent.'
   if (item.state === 'stale' && item.scheduled) {
     const limit = item.limit ?? 600
-    return `fail bridge: The last OpenClaw sync is older than ${limit} seconds. Run python3 bridge/mc-bridge-sync.py and confirm the schedule is installed.`
+    return withCommand(`fail bridge: The last OpenClaw sync is older than ${limit} seconds. Confirm the schedule is installed, then sync now with:`, 'python3 bridge/mc-bridge-sync.py')
   }
   if (item.state === 'stale') {
     const limit = item.limit ?? 600
     return `info bridge: The last OpenClaw sync is older than ${limit} seconds. No bridge schedule is installed.`
   }
   if (item.state === 'unreadable') {
-    return 'fail bridge: The OpenClaw sync timestamp could not be read. Check MC_BRIDGE_STAMP_FILE, then run python3 bridge/mc-bridge-sync.py.'
+    return withCommand('fail bridge: The OpenClaw sync timestamp could not be read. Check MC_BRIDGE_STAMP_FILE, then sync now with:', 'python3 bridge/mc-bridge-sync.py')
   }
   return 'info bridge: No OpenClaw sync timestamp was found. That is normal before the first successful bridge run.'
 }
@@ -1362,9 +1367,9 @@ function healthLine(ports, docker = false) {
     return `fail health: The health check at ${url} did not say whether the database is up.`
   }
   if (docker) {
-    return `fail health: The API health endpoint is not reachable at ${url}. Start the stack with: docker compose up -d`
+    return withCommand(`fail health: The API health endpoint is not reachable at ${url}. Start the stack with:`, 'docker compose up -d')
   }
-  return `fail health: The API health endpoint is not reachable at ${url}. Start the API and the web app with: ${FIX_HEALTH}`
+  return withCommand(`fail health: The API health endpoint is not reachable at ${url}. Start the API and the web app with:`, FIX_HEALTH)
 }
 
 export function report(facts) {
@@ -1379,7 +1384,7 @@ export function report(facts) {
   }
   lines.push(
     portLine(facts.ports, docker),
-    facts.envExists ? 'pass env: .env is present.' : `fail env: .env is missing. Create it with: ${FIX_ENV}`,
+    facts.envExists ? 'pass env: .env is present.' : withCommand('fail env: .env is missing. Create it with:', FIX_ENV),
     databaseLine(facts.database),
     migrationsLine(facts.database),
     tokenLine(facts.env),
@@ -1389,7 +1394,7 @@ export function report(facts) {
     bridgeLine(facts.bridge),
     gatewayLine(facts.env, facts.gateway),
   )
-  const flat = lines.flat()
+  const flat = lines.flat().flatMap((line) => String(line).split('\n').filter(Boolean))
   lines.length = 0
   lines.push(...flat)
   const code = lines.some((line) => line.startsWith('fail ')) ? 1 : 0

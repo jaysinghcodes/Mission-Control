@@ -79,30 +79,30 @@ function assertSummaryLead(summary, native) {
 function assertFirstInstallSummary(text, { reset, url, native = false }) {
   const summary = summaryFrom(text)
   assert.ok(summary.length <= 7, summary.join('\n'))
-  assert.equal(summary.length, 6, summary.join('\n'))
+  assert.equal(summary.length, 7, summary.join('\n'))
   assertSummaryLead(summary, native)
   assert.equal(summary[1], SUMMARY_INGEST)
   assert.equal(summary[2], SUMMARY_OPENCLAW)
   assert.equal(summary[3], url)
   assert.match(summary[4], /^Dashboard password, shown once: \S+$/)
-  assert.equal(summary[5], `Reset the dashboard password with: ${reset}`)
-  assert.equal(summary.at(-3), url)
-  assert.equal(summary.at(-2), summary[4])
-  assert.equal(summary.at(-1), summary[5])
+  assert.equal(summary[5], 'Reset the dashboard password with:')
+  assert.equal(summary[6], `  ${reset}`)
+  assert.equal(summary.at(-4), url)
+  assert.equal(summary.at(-3), summary[4])
   assert.equal(text.includes('This install does not start the OpenClaw gateway'), false)
 }
 
 function assertRerunSummary(text, { reset, url, native = false }) {
   const summary = summaryFrom(text)
   assert.ok(summary.length <= 7, summary.join('\n'))
-  assert.equal(summary.length, 5, summary.join('\n'))
+  assert.equal(summary.length, 6, summary.join('\n'))
   assertSummaryLead(summary, native)
   assert.equal(summary[1], SUMMARY_INGEST)
   assert.equal(summary[2], SUMMARY_OPENCLAW)
   assert.equal(summary[3], url)
-  assert.equal(summary[4], `Reset the dashboard password with: ${reset}`)
-  assert.equal(summary.at(-2), url)
-  assert.equal(summary.at(-1), summary[4])
+  assert.equal(summary[4], 'Reset the dashboard password with:')
+  assert.equal(summary[5], `  ${reset}`)
+  assert.equal(summary.at(-3), url)
   assert.equal(text.includes('Dashboard password, shown once:'), false)
 }
 
@@ -448,7 +448,20 @@ function freshDir() {
   }
 }
 
+/** A printed command sits on its own line, indented two spaces, under a sentence that ends with a colon. */
+function assertPastableCommands(text) {
+  const lines = text.split(/\n/)
+  for (const [i, line] of lines.entries()) {
+    if (/^  \S/.test(line)) {
+      assert.match(lines[i - 1] ?? '', /:$/, `${lines[i - 1]}\n${line}`)
+      assert.doesNotMatch(line, /\.$/, line)
+    }
+    assert.doesNotMatch(line, /\b(with|run): (bash|npm|npx|docker|python3|openssl|sudo|cp) /, line)
+  }
+}
+
 function assertReadableDoctor(text) {
+  assertPastableCommands(text)
   const lines = text.split(/\n/).filter((line) => /^(pass|fail|info) /.test(line))
   assert.ok(lines.length >= 8, text)
   for (const line of lines) {
@@ -674,9 +687,9 @@ test('a fresh install ends with the URL and password, and a rerun does not print
       reset: 'docker compose exec api npm run password:reset',
       url: 'Open http://localhost:5173/#/tasks',
     })
-    const password = lines.at(-2)
-    const reset = lines.at(-1)
-    const url = lines.at(-3)
+    const password = lines.at(-3)
+    const reset = lines.slice(-2).join('\n')
+    const url = lines.at(-4)
     assert.equal(text.split('Dashboard password, shown once:').length - 1, 1)
     const shown = password.match(/Dashboard password, shown once: (\S+)/)
     assert.ok(shown)
@@ -695,8 +708,8 @@ test('a fresh install ends with the URL and password, and a rerun does not print
       reset: 'docker compose exec api npm run password:reset',
       url: 'Open http://localhost:5173/#/tasks',
     })
-    assert.match(againLines.at(-2) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
-    assert.equal(againLines.at(-1), 'Reset the dashboard password with: docker compose exec api npm run password:reset')
+    assert.match(againLines.at(-3) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
+    assert.deepEqual(againLines.slice(-2), ['Reset the dashboard password with:', '  docker compose exec api npm run password:reset'])
     assert.doesNotMatch(again, /Dashboard password, shown once:/)
     assert.equal(again.includes(shown[1]), false)
     assert.deepEqual(readFileSync(envPath), before)
@@ -967,13 +980,16 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
     writeExe(path.join(fx.bin, 'psql'), '#!/bin/sh\nprintf \'16.4\\n\'\nexit 0\n')
     const result = runInstall(fx.repo, {
       ...fx.env,
-      PATH: fx.env.PATH,
+      PATH: `${fx.bin}:${pathWithout(['openclaw'])}`,
       NATIVE_LOG: nativeLog,
       MC_INSTALL_READY_SECONDS: '0',
     })
     const text = outputOf(result)
     const log = waitForLog(nativeLog, 'npm run dev')
     assert.match(text, /Docker was not found\. Using the native path/)
+    // Native keeps the pastable seed command: npm ci already ran in this checkout.
+    assert.match(text, /\nOpenClaw was not found on PATH\. Skipping the bridge schedule\. Sample data does not need OpenClaw\. Fill it with:\n  npm run seed:demo\n/)
+    assert.doesNotMatch(text, /Demo data in docs\/INSTALL\.md/)
     assert.doesNotMatch(text, /is not a supported native runtime/)
     assert.doesNotMatch(text, /The API is already up/)
     assert.match(text, /Open http:\/\/localhost:5173\/#\/tasks/)
@@ -1588,7 +1604,18 @@ test('bridge schedule: missing OpenClaw skips with exit 0', async () => {
     })
     const text = outputOf(result)
     assert.equal(result.status, 0, text)
-    assert.match(text, /OpenClaw was not found on PATH\. Skipping the bridge schedule\. npm run seed:demo still fills sample data\./)
+    // Compose: the api image has no seed scripts, so the skip line prints no command and names the doc.
+    assert.match(
+      text,
+      /\nOpenClaw was not found on PATH\. Skipping the bridge schedule\. Sample data does not need OpenClaw\. To load it on a Compose install, see Demo data in docs\/INSTALL\.md\.\n/,
+    )
+    assert.doesNotMatch(text, /Fill it with:/)
+    assert.doesNotMatch(text, /^ *npm /m, 'Compose prints no bare npm command')
+    assert.doesNotMatch(text, /npm ci/)
+    assert.doesNotMatch(text, /docker compose exec api npm run seed:demo/)
+    const docs = readFileSync(path.join(root, 'docs/INSTALL.md'), 'utf8')
+    assert.match(docs, /^## Demo data$/m)
+    assertPastableCommands(text)
     assert.doesNotMatch(text, /Installed the bridge schedule/)
     assert.equal(readFileSync(fx.cronFile, 'utf8'), FOREIGN_CRON)
     assert.equal(existsSync(path.join(fx.systemdDir, 'mission-control-bridge.timer')), false)
@@ -1990,7 +2017,7 @@ test('bridge schedule: unknown arguments do not install or uninstall', () => {
     const unknown = runInstall(fx.repo, fx.env, ['--nope'])
     const text = outputOf(unknown)
     assert.notEqual(unknown.status, 0)
-    assert.match(text, /Unknown argument\. Run bash install\.sh to install, or bash install\.sh --uninstall-schedule to remove the bridge schedule\./)
+    assert.match(text, /Unknown argument\. Install with:\n  bash install\.sh\nRemove the bridge schedule with:\n  bash install\.sh --uninstall-schedule\n/)
     assert.equal(existsSync(path.join(fx.repo, '.env')), false)
     assert.equal(readFileSync(fx.cronFile, 'utf8'), FOREIGN_CRON)
     assert.equal(readFileSync(fx.log, 'utf8'), '')
@@ -2321,4 +2348,25 @@ test('compose health wait uses docker compose exec when curl is missing and stay
     health?.child.kill()
     rmSync(fx.dir, { recursive: true, force: true })
   }
+})
+
+test('every command install.sh echoes sits on its own line under a sentence that ends with a colon', () => {
+  const source = readFileSync(path.join(root, 'install.sh'), 'utf8').split('\n')
+  const echoed = source
+    .map((line) => line.match(/^\s*echo "(.*)"(?:\s*>&2)?\s*$/))
+    .map((m) => (m ? m[1] : null))
+  let commands = 0
+  for (const [i, text] of echoed.entries()) {
+    if (text === null) continue
+    if (text.startsWith('  ')) {
+      commands += 1
+      assert.match(echoed[i - 1] ?? '', /:$/, `install.sh line ${i + 1}: ${text}`)
+      assert.doesNotMatch(text, /\.$/, `install.sh line ${i + 1}: ${text}`)
+      continue
+    }
+    assert.doesNotMatch(text, /\b(with|run): \S/, `install.sh line ${i + 1}: ${text}`)
+    assert.doesNotMatch(text, /\brun bash install\.sh\b/, `install.sh line ${i + 1}: ${text}`)
+    assert.doesNotMatch(text, /\bRun bash install\.sh\b/, `install.sh line ${i + 1}: ${text}`)
+  }
+  assert.ok(commands >= 12, String(commands))
 })

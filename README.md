@@ -160,7 +160,7 @@ Then open **http://localhost:5173/#/tasks**. Leave `VITE_API_URL` unset here too
 2. Open `http://localhost:5173/#/tasks`. `/` redirects to `/tasks`. The sidebar chip says **Connected** when `GET /health` and the socket are up.
 3. The first open asks for a timezone, then a naming choice, then confirms the detected provider. Skip finishes that open. Change them later under System, then Settings. Seat rules are in [How crew seats work](#how-crew-seats-work).
 4. A fresh setup does not load sample data. Empty states are a valid first run. On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the sample shots. `npm run seed:clear` removes only those rows.
-5. If something fails, run `npm run doctor` from the repo root. The failing line names the next command. Notes are in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+5. If something fails, run `npm run doctor` from the repo root. The failing line ends with a colon, and the next command follows on its own indented line, ready to paste. Notes are in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## How crew seats work
 
@@ -249,7 +249,7 @@ npm run build
 
 ## Troubleshooting
 
-Start with `npm run doctor`. A failing line includes the next command. A missing OpenClaw command does not fail doctor. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` fails doctor only when a bridge schedule is installed.
+Start with `npm run doctor`. A failing line that names a command ends with a colon, and the command is on the next line, indented two spaces, ready to paste. A missing OpenClaw command does not fail doctor. A sync timestamp older than `MC_BRIDGE_STALE_SECONDS` fails doctor only when a bridge schedule is installed.
 
 The cases hit on a fresh clone, including 401, login lockout, and a bridge with no `openclaw` on PATH, are in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
