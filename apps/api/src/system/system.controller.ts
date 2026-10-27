@@ -4,6 +4,7 @@ import * as os from 'os';
 import { PrismaService } from '../prisma/prisma.service';
 import { probeGateway } from './gateway-probe';
 import {
+  API_STARTED_AT,
   configuredGatewayPort,
   gatewayMaxAgeMs,
   gatewayStatusFromProbe,
@@ -21,6 +22,7 @@ import {
  * OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT (defaults 127.0.0.1 and
  * 18789). Under Compose, with the host blank, status comes from the latest
  * gateway.snapshot. Age uses the row timestamp when checkedAt is later.
+ * A report stored before this process started is Unknown.
  * An explicit host still probes that address.
  */
 @Controller('system')
@@ -90,6 +92,7 @@ export class SystemController {
       Date.now(),
       gatewayMaxAgeMs(process.env),
       configuredGatewayPort(process.env),
+      API_STARTED_AT,
     );
   }
 

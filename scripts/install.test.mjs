@@ -196,6 +196,9 @@ if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  if [ -n "\${DOCKER_STUB_SHA_LOG:-}" ]; then
+    printf 'GIT_SHA=%s\\n' "\${GIT_SHA:-}" >> "$DOCKER_STUB_SHA_LOG"
+  fi
   if [ -n "\${DOCKER_STUB_NOISE:-}" ]; then
     echo "compose build output \${DOCKER_STUB_NOISE}"
   fi
@@ -1811,6 +1814,42 @@ test('bridge schedule: shell interval and register win over .env', () => {
   } finally {
     rmSync(fx.dir, { recursive: true, force: true })
     rmSync(kept.dir, { recursive: true, force: true })
+  }
+})
+
+test('GIT_SHA reaches only the compose build, never the first bridge run', () => {
+  const fx = scheduleFixture()
+  const shaLog = path.join(fx.dir, 'compose-sha.txt')
+  const bridgeEnv = path.join(fx.dir, 'bridge-env.txt')
+  const fakePython = path.join(fx.bin, 'fake-python')
+  try {
+    writeExe(fakePython, `#!/bin/sh\nprintf 'GIT_SHA=%s\\n' "\${GIT_SHA:-}" >> ${shellQuote(bridgeEnv)}\nexit 0\n`)
+    const git = (...args) =>
+      spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], {
+        cwd: fx.repo,
+        encoding: 'utf8',
+      })
+    assert.equal(git('init', '-q').status, 0)
+    assert.equal(git('add', '-A').status, 0)
+    assert.equal(git('commit', '-q', '-m', 'fixture').status, 0)
+    const head = git('rev-parse', 'HEAD').stdout.trim()
+    assert.match(head, /^[0-9a-f]{40}$/)
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      DOCKER_STUB_SHA_LOG: shaLog,
+      MC_BRIDGE_SCHEDULER: 'cron',
+      MC_BRIDGE_RUN_NOW: '1',
+      MC_BRIDGE_PYTHON: fakePython,
+      GIT_SHA: undefined,
+      GIT_COMMIT: undefined,
+    })
+    const text = outputOf(result)
+    assert.match(text, /Running the bridge once/)
+    assert.equal(readFileSync(shaLog, 'utf8').trim(), `GIT_SHA=${head}`)
+    assert.equal(readFileSync(bridgeEnv, 'utf8').trim(), 'GIT_SHA=')
+    assert.equal(PUNCT.test(text), false)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
   }
 })
 
