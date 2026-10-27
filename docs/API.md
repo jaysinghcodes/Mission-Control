@@ -72,7 +72,7 @@ The fresh clone job runs this path on Node.js 20, Node.js 22, and Node.js 24. It
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
 cd mission-control
 npm ci
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 set -a; . ./.env; set +a
 (cd apps/api && npx prisma generate)
 (cd apps/api && npx prisma migrate deploy)

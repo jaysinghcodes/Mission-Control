@@ -132,7 +132,7 @@ Prerequisites: git, Node.js 20.17 or later, npm 11.17.0, and Postgres 16 listeni
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
 cd mission-control
 npm ci
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 set -a; . ./.env; set +a
 (cd apps/api && npx prisma generate)
 (cd apps/api && npx prisma migrate deploy)

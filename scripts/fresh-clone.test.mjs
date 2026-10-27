@@ -14,7 +14,7 @@ const README_COMMANDS = [
   'git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control',
   'cd mission-control',
   'npm ci',
-  'cp .env.example .env',
+  '[ -f .env ] || cp .env.example .env',
   'set -a; . ./.env; set +a',
   '(cd apps/api && npx prisma generate)',
   '(cd apps/api && npx prisma migrate deploy)',
@@ -48,7 +48,7 @@ test('the install script clones this checkout and leaves dev to the caller', () 
   assert.match(plan.script, /git clone --local '\/src\/mission-control' 'mission-control'/)
   assert.doesNotMatch(plan.script, /github\.com/)
   assert.doesNotMatch(plan.script, /npm run dev/)
-  assert.match(plan.script, /cp \.env\.example \.env/)
+  assert.match(plan.script, /^\[ -f \.env \] \|\| cp \.env\.example \.env$/m)
   assert.equal(plan.cloneDir, '/tmp/mc-work/mission-control')
   assert.deepEqual(plan.afterDev, [])
 })

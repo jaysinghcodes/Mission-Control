@@ -1,37 +1,37 @@
 #!/usr/bin/env python3
 """
-mc-bridge-sync.py — minimal OpenClaw → Mission Control bridge (ticket 2).
+mc-bridge-sync.py: minimal OpenClaw to Mission Control bridge (ticket 2).
 
 Vendored into the repo so a fresh clone ships with the integration piece.
 It used to live only on the operator's box at ~/.openclaw/.mc-bridge-sync.py.
 
 ONE RUN = collect OpenClaw state once, POST it, exit. Schedule it every ~5 min
-(system cron or an OpenClaw cron job) — see bridge/README.md.
+(system cron or an OpenClaw cron job). See bridge/README.md.
 
   collect                                 POST /events (x-ingest-token)
   ───────────────────────────────────     ─────────────────────────────
-  openclaw agents list --json         →   agents.snapshot
-  openclaw sessions --all-agents --json → sessions.snapshot
-  openclaw cron list --all --json     →   calendar.snapshot
+  openclaw agents list --json to agents.snapshot
+  openclaw sessions --all-agents --json to sessions.snapshot
+  openclaw cron list --all --json to calendar.snapshot
                                           + run.* for job-state changes
                                           + POST /runs and PATCH /runs/:id
                                             (ticketId when the job has one)
-  (derived from sessions token counts) →  usage.snapshot (daily points, up to 30 days)
+  (derived from sessions token counts) to usage.snapshot (daily points, up to 30 days)
   ~/.openclaw/openclaw.json               models.snapshot
     (fallback: openclaw models list)
   openclaw devices list --json            devices.snapshot devices
   openclaw nodes list --json              devices.snapshot nodes
   TCP connect to 127.0.0.1                gateway.snapshot
     (OPENCLAW_GATEWAY_PORT or 18789)
-  $MC_BRIDGE_APPROVALS_CMD (optional) →   approvals.snapshot
-  agent workspace MEMORY.md + memory/*.md → memory.snapshot
+  $MC_BRIDGE_APPROVALS_CMD (optional) to approvals.snapshot
+  agent workspace MEMORY.md + memory/*.md to memory.snapshot
 
 Design rules (why the code looks the way it does):
-  * stdlib only — runs under any python3 >= 3.8 with zero installs.
+  * stdlib only. Runs under any python3 >= 3.8 with zero installs.
   * NEVER WIPE ON FAILURE. Most snapshots replace a table on the API side.
     usage.snapshot does not: it upserts daily points and leaves other days
     alone. If a source is unavailable (no `openclaw` on PATH, non-zero exit,
-    bad JSON) that snapshot is SKIPPED, not sent empty — otherwise a broken
+    bad JSON) that snapshot is SKIPPED, not sent empty. Otherwise a broken
     bridge would erase the dashboard (or the demo seed). An instance that
     genuinely has zero items still posts [].
   * run.* events are emitted only on CHANGE, using a small state file, so the
@@ -205,7 +205,7 @@ class Sources:
       * CLI (default): shell out to `openclaw … --json`.
       * --from-dir DIR: read DIR/{agents,sessions,cron,approvals,devices,nodes}.json.
         Used for testing the mapping without an OpenClaw install (see bridge/examples).
-    Every getter returns parsed JSON or None (= source unavailable → skip).
+    Every getter returns parsed JSON or None (meaning the source is unavailable, so skip).
     """
 
     def __init__(self, from_dir: Optional[Path]) -> None:
@@ -219,7 +219,7 @@ class Sources:
         try:
             return json.loads(p.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
-            log(f"{p}: bad JSON ({e}) — skipping")
+            log(f"{p}: bad JSON ({e}). Skipping it.")
             return None
 
     def _cli(self, argv: List[str]) -> Optional[Any]:
@@ -227,19 +227,19 @@ class Sources:
         try:
             proc = run_cli(argv, 60, env=openclaw_env())
         except FileNotFoundError:
-            log(f"`{argv[0]}` not found on PATH — skipping {' '.join(argv[1:3])}")
+            log(f"`{argv[0]}` not found on PATH. Skipping {' '.join(argv[1:3])}.")
             return None
         except subprocess.TimeoutExpired:
-            log(f"`{' '.join(argv)}` timed out — skipping")
+            log(f"`{' '.join(argv)}` timed out. Skipping it.")
             return None
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout).strip().splitlines()[-1:] or ["(no output)"]
-            log(f"`{' '.join(argv)}` exited {proc.returncode}: {tail[0][:200]} — skipping")
+            log(f"`{' '.join(argv)}` exited {proc.returncode}: {tail[0][:200]}. Skipping it.")
             return None
         try:
             return json.loads(proc.stdout)
         except json.JSONDecodeError:
-            log(f"`{' '.join(argv)}` did not print JSON — skipping")
+            log(f"`{' '.join(argv)}` did not print JSON. Skipping it.")
             return None
 
     def agents(self) -> Optional[Any]:
@@ -278,7 +278,7 @@ class Sources:
         """
         OpenClaw has no stable "pending approvals" list command yet, so this is
         opt-in: set MC_BRIDGE_APPROVALS_CMD to any command that prints a JSON
-        array (or {approvals:[…]}) of {kind, tag, desc, meta?}. Unset → skip,
+        array (or {approvals:[…]}) of {kind, tag, desc, meta?}. Unset means skip,
         which PRESERVES whatever approvals Mission Control already has.
         """
         if self.from_dir:
@@ -324,7 +324,7 @@ def as_list(raw: Any, *keys: str) -> Optional[List[Dict[str, Any]]]:
     """
     Normalize OpenClaw's --json list envelopes (they differ per command, see
     openclaw/openclaw#77943): bare array, or {<key>: [...]}, or {items: [...]}.
-    Returns None if the shape is unrecognized (→ skip, never wipe).
+    Returns None if the shape is unrecognized (so skip, never wipe).
     """
     if raw is None:
         return None
@@ -618,7 +618,7 @@ def ago(ms: Optional[int], now_ms: int) -> Optional[str]:
     return f"{s // 86400}d ago"
 
 
-# ── Mapping: OpenClaw JSON → Mission Control snapshot payloads ──────────────
+# ── Mapping: OpenClaw JSON to Mission Control snapshot payloads ──────────────
 # Output shapes are dictated by apps/api/src/snapshots/snapshots.service.ts.
 
 def price_model(provider: Any, model: Any) -> Optional[str]:
@@ -1155,7 +1155,7 @@ def cron_day_time(expr: str) -> Tuple[Optional[int], Optional[str]]:
     tm = f"{int(hour):02d}:{int(minute):02d}" if minute.isdigit() and hour.isdigit() else None
     day = None
     if dow.isdigit():
-        day = (int(dow) + 6) % 7  # cron 0/7=Sun,1=Mon → grid 0=Mon … 6=Sun
+        day = (int(dow) + 6) % 7  # cron 0/7=Sun,1=Mon maps to grid 0=Mon through 6=Sun
     elif dow.upper()[:3] in DOW and len(dow) == 3:
         day = DOW.index(dow.upper())
     return day, tm
@@ -1174,7 +1174,7 @@ def map_cron(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 day, tm = cron_day_time(label)
             elif kind == "every" and sched.get("everyMs"):
                 mins = max(1, int(sched["everyMs"]) // 60000)
-                label = f"every {mins}m"  # interval → all-day strip
+                label = f"every {mins}m"  # interval to all-day strip
             elif kind == "at":
                 label = f"at {sched.get('at')}"
         elif isinstance(sched, str):
@@ -1259,14 +1259,14 @@ def cron_run_plan(
     Diff each job's run state against the previous bridge run.
 
     Events (unchanged contract):
-      run.running    — job started running since last time
-      run.completed  — a new lastRunAtMs with status ok
-      run.failed     — a new lastRunAtMs with status error
+      run.running:   job started running since last time
+      run.completed: a new lastRunAtMs with status ok
+      run.failed:    a new lastRunAtMs with status error
     First run for a job only records state (no backfill flood).
 
     Calls are the REST writes that store Run.ticketId:
-      create — POST /runs, then PATCH to running or a terminal status
-      patch  — PATCH /runs/:id when this job already has a run id
+      create: POST /runs, then PATCH to running or a terminal status
+      patch:  PATCH /runs/:id when this job already has a run id
     ticketId is included only when OpenClaw knows it.
 
     Mutates `state` in place: {jobId: {running, lastRunAtMs, runId}}.
@@ -1596,7 +1596,7 @@ def usage_points_from_sessions(
     return {"points": points}, {"started": True, "seen": seen, "days": days}
 
 
-# ── Memory (OpenClaw workspace files → memory.snapshot) ────────────────────
+# ── Memory (OpenClaw workspace files to memory.snapshot) ────────────────────
 # Confirmed from OpenClaw docs (docs.openclaw.ai/concepts/memory and
 # concepts/agent-workspace):
 #   * Each agent has one workspace. `openclaw agents list --json` includes
@@ -1618,7 +1618,7 @@ MAX_MEMORY_BYTES = 1_000_000
 
 
 def memory_stable_id(agent_id: str, rel: str) -> str:
-    """Stable across re-syncs. Same agent + relative path → same id."""
+    """Stable across re-syncs. Same agent and relative path give the same id."""
     digest = hashlib.sha256(f"{agent_id}\n{rel}".encode("utf-8")).hexdigest()[:24]
     return f"mem-{digest}"
 
@@ -1839,7 +1839,7 @@ def agents_from_memory_dir(root: Path) -> Optional[List[Dict[str, Any]]]:
     """
     A sample OpenClaw memory dir is either one workspace (MEMORY.md or
     memory/ inside it) or a folder of per-agent workspaces. None if `root`
-    does not exist — the caller skips the snapshot instead of posting [].
+    does not exist. The caller skips the snapshot instead of posting [].
     """
     if not root.is_dir():
         return None
@@ -1960,7 +1960,7 @@ def _entry_from_file(
     try:
         mtime = path.stat().st_mtime
     except OSError as exc:
-        log(f"{path}: {exc} — skipping")
+        log(f"{path}: {exc}. Skipping it.")
         return None
     # `day` is the filename date for a daily note. Long-term MEMORY.md has
     # no date in the name and keeps the file mtime.
@@ -2002,7 +2002,7 @@ def collect_memory(
             continue
         workspace = resolve_workspace(raw, base)
         if not workspace.is_dir():
-            log(f"memory workspace missing: {workspace} — skipping agent")
+            log(f"memory workspace missing: {workspace}. Skipping that agent.")
             continue
         readable += 1
         agent_id = str(first(agent, "id", "name") or workspace.name)
@@ -2430,7 +2430,7 @@ def profile_lines(started: float, slow: Optional["SlowData"]) -> List[str]:
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="OpenClaw → Mission Control bridge (one sync per run)")
+    ap = argparse.ArgumentParser(description="OpenClaw to Mission Control bridge, one sync per run")
     ap.add_argument("--dry-run", action="store_true", help="print events as JSON lines; post nothing")
     ap.add_argument("--from-dir", type=Path, help="read <dir>/{agents,sessions,cron,approvals,devices,nodes}.json instead of the CLI")
     ap.add_argument(
@@ -2463,8 +2463,8 @@ def run_sync(args: argparse.Namespace, holder: Dict[str, Any]) -> int:
     token = os.environ.get("INGEST_TOKEN", "")
     if not token and not args.dry_run:
         # Compose falls back to `dev-ingest-token` when .env leaves it blank;
-        # we deliberately do NOT guess — an explicit token avoids silent 401s.
-        log("INGEST_TOKEN is not set (env or repo-root .env) — refusing to post")
+        # we deliberately do NOT guess. An explicit token avoids silent 401s.
+        log("INGEST_TOKEN is not set in the environment or the repo root .env. Refusing to post.")
         return 2
 
     src = Sources(args.from_dir)
@@ -2556,9 +2556,9 @@ def run_sync(args: argparse.Namespace, holder: Dict[str, Any]) -> int:
     if args.memory_dir is not None:
         mem_agents = agents_from_memory_dir(args.memory_dir)
         if mem_agents is None:
-            log(f"memory dir {args.memory_dir} not found — skipping memory.snapshot")
+            log(f"memory dir {args.memory_dir} not found. Skipping memory.snapshot.")
         elif len(mem_agents) == 0:
-            log(f"memory dir {args.memory_dir} has no agent workspaces — skipping memory.snapshot")
+            log(f"memory dir {args.memory_dir} has no agent workspaces. Skipping memory.snapshot.")
         else:
             memory_entries = collect_memory(mem_agents, tz=zone, memo=slow.memory)
     elif agents_rows is not None:

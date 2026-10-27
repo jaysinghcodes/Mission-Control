@@ -3,7 +3,7 @@
 # That writes a random ingest token and a dashboard password hash, runs
 # docker compose up -d --build, runs doctor, and prints the URL.
 # The password is printed once. A plain second run leaves .env unchanged.
-# A new MC_DB_PORT updates a stock DATABASE_URL. The api service below still uses db:5432.
+# bash install.sh points a stock DATABASE_URL at MC_DB_PORT. The api service below still uses db:5432.
 # Then open http://localhost:5173/#/tasks
 # The browser uses that one port. nginx proxies /api and /socket.io.
 # No OpenClaw? `npm run seed:demo` (from the host) fills sample data.
