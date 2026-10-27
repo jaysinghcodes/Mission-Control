@@ -243,7 +243,7 @@ describe('mergeNamedCrewMap', () => {
     expect(next.quill).toBe('quill');
   });
 
-  it('gives a freed seat to the earliest agent with no saved choice', () => {
+  it('fills every free seat in join order after a save', () => {
     const next = mergeNamedCrewMap(
       agents,
       seats,
@@ -254,28 +254,96 @@ describe('mergeNamedCrewMap', () => {
     );
     expect(next.quill).toBe('');
     expect(next.pixel).toBe('');
-    expect(next.helper).toBe('pixel');
-    expect(next.nova).toBeUndefined();
+    expect(next.helper).toBe('speedy');
+    expect(next.nova).toBe('atlas');
+    expect(next.newcomer).toBe('pixel');
   });
 
   it('reseats a holder who lost a seat, unless that holder is set to Own name', () => {
     const taken = mergeNamedCrewMap(
       agents,
       seats,
-      { helper: 'speedy', pixel: 'pixel' },
+      { helper: 'speedy', pixel: 'pixel', nova: 'atlas', quill: 'quill' },
       { pixel: 'speedy' },
     );
     expect(taken.pixel).toBe('speedy');
     expect(taken.helper).toBe('pixel');
+    expect(taken.nova).toBe('atlas');
+    expect(taken.quill).toBe('quill');
+    expect(taken.newcomer).toBeUndefined();
 
     const own = mergeNamedCrewMap(
       agents,
       seats,
-      { helper: 'speedy', pixel: 'pixel' },
+      { helper: 'speedy', pixel: 'pixel', nova: 'atlas', quill: 'quill' },
       { pixel: 'speedy', helper: '' },
     );
     expect(own.pixel).toBe('speedy');
     expect(own.helper).toBe('');
-    expect(own.nova).toBe('pixel');
+    expect(own.newcomer).toBe('pixel');
+  });
+
+  it('reseats ledger in the same save when helper takes its seat', () => {
+    const crew = readCrew();
+    const roster = [
+      { id: 'helper', position: 0 },
+      { id: 'ledger', position: 1 },
+      { id: 'scribe', position: 2 },
+    ];
+    const next = mergeNamedCrewMap(
+      roster,
+      crew,
+      { helper: '', ledger: 'ledger', scribe: 'speedy' },
+      { helper: 'ledger' },
+    );
+    expect(next.helper).toBe('ledger');
+    expect(next.scribe).toBe('speedy');
+    expect(next.ledger).toBe('atlas');
+    for (const agent of roster) expect(agent.id in next).toBe(true);
+  });
+
+  it('leaves a new agent unseated when every seat is full, then seats it once one opens', () => {
+    const crew = readCrew();
+    const roster = crew.map((seat, index) => ({
+      id: `a${index}`,
+      position: index,
+    }));
+    const full: Record<string, string> = {};
+    crew.forEach((seat, index) => {
+      full[`a${index}`] = seat.id;
+    });
+    const late = { id: 'late', position: crew.length };
+    const withLate = [...roster, late];
+    const stays = mergeNamedCrewMap(withLate, crew, full, { a0: crew[0].id });
+    expect(stays.late).toBeUndefined();
+    expect(stays).toEqual(full);
+
+    const opened = mergeNamedCrewMap(withLate, crew, full, { a3: '' });
+    expect(opened.a3).toBe('');
+    expect(opened.late).toBe(crew[3].id);
+  });
+
+  it('switching back to crew drops deleted agents and seats new ones without moving stored seats', () => {
+    const stored = {
+      helper: 'atlas',
+      pixel: '',
+      nova: 'speedy',
+      gone: 'pixel',
+    };
+    const roster = [
+      { id: 'helper', position: 0 },
+      { id: 'pixel', position: 1 },
+      { id: 'nova', position: 2 },
+      { id: 'later', position: 5 },
+      { id: 'quill', position: 6 },
+    ];
+    const next = mergeNamedCrewMap(roster, seats, stored, {});
+    expect(next).toEqual({
+      helper: 'atlas',
+      pixel: '',
+      nova: 'speedy',
+      quill: 'quill',
+      later: 'pixel',
+    });
   });
 });

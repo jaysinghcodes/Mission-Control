@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { readCrew } from './naming';
+import { readCrew, registrationOrder } from './naming';
 import { SETTING_ID } from '../team/mission';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentsController } from '../agents/agents.controller';
@@ -24,6 +24,15 @@ class StatusResponse {
 
 function statusResponse(): Response {
   return new StatusResponse() as unknown as Response;
+}
+
+function withoutKey(
+  map: Record<string, string>,
+  key: string,
+): Record<string, string> {
+  const out = { ...map };
+  delete out[key];
+  return out;
 }
 
 describe('crew seat lock', () => {
@@ -346,5 +355,114 @@ describe('crew seat lock', () => {
     await settings.put({ namingMode: 'crew', crewMap: stale });
     expect((await map())[newcomer]).toBe(seated[newcomer]);
     expect((await map())[first]).toBe(stale[first]);
+  });
+
+  function freeSeats(current: Record<string, string>): string[] {
+    const used = new Set(Object.values(current));
+    return readCrew()
+      .map((seat) => seat.id)
+      .filter((id) => !used.has(id));
+  }
+
+  it('reseats the displaced holder in the same save response', async () => {
+    await parkOthers();
+    const helper = `${stamp}helper`;
+    const ledger = `${stamp}ledger`;
+    await agents.register({ id: helper, name: 'Helper' }, statusResponse());
+    await agents.register({ id: ledger, name: 'Ledger' }, statusResponse());
+    await settings.put({ namingMode: 'crew', crewMap: { [helper]: '' } });
+    const before = await map();
+    expect(before[helper]).toBe('');
+    const held = before[ledger];
+    expect(held).toBeTruthy();
+    const open = freeSeats(before);
+    expect(open.length).toBeGreaterThanOrEqual(1);
+    const res = await settings.put({
+      namingMode: 'crew',
+      crewMap: { [helper]: held },
+    });
+    expect(res.crewMap[helper]).toBe(held);
+    expect(res.crewMap[ledger]).toBe(open[0]);
+    expect(await map()).toEqual(res.crewMap);
+  });
+
+  it('own names then crew again restores every seat and Own name choice', async () => {
+    await parkOthers();
+    const own = `${stamp}keep`;
+    const seated = `${stamp}seated`;
+    await agents.register({ id: own, name: 'Keep' }, statusResponse());
+    await agents.register({ id: seated, name: 'Seated' }, statusResponse());
+    await settings.put({ namingMode: 'crew', crewMap: { [own]: '' } });
+    const before = await map();
+    expect(before[own]).toBe('');
+    expect(before[seated]).toBeTruthy();
+    const asOwn = await settings.put({ namingMode: 'own', crewMap: {} });
+    expect(asOwn.namingMode).toBe('own');
+    expect(asOwn.crewMap).toEqual(before);
+    await settings.put({ timezone: null });
+    expect(await map()).toEqual(before);
+    const back = await settings.put({ namingMode: 'crew' });
+    expect(back.namingMode).toBe('crew');
+    expect(back.crewMap).toEqual(before);
+  });
+
+  it('switching back to crew drops deleted agents and seats new ones, and no stored seat moves', async () => {
+    await parkOthers();
+    const stays = `${stamp}stays`;
+    const leaves = `${stamp}leaves`;
+    await agents.register({ id: stays, name: 'Stays' }, statusResponse());
+    await agents.register({ id: leaves, name: 'Leaves' }, statusResponse());
+    const before = await map();
+    expect(before[stays]).toBeTruthy();
+    expect(before[leaves]).toBeTruthy();
+    await settings.put({ namingMode: 'own', crewMap: {} });
+    await agents.remove(leaves);
+    const arrives = `${stamp}arrives`;
+    await agents.register({ id: arrives, name: 'Arrives' }, statusResponse());
+    const whileOwn = await map();
+    expect(whileOwn).toEqual(before);
+    const back = await settings.put({ namingMode: 'crew', crewMap: {} });
+    expect(back.crewMap[leaves]).toBeUndefined();
+    expect(back.crewMap[arrives]).toBe(
+      freeSeats(withoutKey(before, leaves))[0],
+    );
+    for (const [id, seat] of Object.entries(before)) {
+      if (id === leaves) continue;
+      expect(back.crewMap[id]).toBe(seat);
+    }
+  });
+
+  it('with all seats full a new agent waits, and freeing a seat seats it on the next save', async () => {
+    const parked = await parkOthers();
+    const free = readCrew().length - Object.keys(parked).length;
+    const fillers = Array.from(
+      { length: free },
+      (_, index) => `${stamp}f${String(index).padStart(2, '0')}`,
+    );
+    for (const id of fillers) {
+      await agents.register({ id, name: 'Fill' }, statusResponse());
+    }
+    const late = `${stamp}late`;
+    await agents.register({ id: late, name: 'Late' }, statusResponse());
+    const full = await map();
+    expect(freeSeats(full)).toHaveLength(0);
+    expect(full[late]).toBeUndefined();
+    const stillFull = await settings.put({ namingMode: 'crew', crewMap: {} });
+    expect(stillFull.crewMap[late]).toBeUndefined();
+    const giver = Object.keys(full).find((id) => full[id] !== '')!;
+    const opened = full[giver];
+    const res = await settings.put({
+      namingMode: 'crew',
+      crewMap: { [giver]: '' },
+    });
+    expect(res.crewMap[giver]).toBe('');
+    const roster = await prisma.agent.findMany();
+    const waiting = registrationOrder(
+      roster.filter((agent) => !(agent.id in full)),
+    );
+    const next = waiting.find((agent) => agent.id === opened) ?? waiting[0];
+    // The late agent is next unless another worker left an earlier waiter.
+    expect(res.crewMap[next.id]).toBe(opened);
+    if (waiting.length === 1) expect(res.crewMap[late]).toBe(opened);
   });
 });

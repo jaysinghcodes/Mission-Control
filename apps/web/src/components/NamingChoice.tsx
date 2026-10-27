@@ -2,13 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { useNaming } from '../lib/naming'
 import type { NamingMode } from '../lib/crew'
 import type { Agent } from '../types'
-import { assignCrewSeats, orderByPosition } from '../lib/crew'
+import { assignCrewSeats, orderByPosition, restoreCrewMap } from '../lib/crew'
 import { Btn } from './shell'
+
+/** Seat picker value for an agent that has not chosen yet. Never saved. */
+const WAITING = '__waiting'
 
 /**
  * First run and Settings share this form.
  * A saved crew map is shown as stored. The first proposal matches
- * seat ids, then fills free seats in registration order.
+ * seat ids, then fills free seats in registration order. Own names
+ * keeps the stored map, so switching back to crew restores it.
  */
 export function NamingChoice({
   agents,
@@ -34,10 +38,11 @@ export function NamingChoice({
   const locked = initialMode === 'crew' || initialMode === 'own' || Object.keys(initialMap).length > 0
   const [mode, setMode] = useState<NamingMode>(initialMode === 'own' ? 'own' : 'crew')
   const [map, setMap] = useState<Record<string, string>>(() => {
-    if (locked) return storedMap(initialMode, initialMap)
+    if (locked) return { ...initialMap }
     if (!agentsReady || seats.length === 0) return {}
     return assignCrewSeats(ordered, seats, {})
   })
+  const hasStoredSeats = Object.keys(initialMap).length > 0
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const proposed = useRef(locked || (agentsReady && seats.length > 0))
@@ -52,8 +57,9 @@ export function NamingChoice({
   function choose(next: NamingMode) {
     setMode(next)
     setError(null)
-    if (next === 'crew' && Object.keys(map).length === 0 && initialMode !== 'crew') {
-      setMap(assignCrewSeats(ordered, seats, {}))
+    if (next === 'crew' && mode !== 'crew') {
+      // Restore the stored seats. Agents that have not chosen fill free seats.
+      setMap((prev) => restoreCrewMap(ordered, seats, prev))
     }
   }
 
@@ -65,7 +71,11 @@ export function NamingChoice({
   async function save() {
     setSaving(true)
     setError(null)
-    const crewMap = mode === 'crew' ? map : {}
+    // Own names leaves the stored map alone on the server.
+    const living = new Set(agents.map((agent) => agent.id))
+    const crewMap = mode === 'crew'
+      ? Object.fromEntries(Object.entries(map).filter(([id]) => living.has(id)))
+      : {}
     const message = await naming.save({ namingMode: mode, crewMap })
     setSaving(false)
     if (message) setError(message)
@@ -115,15 +125,16 @@ export function NamingChoice({
                       <span className="block text-[14px] font-semibold text-mc-text">{agent.name}</span>
                       <span className="block text-[12px] text-mc-sub">{agent.id} · {agent.role?.trim() || 'Agent'}</span>
                     </span>
-                    <label className="text-[12px] text-mc-sub">
+                    <label className="max-w-full text-[12px] text-mc-sub">
                       <span className="sr-only">Crew seat for {agent.id}</span>
                       <select
                         aria-label={`Crew seat for ${agent.id}`}
                         data-agent-id={agent.id}
-                        value={map[agent.id] ?? ''}
+                        value={map[agent.id] ?? WAITING}
                         onChange={(e) => setSeat(agent.id, e.target.value)}
-                        className="h-8 rounded-lg bg-mc-ctl px-2 text-[13px] text-mc-text"
+                        className="h-8 max-w-full rounded-lg bg-mc-ctl px-2 text-[13px] text-mc-text"
                       >
+                        {!(agent.id in map) && <option value={WAITING} disabled>No seat yet</option>}
                         <option value="">Own name</option>
                         {seats.map((seat) => (
                           <option key={seat.id} value={seat.id} disabled={taken.has(seat.id)}>
@@ -140,23 +151,18 @@ export function NamingChoice({
         </div>
       )}
 
+      {mode === 'own' && hasStoredSeats && (
+        <p className="mt-3 text-[13px] text-mc-sub" data-naming-kept="true">
+          Your crew seats stay saved. Choosing the crew again restores them.
+        </p>
+      )}
+
       {error && <p className="mt-3 text-[13px] text-mc-orangetext">{error}</p>}
       <div className="mt-5">
         <Btn kind="primary" onClick={() => void save()} disabled={saving}>{saving ? 'Saving' : submitLabel}</Btn>
       </div>
     </div>
   )
-}
-
-/** A saved crew or own choice is shown as stored. A first run proposes below. */
-function storedMap(
-  mode: NamingMode | null,
-  initialMap: Record<string, string>,
-): Record<string, string> {
-  if (mode === 'own') return {}
-  if (mode === 'crew') return { ...initialMap }
-  if (Object.keys(initialMap).length > 0) return { ...initialMap }
-  return {}
 }
 
 function Choice({
