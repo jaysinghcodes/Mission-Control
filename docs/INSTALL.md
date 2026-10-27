@@ -16,7 +16,7 @@ Then open the URL the script prints. The default is **http://localhost:5173/#/ta
 
 `bash install.sh` copies `.env.example` to `.env` only when `.env` is missing. It writes `INGEST_TOKEN` as a random value, and it writes `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`. It never writes `change-me`. Long build output goes to `install.log`. The screen shows one progress line and names that file. The run ends with the URL, the password on the first install, and the reset command. A second run does not print or change the password. The file stores only the hash. A second run keeps every value already in `.env`. If the hash or the session secret is missing, that run fills only the missing one and does not change other keys. The script does not print the ingest token or the session secret. `npm run password:reset` writes a new hash to the session file, prints the password once, and revokes every session. It prints that password only after the new hash is read back. There is no HTTP route for that reset. The same run writes `MC_INSTALL_MODE=compose` or `MC_INSTALL_MODE=native` in `.env`. On compose, a host `npm run password:reset` runs `docker compose exec api npm run password:reset` inside the api container and does not call Node on the host or write a host file. If the api is not running, or Docker cannot run that command, it exits nonzero and tells you to run `docker compose up -d` first. With no `MC_INSTALL_MODE` in `.env`, a host `npm run password:reset` checks Docker for this checkout's Compose containers and its mc-auth volume. If it finds either, or Docker does not answer, it refuses and writes nothing. Run `bash install.sh` again, or start Docker when it did not answer, then run the reset again. With no docker command, or no Compose trace, the native reset runs. If the new hash cannot be read back, the command exits 3 and says the password may have changed. Run the reset again to set a new one.
 
-Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`, and `MC_REMOTE_PORT` from the environment are written into a new `.env`. A shell `PORT`, or a shell `MC_API_PORT` when `PORT` is unset, is written into `PORT` on that new file so a native process listens there. `MC_REMOTE_PORT` defaults to 3011. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. A rerun writes that key when it is missing and does not change tokens. A shell `PORT` or `MC_WEB_PORT` still wins for that run. A shell `MC_DB_PORT` that differs from the stored port updates `DATABASE_URL` only when that URL uses `localhost` or `127.0.0.1` and its port is the previous `MC_DB_PORT`, or 5432 when none was stored. That same run updates the `MC_DB_PORT` line. A custom URL, including another host or a URL with no port, is left as is and the installer says so. Tokens and secrets are not rotated. A shell value still wins for that run.
+Host ports follow the shell, then `.env`, then the default. `MC_DB_PORT`, `MC_API_PORT`, `MC_WEB_PORT`, and `MC_REMOTE_PORT` from the environment are written into a new `.env`. A shell `PORT`, or a shell `MC_API_PORT` when `PORT` is unset, is written into `PORT` on that new file so a native process listens there. `MC_REMOTE_PORT` defaults to 3011. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. A rerun writes that key when it is missing and does not change tokens. A shell `PORT` or `MC_WEB_PORT` still wins for that run. A rerun points `DATABASE_URL` at `MC_DB_PORT` (the shell, then `.env`, then 5432) when that URL uses `localhost` or `127.0.0.1` on the previous `MC_DB_PORT`, or 5432 when none was stored, or when it is still the template line `postgresql://postgres:postgres@localhost:5432/mission_control`. So when a taken port 5432 makes you set only `MC_DB_PORT` in `.env`, the next `bash install.sh` moves `DATABASE_URL` to that port and `npm run seed:demo` reaches the Compose database. A shell `MC_DB_PORT` that differs from the stored port also updates the `MC_DB_PORT` line. A custom URL, including another host or a URL with no port, is left as is and the installer says so. Tokens and secrets are not rotated. A shell value still wins for that run.
 
 OpenClaw is optional. The command above does not start the OpenClaw gateway. A fresh setup does not load sample data. `npm run seed:demo` does not need OpenClaw. On this Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. [Demo data](#demo-data) has the steps for both paths.
 
@@ -56,7 +56,7 @@ Create the database the template expects if it is not there yet: database `missi
 git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control
 cd mission-control
 npm ci
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 set -a; . ./.env; set +a
 (cd apps/api && npx prisma generate)
 (cd apps/api && npx prisma migrate deploy)
@@ -69,7 +69,7 @@ Then open **http://localhost:5173/#/tasks** unless `MC_WEB_PORT` names another p
 
 | Command | Why |
 | --- | --- |
-| `cp .env.example .env` | Root env file. The API loads it on boot. Compose reads the same file. |
+| `[ -f .env ] || cp .env.example .env` | Root env file. The API loads it on boot. Compose reads the same file. It copies the template only when `.env` is missing, so an installer `.env` keeps its tokens. |
 | `set -a; . ./.env; set +a` | Vite and Turbo only see variables that are already in the environment. The API also loads the file itself. The dev proxy does not attach a token. |
 | `npx prisma generate` | Builds the Prisma client. Run it from `apps/api`. npm 11 does not do this during `npm ci`. |
 | `npx prisma migrate deploy` | Applies `apps/api/prisma/migrations`. The API also runs this on boot. |
@@ -141,7 +141,13 @@ OpenClaw is optional. A running OpenClaw instance is the live data source, throu
 
 ### Connect step 3: the root .env
 
-If you ran the installer, the root `.env` already exists. Leave it. The tokens are already in that file. Docker Compose reads exactly one env file, the root `.env` next to `docker-compose.yml`. Copy the template with `cp .env.example .env` only when `.env` is missing and you are not using `bash install.sh`.
+If you ran the installer, the root `.env` already exists. Leave it. The tokens are already in that file. Docker Compose reads exactly one env file, the root `.env` next to `docker-compose.yml`. Copy the template only when `.env` is missing and you are not using `bash install.sh`. The command on the Connect page checks first, so pasting it never replaces an existing `.env`:
+
+```sh
+[ -f .env ] || cp .env.example .env
+```
+
+A plain `cp .env.example .env` would overwrite the installer's `INGEST_TOKEN`, `DASHBOARD_PASSWORD_HASH`, and `SESSION_SECRET`. Do not run it once `.env` exists.
 
 Never invent or guess credentials. Ask the human who owns them. Pause and ask for every real secret, redact secrets in any echoed output, show the command before running it, and keep side effecting actions behind an approval. `.env` is git ignored. Never commit it.
 

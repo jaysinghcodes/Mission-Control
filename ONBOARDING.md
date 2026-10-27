@@ -42,7 +42,7 @@ cd mission-control
 bash install.sh
 ```
 
-That writes the ingest token and dashboard login values when `.env` is missing, starts the stack, runs doctor, and prints the URL. The password is printed once. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. A later run updates `DATABASE_URL` only when a new `MC_DB_PORT` is passed and the URL is still the stock localhost port. A custom URL is left as is. Do not print the token or the password hash. Tell the operator the token lives in `.env`.
+That writes the ingest token and dashboard login values when `.env` is missing, starts the stack, runs doctor, and prints the URL. The password is printed once. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. A later run points a stock `DATABASE_URL` at `MC_DB_PORT` from the shell or from `.env`. A custom URL is left as is. Do not print the token or the password hash. Tell the operator the token lives in `.env`.
 
 If `openclaw` is on PATH, the same command installs the bridge schedule. Linux uses a systemd user timer, or cron when that user timer is not available. macOS uses launchd. The interval comes from `MC_BRIDGE_INTERVAL_SECONDS` (default 300). Remove it with `bash install.sh --uninstall-schedule`. If `openclaw` is not on PATH, the installer says so and continues. `npm run seed:demo` still works. On Compose, run `npm ci` in the checkout first, as [Demo data](docs/INSTALL.md#demo-data) says.
 
@@ -54,15 +54,15 @@ Compose and the API both read the root `.env` next to `docker-compose.yml`. A va
 
 If step 2 already ran `bash install.sh`, `.env` exists. Leave it. The tokens are already random. Do not copy the template over that file.
 
-Copy the template only when `.env` is missing and you are not using the installer:
+Copy the template only when `.env` is missing and you are not using the installer. This command checks first, so it never replaces an existing `.env`:
 
 ```sh
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 ```
 
 Walk each variable. Ask the operator for real values. Do not invent one.
 
-* `DATABASE_URL`: leave the user and password unless their Postgres login differs. `bash install.sh` sets the port from `MC_DB_PORT` (the shell, then `.env`, then 5432) when it creates `.env`. A later run updates that port only when the URL is still `localhost` or `127.0.0.1` on the previous port and a new `MC_DB_PORT` is passed. A custom URL is left as is. Compose still points the API at the db service.
+* `DATABASE_URL`: leave the user and password unless their Postgres login differs. `bash install.sh` sets the port from `MC_DB_PORT` (the shell, then `.env`, then 5432) when it creates `.env`. A later run moves that port to `MC_DB_PORT` (the shell or `.env`) when the URL is still `localhost` or `127.0.0.1` on the previous port, or the template line on 5432. A custom URL is left as is. Compose still points the API at the db service.
 * `INGEST_TOKEN`: shared secret for agent ingest, including `POST /events`. Send it as `x-ingest-token`. `bash install.sh` writes a random value when it creates `.env`. You may generate one with `openssl rand -hex 24` and show it once. The template placeholder is not a production secret. Replace it before anyone else can reach the port. The bridge reads this same variable and exits if it is blank. The web bundle does not contain the value. If it is unset and `HOST` is not loopback, the API refuses to start. A second run of the installer does not replace a token that is already in `.env`.
 * `DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET`: the dashboard password, stored hashed, and the cookie secret. `bash install.sh` writes both when they are missing and prints the password once. Loopback `npm run dev` stays open when the hash is blank. Compose requires both, because the API sees the Docker network and not loopback. `SOCKET_TOKEN` is retired. Do not bake a socket token into the web bundle.
 * `WEB_ORIGIN`: leave commented unless they need another origin. The API default is `http://localhost:5173` and `http://127.0.0.1:5173`.
@@ -73,7 +73,7 @@ Walk each variable. Ask the operator for real values. Do not invent one.
 
 ### Step 4. Start the stack
 
-`bash install.sh` already starts the stack. Running it again is safe. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. It updates a stock `DATABASE_URL` when a new `MC_DB_PORT` is passed, and it leaves a custom URL as is. Default, with Docker. Those commands do not load sample data. Leave `VITE_API_URL` unset. The browser uses port 5173, and nginx proxies `/api` and `/socket.io`.
+`bash install.sh` already starts the stack. Running it again is safe. A plain second run leaves `.env` unchanged once `MC_INSTALL_MODE` is set. It points a stock `DATABASE_URL` at `MC_DB_PORT` from the shell or `.env`, and it leaves a custom URL as is. Default, with Docker. Those commands do not load sample data. Leave `VITE_API_URL` unset. The browser uses port 5173, and nginx proxies `/api` and `/socket.io`.
 
 ```sh
 docker compose up -d --build

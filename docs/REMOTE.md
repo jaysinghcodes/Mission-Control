@@ -16,6 +16,24 @@ Pick the OS you are on. Every OS gets the same command. On macOS, open Terminal.
 
 If the page check fails, keep the SSH session open, run the tunnel again, then retry. If the stack is not up, finish steps 1 to 4 on the host first. Tailscale Serve and Cloudflare Tunnel point at `127.0.0.1` on the tunnel port, `MC_REMOTE_PORT` (default 3011), as the sections below say. Leave `TRUSTED_PROXY` unset.
 
+## From a phone
+
+A phone opens Mission Control in its browser. SSH, the Connect page step 7 method, is not practical on a phone, so use Tailscale Serve or a Cloudflare quick tunnel instead. Run the tunnel program on the machine that runs Mission Control: the VPS, or your laptop when Mission Control runs there. A laptop host must stay awake and online while the phone uses it.
+
+Tailscale: install the Tailscale app on the phone and sign in to the same tailnet as the host. On the host, serve the tunnel port, then open the `https` name it prints in the phone browser.
+
+```bash
+tailscale serve http://127.0.0.1:${MC_REMOTE_PORT:-3011}
+```
+
+Cloudflare quick tunnel: no app is needed on the phone. On the host, run the command below, then open the `trycloudflare.com` link it prints in the phone browser. The link changes every run, and anyone with it reaches the sign in page, so the password matters.
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:${MC_REMOTE_PORT:-3011}
+```
+
+Sign in with the dashboard password. Both paths use the tunnel port, `MC_REMOTE_PORT` (default 3011), and always require login. The sections below have the details.
+
 ## SSH tunnel
 
 Login is required on the Compose install this guide is for.

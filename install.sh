@@ -7,13 +7,14 @@
 # macOS uses launchd. The schedule PATH includes the openclaw directory and the python3 directory.
 # Remove it with: bash install.sh --uninstall-schedule. That also removes the sync timestamp.
 # A plain second run leaves .env unchanged when the dashboard hash and session secret are already set.
-# A new shell MC_DB_PORT updates a stock DATABASE_URL and that port line.
-# A custom DATABASE_URL is left as is.
+# A rerun points a stock DATABASE_URL at MC_DB_PORT from the shell or from .env.
+# A new shell MC_DB_PORT also updates that port line. A custom DATABASE_URL is left as is.
 # A missing dashboard password hash or session secret is filled. Other keys stay.
 # The ingest token is not printed. A new dashboard password is printed once, in the final summary.
 # A second run does not print or change that password.
 # Long build output goes to install.log. The screen shows one progress line and names that file.
 # The run ends with the dashboard URL, the password on the first install, and the reset command.
+# A rerun ends with the printed once line and the reset command right under it.
 # Before Compose starts, the host docs directory is created as this user.
 
 set -euo pipefail
@@ -352,28 +353,38 @@ persist_shell_db_port() {
   MC_DB_PORT_UPDATED=1
 }
 
-# A rerun rewrites DATABASE_URL only when a new shell MC_DB_PORT differs from
-# the stored port and the URL is the stock host and port. Otherwise a custom
-# URL is left as is. A plain rerun changes no line.
+# The .env.example line: postgres:postgres on localhost port 5432, database mission_control.
+# A port set only in .env (what the port conflict message says to do) moves this line too.
+database_url_is_template() {
+  [[ "$1" =~ ^postgres(ql)?://postgres:postgres@(localhost|127\.0\.0\.1):5432/mission_control$ ]]
+}
+
+# A rerun points DATABASE_URL at MC_DB_PORT (the shell, then .env, then 5432)
+# when the URL is the stock host on the stored port or the template line.
+# A new shell MC_DB_PORT is stored too. A custom URL is left as is.
+# A plain rerun with the URL already on that port changes no line.
 rerun_env_ports() {
-  local file previous shell_port current next
+  local file previous shell_port target current next
   file="$1"
   previous="$(stored_db_port "$file")"
   shell_port="$(shell_db_port)"
+  target="${shell_port:-$previous}"
   current="$(file_env_value "$file" DATABASE_URL)"
   MC_DB_PORT_UPDATED=0
   MC_DATABASE_URL_UPDATED=0
-  if [[ -n "$shell_port" && "$shell_port" != "$previous" ]] && database_url_is_stock "$current" "$previous"; then
-    persist_shell_db_port "$file"
-    next="$(database_url_with_port "$current" "$shell_port")"
+  if [[ -n "$current" ]] && { database_url_is_stock "$current" "$previous" || database_url_is_template "$current"; }; then
+    if [[ -n "$shell_port" && "$shell_port" != "$previous" ]]; then
+      persist_shell_db_port "$file"
+    fi
+    next="$(database_url_with_port "$current" "$target")"
     if [[ "$next" != "$current" ]]; then
       write_env_key "$file" DATABASE_URL "$next"
       MC_DATABASE_URL_UPDATED=1
-      echo "Set DATABASE_URL to port ${shell_port}."
+      echo "Set DATABASE_URL to port ${target}."
     fi
     return 0
   fi
-  if [[ -n "$current" ]] && ! database_url_is_stock "$current" "$previous"; then
+  if [[ -n "$current" ]]; then
     echo "DATABASE_URL is custom, so it was left as is. Update its port by hand if needed."
   fi
 }
@@ -1878,7 +1889,9 @@ print_install_summary() {
     reset="npm run password:reset"
     echo "Remote access is in docs/REMOTE.md."
   fi
-  echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
+  if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
+    echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
+  fi
   echo "OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md."
   if [[ "${USE_DOCKER:-0}" != "1" && "${MC_WEB_ANSWERED:-1}" != "1" ]]; then
     # Native: no URL for a port that does not answer.
@@ -1888,9 +1901,15 @@ print_install_summary() {
   fi
   if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
     echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+    echo "Reset the dashboard password with:"
+    echo "  ${reset}"
+  else
+    # A rerun, or a run after a first install that failed, puts the reset
+    # command right under the printed once line.
+    echo "INGEST_TOKEN is in .env. The dashboard password is printed once when it is created."
+    echo "If you did not save it, reset it with:"
+    echo "  ${reset}"
   fi
-  echo "Reset the dashboard password with:"
-  echo "  ${reset}"
   MC_SUMMARY_PRINTED=1
 }
 
@@ -1902,6 +1921,13 @@ on_exit() {
   fi
   if [[ -n "${MC_NEW_PASSWORD:-}" ]]; then
     echo "Dashboard password, shown once: ${MC_NEW_PASSWORD}"
+    if [[ "${USE_DOCKER:-0}" == "1" ]]; then
+      echo "Save it now. The next run does not show it. If you lose it, reset it with:"
+      echo "  docker compose exec api npm run password:reset"
+    else
+      echo "Save it now. The next run does not show it. If you lose it, reset it with:"
+      echo "  npm run password:reset"
+    fi
     MC_SUMMARY_PRINTED=1
   fi
 }

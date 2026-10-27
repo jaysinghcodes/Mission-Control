@@ -49,6 +49,7 @@ function outputOf(result) {
 
 const SUMMARY_INGEST =
   'INGEST_TOKEN is in .env. The dashboard password is printed once when it is created.'
+const SUMMARY_RERUN_RESET = 'If you did not save it, reset it with:'
 const SUMMARY_OPENCLAW = 'OpenClaw is optional. See docs/OPENCLAW_ONBOARDING.md.'
 const SUMMARY_REMOTE = 'Remote access is in docs/REMOTE.md.'
 const SUMMARY_TUNNEL =
@@ -97,12 +98,13 @@ function assertRerunSummary(text, { reset, url, native = false }) {
   assert.ok(summary.length <= 7, summary.join('\n'))
   assert.equal(summary.length, 6, summary.join('\n'))
   assertSummaryLead(summary, native)
-  assert.equal(summary[1], SUMMARY_INGEST)
-  assert.equal(summary[2], SUMMARY_OPENCLAW)
-  assert.equal(summary[3], url)
-  assert.equal(summary[4], 'Reset the dashboard password with:')
+  assert.equal(summary[1], SUMMARY_OPENCLAW)
+  assert.equal(summary[2], url)
+  // #152: no new password this run, so the reset command sits right under the printed once line.
+  assert.equal(summary[3], SUMMARY_INGEST)
+  assert.equal(summary[4], SUMMARY_RERUN_RESET)
   assert.equal(summary[5], `  ${reset}`)
-  assert.equal(summary.at(-3), url)
+  assert.equal(summary.at(-4), url)
   assert.equal(text.includes('Dashboard password, shown once:'), false)
 }
 
@@ -714,8 +716,8 @@ test('a fresh install ends with the URL and password, and a rerun does not print
       reset: 'docker compose exec api npm run password:reset',
       url: 'Open http://localhost:5173/#/tasks',
     })
-    assert.match(againLines.at(-3) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
-    assert.deepEqual(againLines.slice(-2), ['Reset the dashboard password with:', '  docker compose exec api npm run password:reset'])
+    assert.match(againLines.at(-4) ?? '', /^Open http:\/\/localhost:5173\/#\/tasks$/)
+    assert.deepEqual(againLines.slice(-3), [SUMMARY_INGEST, SUMMARY_RERUN_RESET, '  docker compose exec api npm run password:reset'])
     assert.doesNotMatch(again, /Dashboard password, shown once:/)
     assert.equal(again.includes(shown[1]), false)
     assert.deepEqual(readFileSync(envPath), before)
@@ -1342,17 +1344,18 @@ test('Run B: ports already in .env are kept and used', async () => {
       MC_DB_PORT: '15581',
       MC_INSTALL_MODE: 'compose',
     })
-    const before = readFileSync(envFile)
+    const before = readFileSync(envFile, 'utf8')
     const result = runInstall(fx.repo, {
       ...fx.env,
       MC_INSTALL_READY_SECONDS: '8',
     })
     const text = outputOf(result)
     assert.equal(result.status, 0, text)
-    assert.deepEqual(readFileSync(envFile), before)
-    assert.match(text, /Keeping the existing \.env\. Tokens and other values were not changed\./)
-    assert.match(text, /DATABASE_URL is custom, so it was left as is\. Update its port by hand if needed\./)
-    assert.doesNotMatch(text, /Set DATABASE_URL to port/)
+    // #152: the template DATABASE_URL follows MC_DB_PORT from .env. Nothing else changes.
+    assert.equal(readFileSync(envFile, 'utf8'), before.replace('localhost:5432/', 'localhost:15581/'))
+    assert.match(text, /Set DATABASE_URL to port 15581\./)
+    assert.match(text, /Tokens and secrets were not changed\./)
+    assert.doesNotMatch(text, /DATABASE_URL is custom/)
     assert.match(text, /Waiting for the API health check on port 3881\./)
     assert.match(text, /pass ports: Port 3881 is already running\./)
     assert.match(text, /Open http:\/\/localhost:15881\/#\/tasks/)
@@ -2312,6 +2315,63 @@ test('compose up names the env var when the port is already in use', () => {
     } finally {
       rmSync(fx.dir, { recursive: true, force: true })
     }
+  }
+})
+
+test('#152: MC_DB_PORT set only in .env after a 5432 conflict moves DATABASE_URL, and the rerun names the reset command', () => {
+  const fx = freshDir()
+  try {
+    const first = runInstall(fx.repo, { ...fx.env, DOCKER_STUB_BIND: '1', DOCKER_STUB_BIND_PORT: '5432' })
+    const firstText = outputOf(first)
+    assert.equal(first.status, 1, firstText)
+    assert.match(firstText, /Port 5432 is used by another program\. Stop it or set MC_DB_PORT in \.env\./)
+    const shown = firstText.match(/Dashboard password, shown once: (\S+)/)
+    assert.ok(shown, firstText)
+    // The failed run puts the reset command right under the password.
+    const firstLines = firstText.split('\n')
+    const at = firstLines.findIndex((line) => line.startsWith('Dashboard password, shown once: '))
+    assert.equal(firstLines[at + 1], 'Save it now. The next run does not show it. If you lose it, reset it with:')
+    assert.equal(firstLines[at + 2], '  docker compose exec api npm run password:reset')
+    assert.equal(PUNCT.test(firstText), false)
+
+    const envPath = path.join(fx.repo, '.env')
+    const stock = readFileSync(envPath, 'utf8')
+    const before = assignments(stock)
+    assert.equal(before.DATABASE_URL, 'postgresql://postgres:postgres@localhost:5432/mission_control')
+    // Follow the advice: set only MC_DB_PORT in .env.
+    writeFileSync(envPath, stock.replace(/^# MC_DB_PORT=5432$/m, 'MC_DB_PORT=15532'))
+    chmodSync(envPath, 0o600)
+    const edited = readFileSync(envPath, 'utf8')
+
+    const second = runInstall(fx.repo, fx.env)
+    const text = outputOf(second)
+    const secondFailed = assertReadableDoctor(text).some((line) => line.startsWith('fail '))
+    assert.equal(second.status, secondFailed ? 1 : 0, text)
+    const after = assignments(readFileSync(envPath, 'utf8'))
+    assert.equal(after.MC_DB_PORT, '15532')
+    assert.equal(after.DATABASE_URL, 'postgresql://postgres:postgres@localhost:15532/mission_control')
+    assert.match(text, /Set DATABASE_URL to port 15532\./)
+    assert.match(text, /Tokens and secrets were not changed\./)
+    assert.doesNotMatch(text, /DATABASE_URL is custom/)
+    assert.equal(readFileSync(envPath, 'utf8'), edited.replace('localhost:5432/', 'localhost:15532/'))
+    for (const key of ['INGEST_TOKEN', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET']) {
+      assert.equal(after[key], before[key], key)
+    }
+    assert.equal(statSync(envPath).mode & 0o777, 0o600)
+    assertRerunSummary(text, {
+      reset: 'docker compose exec api npm run password:reset',
+      url: 'Open http://localhost:5173/#/tasks',
+    })
+    assert.equal(text.includes(shown[1]), false)
+
+    // A third plain run changes nothing.
+    const settled = readFileSync(envPath)
+    const third = runInstall(fx.repo, fx.env)
+    const thirdText = outputOf(third)
+    assert.deepEqual(readFileSync(envPath), settled)
+    assert.doesNotMatch(thirdText, /Set DATABASE_URL to port|DATABASE_URL is custom/)
+  } finally {
+    rmSync(fx.dir, { recursive: true, force: true })
   }
 })
 

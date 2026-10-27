@@ -122,7 +122,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [
       'The installer already wrote the root `.env`, so leave it when it exists. Copy the template only when it is missing, and ask the owner for every real secret.',
     ],
-    commands: [{ cmd: 'cp .env.example .env' }],
+    commands: [{ cmd: '[ -f .env ] || cp .env.example .env' }],
     links: [{ label: 'Every variable', to: stepDoc('connect-step-3-the-root-env'), external: true }],
     confirmable: true,
   },
@@ -171,6 +171,7 @@ export const STEP_DATA: ConnectStep[] = [
     body: [`On your laptop, forward port ${WEB_PORT} over SSH and keep the session open.`],
     links: [
       { label: 'Remote access guide', to: 'https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md#from-the-connect-page', external: true },
+      { label: 'From a phone', to: 'https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md#from-a-phone', external: true },
     ],
     probe: 'health',
     confirmable: false,

@@ -57,7 +57,8 @@ test('each step has one or two sentences, at most one command, and one docs link
     }
     const links = step.split('links: [')[1]
     assert.ok(links, `step ${id} link`)
-    assert.equal((links.match(/label: /g) ?? []).length, 1, `step ${id} has one link`)
+    // Step 7 adds the From a phone link (#152).
+    assert.equal((links.match(/label: /g) ?? []).length, id === 7 ? 2 : 1, `step ${id} links`)
     assert.doesNotMatch(step, /secrets|vars:/)
   }
   // Step 7 keeps the per OS SSH command, which copies as is.
@@ -79,6 +80,47 @@ test('every step link opens a heading that exists in the docs', async () => {
   for (const slug of slugs) assert.ok(docs['docs/INSTALL.md'].includes(slug), slug)
   assert.ok(src.includes(`${REPO}docs/REMOTE.md#from-the-connect-page`))
   assert.ok(docs['docs/REMOTE.md'].includes('from-the-connect-page'))
+  assert.ok(stepBlock(src, 7).includes(`label: 'From a phone', to: '${REPO}docs/REMOTE.md#from-a-phone'`))
+  assert.ok(docs['docs/REMOTE.md'].includes('from-a-phone'))
+})
+
+test('#152: step 3 copies the template only when .env is missing, matching its copy and the docs', async () => {
+  const src = await read('../src/components/ConnectSteps.tsx')
+  const step = stepBlock(src, 3)
+  const cmds = [...step.matchAll(/cmd: '([^']+)'/g)].map((m) => m[1])
+  assert.deepEqual(cmds, ['[ -f .env ] || cp .env.example .env'])
+  assert.match(step, /leave it when it exists/)
+  // No bare copy that overwrites an installer .env anywhere on the page.
+  assert.doesNotMatch(src, /cmd: 'cp \.env\.example \.env'/)
+  for (const rel of ['../../../docs/INSTALL.md', '../../../ONBOARDING.md', '../../../README.md', '../../../docs/API.md']) {
+    const doc = await read(rel)
+    const bare = doc.split('\n').filter((line) => line.trim() === 'cp .env.example .env')
+    assert.deepEqual(bare, [], rel)
+    assert.ok(doc.includes('[ -f .env ] || cp .env.example .env'), rel)
+  }
+})
+
+test('#152: step 3 command leaves an existing .env byte for byte and creates a missing one', async () => {
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const path = await import('node:path')
+  const { spawnSync } = await import('node:child_process')
+  const dir = mkdtempSync(path.join(tmpdir(), 'mc-step3-'))
+  try {
+    writeFileSync(path.join(dir, '.env.example'), 'INGEST_TOKEN=change-me\nDASHBOARD_PASSWORD_HASH=\nSESSION_SECRET=\n')
+    const installer = 'INGEST_TOKEN=' + 'ab'.repeat(24) + '\nDASHBOARD_PASSWORD_HASH=scrypt:16384:8:1:aa:bb\nSESSION_SECRET=' + 'ef'.repeat(32) + '\n'
+    writeFileSync(path.join(dir, '.env'), installer)
+    const kept = spawnSync('bash', ['-c', '[ -f .env ] || cp .env.example .env'], { cwd: dir })
+    assert.equal(kept.status, 0)
+    assert.equal(readFileSync(path.join(dir, '.env'), 'utf8'), installer)
+    rmSync(path.join(dir, '.env'))
+    const made = spawnSync('bash', ['-c', '[ -f .env ] || cp .env.example .env'], { cwd: dir })
+    assert.equal(made.status, 0)
+    assert.ok(existsSync(path.join(dir, '.env')))
+    assert.match(readFileSync(path.join(dir, '.env'), 'utf8'), /INGEST_TOKEN=change-me/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('the facts cut from the page live in the docs', async () => {
@@ -122,6 +164,10 @@ test('the facts cut from the page live in the docs', async () => {
     '`MC_REMOTE_PORT` (default 3011)',
     'Leave `TRUSTED_PROXY` unset.',
     'The page calls the API on that same origin.',
+    'SSH, the Connect page step 7 method, is not practical on a phone',
+    'install the Tailscale app on the phone and sign in to the same tailnet as the host',
+    'Cloudflare quick tunnel: no app is needed on the phone.',
+    'A laptop host must stay awake and online while the phone uses it.',
   ]) {
     assert.ok(remote.includes(fact), fact)
   }
