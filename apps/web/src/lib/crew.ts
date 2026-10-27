@@ -198,15 +198,18 @@ export function restoreCrewMap(
   return next
 }
 
-/** Refetch settings after a roster change that can move the crew map. Heartbeats do not. */
+/**
+ * Refetch settings after a roster change that can move the crew map, or
+ * after a Settings save in any tab (settings.changed). Heartbeats do not.
+ */
 export function namingRefreshTs(
   seenTs: number,
   events: readonly { type: string; ts: number; action?: unknown }[],
 ): number | null {
   let latest = 0
   for (const event of events) {
-    if (event.type !== 'agents.snapshot') continue
-    if (event.action === 'heartbeat') continue
+    if (event.type !== 'agents.snapshot' && event.type !== 'settings.changed') continue
+    if (event.type === 'agents.snapshot' && event.action === 'heartbeat') continue
     if (event.ts > latest) latest = event.ts
   }
   return latest > seenTs ? latest : null

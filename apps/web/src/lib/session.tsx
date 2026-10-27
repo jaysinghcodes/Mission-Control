@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { API_URL } from './apiBase'
+import { io, type Socket } from 'socket.io-client'
+import { API_URL, socketUrl } from './apiBase'
+import { sessionDropAction } from './session-drop'
 
 /**
  * Dashboard session. Loopback reports loginRequired false.
@@ -76,6 +78,42 @@ export async function submitPassword(
   return { status: res.status, message }
 }
 
+/**
+ * A revoke in another tab or browser drops this socket. The tab then reads
+ * the session again and shows the sign in form within the 2 s target.
+ * Only a tab that had to sign in watches. Loopback is never dropped.
+ */
+function useRevokeWatch(active: boolean, onDrop: () => Promise<boolean>) {
+  useEffect(() => {
+    if (!active) return
+    const options = {
+      transports: ['websocket'] as 'websocket'[],
+      autoConnect: false,
+      withCredentials: true,
+    }
+    const explicit = socketUrl()
+    const socket: Socket = explicit ? io(explicit, options) : io(options)
+    let retry: ReturnType<typeof setTimeout> | null = null
+    let closed = false
+    socket.on('disconnect', (reason: string) => {
+      if (sessionDropAction(reason) !== 'recheck') return
+      void onDrop().then((stillIn) => {
+        // A server drop with a cookie that still works: dial again later.
+        if (stillIn && !closed) retry = setTimeout(() => socket.connect(), 1000)
+      })
+    })
+    // Same StrictMode guard as useLiveActivity: dial on the next macrotask.
+    const first = setTimeout(() => socket.connect(), 0)
+    return () => {
+      closed = true
+      clearTimeout(first)
+      if (retry) clearTimeout(retry)
+      socket.removeAllListeners()
+      socket.disconnect()
+    }
+  }, [active, onDrop])
+}
+
 function applyStoredTheme() {
   const choice = localStorage.getItem('mc-theme')
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -105,6 +143,16 @@ export function SessionGate({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => void refresh(), 0)
     return () => clearTimeout(timer)
   }, [refresh])
+
+  /** True while this browser is still signed in. A failed read counts as signed in. */
+  const recheck = useCallback(async () => {
+    const next = await readSession()
+    if (!next) return true
+    setInfo(next)
+    return !next.loginRequired || next.authenticated
+  }, [])
+
+  useRevokeWatch(Boolean(info && info.loginRequired && info.authenticated), recheck)
 
   const end = useCallback(async () => {
     try {
