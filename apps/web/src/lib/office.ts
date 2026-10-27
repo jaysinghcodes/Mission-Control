@@ -14,7 +14,7 @@ import { pluralize } from './pluralize'
 
 export type DeskRoom = 'build' | 'qa' | 'ship' | 'deploy'
 export type Room = DeskRoom | 'commons'
-export type FloorMode = 'all' | 'gather' | 'meeting' | 'break'
+type FloorMode = 'all' | 'gather' | 'meeting' | 'break'
 
 export const FLOOR_MODES: readonly FloorMode[] = ['all', 'gather', 'meeting', 'break']
 export const DESK_ROOMS: readonly DeskRoom[] = ['build', 'qa', 'ship', 'deploy']
@@ -22,7 +22,7 @@ export const DESK_ROOMS: readonly DeskRoom[] = ['build', 'qa', 'ship', 'deploy']
 /** Two desks per room, matching the locked mock. Overflow joins the Commons. */
 export const DESK_CAP = 2
 
-export interface FloorAgent {
+interface FloorAgent {
   id: string
   name: string
   role?: string | null

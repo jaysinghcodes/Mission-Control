@@ -10,7 +10,6 @@ const pagesDir = new URL('../src/pages/', import.meta.url)
 const pages = (await readdir(pagesDir)).filter((name) => name.endsWith('.tsx'))
 
 const SURFACES = [
-  'Activity.tsx',
   'Office.tsx',
   'Memory.tsx',
   'Docs.tsx',

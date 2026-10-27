@@ -16,18 +16,18 @@ import type { CSSProperties, ReactElement } from "react";
 
 /* ---------------------------------------------------------------- types */
 
-export type HeadShape = "monitor" | "boxy" | "capsule" | "orb" | "dome" | "tv" | "pill";
+type HeadShape = "monitor" | "boxy" | "capsule" | "orb" | "dome" | "tv" | "pill";
 export type Face = "smile" | "grill" | "visor" | "cyclops" | "happy" | "pixel" | "slit" | "lenses" | "wink";
-export type BodyShape = "box" | "barrel" | "dome" | "egg" | "shield" | "neck";
+type BodyShape = "box" | "barrel" | "dome" | "egg" | "shield" | "neck";
 export type Panel = "buttons" | "vents" | "chart" | "emblem" | "dial" | "none";
-export type Loco = "treads" | "wheels" | "legs" | "pogo" | "spider" | "hover" | "unicycle";
-export type Arms = "claws" | "pincers" | "noodle" | "stubby" | "wave" | "none";
-export type Accessory =
+type Loco = "treads" | "wheels" | "legs" | "pogo" | "spider" | "hover" | "unicycle";
+type Arms = "claws" | "pincers" | "noodle" | "stubby" | "wave" | "none";
+type Accessory =
   | "beacon" | "siren" | "antenna" | "twin" | "coil" | "star" | "propeller"
   | "dish" | "headset" | "bolts" | "hardhat";
 export type RobotStatus = "working" | "idle" | "blocked" | "offline";
 
-export interface RobotSpec {
+interface RobotSpec {
   role: string;
   color: string; // the robot's own saturated color
   accent: string; // lights, buttons, antenna balls
@@ -709,7 +709,7 @@ const STATUS_COLOR: Record<RobotStatus, string> = {
   working: "#3ddc84", idle: "#f5c542", blocked: "#ff5a5f", offline: "#6b7280",
 };
 
-export interface RobotAvatarProps {
+interface RobotAvatarProps {
   /** Roster slot 0–11 (wraps). Use `slotForId(agentId)` for a stable mapping. */
   slot: number;
   /** Rendered width/height in px. Default 64. */

@@ -17,9 +17,9 @@ export { setActiveTimeZone } from './zone-day'
 
 const LABELS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const
 
-export type DayLabel = (typeof LABELS)[number]
+type DayLabel = (typeof LABELS)[number]
 /** 0 = Sunday, 1 = Monday. The calendar page uses Monday. */
-export type WeekStart = 0 | 1
+type WeekStart = 0 | 1
 
 /** No week-start control. Monday matches CronJob.day and the bridge. */
 export const WEEK_STARTS_ON: WeekStart = 1
@@ -39,7 +39,7 @@ export interface CalendarDay {
   cronDay: number
 }
 
-export interface WallClock {
+interface WallClock {
   hour: number
   minute: number
 }
@@ -55,24 +55,24 @@ export function parseClock(time: string | null): WallClock | null {
 }
 
 /** Weekday of a Gregorian calendar date. 0=Sun … 6=Sat. Not an instant conversion. */
-export function weekdayOf(dayKey: string): number {
+function weekdayOf(dayKey: string): number {
   const [year, month, date] = dayKey.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, date)).getUTCDay()
 }
 
 /** Shift a YYYY-MM-DD label by whole days. Not an instant conversion. */
-export function shiftDay(dayKey: string, deltaDays: number): string {
+function shiftDay(dayKey: string, deltaDays: number): string {
   const [year, month, date] = dayKey.split('-').map(Number)
   const next = new Date(Date.UTC(year, month - 1, date))
   next.setUTCDate(next.getUTCDate() + deltaDays)
   return next.toISOString().slice(0, 10)
 }
 
-export function cronDayOf(dayKey: string): number {
+function cronDayOf(dayKey: string): number {
   return (weekdayOf(dayKey) + 6) % 7
 }
 
-export function columnOf(dayKey: string, weekStartsOn: WeekStart = WEEK_STARTS_ON): number {
+function columnOf(dayKey: string, weekStartsOn: WeekStart = WEEK_STARTS_ON): number {
   const weekday = weekdayOf(dayKey)
   return weekStartsOn === 0 ? weekday : (weekday + 6) % 7
 }
@@ -121,7 +121,7 @@ export function formatWeekRange(startKey: string): string {
   return `${left} to ${right}`
 }
 
-export function formatMonthTitle(dayKey: string): string {
+function formatMonthTitle(dayKey: string): string {
   return formatKey(dayKey, { month: 'long', year: 'numeric' })
 }
 

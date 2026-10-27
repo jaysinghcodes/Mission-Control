@@ -273,7 +273,6 @@ test('the first 12 seats are unique even when a hash lands on a taken robot', ()
 test('board and backlog scroll sideways and wrap actions (layout only)', async () => {
   const tickets = await readFile(new URL('../src/pages/Tickets.tsx', import.meta.url), 'utf8')
   const backlog = await readFile(new URL('../src/pages/Backlog.tsx', import.meta.url), 'utf8')
-  const activity = await readFile(new URL('../src/pages/Activity.tsx', import.meta.url), 'utf8')
   const office = await readFile(new URL('../src/pages/Office.tsx', import.meta.url), 'utf8')
   // Fixed-width columns inside a sideways scroller. A shrinking grid clipped
   // titles at ~768px; w-[260px] shrink-0 keeps each column readable.
@@ -291,8 +290,6 @@ test('board and backlog scroll sideways and wrap actions (layout only)', async (
   // Titles must not be ellipsized, and the generic bot glyph is gone.
   assert.equal(tickets.includes('truncate'), false)
   assert.equal(tickets.includes('<Bot'), false)
-  assert.equal(activity.includes('<Bot'), false)
-  assert.match(activity, /AgentAvatar/)
   // Office is the desk floor (Build / QA / Ship / Deploy + Commons), still robots.
   assert.match(office, /Build/)
   assert.match(office, /Commons/)
