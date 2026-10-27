@@ -57,6 +57,29 @@ function launchOptions() {
   return options
 }
 
+// System spend period tabs stay inside their card at phone and desktop widths.
+async function assertPeriodTabsFit(page) {
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await settle()
+    const fit = await page.locator('[role=tablist][aria-label="Spend period"]').evaluate((list) => {
+      const box = list.getBoundingClientRect()
+      const row = list.parentElement.getBoundingClientRect()
+      const tabs = [...list.querySelectorAll('[role=tab]')]
+      return {
+        inside: box.left >= row.left - 0.5 && box.right <= row.right + 0.5,
+        clipped: tabs.filter((tab) => tab.scrollWidth > tab.clientWidth + 1 || tab.getBoundingClientRect().right > box.right + 0.5).map((tab) => tab.innerText),
+        pageScroll: document.documentElement.scrollWidth > window.innerWidth,
+        count: tabs.length,
+      }
+    })
+    if (fit.count !== 3 || !fit.inside || fit.clipped.length || fit.pageScroll) {
+      throw new Error(`System period tabs do not fit at ${width}: ${JSON.stringify(fit)}`)
+    }
+  }
+  console.log('System period tabs fit at 320, 390 and 1440.')
+}
+
 const errors = []
 
 function note(kind, text) {
@@ -105,6 +128,8 @@ async function main() {
     await settle()
 
     await visit('#/system', 'System')
+    await assertPeriodTabsFit(page)
+    await page.setViewportSize({ width: 1400, height: 900 })
 
     const title = `Fresh clone ${Date.now()}`
     await visit('#/tasks', 'Tasks')

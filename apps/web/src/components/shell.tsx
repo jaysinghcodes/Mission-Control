@@ -85,14 +85,19 @@ export function Segmented({
   active,
   onChange,
   ariaLabel,
+  fit = false,
 }: {
   labels: string[]
   active: number
   onChange: (index: number) => void
   ariaLabel: string
+  /** Below sm, stretch to the row and let each tab shrink to its label so the set never runs past its card. */
+  fit?: boolean
 }) {
+  const track = fit ? 'flex w-full min-w-0 sm:inline-flex sm:w-auto' : 'inline-flex shrink-0'
+  const size = fit ? 'min-w-0 flex-auto px-2 sm:flex-none sm:min-w-[84px] sm:px-3' : 'min-w-[84px] px-3'
   return (
-    <div role="tablist" aria-label={ariaLabel} className="inline-flex h-8 shrink-0 items-center rounded-[9px] bg-mc-ctl p-[3px]">
+    <div role="tablist" aria-label={ariaLabel} className={`${track} h-8 items-center rounded-[9px] bg-mc-ctl p-[3px]`}>
       {labels.map((label, i) => {
         const on = i === active
         return (
@@ -102,7 +107,7 @@ export function Segmented({
             role="tab"
             aria-selected={on}
             onClick={() => onChange(i)}
-            className={`h-[26px] min-w-[84px] rounded-[7px] px-3 text-[13px] whitespace-nowrap ${
+            className={`h-[26px] ${size} rounded-[7px] text-[13px] whitespace-nowrap ${
               on ? 'bg-mc-thumb font-semibold text-mc-text shadow-[0_1px_2px_rgb(0_0_0/0.12)]' : 'font-medium text-mc-sub2'
             }`}
           >

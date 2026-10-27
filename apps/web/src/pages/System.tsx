@@ -340,6 +340,7 @@ export default function System() {
           active={period}
           onChange={setPeriod}
           ariaLabel="Spend period"
+          fit
         />
       </div>
 
