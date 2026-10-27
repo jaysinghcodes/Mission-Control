@@ -41,11 +41,6 @@ export interface AgentsResp {
   ts: number
 }
 
-export interface AgentDetailResp {
-  agent: Agent & { children: Agent[] }
-  ts: number
-}
-
 /** Project from GET /projects (ticket 4). `nameKey` is not on the wire. */
 export interface Project {
   id: string

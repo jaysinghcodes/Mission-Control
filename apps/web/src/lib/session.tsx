@@ -8,7 +8,7 @@ import { sessionDropAction } from './session-drop'
  * A remote browser stays on the sign in form until the cookie is set.
  */
 
-export interface SessionInfo {
+interface SessionInfo {
   authenticated: boolean
   loginRequired: boolean
   compose: boolean
@@ -57,7 +57,7 @@ async function readSession(): Promise<SessionInfo | null> {
   }
 }
 
-export async function submitPassword(
+async function submitPassword(
   password: string,
 ): Promise<{ status: number; message: string }> {
   const res = await fetch(`${API_URL}/auth/login`, {

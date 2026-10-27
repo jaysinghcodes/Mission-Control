@@ -11,7 +11,7 @@ import {
 import { configuredSessionSecret, passwordMatches } from './password';
 import { currentSessionVersion, effectivePasswordHash } from './session-state';
 
-export const SESSION_COOKIE = 'mc_session';
+const SESSION_COOKIE = 'mc_session';
 const DEFAULT_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 export interface SessionStatus {
@@ -21,9 +21,7 @@ export interface SessionStatus {
   compose: boolean;
 }
 
-export function sessionMaxAgeSeconds(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
+function sessionMaxAgeSeconds(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.SESSION_MAX_AGE_SECONDS;
   if (typeof raw !== 'string' || raw.trim() === '')
     return DEFAULT_MAX_AGE_SECONDS;
@@ -34,7 +32,7 @@ export function sessionMaxAgeSeconds(
   return n;
 }
 
-export function trustedProxyList(env: NodeJS.ProcessEnv = process.env): string {
+function trustedProxyList(env: NodeJS.ProcessEnv = process.env): string {
   const raw = env.TRUSTED_PROXY;
   return typeof raw === 'string' ? raw : '';
 }
@@ -57,7 +55,7 @@ export const SHARED_REMOTE_BUCKET = 'remote';
  * nginx on MC_REMOTE_PORT sets this to 1 and the local listener clears it.
  * The API honors it only from the bundled proxy.
  */
-export const REMOTE_LISTENER_HEADER = 'x-mc-remote';
+const REMOTE_LISTENER_HEADER = 'x-mc-remote';
 
 export function requestLoopback(
   req: LoopbackRequest,
@@ -156,7 +154,7 @@ export function signSession(
   return `${payload}.${sig}`;
 }
 
-export function verifySession(
+function verifySession(
   token: string,
   secret: string,
   now = Date.now(),

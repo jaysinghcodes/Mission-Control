@@ -17,7 +17,7 @@ export interface PriceTable {
 
 const EMPTY: PriceTable = { models: {} };
 
-export function pricesDir(): string {
+function pricesDir(): string {
   const override = process.env.MC_PRICES_DIR?.trim();
   if (override) return override;
   let dir = process.cwd();

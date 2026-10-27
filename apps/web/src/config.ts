@@ -2,12 +2,9 @@
  * config.ts — build-time, display-only settings for the web app.
  *
  * Ticket 3 (OSS reposition): the UI used to hardcode the original author's
- * name (a personalised greeting, a fixed-initial avatar, task copy naming a
- * personal agent). A fresh clone must not ship anyone's personal names, so
- * the operator's name now comes from configuration:
- *
- *   VITE_OPERATOR_NAME=Ada   → "Good evening, Ada", "A" avatar
- *   unset / blank            → neutral "Good evening", generic avatar
+ * name. A fresh clone must not ship anyone's personal names, so the
+ * operator's name now comes from configuration (VITE_OPERATOR_NAME). Unset
+ * or blank falls back to the neutral "Operator".
  *
  * Vite inlines VITE_* vars at BUILD time:
  *   - `npm run dev`: set VITE_OPERATOR_NAME in the root .env (exported with
@@ -27,21 +24,3 @@ export const OPERATOR_NAME: string = String(import.meta.env.VITE_OPERATOR_NAME ?
  * neutral "Operator" fallback. Used to recognise "my" runs in the UI.
  */
 export const OPERATOR_ASSIGNEE: string = OPERATOR_NAME || 'Operator'
-
-/**
- * Time-of-day greeting, optionally personalised.
- *   greeting(new Date('…T09:00'), 'Ada') → "Good morning, Ada"
- *   greeting(new Date('…T20:00'), '')    → "Good evening"
- * Uses the browser's local clock (it's the operator's day that matters).
- */
-export function greeting(now: Date = new Date(), name: string = OPERATOR_NAME): string {
-  const h = now.getHours()
-  const part = h < 5 ? 'evening' : h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening'
-  return name ? `Good ${part}, ${name}` : `Good ${part}`
-}
-
-/** Avatar initial for the topbar account button; null → render a generic glyph. */
-export function operatorInitial(name: string = OPERATOR_NAME): string | null {
-  const ch = name.trim().charAt(0)
-  return ch ? ch.toUpperCase() : null
-}

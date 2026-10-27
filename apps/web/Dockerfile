@@ -10,7 +10,7 @@ COPY config/timezones.json /app/config/timezones.json
 # Blank means the browser calls this page. nginx proxies /api and /socket.io.
 ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL
-# Display-only operator name (greeting/avatar). Blank means a neutral first run.
+# Display-only operator name (account label and team owner). Blank means a neutral first run.
 ARG VITE_OPERATOR_NAME=
 ENV VITE_OPERATOR_NAME=$VITE_OPERATOR_NAME
 # Optional operator-owned Discord server id (channel deep links). Blank → none.

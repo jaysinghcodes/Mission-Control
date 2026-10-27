@@ -97,8 +97,8 @@ export class MemoryController {
   }
 }
 
-/** Query object for GET /memory. Exported so tests can pin the day bounds. */
-export function memoryListWhere(
+/** Query object for GET /memory. */
+function memoryListWhere(
   day?: string,
   kind?: string,
   q?: string,

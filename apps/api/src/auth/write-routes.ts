@@ -87,7 +87,7 @@ export function listRegisteredRoutes(
   return routes;
 }
 
-export function joinRoute(
+function joinRoute(
   controllerPath: string | string[] | undefined,
   methodPath: string,
 ): string {

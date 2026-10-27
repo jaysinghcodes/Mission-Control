@@ -565,7 +565,7 @@ function dedupeMemory(rows: MemoryWrite[]): MemoryWrite[] {
  * `mem-` is the bridge's own stable prefix. Anything else is stored as
  * `bridge-…`. A `demo-` id is refused so ingest cannot take a seed row's key.
  */
-export function namespaceBridgeId(id: string): string | null {
+function namespaceBridgeId(id: string): string | null {
   if (!id || id.startsWith('demo-')) return null;
   if (id.startsWith('bridge-') || id.startsWith('mem-')) return id;
   const namespaced = `bridge-${id}`;

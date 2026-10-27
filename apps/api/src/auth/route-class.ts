@@ -8,7 +8,7 @@
  * ticket delete route.
  */
 
-export function requestPath(url: string | undefined): string {
+function requestPath(url: string | undefined): string {
   const raw = typeof url === 'string' && url.length > 0 ? url : '/';
   const path = raw.split('?')[0] || '/';
   if (path.length > 1 && path.endsWith('/')) return path.slice(0, -1);

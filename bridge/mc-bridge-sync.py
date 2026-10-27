@@ -1338,12 +1338,6 @@ def cron_run_plan(
     return events, calls
 
 
-def cron_run_events(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
-    """Event half of cron_run_plan. Prefer cron_run_plan when the REST calls matter."""
-    events, _calls = cron_run_plan(rows, state)
-    return events
-
-
 # Session counters are cumulative. The first sync places each session on the
 # calendar day of its last activity, up to USAGE_RETENTION_DAYS back (default
 # 30), when that timestamp exists. Later syncs post only the increase, on the

@@ -55,13 +55,11 @@ const proxy = {
 }
 
 const listenPort = webPort()
-const nativeApi = String(apiPort())
 
 // https://vite.dev/config/
 export default defineConfig({
   define: {
     __MC_WEB_PORT__: JSON.stringify(String(listenPort)),
-    __MC_API_PORT__: JSON.stringify(nativeApi),
   },
   plugins: [react(), tailwindcss()],
   server: {

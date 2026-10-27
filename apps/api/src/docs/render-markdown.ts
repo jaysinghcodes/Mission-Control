@@ -92,7 +92,7 @@ function rewriteUnsafeAttrs(tag: string): string {
   );
 }
 
-export function hardenHtml(html: string): string {
+function hardenHtml(html: string): string {
   const stripped = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   return stripped.replace(/<[^>]+>/g, rewriteUnsafeAttrs);
 }

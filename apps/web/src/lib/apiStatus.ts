@@ -51,7 +51,7 @@ function set(patch: Partial<ApiStatus>) {
 }
 
 /** HTTP statuses that mean "a proxy answered, the API behind it did not". */
-export function isGatewayDown(httpStatus: number): boolean {
+function isGatewayDown(httpStatus: number): boolean {
   return httpStatus === 502 || httpStatus === 503 || httpStatus === 504
 }
 
@@ -97,9 +97,4 @@ function subscribe(listener: () => void): () => void {
 /** React hook: the current shared API status; re-renders on change. */
 export function useApiStatus(): ApiStatus {
   return useSyncExternalStore(subscribe, () => status)
-}
-
-/** True when a fetch rejection was our own abort, not a network failure. */
-export function isAbortError(err: unknown): boolean {
-  return err instanceof DOMException && err.name === 'AbortError'
 }

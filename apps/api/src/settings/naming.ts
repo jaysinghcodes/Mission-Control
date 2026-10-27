@@ -28,7 +28,7 @@ const COLOR = /^#[0-9a-fA-F]{6}$/;
 const MAP_MAX = 200;
 const KEY_MAX = 200;
 
-export function crewFile(): string {
+function crewFile(): string {
   const override = process.env.MC_CREW_FILE?.trim();
   if (override) return override;
   let dir = process.cwd();

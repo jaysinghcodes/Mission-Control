@@ -11,7 +11,7 @@ export const SHOW_SAMPLE_BOTS_LABEL = 'Show sample bots'
 export const SAMPLE_LABEL = 'Sample'
 export const OFFLINE_LABEL = 'Offline'
 
-export const SHOW_SAMPLE_BOTS_KEY = 'mc-show-sample-bots'
+const SHOW_SAMPLE_BOTS_KEY = 'mc-show-sample-bots'
 export const SHOW_SAMPLE_BOTS_EVENT = 'mc-show-sample-bots'
 
 /**
@@ -39,11 +39,11 @@ export interface RosterPresence extends RosterSource {
   status?: string | null
 }
 
-export function isRealSource(source: string | null | undefined): boolean {
+function isRealSource(source: string | null | undefined): boolean {
   return source === 'registered' || source === 'snapshot'
 }
 
-export function isSampleSource(source: string | null | undefined): boolean {
+function isSampleSource(source: string | null | undefined): boolean {
   return source === 'default'
 }
 

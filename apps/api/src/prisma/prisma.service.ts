@@ -55,7 +55,7 @@ export class PrismaService
       this.dbReadyFlag = false;
 
       console.warn(
-        '[prisma] database unavailable — health will report degraded',
+        '[prisma] database unavailable, so health will report degraded',
       );
     }
   }

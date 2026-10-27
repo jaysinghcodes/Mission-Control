@@ -62,7 +62,7 @@ export function configuredDocsRoot(
  * equal to the container mount, is null so the page shows its generic
  * line instead of a container path.
  */
-export const CONTAINER_DOCS_ROOT = '/data/docs';
+const CONTAINER_DOCS_ROOT = '/data/docs';
 
 export function docsHostDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -119,7 +119,7 @@ export function assertDocId(id: string): string {
   return text;
 }
 
-export function fullyDecode(raw: string): string {
+function fullyDecode(raw: string): string {
   let value = raw;
   for (let i = 0; i < MAX_DECODE; i++) {
     if (!/%[0-9a-fA-F]{2}/.test(value)) return value;

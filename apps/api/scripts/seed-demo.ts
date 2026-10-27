@@ -92,7 +92,7 @@ loadDotenv(join(__dirname, '..', '.env'));
 loadDotenv(join(__dirname, '..', '..', '..', '.env'));
 
 if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO_ALLOW_PROD !== '1') {
-  console.error('[seed:demo] NODE_ENV=production — refusing to write demo data (set SEED_DEMO_ALLOW_PROD=1 to override).');
+  console.error('[seed:demo] NODE_ENV=production, so no demo data was written. Set SEED_DEMO_ALLOW_PROD=1 to override.');
   process.exit(2);
 }
 
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
   const bad = TICKETS.filter((t) => !isTicketStatus(t.status));
   if (bad.length > 0) {
     throw new Error(
-      `invalid demo ticket status: ${bad.map((t) => `${t.key}=${t.status}`).join(', ')} — expected one of ${TICKET_STATUSES.join(', ')}`,
+      `invalid demo ticket status: ${bad.map((t) => `${t.key}=${t.status}`).join(', ')}. Expected one of ${TICKET_STATUSES.join(', ')}`,
     );
   }
   // Same allowlist as PATCH /runs. This script writes rows
@@ -622,7 +622,7 @@ async function main(): Promise<void> {
     if (!beforeTool) counts.customTools++;
   } catch (err) {
     if ((err as { code?: string }).code !== 'P2002') throw err;
-    console.log('[seed:demo] custom tool name already taken — left the existing row');
+    console.log('[seed:demo] custom tool name already taken, so the existing row stays');
   }
 
   // What THIS run inserted (0 everywhere on a re-run = already seeded).
@@ -659,7 +659,7 @@ main()
     // compose / manual Postgres) the schema has to be applied by hand. We do
     // NOT auto-migrate here — schema changes stay an explicit, reviewed step.
     if ((err as { code?: string })?.code === 'P2021') {
-      console.error('[seed:demo] Schema missing — start the api once, or run `cd apps/api && npx prisma migrate deploy`.');
+      console.error('[seed:demo] Schema missing. Start the api once, or run `cd apps/api && npx prisma migrate deploy`.');
     } else {
       // Most common cause on a fresh clone: compose db not up yet.
       console.error('[seed:demo] Is Postgres up? `docker compose up -d db` (or the full stack) and check DATABASE_URL.');

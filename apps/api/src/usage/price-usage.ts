@@ -37,7 +37,7 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export function isLocalLine(
+function isLocalLine(
   line: Pick<RawUsageLine, 'provider' | 'model' | 'local'>,
   localProviders: ReadonlySet<string>,
 ): boolean {

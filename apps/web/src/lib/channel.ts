@@ -3,7 +3,7 @@
  * data supplies one. No server id is shipped in this repo.
  */
 
-export const DISCORD_GUILD: string = String(import.meta.env.VITE_DISCORD_GUILD_ID ?? '').trim()
+const DISCORD_GUILD: string = String(import.meta.env.VITE_DISCORD_GUILD_ID ?? '').trim()
 
 const SNOWFLAKE = /^\d{17,21}$/
 

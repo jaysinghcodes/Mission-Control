@@ -47,19 +47,3 @@ export function writeUrl(path: string): string {
   const suffix = path.startsWith('/') ? path : `/${path}`
   return `/api${suffix}`
 }
-
-/**
- * Short label for the live feed endpoint. Same origin has no host here.
- * An absolute URL keeps its scheme and port.
- */
-export function socketLabel(url: string = socketUrl() ?? ''): string {
-  if (!url) return 'ws://this origin'
-  try {
-    const u = new URL(url)
-    const scheme = u.protocol === 'https:' ? 'wss' : 'ws'
-    const port = u.port || (u.protocol === 'https:' ? '443' : '80')
-    return `${scheme}://…:${port}`
-  } catch {
-    return url
-  }
-}

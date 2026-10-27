@@ -26,8 +26,8 @@
  * the two maps together.
  */
 
-export type LiveRoom = 'build' | 'qa' | 'ship' | 'deploy' | 'commons'
-export type LiveSource = 'ticket' | 'run' | 'heartbeat'
+type LiveRoom = 'build' | 'qa' | 'ship' | 'deploy' | 'commons'
+type LiveSource = 'ticket' | 'run' | 'heartbeat'
 
 export interface LiveTicket {
   id?: string | null
@@ -47,14 +47,14 @@ export interface LiveRun {
   createdAt?: string | null
 }
 
-export interface LivePerson {
+interface LivePerson {
   id: string
   name: string
   status?: string | null
   currentTask?: string | null
 }
 
-export interface LiveWork {
+interface LiveWork {
   room: LiveRoom
   subtitle: string
   working: boolean

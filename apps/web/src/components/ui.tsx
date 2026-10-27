@@ -13,11 +13,6 @@ export function Card({ children, className = '', rx = 'rounded-xl' }: { children
   )
 }
 
-/** Inner panel (wireframe `inner`: nested card surfaces). */
-export function Inner({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`bg-mc-inner ${className}`}>{children}</div>
-}
-
 /** Uppercase section label (11px, letter-spaced, faint). */
 export function SectionLabel({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
@@ -81,21 +76,6 @@ export function SearchField({ placeholder = 'Search', w = 200, h = 32, value, on
         className="w-full bg-transparent text-[12.5px] text-mc-text placeholder:text-mc-faint outline-none"
       />
     </div>
-  )
-}
-
-/** Status dot. */
-export function Dot({ color, size = 5 }: { color: string; size?: number }) {
-  return <span className="inline-block rounded-full shrink-0" style={{ width: size, height: size, backgroundColor: color }} />
-}
-
-/** KPI tile (wireframe Overview stats: 188×74 card, 40px value, 11px label). */
-export function KpiCard({ value, label, valueClass = 'text-mc-text' }: { value: string; label: string; valueClass?: string }) {
-  return (
-    <Card className="px-4 py-3">
-      <div className={`text-[40px] font-semibold leading-none ${valueClass}`}>{value}</div>
-      <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-mc-faint">{label}</div>
-    </Card>
   )
 }
 

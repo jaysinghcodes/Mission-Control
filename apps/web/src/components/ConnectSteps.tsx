@@ -1,7 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { WEB_PORT } from '../lib/ports'
-import { Chip, PillButton } from './ui'
 
 /**
  * ConnectSteps: the 8 step onboarding runbook for the /connect page.
@@ -9,22 +7,21 @@ import { Chip, PillButton } from './ui'
  * The other steps are guidance the operator confirms. Confirmed is not verified.
  */
 
-export type Phase = 'host' | 'verify' | 'here'
+type Phase = 'host' | 'verify' | 'here'
 export type OsKey = 'mac' | 'windows' | 'linux' | 'other'
-export type RingState = 'done' | 'active' | 'pending'
 
-export interface StepCmd {
+interface StepCmd {
   label?: string
   cmd: string
 }
 
-export interface StepLink {
+interface StepLink {
   label: string
   to: string
   external?: boolean
 }
 
-export interface ConnectStep {
+interface ConnectStep {
   id: number // 1..8, matches ONBOARDING.md order. Do not renumber.
   title: string // ONBOARDING.md heading text, without a "Step N" prefix
   phase: Phase
@@ -40,12 +37,12 @@ export interface ConnectStep {
 export const INSTALL_GUIDE = 'https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/INSTALL.md'
 
 /** SSH to the configured owner port. The browser stays on that port. */
-export function sshTunnel(port: string): string {
+function sshTunnel(port: string): string {
   return `ssh -L ${port}:127.0.0.1:${port} ubuntu@your-server-ip`
 }
 
 /** Per-OS tunnel commands (existing record shape, labels kept). */
-export function osSteps(port: string = WEB_PORT): Record<OsKey, { name: string; cmd: string; note: string }> {
+function osSteps(port: string = WEB_PORT): Record<OsKey, { name: string; cmd: string; note: string }> {
   const cmd = sshTunnel(port)
   return {
     mac: {
@@ -189,13 +186,6 @@ export const STEP_DATA: ConnectStep[] = [
   },
 ]
 
-/** Shared ring styles: done = green w/ ✓, active = primary outline, pending = faint. */
-export function ringClass(state: RingState): string {
-  if (state === 'done') return 'bg-mc-greenbg text-mc-greentext'
-  if (state === 'active') return 'border border-mc-primary text-mc-text'
-  return 'bg-mc-inner text-mc-faint'
-}
-
 /** Render body text. Backticks become inline code. Double stars become emphasis. */
 export function fmt(text: string): ReactNode[] {
   const out: ReactNode[] = []
@@ -252,92 +242,6 @@ export function CodeBlock({ cmd, label }: { cmd: string; label?: string }) {
             {copied ? '✓ Copied' : 'Copy'}
           </button>
         )}
-      </div>
-    </div>
-  )
-}
-
-/** One numbered step card. `children` = the page-injected dynamic zone (probe / OS switcher). */
-export function ConnectStepCard({
-  step,
-  state,
-  confirmed,
-  onConfirm,
-  onUndo,
-  children,
-}: {
-  step: ConnectStep
-  state: RingState
-  confirmed: boolean
-  onConfirm: (id: number) => void
-  onUndo: (id: number) => void
-  children?: ReactNode
-}) {
-  return (
-    <div className="flex items-start gap-3.5">
-      {/* Number ring. Done shows a check. Active is the current step. */}
-      <span
-        aria-hidden
-        className={`mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full text-[11px] font-bold transition-colors duration-150 ${ringClass(state)}`}
-      >
-        {state === 'done' ? '✓' : step.id}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-          <h3 className="text-[15px] font-semibold leading-snug text-mc-text">{step.title}</h3>
-          <Chip label={step.phaseLabel} bg="var(--mc-inner)" fg="var(--mc-faint)" h={18} fs="text-[9.5px]" />
-        </div>
-        <div className="mt-1">
-          {step.body.map((line, i) => (
-            <p key={i} className="mt-1.5 text-[12.5px] leading-relaxed text-mc-sub">
-              {fmt(line)}
-            </p>
-          ))}
-        </div>
-        {step.commands?.map((c, i) => <CodeBlock key={i} cmd={c.cmd} label={c.label} />)}
-        {step.links && (
-          <div className="mt-3.5 flex flex-wrap items-center gap-2">
-            {step.links.map((l) =>
-              l.external ? (
-                <a
-                  key={l.label}
-                  href={l.to}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-8 items-center rounded-full border border-mc-border bg-mc-card px-4 text-[12.5px] font-semibold text-mc-sub transition-colors duration-150 hover:text-mc-text focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary"
-                >
-                  {l.label}
-                </a>
-              ) : (
-                <Link
-                  key={l.label}
-                  to={l.to}
-                  className="inline-flex h-8 items-center rounded-full border border-mc-border bg-mc-card px-4 text-[12.5px] font-semibold text-mc-sub transition-colors duration-150 hover:text-mc-text focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary"
-                >
-                  {l.label}
-                </Link>
-              ),
-            )}
-          </div>
-        )}
-        {children}
-        {step.confirmable &&
-          (confirmed ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-[12.5px] font-semibold text-mc-greentext">
-              <span>✓ Done. You confirmed this</span>
-              <button
-                type="button"
-                onClick={() => onUndo(step.id)}
-                className="rounded text-[11.5px] font-medium text-mc-faint underline underline-offset-2 transition-colors duration-150 hover:text-mc-sub focus:outline-none focus-visible:ring-2 focus-visible:ring-mc-primary"
-              >
-                Undo
-              </button>
-            </div>
-          ) : (
-            <div className="mt-4">
-              <PillButton label="✓ Mark done. I did this" onClick={() => onConfirm(step.id)} />
-            </div>
-          ))}
       </div>
     </div>
   )

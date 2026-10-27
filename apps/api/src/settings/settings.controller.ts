@@ -165,7 +165,7 @@ export function changedFields(patch: {
   return order.filter((key) => patch[key] !== undefined);
 }
 
-export function settingsBody(
+function settingsBody(
   namingMode: NamingMode | null,
   crewMap: Record<string, string>,
   seats: CrewSeat[],

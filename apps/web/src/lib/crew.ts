@@ -41,7 +41,7 @@ export interface Presented {
 const HEX = /^#[0-9a-fA-F]{6}$/
 const FALLBACK_COLOR = '#58A6FF'
 
-export function safeColor(value: string | null | undefined, fallback: string = FALLBACK_COLOR): string {
+function safeColor(value: string | null | undefined, fallback: string = FALLBACK_COLOR): string {
   const color = (value ?? '').trim()
   return HEX.test(color) ? color : fallback
 }

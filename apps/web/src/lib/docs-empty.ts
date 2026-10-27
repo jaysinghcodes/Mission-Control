@@ -17,7 +17,7 @@ export interface DocsEmptyCopy {
   tail: string
 }
 
-export function isAbsoluteHostPath(dir: string): boolean {
+function isAbsoluteHostPath(dir: string): boolean {
   return dir.startsWith('/') || /^[A-Za-z]:[\\/]/.test(dir)
 }
 

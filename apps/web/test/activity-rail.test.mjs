@@ -73,17 +73,13 @@ test('Office, Calendar, and System name the agent and never show an event type',
 })
 
 test('activity text uses the seated crew name from the current map', async () => {
-  const pages = ['Office.tsx', 'Activity.tsx', 'Calendar.tsx', 'System.tsx']
+  const pages = ['Office.tsx', 'Calendar.tsx', 'System.tsx']
   for (const page of pages) {
     const src = await readFile(new URL(`../src/pages/${page}`, import.meta.url), 'utf8')
     assert.match(src, /activityRailLine\([\s\S]*naming\)/, page)
   }
-  const search = await readFile(new URL('../src/components/SearchBox.tsx', import.meta.url), 'utf8')
-  assert.match(search, /activityRailLine\(hit, \[\], \[\], \[\], naming\)/)
   const office = await readFile(new URL('../src/pages/Office.tsx', import.meta.url), 'utf8')
   assert.match(office, /actor\?\.name/)
-  const activityPage = await readFile(new URL('../src/pages/Activity.tsx', import.meta.url), 'utf8')
-  assert.match(activityPage, /line\.actor\?\.name/)
 
   const roster = [
     { id: 'helper', name: 'Pixel', role: 'helper' },

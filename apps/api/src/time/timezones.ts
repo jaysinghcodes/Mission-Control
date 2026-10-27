@@ -13,7 +13,7 @@ interface TimeZoneTable {
 
 let cached: TimeZoneTable | null = null;
 
-export function timeZonesFile(): string {
+function timeZonesFile(): string {
   const override = process.env.MC_TIMEZONES_FILE?.trim();
   if (override) return override;
   let dir = process.cwd();
