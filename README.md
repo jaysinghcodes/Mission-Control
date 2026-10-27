@@ -295,3 +295,7 @@ docs/API.md                   API reference, including the 401 line
 docs/REMOTE.md                SSH, Tailscale Serve, and Cloudflare Tunnel
 docs/screenshots/             Hero GIF and the stills above
 ```
+
+## License
+
+Mission Control is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
