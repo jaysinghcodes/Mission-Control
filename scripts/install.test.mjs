@@ -1225,7 +1225,7 @@ test('native install prints no web URL when the web app does not answer (issue 1
     const at = summary.indexOf('The web app did not answer yet, so no URL is printed. Its log is install-dev.log.')
     assert.ok(at > 0, text)
     assert.equal(summary[at - 1], SUMMARY_OPENCLAW)
-    assert.match(summary.at(-1) ?? '', /^Reset the dashboard password with: npm run password:reset$/)
+    assert.deepEqual(summary.slice(-2), ['Reset the dashboard password with:', '  npm run password:reset'])
     // The API wait may spend a tick before the dev process binds, so the web wait
     // used at least its full budget of 3.
     assert.ok(Number(readFileSync(clock, 'utf8').trim()) >= 3)
