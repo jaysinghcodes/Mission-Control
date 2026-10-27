@@ -6,7 +6,9 @@ bridge on main (814727c) with the same fixture, the same stub outputs and
 the same pinned clocks: a first run, a steady state run 5 minutes later,
 and a run 61 minutes after the first. When git can show main's bridge at that
 commit, or MC_PARITY_MAIN_BRIDGE names a copy, the test runs it live on the
-same fixture and compares the bytes directly instead. Each run
+same fixture and compares the bytes directly instead. usage.snapshot is
+left out of that comparison because #116 changed it on purpose; it is
+compared with a full refresh run of this bridge instead. Each run
 uses a copy of the bridge with no repo root .env, so a fresh clone with a
 .env gets the same bytes.
 """
@@ -25,11 +27,35 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import light_fixture as lf  # noqa: E402
 
+# Hashes of main's requests without the events in CHANGED_SINCE_MAIN.
 MAIN_HASHES = {
-    0: "d52ffe2b984ad0d5ce2b8c967b5239cf1accbcbc9464b2f1bc285b80de86d09f",
-    300: "c25922099b37b79a472155d274bbe2681431704c4cb58af24c4088b20fbb306f",
-    3700: "043084bdba96890018fd999d174517eaebb70e49bb5b2f5bf0431e5aa3d63010",
+    0: "670c512edcbe0875f3e533718c10e584977b694f3dc3ca59f1534cc0a6784d01",
+    300: "60d7d6751b871f294dd9fb8628204a970569b104b6685cfe90683f33e4ac5320",
+    3700: "d687c973a95c8c59e7753b5e2381f04ab8a278ae40722571b61d2477b4906949",
 }
+
+# #116 changed what usage.snapshot sends on purpose: the model is priced as
+# provider/model, the provider is the one OpenClaw reports, and a local
+# provider is marked local. Every other event stays byte identical to main.
+# Usage is compared with a run of this bridge that refreshes every source on
+# every run, so the light path still sends the same usage as a full run.
+CHANGED_SINCE_MAIN = {"usage.snapshot"}
+
+
+def event_type(body: bytes):
+    try:
+        return json.loads(body).get("type")
+    except (ValueError, AttributeError):
+        return None
+
+
+def kept_wire(result) -> bytes:
+    kept = [r for r in result["requests"] if event_type(r[2]) not in CHANGED_SINCE_MAIN]
+    return lf.wire({"requests": kept})
+
+
+def changed_bodies(result):
+    return [r[2] for r in result["requests"] if event_type(r[2]) in CHANGED_SINCE_MAIN]
 
 FIRST_RUN_CALLS = sorted([
     "sessions --all-agents --json",
@@ -117,10 +143,21 @@ class LightRunTest(unittest.TestCase):
                 for offset in (0, 300, 3700):
                     ran = lf.run(paths, offset, state, bridge=main_bridge)
                     self.assertEqual(ran["code"], 0, ran["stderr"])
-                    expected[offset] = hashlib.sha256(lf.wire(ran)).hexdigest()
+                    expected[offset] = hashlib.sha256(kept_wire(ran)).hexdigest()
+            full_paths = lf.build(other / "full")
+            full_state = other / "full-state"
+            full_state.mkdir()
+            full = {}
             for offset in (0, 300, 3700):
-                got = hashlib.sha256(lf.wire(self.run_at(offset))).hexdigest()
+                ran = lf.run(full_paths, offset, full_state, extra_env={"MC_BRIDGE_REFRESH_SECONDS": "0"})
+                self.assertEqual(ran["code"], 0, ran["stderr"])
+                self.assertEqual(sorted(ran["calls"]), FIRST_RUN_CALLS)
+                full[offset] = changed_bodies(ran)
+            for offset in (0, 300, 3700):
+                light = self.run_at(offset)
+                got = hashlib.sha256(kept_wire(light)).hexdigest()
                 self.assertEqual(got, expected[offset], f"run at +{offset} s")
+                self.assertEqual(changed_bodies(light), full[offset], f"usage at +{offset} s")
 
     def test_openclaw_json_change_triggers_a_full_refresh(self):
         self.run_at(0)
