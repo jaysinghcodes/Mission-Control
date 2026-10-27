@@ -2,6 +2,8 @@ import type { AggregateResult, UsageProvider } from './aggregate-usage';
 import { lookupPrice, tokenCost, type PriceTable } from './prices';
 
 export const PRICE_NOT_SET = 'Price not set';
+/** Shown next to the known total on System and Usage when any model has no price. */
+export const PRICE_NOT_SET_SOME = 'Price not set for some models';
 
 export interface RawUsageLine {
   day: string;
@@ -217,7 +219,12 @@ function rollupProviders(lines: PricedUsageLine[]): PricedProvider[] {
 }
 
 /**
- * Replace stored dollar totals with the price table.
+ * The one cost function for a period. GET /usage returns it, and the System
+ * header and the Usage page both read that response.
+ * Replace stored dollar totals with the price table. totalCost is the known
+ * total. When any model has no price, priceNote is exactly
+ * "Price not set for some models" and unpricedModels names them, so a
+ * missing price never reads as a plain $0.
  * Rows that have no lines keep the stored total (older snapshots and tests).
  */
 export function applyUsagePrices(
@@ -227,9 +234,15 @@ export function applyUsagePrices(
 ): AggregateResult {
   const raw = agg.rawLines;
   if (!agg.usage || raw.length === 0) return agg;
-  const priced = groupPricedLines(
-    raw.map((line) => priceRawLine(line, table, localProviders)),
-  );
+  const lines = raw.map((line) => priceRawLine(line, table, localProviders));
+  const unpricedModels = [
+    ...new Set(
+      lines
+        .filter((line) => line.priceLabel === PRICE_NOT_SET)
+        .map((line) => line.model),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+  const priced = groupPricedLines(lines);
   const known = priced.filter(
     (line): line is PricedUsageLine & { cost: number } => line.cost != null,
   );
@@ -239,6 +252,13 @@ export function applyUsagePrices(
   for (const line of known) {
     byDay.set(line.day, round6((byDay.get(line.day) ?? 0) + line.cost));
   }
+  const dayLines = new Map<string, { all: number; unpriced: number }>();
+  for (const line of priced) {
+    const seen = dayLines.get(line.day) ?? { all: 0, unpriced: 0 };
+    seen.all += 1;
+    if (line.cost == null) seen.unpriced += 1;
+    dayLines.set(line.day, seen);
+  }
   const providers = rollupProviders(priced);
   return {
     ...agg,
@@ -246,14 +266,22 @@ export function applyUsagePrices(
       ...agg.usage,
       totalCost,
       priceLabel: allUnpriced ? PRICE_NOT_SET : null,
+      priceNote: unpricedModels.length > 0 ? PRICE_NOT_SET_SOME : null,
+      unpricedModels,
       tokensIn: priced.reduce((sum, line) => sum + line.tokensIn, 0),
       tokensOut: priced.reduce((sum, line) => sum + line.tokensOut, 0),
       providers,
       groups: priced,
     },
-    days: agg.days.map((day) => ({
-      day: day.day,
-      totalCost: byDay.get(day.day) ?? 0,
-    })),
+    days: agg.days.map((day) => {
+      const seen = dayLines.get(day.day);
+      const unpriced = seen ? seen.unpriced : 0;
+      return {
+        day: day.day,
+        totalCost: byDay.get(day.day) ?? 0,
+        priceLabel: seen && unpriced === seen.all ? PRICE_NOT_SET : null,
+        priceNote: unpriced > 0 ? PRICE_NOT_SET_SOME : null,
+      };
+    }),
   };
 }

@@ -75,7 +75,7 @@ const LINES = [
   {
     bot: 'Nova',
     provider: 'deepseek',
-    model: 'deepseek/deepseek-chat',
+    model: 'deepseek/deepseek-flash',
     tokensIn: 420_000,
     tokensOut: 70_000,
   },
