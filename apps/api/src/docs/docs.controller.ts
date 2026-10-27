@@ -6,7 +6,7 @@ import {
   Param,
   Query,
 } from '@nestjs/common';
-import { configuredDocsRoot, DocsPathError } from './docs-path';
+import { docsHostDir, DocsPathError } from './docs-path';
 import { DocsService } from './docs.service';
 import type { DocDetail, DocType } from './docs-library';
 
@@ -39,7 +39,7 @@ export class DocsController {
   async list(@Query('q') q?: string, @Query('type') type?: string) {
     const parsed = parseType(type);
     const result = await this.docs.list({ q, type: parsed });
-    return { ...result, dir: configuredDocsRoot(), ts: Date.now() };
+    return { ...result, dir: docsHostDir(), ts: Date.now() };
   }
 
   /** Declared before `:id` so "open" is not captured as an id. */

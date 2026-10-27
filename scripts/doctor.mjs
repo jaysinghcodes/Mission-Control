@@ -1262,11 +1262,16 @@ export function gatewayLine(env, reading) {
     const hint = reading && reading.dockerDenied ? DOCKER_PERMISSION_HINT : GATEWAY_UNKNOWN_HINT
     return `info gateway: Gateway status is unknown. ${hint}`
   }
+  // Issue 117: a port number is printed only when something answers on it.
+  // A down or unprobed gateway names the setting instead of the number.
   const target = gatewayTarget(env)
-  if (reading && (reading.state === 'up' || reading.state === 'down')) {
-    return `info gateway: The gateway probe at ${target.host} port ${target.port} is ${reading.state}.`
+  if (reading && reading.state === 'up') {
+    return `info gateway: The gateway probe at ${target.host} port ${target.port} is up.`
   }
-  return `info gateway: The gateway probe uses ${target.host} port ${target.port}. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.`
+  if (reading && reading.state === 'down') {
+    return `info gateway: The gateway probe at ${target.host} got no answer. OPENCLAW_GATEWAY_PORT sets the port it checks.`
+  }
+  return `info gateway: The gateway probe uses ${target.host}. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.`
 }
 
 export function probeGatewayTarget(target, timeoutMs = 800) {

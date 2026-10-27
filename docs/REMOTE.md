@@ -4,7 +4,7 @@ A laptop reaches a VPS install in three ways. All three are free. OpenClaw is op
 
 Run the tunnel program on the VPS. Compose publishes the owner port and the tunnel port on `127.0.0.1` only. Point each program at that address. Do not publish port 3011 on a public interface.
 
-On Compose, `bash install.sh` prints the owner URL and the tunnel port. On the native path it prints the owner URL and a pointer to this file, because that path does not listen on the tunnel port. The owner port is `MC_WEB_PORT` (default 5173). The Compose tunnel port is `MC_REMOTE_PORT` (default 3011). Use `127.0.0.1`, not a name that might resolve to another address. The published sockets are IPv4 loopback only.
+On Compose, `bash install.sh` prints the owner URL and the tunnel port. On the native path it prints the owner URL and a pointer to this file, because that path does not listen on the tunnel port. The native install prints that URL only after the web app answers on it. The owner port is `MC_WEB_PORT` (default 5173). The Compose tunnel port is `MC_REMOTE_PORT` (default 3011). Use `127.0.0.1`, not a name that might resolve to another address. The published sockets are IPv4 loopback only.
 
 Leave `TRUSTED_PROXY` unset. These paths do not set it. The tunnel listener does not read it.
 

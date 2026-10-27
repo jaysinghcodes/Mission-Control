@@ -57,7 +57,8 @@ Template: [`../../.env.example`](../../.env.example). The API loads the root `.e
 | `OFFLINE_AFTER_MS` | `600000` | How long a registered bot can go without a heartbeat before it is offline |
 | `HEALTH_TICK_MS` | `30000` | Socket `health.tick` interval. `0` disables it |
 | `USAGE_RETENTION_DAYS` | `30` | How many calendar days of usage a snapshot may keep, through today |
-| `DOCS_ROOT` | `<repo>/data/docs` | Markdown for `GET /docs`. The browser never receives a filesystem path |
+| `DOCS_ROOT` | `<repo>/data/docs` | Markdown for `GET /docs`. The browser never receives a doc's filesystem path. `GET /docs` returns `dir`, the host docs folder for the empty state |
+| `MC_DOCS_HOST_PATH` | unset | Compose only. The host side of the docs bind, named in the Docs empty state instead of `/data/docs`. `bash install.sh` sets it. Blank or `/data/docs` sends `dir: null` |
 
 ## Layout
 

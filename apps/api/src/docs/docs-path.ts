@@ -37,12 +37,46 @@ export function repoRoot(): string {
  * root, not the process cwd (seed, jest, and `nest start` do not agree).
  * Unset → `<repo>/data/docs`.
  */
-export function configuredDocsRoot(): string {
-  const raw = process.env.DOCS_ROOT?.trim();
+export function configuredDocsRoot(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const raw = env.DOCS_ROOT?.trim();
   if (!raw) return path.join(repoRoot(), 'data', 'docs');
   return path.isAbsolute(raw)
     ? path.normalize(raw)
     : path.resolve(repoRoot(), raw);
+}
+
+/**
+ * Docs folder named in the Docs empty state (issue 117). This is the HOST
+ * path the operator can open, never the container mount.
+ *
+ * Native: the configured root above, which is already a host path.
+ * Compose (`MC_COMPOSE=1`): the api reads `/data/docs` inside the
+ * container, so that path means nothing on the host. Compose passes the
+ * host side of the bind as `MC_DOCS_HOST_PATH`. `bash install.sh` sets it
+ * to an absolute path. Without the installer it is the project `.env`
+ * `DOCS_ROOT`, or `./data/docs`, which is relative to the checkout. A
+ * relative value is returned without its leading `./`, and the page says
+ * it is relative to the Mission Control folder. Blank, or a value
+ * equal to the container mount, is null so the page shows its generic
+ * line instead of a container path.
+ */
+export const CONTAINER_DOCS_ROOT = '/data/docs';
+
+export function docsHostDir(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (env.MC_COMPOSE !== '1') return configuredDocsRoot(env);
+  const raw = (env.MC_DOCS_HOST_PATH ?? '').trim();
+  if (!raw) return null;
+  if (path.posix.isAbsolute(raw)) {
+    const normal = path.posix.normalize(raw).replace(/(.)\/+$/, '$1');
+    return normal === CONTAINER_DOCS_ROOT ? null : normal;
+  }
+  const relative = path.posix.normalize(raw).replace(/\/+$/, '');
+  if (!relative || relative === '.') return null;
+  return relative;
 }
 
 /**

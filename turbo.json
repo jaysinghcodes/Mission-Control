@@ -11,7 +11,8 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"],
       // Vite inlines VITE_* into the web bundle, so they must bust the cache.
-      "env": ["VITE_*"]
+      // The /connect page also bakes the web and API ports (issue 117).
+      "env": ["VITE_*", "MC_WEB_PORT", "PORT", "MC_API_PORT"]
     },
     // `npm run dev` → api `dev` (nest start --watch) + web `dev` (vite) in
     // parallel. Both workspaces MUST define a `dev` script or turbo skips them.

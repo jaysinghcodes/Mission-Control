@@ -69,6 +69,12 @@ test('compose yaml lists db, api, and web on loopback', () => {
   assert.deepEqual(compose.services.api.extra_hosts, ['host.docker.internal:host-gateway'])
   assert.equal(compose.services.api.environment.OPENCLAW_LOG_DIR, '${OPENCLAW_LOG_DIR:-/tmp/openclaw}')
   assert.equal(compose.services.web.build.dockerfile, 'apps/web/Dockerfile')
+  // Issue 117: the /connect page shows the installed web port, and the Docs
+  // empty state names the host docs folder, not the container mount.
+  assert.equal(compose.services.web.build.args.MC_WEB_PORT, '${MC_WEB_PORT:-5173}')
+  assert.equal(compose.services.api.environment.DOCS_ROOT, '/data/docs')
+  assert.equal(compose.services.api.environment.MC_DOCS_HOST_PATH, '${MC_DOCS_HOST_PATH:-${DOCS_ROOT:-./data/docs}}')
+  assert.ok(compose.services.api.volumes.includes('${DOCS_ROOT:-./data/docs}:/data/docs'))
 })
 
 test('nginx proxies /api and /socket.io and does not inject a write token', () => {
@@ -121,6 +127,8 @@ test('Dockerfiles copy files that exist and the web API url defaults to blank', 
   assert.match(web, /ARG VITE_API_URL=/)
   assert.doesNotMatch(web, /ARG VITE_API_URL=http/)
   assert.match(web, /COPY apps\/web\/nginx\.conf\.template/)
+  // The build stage bakes MC_WEB_PORT before vite build reads it.
+  assert.match(web, /ARG MC_WEB_PORT=5173\nENV MC_WEB_PORT=\$MC_WEB_PORT\nRUN cd apps\/web && npm run build/)
   for (const rel of [
     'package.json',
     'package-lock.json',

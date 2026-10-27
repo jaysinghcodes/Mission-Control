@@ -5,7 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { COMPOSE_PASSWORD_RESET, buildInstallScript, docsOwnerError, finishFreshInstall, hostNodeInvocation, installMode, parseDashboardPassword, parseInstallerUrl, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
+import { createServer } from 'node:net'
+import { COMPOSE_PASSWORD_RESET, buildInstallScript, docsOwnerError, finishFreshInstall, hostNodeInvocation, installMode, parseDashboardPassword, parseInstallerUrl, parsePrintedPorts, portAnswers, readComposeInstallCommands, readInstallCommands, removeInstallWork, runShell } from './fresh-clone.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -109,6 +110,17 @@ test('the installer log yields the password and the dashboard URL', () => {
   assert.equal(parseInstallerUrl(log), 'http://127.0.0.1:5173/')
   assert.equal(parseDashboardPassword('no password here'), '')
   assert.equal(parseInstallerUrl('Open http://example.com/'), '')
+})
+
+test('the installer log yields every printed port (issue 117)', () => {
+  const log = [
+    'pass ports: Port 3405 is already running.',
+    'info gateway: The gateway probe at 127.0.0.1 got no answer. OPENCLAW_GATEWAY_PORT sets the port it checks.',
+    'Open http://localhost:5405/#/tasks',
+    'Tunnel port 3011. Cloudflare Tunnel and Tailscale Serve use that port.',
+  ].join('\n')
+  assert.deepEqual(parsePrintedPorts(log).sort(), [3011, 3405, 5405])
+  assert.deepEqual(parsePrintedPorts('Remote access is in docs/REMOTE.md.'), [])
 })
 
 test('CI runs Compose and native installs and the fixture bridge', () => {
@@ -276,4 +288,17 @@ test('a README without npm run dev is rejected', () => {
     }),
     /npm run dev/,
   )
+})
+
+test('issue 117: the printed port check is a TCP connect, so a non HTTP listener answers', async () => {
+  // A raw TCP server that never speaks HTTP, like Postgres on MC_DB_PORT.
+  const server = createServer((socket) => socket.end())
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  try {
+    assert.equal(await portAnswers(port), true)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+  assert.equal(await portAnswers(port, '127.0.0.1', 1000), false)
 })

@@ -8,11 +8,13 @@ import { useNaming } from '../lib/naming'
 import { API_URL } from '../lib/apiBase'
 import { pluralize } from '../lib/pluralize'
 import { formatDocWhen } from '../lib/when'
+import { docsEmptyCopy } from '../lib/docs-empty'
 
 /**
  * Docs. The ticket 13 cards grid, wired to GET /docs.
  * The API reads DOCS_ROOT. This page never reads disk and never sends a
- * filesystem path. Each card opens by the server-issued id. Read only.
+ * filesystem path. The empty state names the host docs folder the API
+ * reports, never the Compose container path (issue 117). Each card opens by the server-issued id. Read only.
  */
 
 interface DocItem {
@@ -29,7 +31,7 @@ interface DocItem {
 interface DocList {
   docs: DocItem[]
   total: number
-  dir?: string
+  dir?: string | null
 }
 
 interface DocDetail extends DocItem {
@@ -107,6 +109,7 @@ export default function Docs() {
       : pluralize(data.total, 'doc')
 
   const shown = detail && detail.id === openId ? detail : null
+  const emptyCopy = docsEmptyCopy(data?.dir)
   const title = shown?.title ?? open?.title ?? ''
 
   return (
@@ -146,10 +149,16 @@ export default function Docs() {
       {!openId && data && data.total === 0 && (
         <EmptyState
           title="No docs yet"
-          body={data.dir
-            ? `No markdown in ${data.dir}. DOCS_ROOT sets that folder. npm run seed:demo writes sample docs. This page does not read a path you type.`
-            : 'No markdown yet. DOCS_ROOT sets the folder (the default is data/docs). npm run seed:demo writes sample docs. This page does not read a path you type.'}
+          body={emptyCopy.lead}
         >
+          {emptyCopy.folder && (
+            <>
+              <p data-docs-folder className="mt-1 max-w-lg font-mono text-[13px] text-mc-text [line-break:anywhere]">
+                {emptyCopy.folder}
+              </p>
+              <p className="mt-1 max-w-lg text-[13px] leading-relaxed text-mc-sub">{emptyCopy.tail}</p>
+            </>
+          )}
           <Link to="/connect" className="mt-3 inline-block text-[13px] font-semibold text-mc-accent-text">Setup</Link>
           <p className="mt-2 text-[13px] text-mc-sub">
             Or run <code className="font-mono text-mc-text">npm run seed:demo</code>

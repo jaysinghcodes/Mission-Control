@@ -136,7 +136,7 @@ test('a healthy report exits 0 and keeps OpenClaw informational', () => {
   assert.match(result.lines[6], /^pass login: HOST is loopback, so the dashboard stays open without a password\.$/)
   assert.match(result.lines[8], /^info openclaw: OpenClaw is optional/)
   assert.match(result.lines[9], /^info bridge: No OpenClaw sync timestamp was found/)
-  assert.match(result.lines[10], /^info gateway: The gateway probe uses 127\.0\.0\.1 port 18789\./)
+  assert.match(result.lines[10], /^info gateway: The gateway probe uses 127\.0\.0\.1\. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it\.$/)
 })
 
 test('each required failure names the next command and exits non zero', () => {
@@ -438,7 +438,7 @@ test('gateway status comes from the bridge under Compose and from a direct probe
   )
   assert.equal(
     gatewayLine({}),
-    'info gateway: The gateway probe uses 127.0.0.1 port 18789. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.',
+    'info gateway: The gateway probe uses 127.0.0.1. Set OPENCLAW_GATEWAY_HOST and OPENCLAW_GATEWAY_PORT to change it.',
   )
   assert.equal(
     gatewayLine({ MC_DOCTOR_DOCKER: '1' }),
@@ -454,7 +454,7 @@ test('gateway status comes from the bridge under Compose and from a direct probe
   )
   assert.equal(
     gatewayLine({ OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }, { state: 'down' }),
-    'info gateway: The gateway probe at gateway.internal port 19001 is down.',
+    'info gateway: The gateway probe at gateway.internal got no answer. OPENCLAW_GATEWAY_PORT sets the port it checks.',
   )
   assert.equal(
     gatewayLine({ MC_DOCTOR_DOCKER: '1', OPENCLAW_GATEWAY_HOST: 'gateway.internal', OPENCLAW_GATEWAY_PORT: '19001' }, { state: 'up' }),

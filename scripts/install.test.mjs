@@ -196,6 +196,7 @@ if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  printf 'up MC_DOCS_HOST_PATH=%s\\n' "\${MC_DOCS_HOST_PATH:-}" >> "$DOCKER_STUB_LOG"
   if [ -n "\${DOCKER_STUB_SHA_LOG:-}" ]; then
     printf 'GIT_SHA=%s\\n' "\${GIT_SHA:-}" >> "$DOCKER_STUB_SHA_LOG"
   fi
@@ -269,7 +270,7 @@ const SCHEDULE_ENV_KEYS = [
 
 function runInstall(dir, env, args = []) {
   const merged = { ...process.env }
-  for (const key of ['PORT', 'MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT', 'MC_INSTALL_HEALTH_PORT', ...SCHEDULE_ENV_KEYS]) {
+  for (const key of ['PORT', 'MC_WEB_PORT', 'MC_API_PORT', 'MC_DB_PORT', 'MC_REMOTE_PORT', 'MC_INSTALL_HEALTH_PORT', 'MC_DOCS_HOST_PATH', ...SCHEDULE_ENV_KEYS]) {
     if (!Object.prototype.hasOwnProperty.call(env, key)) delete merged[key]
   }
   Object.assign(merged, env)
@@ -577,6 +578,10 @@ test('the Compose docs directory follows the shell, then .env, then data/docs', 
     const shellFailed = assertReadableDoctor(shellText).some((line) => line.startsWith('fail '))
     assert.equal(shellRun.status, shellFailed ? 1 : 0, shellText)
     assert.equal(existsSync(path.join(fromShell.repo, 'from-shell', 'docs')), true)
+    assert.match(
+      readFileSync(fromShell.log, 'utf8'),
+      /^up MC_DOCS_HOST_PATH=\/.+\/repo\/from-shell\/docs$/m,
+    )
     assert.equal(existsSync(path.join(fromShell.repo, 'from-file', 'docs')), false)
     assert.equal(existsSync(path.join(fromShell.repo, 'data', 'docs')), false)
     assert.equal(statSync(path.join(fromShell.repo, 'from-shell', 'docs')).uid, process.getuid())
@@ -595,6 +600,7 @@ test('the Compose docs directory follows the shell, then .env, then data/docs', 
     const emptyFailed = assertReadableDoctor(emptyText).some((line) => line.startsWith('fail '))
     assert.equal(emptyRun.status, emptyFailed ? 1 : 0, emptyText)
     assert.equal(existsSync(path.join(fromEmpty.repo, 'data', 'docs')), true)
+    assert.match(readFileSync(fromEmpty.log, 'utf8'), /^up MC_DOCS_HOST_PATH=\/.+\/repo\/data\/docs$/m)
     assert.equal(existsSync(path.join(fromEmpty.repo, 'from-file', 'docs')), false)
   } finally {
     rmSync(fromShell.dir, { recursive: true, force: true })
@@ -1026,6 +1032,24 @@ test('the native path runs npm ci, migrate, and doctor when Docker is missing', 
   }
 })
 
+/** Every port number the installer output names. */
+function printedPorts(text) {
+  const ports = new Set()
+  for (const match of String(text).matchAll(/(?:localhost|127\.0\.0\.1):(\d+)|\b[Pp]ort (\d+)/g)) {
+    ports.add(Number(match[1] ?? match[2]))
+  }
+  return [...ports]
+}
+
+async function answers(port) {
+  try {
+    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) })
+    return true
+  } catch {
+    return false
+  }
+}
+
 test('native install binds shell PORT and MC_WEB_PORT and the printed URL answers', async () => {
   const fx = freshDir()
   const apiHold = createServer()
@@ -1058,10 +1082,12 @@ test('native install binds shell PORT and MC_WEB_PORT and the printed URL answer
       '  res.writeHead(200, { "content-type": "application/json" })',
       '  res.end(JSON.stringify({ service: "mission-control", status: "ok", database: "connected" }))',
       '})',
-      'await listen(webPort, (req, res) => {',
-      '  res.writeHead(200, { "content-type": "text/html; charset=utf-8" })',
-      '  res.end("<!doctype html><title>Mission Control</title>")',
-      '})',
+      'if (process.env.BIND_WEB !== "0") {',
+      '  await listen(webPort, (req, res) => {',
+      '    res.writeHead(200, { "content-type": "text/html; charset=utf-8" })',
+      '    res.end("<!doctype html><title>Mission Control</title>")',
+      '  })',
+      '}',
       'setInterval(() => {}, 1000)',
       '',
     ].join('\n'),
@@ -1102,6 +1128,110 @@ test('native install binds shell PORT and MC_WEB_PORT and the printed URL answer
     assert.equal(body.service, 'mission-control')
     assert.equal(body.database, 'connected')
     assert.match(text, new RegExp(`pass ports: Port ${apiPort} is already running\\.`))
+    // Issue 117: a native install prints only ports that answer, and never the tunnel port.
+    assert.doesNotMatch(text, /Tunnel port|3011|MC_REMOTE_PORT/)
+    const printed = printedPorts(text)
+    assert.ok(printed.includes(webPort) && printed.includes(apiPort), text)
+    for (const port of printed) {
+      assert.equal(await answers(port), true, `port ${port} was printed but does not answer\n${text}`)
+    }
+  } finally {
+    const pidFile = path.join(fx.repo, 'install-dev.pid')
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, 'utf8').trim())
+      if (pid) {
+        try {
+          process.kill(pid, 'SIGTERM')
+        } catch {
+          // The dev process already exited.
+        }
+      }
+    }
+    rmSync(fx.dir, { recursive: true, force: true })
+  }
+})
+
+test('native install prints no web URL when the web app does not answer (issue 117)', async () => {
+  const fx = freshDir()
+  const apiHold = createServer()
+  const webHold = createServer()
+  const apiPort = await new Promise((resolve, reject) => {
+    apiHold.once('error', reject)
+    apiHold.listen(0, '127.0.0.1', () => resolve(apiHold.address().port))
+  })
+  const webPort = await new Promise((resolve, reject) => {
+    webHold.once('error', reject)
+    webHold.listen(0, '127.0.0.1', () => resolve(webHold.address().port))
+  })
+  await new Promise((resolve) => apiHold.close(() => webHold.close(resolve)))
+  const bindScript = path.join(fx.dir, 'bind.mjs')
+  writeFileSync(
+    bindScript,
+    [
+      "import { createServer } from 'node:http'",
+      'const apiPort = Number(process.env.PORT)',
+      'const webPort = Number(process.env.MC_WEB_PORT)',
+      'function listen(port, respond) {',
+      '  return new Promise((resolve, reject) => {',
+      '    const server = createServer(respond)',
+      '    server.once("error", reject)',
+      '    server.listen(port, "127.0.0.1", () => resolve(server))',
+      '  })',
+      '}',
+      'await listen(apiPort, (req, res) => {',
+      '  if (!req.url || !req.url.startsWith("/health")) { res.writeHead(404); res.end(); return }',
+      '  res.writeHead(200, { "content-type": "application/json" })',
+      '  res.end(JSON.stringify({ service: "mission-control", status: "ok", database: "connected" }))',
+      '})',
+      'if (process.env.BIND_WEB !== "0") {',
+      '  await listen(webPort, (req, res) => {',
+      '    res.writeHead(200, { "content-type": "text/html; charset=utf-8" })',
+      '    res.end("<!doctype html><title>Mission Control</title>")',
+      '  })',
+      '}',
+      'setInterval(() => {}, 1000)',
+      '',
+    ].join('\n'),
+  )
+  const clock = path.join(fx.dir, 'clock')
+  writeFileSync(clock, '0\n')
+  try {
+    writeExe(path.join(fx.bin, 'docker'), '#!/bin/sh\nexit 127\n')
+    writeNode22Report(fx.bin)
+    const nativeLog = path.join(fx.dir, 'native.log')
+    writeFileSync(nativeLog, '')
+    writeExe(
+      path.join(fx.bin, 'npm'),
+      '#!/bin/sh\nprintf \'npm %s\\n\' "$*" >> "$NATIVE_LOG"\nif [ "$1" = "run" ] && [ "$2" = "dev" ]; then\n  exec node "$BIND_SCRIPT"\nfi\nexit 0\n',
+    )
+    writeExe(path.join(fx.bin, 'npx'), '#!/bin/sh\nexit 0\n')
+    writeExe(path.join(fx.bin, 'pg_isready'), '#!/bin/sh\nexit 0\n')
+    writeExe(path.join(fx.bin, 'psql'), '#!/bin/sh\nprintf \'16.4\\n\'\nexit 0\n')
+    const result = runInstall(fx.repo, {
+      ...fx.env,
+      PORT: String(apiPort),
+      MC_WEB_PORT: String(webPort),
+      NATIVE_LOG: nativeLog,
+      BIND_SCRIPT: bindScript,
+      BIND_WEB: '0',
+      MC_INSTALL_READY_SECONDS: '3',
+      MC_INSTALL_CLOCK_FILE: clock,
+    })
+    const text = outputOf(result)
+    assert.doesNotMatch(text, /Open http:\/\//)
+    assert.doesNotMatch(text, new RegExp(`localhost:${webPort}`))
+    assert.doesNotMatch(text, /Tunnel port|3011|MC_REMOTE_PORT/)
+    const summary = text.replace(/\s+$/, '').split('\n')
+    const at = summary.indexOf('The web app did not answer yet, so no URL is printed. Its log is install-dev.log.')
+    assert.ok(at > 0, text)
+    assert.equal(summary[at - 1], SUMMARY_OPENCLAW)
+    assert.deepEqual(summary.slice(-2), ['Reset the dashboard password with:', '  npm run password:reset'])
+    // The API wait may spend a tick before the dev process binds, so the web wait
+    // used at least its full budget of 3.
+    assert.ok(Number(readFileSync(clock, 'utf8').trim()) >= 3)
+    for (const port of printedPorts(text)) {
+      assert.equal(await answers(port), true, `port ${port} was printed but does not answer\n${text}`)
+    }
   } finally {
     const pidFile = path.join(fx.repo, 'install-dev.pid')
     if (existsSync(pidFile)) {

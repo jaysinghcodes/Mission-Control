@@ -169,3 +169,68 @@ test('ordered people keep the sample roster and append a real bot', () => {
   const onlyReal = roster.orderedPeople([{ id: 'ribbon', name: 'Ribbon' }], names, (agent) => agent.name)
   assert.deepEqual(onlyReal.map((agent) => agent.id), ['ribbon'])
 })
+
+test('issue 117: counts beside the floor skip work owned by hidden sample bots', async () => {
+  const mixed = [...seeded, registered('stranger_bot')]
+  const hidden = roster.hiddenAgentIds(mixed, false)
+  assert.deepEqual([...hidden].sort(), seeded.map((agent) => agent.id).sort())
+  assert.equal(roster.hiddenAgentIds(mixed, true).size, 0)
+  assert.equal(roster.hiddenAgentIds(seeded, false).size, 0)
+
+  const tickets = [
+    { key: 'MC-1', status: 'build', assignee: 'speedy' },
+    { key: 'MC-2', status: 'qa', assignee: 'forge' },
+    { key: 'MC-3', status: 'review', assignee: 'atlas' },
+    { key: 'MC-4', status: 'done', assignee: 'pixel' },
+    { key: 'MC-150', status: 'qa', assignee: 'stranger_bot' },
+    { key: 'MC-151', status: 'build', assignee: null },
+    { key: 'MC-152', status: 'build', assignee: 'Operator' },
+  ]
+  const shown = roster.withoutHiddenBots(tickets, hidden)
+  assert.deepEqual(shown.map((t) => t.key), ['MC-150', 'MC-151', 'MC-152'])
+  assert.deepEqual(roster.withoutHiddenBots(tickets, new Set()).map((t) => t.key), tickets.map((t) => t.key))
+  const runs = [{ id: 'r1', agent: 'echo' }, { id: 'r2', agent: 'stranger_bot' }]
+  assert.deepEqual(roster.withoutHiddenBots(runs, hidden).map((r) => r.id), ['r2'])
+
+  const office = await readFile(new URL('../src/pages/Office.tsx', import.meta.url), 'utf8')
+  assert.match(office, /const pipe = stageCounts\(shownTickets\)/)
+  assert.match(office, /shownTickets\.filter\(\(ticket\) => stageIndexForStatus/)
+  assert.doesNotMatch(office, /stageCounts\(ticketRows\)/)
+  const system = await readFile(new URL('../src/pages/System.tsx', import.meta.url), 'utf8')
+  assert.match(system, /visibleAgentKeys\(roster, hidden, \[\.\.\.named, \.\.\.fromSessions\]\)/)
+  assert.equal((system.match(/agentsFor\(model, focus, roster, sessions\.data\?\.sessions \?\? \[\], hiddenBots\)/g) ?? []).length, 2)
+})
+
+test('issue 117: System model agents with the demo usage shape keep only visible bots', () => {
+  // GET /usage after seed:demo rolls providers up by line.bot, so agents are labels.
+  const providers = [
+    { name: 'openai', model: 'openai/gpt-4.1', agents: ['Quill'] },
+    { name: 'anthropic', model: 'anthropic/claude-sonnet-4-6', agents: ['Sage'] },
+    { name: 'deepseek', model: 'deepseek/deepseek-chat', agents: ['Nova'] },
+    { name: 'google', model: 'google/gemini-2.5-flash', agents: ['Lens'] },
+    { name: 'ollama', model: 'ollama/llama3.1', agents: ['Local'] },
+  ]
+  const mixed = [...seeded.map((agent) => ({ ...agent, name: agent.id[0].toUpperCase() + agent.id.slice(1) })), registered('ribbon', { name: 'Ribbon' })]
+  const hidden = roster.hiddenAgentIds(mixed, false)
+  assert.ok(hidden.has('quill'))
+  for (const p of providers) {
+    assert.deepEqual(roster.visibleAgentKeys(mixed, hidden, p.agents), [], `${p.model} should show No agent tagged`)
+  }
+  // Exact ids drop the same way (sessions.snapshot sends ids).
+  assert.deepEqual(roster.visibleAgentKeys(mixed, hidden, ['quill', 'speedy']), [])
+
+  // A visible bot stays by id or display name, ignoring case, once.
+  assert.deepEqual(roster.visibleAgentKeys(mixed, hidden, ['Ribbon', 'ribbon', 'RIBBON', ' ', null, 'Quill']), ['ribbon'])
+  assert.equal(roster.visibleBotFor(mixed, hidden, 'rIbBoN')?.id, 'ribbon')
+  assert.equal(roster.visibleBotFor(mixed, hidden, 'Quill'), undefined)
+  assert.equal(roster.visibleBotFor(mixed, hidden, 'Sage'), undefined)
+
+  // A registered bot that is named Sage keeps the Sage usage line.
+  const withSage = [...mixed, registered('sage_bot', { name: 'Sage' })]
+  assert.deepEqual(roster.visibleAgentKeys(withSage, roster.hiddenAgentIds(withSage, false), ['Sage', 'Quill']), ['sage_bot'])
+
+  // Show sample bots on, or a seed only roster: every label stays as sent.
+  const labels = providers.flatMap((p) => p.agents)
+  assert.deepEqual(roster.visibleAgentKeys(mixed, roster.hiddenAgentIds(mixed, true), labels), labels)
+  assert.deepEqual(roster.visibleAgentKeys(seeded, roster.hiddenAgentIds(seeded, false), labels), labels)
+})

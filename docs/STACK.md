@@ -34,7 +34,7 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 | `/#/calendar` | Cron jobs for the week |
 | `/#/memory` | Memory notes |
 | `/#/usage` | Cost so far, by day, bot, and model |
-| `/#/docs` | Markdown library from `DOCS_ROOT` |
+| `/#/docs` | Markdown library from `DOCS_ROOT`. The empty state names the host docs folder, never the Compose path `/data/docs` |
 | `/#/team` | Mission, people, devices |
 | `/#/system` | Health, provider and model per agent, versions, spend, links to the panels below |
 | `/#/system/logs` | Gateway log tail, or an empty state |
@@ -76,7 +76,7 @@ Sessions and gateway logs stay empty until a real bridge posts them.
 
 ## Roster marks
 
-Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. The rows stay in the database. Turn on Show sample bots on System to bring them back. They show the Sample tag. The switch is saved in this browser and stays on after a reload. Delete every real bot and the defaults show again on their own. A bridge snapshot never removes a registered bot.
+Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. The rows stay in the database. Counts follow the visible bots. While sample bots are hidden, the Office Pipeline card and room ticket list skip tickets assigned to a hidden sample bot, and a System model card counts only visible bots. Turn on Show sample bots on System to bring them back. They show the Sample tag. The switch is saved in this browser and stays on after a reload. Delete every real bot and the defaults show again on their own. A bridge snapshot never removes a registered bot.
 
 A registered bot with no heartbeat for 10 minutes shows Offline. The label uses the existing idle robot, dimmed. The row is not deleted.
 
