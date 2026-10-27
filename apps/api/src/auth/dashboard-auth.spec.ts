@@ -121,6 +121,22 @@ describe('dashboard session', () => {
     expect(isIngestWrite('DELETE', '/agents/someone')).toBe(false);
   });
 
+  it('needs the session for device create and delete off loopback, not the ingest token', async () => {
+    const create = await request(app.getHttpServer())
+      .post('/devices')
+      .set('x-test-peer', REMOTE)
+      .set('x-ingest-token', TOKEN)
+      .send({ name: 'Token only', type: 'laptop' });
+    expect(create.status).toBe(401);
+    const remove = await request(app.getHttpServer())
+      .delete('/devices/manual-probe')
+      .set('x-test-peer', REMOTE)
+      .set('x-ingest-token', TOKEN);
+    expect(remove.status).toBe(401);
+    expect(isIngestWrite('POST', '/devices')).toBe(false);
+    expect(isIngestWrite('DELETE', '/devices/manual-probe')).toBe(false);
+  });
+
   it('ignores X-Forwarded-For when the peer is not a trusted proxy', async () => {
     delete process.env.TRUSTED_PROXY;
     delete process.env.BUNDLED_PROXY;

@@ -15,12 +15,16 @@ import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
 import { useRosterView } from '../lib/useSampleRoster'
+import { DEVICE_COPY, DEVICE_NAME_MAX, DEVICE_TYPES, DEVICE_TYPE_LABEL, deviceDraftError, type DeviceType } from '../lib/device-form'
+import { useDevicesLive } from '../lib/useDevicesLive'
 
 /**
  * Team. Mission, people, and devices, filled from the API.
  * Mission and devices are rows in Postgres. People are the roster robots
  * from GET /agents, captioned Name · Function, each linking to Agents.
- * Invite and pairing stay as sheets. They do not create accounts.
+ * Invite is a sheet that does not create accounts. Pair a device is a
+ * short form that posts a manual device. Each device row can be removed.
+ * Create and delete broadcast devices.snapshot, so open tabs refetch.
  */
 
 interface MissionResp {
@@ -36,6 +40,7 @@ interface DeviceRow {
   lastSeenAt: string | null
   pairedAt?: string | null
   requestedAt?: string | null
+  source?: string | null
 }
 
 interface DevicesResp {
@@ -51,6 +56,7 @@ export default function Team() {
   const { events, connected } = useLiveActivity()
   useRosterLive(events, agentsQ.refetch, connected)
   useWorkLive(events, ticketsQ.refetch, runsQ.refetch)
+  useDevicesLive(events, devicesQ.refetch)
   const agents = agentsQ.data?.agents ?? []
   const { visible: roster, now } = useRosterView(agents)
   const naming = useNaming()
@@ -69,6 +75,12 @@ export default function Team() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [invite, setInvite] = useState(false)
   const [pair, setPair] = useState(false)
+  const [deviceName, setDeviceName] = useState('')
+  const [deviceType, setDeviceType] = useState<DeviceType>('laptop')
+  const [pairing, setPairing] = useState(false)
+  const [pairError, setPairError] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
   const owner = OPERATOR_NAME || 'Operator'
   const online = devices.filter((d) => d.online).length
 
@@ -89,6 +101,46 @@ export default function Team() {
     }
     missionQ.mutate(() => r.data)
     setEditing(false)
+  }
+
+  function openPair() {
+    setDeviceName('')
+    setDeviceType('laptop')
+    setPairError(null)
+    setPair(true)
+  }
+
+  async function saveDevice() {
+    const problem = deviceDraftError(deviceName, deviceType)
+    if (problem) {
+      setPairError(problem)
+      return
+    }
+    setPairing(true)
+    setPairError(null)
+    const r = await apiSend<{ device: DeviceRow }>('POST', '/devices', { name: deviceName.trim(), type: deviceType })
+    setPairing(false)
+    if (!r.ok || !r.data) {
+      setPairError(r.error ?? 'Could not save the device')
+      return
+    }
+    const added = r.data.device
+    devicesQ.mutate((prev) => (prev ? { ...prev, devices: sortDevices([...prev.devices.filter((d) => d.id !== added.id), added]) } : { devices: [added] }))
+    setPair(false)
+    void devicesQ.refetch()
+  }
+
+  async function removeDevice(id: string) {
+    setRemoving(id)
+    setRemoveError(null)
+    const r = await apiSend<null>('DELETE', `/devices/${encodeURIComponent(id)}`)
+    setRemoving(null)
+    if (!r.ok && r.status !== 404) {
+      setRemoveError(r.error ?? 'Could not remove the device')
+      return
+    }
+    devicesQ.mutate((prev) => (prev ? { ...prev, devices: prev.devices.filter((d) => d.id !== id) } : prev))
+    void devicesQ.refetch()
   }
 
   return (
@@ -217,29 +269,40 @@ export default function Team() {
       <SoftCard className="mt-5 px-6 py-5">
         <div className="flex items-center justify-between">
           <span className="text-[15px] font-semibold">Devices</span>
-          <button type="button" className="text-[13px] font-semibold text-mc-accent-text" onClick={() => setPair(true)}>Pair a device</button>
+          <button type="button" className="text-[13px] font-semibold text-mc-accent-text" onClick={openPair}>Pair a device</button>
         </div>
         {devicesQ.errorMessage && !devicesQ.data && (
           <p className="mt-3 text-[13px] text-mc-orangetext">Couldn't load devices ({devicesQ.errorMessage}).</p>
         )}
         {devicesQ.data && devices.length === 0 ? (
-          <EmptyState title="No devices" body="No machines yet. The bridge posts devices from openclaw devices list and nodes from openclaw nodes list. npm run seed:demo adds three sample devices." />
+          <EmptyState title={DEVICE_COPY.emptyTitle} body={DEVICE_COPY.emptyBody} />
         ) : devicesQ.data ? (
           <ul className="mt-2 divide-y divide-mc-sep">
             {devices.map((d) => {
               const status = deviceStatus(d, formatZoneSaved)
               return (
-                <li key={d.id} className="flex items-center gap-3 py-3">
+                <li key={d.id} data-device-id={d.id} data-device-source={d.source ?? ''} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-mc-fill text-mc-sub2" aria-hidden>
                     <span className="h-3 w-5 rounded-sm border-2 border-current" />
                   </span>
-                  <span className="min-w-0 flex-1">
+                  <span className="min-w-[8rem] flex-1">
                     <span className="block wrap-anywhere text-[14.5px] font-semibold">{d.name}</span>
                     <span className="block wrap-anywhere text-[12.5px] text-mc-sub">{d.type}</span>
                   </span>
-                  <span className="flex max-w-[16rem] items-center gap-2 text-right text-[12.5px] leading-snug">
+                  <span className="flex w-full items-center gap-3 pl-[52px] sm:w-auto sm:pl-0">
+                  <span className="flex min-w-0 flex-1 items-center gap-2 text-[12.5px] leading-snug sm:max-w-[16rem] sm:flex-none sm:text-right">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: status.on ? 'var(--mc-green)' : 'var(--mc-gray)' }} />
                     <span className="wrap-anywhere">{status.status}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-[12.5px] font-semibold text-mc-sub disabled:opacity-50"
+                    onClick={() => void removeDevice(d.id)}
+                    disabled={removing === d.id}
+                    aria-label={`Remove ${d.name}`}
+                  >
+                    {DEVICE_COPY.remove}
+                  </button>
                   </span>
                 </li>
               )
@@ -248,6 +311,7 @@ export default function Team() {
         ) : !devicesQ.errorMessage ? (
           <p className="mt-3 text-[13px] text-mc-sub">Loading devices…</p>
         ) : null}
+        {removeError && <FieldError>{removeError}</FieldError>}
       </SoftCard>
 
       {invite && (
@@ -257,33 +321,59 @@ export default function Team() {
         </Sheet>
       )}
       {pair && (
-        <Sheet title="Pair a device" onClose={() => setPair(false)}>
-          <p className="text-[14px] text-mc-sub2">
-            Pairing from another machine is in the{' '}
-            <a
-              href="https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md"
-              className="font-semibold text-mc-accent-text"
-              target="_blank"
-              rel="noreferrer"
+        <Sheet title="Pair a device" onClose={() => setPair(false)} closeButton={false}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              void saveDevice()
+            }}
+          >
+            <p className="text-[14px] text-mc-sub2">{DEVICE_COPY.formLead}</p>
+            <label className="mt-4 block text-[13px] font-semibold" htmlFor="pair-device-name">{DEVICE_COPY.nameLabel}</label>
+            <input
+              id="pair-device-name"
+              value={deviceName}
+              onChange={(e) => setDeviceName(e.target.value)}
+              maxLength={DEVICE_NAME_MAX}
+              autoFocus
+              autoComplete="off"
+              placeholder="Kitchen laptop"
+              className="mt-1 h-9 w-full rounded-lg bg-mc-ctl px-3 text-[16px] outline-none"
+            />
+            <label className="mt-3 block text-[13px] font-semibold" htmlFor="pair-device-type">{DEVICE_COPY.typeLabel}</label>
+            <select
+              id="pair-device-type"
+              value={deviceType}
+              onChange={(e) => setDeviceType(e.target.value as DeviceType)}
+              className="mt-1 h-9 w-full rounded-lg bg-mc-ctl px-3 text-[16px] text-mc-text outline-none"
             >
-              remote access guide
-            </a>
-            . Setup step 7 has the SSH command and a live API check.
-          </p>
-          <Link to="/connect" className="mt-4 inline-flex h-8 items-center rounded-lg bg-mc-accent-fill px-3.5 text-[13px] font-semibold text-white" onClick={() => setPair(false)}>Open setup</Link>
+              {DEVICE_TYPES.map((t) => (
+                <option key={t} value={t}>{DEVICE_TYPE_LABEL[t]}</option>
+              ))}
+            </select>
+            {pairError && <FieldError>{pairError}</FieldError>}
+            <div className="mt-4 flex gap-2">
+              <Btn kind="primary" type="submit" disabled={pairing}>{pairing ? DEVICE_COPY.saving : DEVICE_COPY.save}</Btn>
+              <Btn kind="plain" onClick={() => setPair(false)}>{DEVICE_COPY.cancel}</Btn>
+            </div>
+          </form>
         </Sheet>
       )}
     </div>
   )
 }
 
-function Sheet({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+function sortDevices(rows: DeviceRow[]): DeviceRow[] {
+  return [...rows].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+}
+
+function Sheet({ title, children, onClose, closeButton = true }: { title: string; children: ReactNode; onClose: () => void; closeButton?: boolean }) {
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4" onClick={onClose}>
       <div className="mc-card w-full max-w-md px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}>
         <div className="text-[17px] font-semibold">{title}</div>
         <div className="mt-3">{children}</div>
-        <button type="button" onClick={onClose} className="mt-4 text-[13px] font-semibold text-mc-sub">Close</button>
+        {closeButton && <button type="button" onClick={onClose} className="mt-4 text-[13px] font-semibold text-mc-sub">Close</button>}
       </div>
     </div>
   )

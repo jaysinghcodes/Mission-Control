@@ -110,7 +110,7 @@ The sidebar order is Tasks, Agents, Approvals, Projects, Office, Pipeline, then 
 | Calendar | `/#/calendar` | Weekly grid of cron jobs | `calendar.snapshot` |
 | Memory | `/#/memory` | Memory notes grouped by day in the timezone saved in Settings | `memory.snapshot` |
 | Docs | `/#/docs` | Markdown files from `DOCS_ROOT` (default `data/docs`), read only in the browser. The empty state names the host docs folder from `dir` on `GET /docs`. Under Compose that is the host side of the bind, never `/data/docs` | files on disk |
-| Team | `/#/team` | Mission, people, and devices. Not an org chart. People use the same live placement as Office. Devices and nodes come from the bridge | `agents.snapshot`, `devices.snapshot`, `/mission`, `/devices`, `/tickets`, `/runs` |
+| Team | `/#/team` | Mission, people, and devices. Not an org chart. People use the same live placement as Office. Devices and nodes come from the bridge. Pair a device adds a manual device, and Remove deletes any device | `agents.snapshot`, `devices.snapshot`, `/mission`, `/devices`, `/tickets`, `/runs` |
 | Usage | `/#/usage` | Cost so far, broken down by day, bot, and model | `usage.snapshot`, `GET /usage`, `config/prices.json` |
 | System | `/#/system` | Health, uptime, provider and model per agent, versions, a spend summary, sessions, activity. Panels: `/#/system/logs`, `/#/system/sessions`, `/#/system/settings`, `/#/system/tools`, `/#/system/connection` | `/health`, `/system`, `/usage`, `/sessions` |
 | Connect | `/#/connect` | Setup sheet. The laptop paths are in [REMOTE.md](REMOTE.md) | |
@@ -315,7 +315,7 @@ Read only routes: `GET /memory?day=YYYY-MM-DD&kind=&q=&limit=&offset=` and `GET 
 
 ### 4.9 Other read routes
 
-`GET /health`, `/system`, `/agents`, `/agents/:id` (id or name), `/sessions`, `/calendar`, `/activity?limit=`, `/logs`, `/search?q=`, `/approvals?status=pending|decided|all`, `/mission`, `/devices`, `/docs`, `/custom-tools`, `/settings`. `GET /health` includes `version` (the `version` field in `apps/api/package.json`), `gitSha` (System shows its first 7 characters on one line, with the full sha in the tooltip), and `openclawVersion` (null until `models.snapshot` reports one). That value is the first line of `openclaw --version` on the host, or the version in the OpenClaw config. The bridge runs `openclaw` without `GIT_SHA` and `GIT_COMMIT`, so Mission Control's commit is never mixed in. System shows the app version, the Git commit, and the OpenClaw version as separate values. `GET /system` includes `gateway` with `host`, `port`, `state` (`up`, `down`, or `unknown`), `up`, `latencyMs`, `checkedAt`, `source` (`probe` or `bridge`), and `version` when present. `up` is true only when `state` is `up`. Under Compose, with `OPENCLAW_GATEWAY_HOST` blank, the value is the latest `gateway.snapshot`. No report, a report older than `GATEWAY_STATUS_MAX_AGE_MS` (default 600000), or a report stored before the API process started is `unknown`. A recreated API container shows Unknown until the next bridge report. A future checkedAt is counted from the time the API stored the report. A native install, or an explicit `OPENCLAW_GATEWAY_HOST`, probes that host on `OPENCLAW_GATEWAY_PORT` (default 18789). The System header does not say everything is running while the gateway is down or unknown. Unknown shows the hint `Gateway status comes from the bridge. Run the bridge to check it.` Writes: `PUT /mission` with `{ mission }`, `PUT /settings`, `POST /approvals/:id/decide` with `{ action: "approve" or "reject" }` (only on your operator's say so; a `pr` approve merges on GitHub). Custom tools also have their own create and update routes under `/custom-tools`. Devices have no write route.
+`GET /health`, `/system`, `/agents`, `/agents/:id` (id or name), `/sessions`, `/calendar`, `/activity?limit=`, `/logs`, `/search?q=`, `/approvals?status=pending|decided|all`, `/mission`, `/devices`, `/docs`, `/custom-tools`, `/settings`. `GET /health` includes `version` (the `version` field in `apps/api/package.json`), `gitSha` (System shows its first 7 characters on one line, with the full sha in the tooltip), and `openclawVersion` (null until `models.snapshot` reports one). That value is the first line of `openclaw --version` on the host, or the version in the OpenClaw config. The bridge runs `openclaw` without `GIT_SHA` and `GIT_COMMIT`, so Mission Control's commit is never mixed in. System shows the app version, the Git commit, and the OpenClaw version as separate values. `GET /system` includes `gateway` with `host`, `port`, `state` (`up`, `down`, or `unknown`), `up`, `latencyMs`, `checkedAt`, `source` (`probe` or `bridge`), and `version` when present. `up` is true only when `state` is `up`. Under Compose, with `OPENCLAW_GATEWAY_HOST` blank, the value is the latest `gateway.snapshot`. No report, a report older than `GATEWAY_STATUS_MAX_AGE_MS` (default 600000), or a report stored before the API process started is `unknown`. A recreated API container shows Unknown until the next bridge report. A future checkedAt is counted from the time the API stored the report. A native install, or an explicit `OPENCLAW_GATEWAY_HOST`, probes that host on `OPENCLAW_GATEWAY_PORT` (default 18789). The System header does not say everything is running while the gateway is down or unknown. Unknown shows the hint `Gateway status comes from the bridge. Run the bridge to check it.` Writes: `PUT /mission` with `{ mission }`, `PUT /settings`, `POST /approvals/:id/decide` with `{ action: "approve" or "reject" }` (only on your operator's say so; a `pr` approve merges on GitHub). Custom tools also have their own create and update routes under `/custom-tools`. Devices have `POST /devices` and `DELETE /devices/:id` (section 4.11).
 
 `GET /settings` returns `{ namingMode, crewMap, seats, timezone, serverTimeZone, timezoneSaved, setupDone, offlineAfterMs, ts }`. `namingMode` is `crew`, `own`, or null until the first choice is saved. `crewMap` maps an agent id to a seat id, or to an empty string for Own name. An agent id that equals a seat id takes that seat only when the seat is free. A saved seat stays with that agent. Other agents with no saved choice take the next free seat in the order they first registered. When a seat opens, the earliest agent with no saved choice takes it. Own name is a saved choice. It stays until a Settings save changes that agent, and that agent is never auto seated. Register, snapshot, and delete write that map in one locked transaction, together with a new roster position, so concurrent registers each get a distinct seat and a distinct position. A display name does not pick a seat. `seats` always lists `config/crew.json` (id, name, role, desk, color). The API image includes that file, plus `config/prices.json` and `config/timezones.json`. A plain `docker run` without a config mount still serves this route. Compose mounts `./config` over `/app/config`, and that mount overrides the baked files. The screen applies a seat only when `namingMode` is `crew` and the map names that agent id. A missing map entry, or a seat id the file does not contain, keeps the stored name, role, and color, and the desk label stays empty. In own names mode `crewMap` is still the stored map, so it can name an id that has since left the roster. The next crew save drops it. `timezone` is the zone usage and memory use. `serverTimeZone` is `TZ` when that name is in `config/timezones.json`, otherwise the host zone. `timezoneSaved` is false until a zone is stored. `setupDone` is false until the first open is finished or skipped. `offlineAfterMs` is `OFFLINE_AFTER_MS` (default 600000).
 
@@ -408,6 +408,34 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agent
 
 That prints `204`.
 
+### 4.11 Devices
+
+Team lists devices from `GET /devices`. Each row has `id`, `name`, `type`, `online`, `lastSeenAt`, `pairedAt`, `requestedAt`, and `source` (`manual`, `demo`, or `bridge`). `devices.snapshot` fills bridge rows from `openclaw devices list` and `openclaw nodes list`. `npm run seed:demo` writes three sample rows (`demo`), and the next snapshot removes them.
+
+Both device writes are dashboard writes. Loopback is open. Off loopback, including Compose, they need the `mc_session` cookie. The ingest token alone is 401.
+
+`POST /devices` with `{ "name": "...", "type": "..." }` adds a manual device and returns 201 `{ device }`. `type` is one of `browser`, `server`, `laptop`, `phone`, or `other`. `name` is required, trimmed, and at most 80 characters. The API assigns the id (`manual-` plus a random UUID). The row is offline, `pairedAt` is now, and `lastSeenAt` and `requestedAt` are null. Any other field, a blank or long name, or an unknown type is 400 and saves nothing.
+
+`DELETE /devices/:id` removes any device (manual, demo, or bridge) and returns 204. A missing id is 404. A bridge row comes back on the next snapshot that still reports it.
+
+`devices.snapshot` never deletes or overwrites a manual row. A bridge entry whose id matches a manual id is skipped, the API logs that once per snapshot, and the rest of the snapshot still applies.
+
+Each create and delete broadcasts `devices.snapshot` with `action` (`create` or `delete`) and `deviceId`, so open Team tabs refetch within 2 s.
+
+```bash
+curl -sS -X POST "http://127.0.0.1:3000/devices" \
+  -H "content-type: application/json" \
+  -d '{"name":"Kitchen laptop","type":"laptop"}'
+```
+
+That prints `{"device":{"id":"manual-...","name":"Kitchen laptop","type":"laptop","online":false,...}}`.
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/devices/manual-..."
+```
+
+That prints `204`, or `404` when the id is gone.
+
 ## 5. Adapting your workflow
 
 * **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Office seats the bot whose id equals `assignee` in Build, QA, or Ship. A display name does not seat a bot. A done ticket stays in the Deploy count and does not seat the bot. An active run seats Deploy when `agent` is that bot's id, until the run finishes, then the bot returns to Commons. Those names match `apps/web/src/lib/board.ts` and `apps/web/src/lib/live-work.ts`. To-Do and Backlog are not pipeline stages. A bot with no ticket in a stage and no active run sits in Commons.
@@ -424,7 +452,7 @@ That prints `204`.
 * Nothing in this repo fetches a provider account balance. Prices live in `config/prices.json`, with `config/prices.local.json` merged on top. The shipped file records its `sourceDate` and a source link per provider. `models.snapshot` is the provider and model list, including which providers are local.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
-* Devices have no dashboard write route. `devices.snapshot` fills them from `openclaw devices list` and `openclaw nodes list`. `npm run seed:demo` still writes three sample devices, and the next snapshot removes those sample rows.
+* Devices cannot be edited in place. Delete the row and add it again (section 4.11).
 * Do not publish port 3000 on a non loopback address without `INGEST_TOKEN` and a dashboard password. The API refuses that start. With the ingest token set, an ingest call that omits `x-ingest-token` is 401. A dashboard call off loopback without a session cookie is also 401, except `POST /tickets` and `PATCH /tickets/:id` when the ingest token and a registered agent id are sent.
 
 ## 7. First read checklist

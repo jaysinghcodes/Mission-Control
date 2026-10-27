@@ -1,5 +1,10 @@
 import { promiseFn } from '../../test/lint-helpers';
-import { deviceRowsFromPayload, SnapshotsService } from './snapshots.service';
+import {
+  deviceRowsFromPayload,
+  keepManualDevices,
+  SnapshotsService,
+} from './snapshots.service';
+import { Logger } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
 
 type DeviceRow = {
@@ -30,6 +35,13 @@ function makePrisma(seed: DeviceRow[] = []) {
   const devices: DeviceRow[] = [...seed];
   const tx = {
     device: {
+      findMany: jest.fn(
+        promiseFn(({ where }: { where?: DeviceWhere }) =>
+          devices
+            .filter((row) => matches(row, where))
+            .map((row) => ({ id: row.id })),
+        ),
+      ),
       deleteMany: jest.fn(
         promiseFn(({ where }: { where?: DeviceWhere }) => {
           const before = devices.length;
@@ -205,5 +217,86 @@ describe('devices.snapshot', () => {
     const { prisma, devices } = makePrisma([DEMO]);
     await new SnapshotsService(prisma).applyDevices({ extra: true });
     expect(devices).toEqual([DEMO]);
+  });
+
+  it('skips a bridge id that matches a manual id', () => {
+    const parsed = deviceRowsFromPayload({
+      devices: [
+        { id: 'manual-1', name: 'Imposter', type: 'server' },
+        { id: 'mac-1', name: 'Kitchen Mac', type: 'operator' },
+      ],
+    });
+    const skipped: string[] = [];
+    const kept = keepManualDevices(
+      parsed?.rows ?? [],
+      [{ id: 'manual-1' }],
+      skipped,
+    );
+    expect(kept.map((row) => row.id)).toEqual(['mac-1']);
+    expect(skipped).toEqual(['manual-1']);
+  });
+
+  it('keeps a manual device through a snapshot of other bridge devices and through sample clearing', async () => {
+    const manual: DeviceRow = {
+      id: 'manual-abc',
+      name: 'Field laptop',
+      type: 'laptop',
+      online: false,
+      lastSeenAt: null,
+      source: 'manual',
+      kind: 'device',
+    };
+    const { prisma, devices } = makePrisma([DEMO, manual]);
+    await new SnapshotsService(prisma).applyDevices({
+      devices: [
+        { id: 'mac-1', name: 'Kitchen Mac', type: 'operator', online: true },
+      ],
+      nodes: [],
+    });
+    expect(devices.map((row) => row.id).sort()).toEqual([
+      'mac-1',
+      'manual-abc',
+    ]);
+    expect(devices.find((row) => row.id === 'manual-abc')).toEqual(manual);
+
+    await new SnapshotsService(prisma).applyDevices({ devices: [], nodes: [] });
+    expect(devices).toEqual([manual]);
+  });
+
+  it('does not revive a deleted manual device', async () => {
+    const { prisma, devices } = makePrisma([DEMO]);
+    await new SnapshotsService(prisma).applyDevices({ devices: [] });
+    expect(devices).toEqual([]);
+  });
+
+  it('leaves a colliding manual row alone, applies the rest, and logs once', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const manual: DeviceRow = {
+      id: 'manual-abc',
+      name: 'Field laptop',
+      type: 'laptop',
+      online: false,
+      lastSeenAt: null,
+      source: 'manual',
+      kind: 'device',
+    };
+    const { prisma, devices } = makePrisma([manual]);
+    await new SnapshotsService(prisma).applyDevices({
+      devices: [
+        { id: 'manual-abc', name: 'Bridge copy', type: 'server', online: true },
+        { id: 'mac-1', name: 'Kitchen Mac', type: 'operator', online: true },
+      ],
+      nodes: [{ id: 'manual-abc', name: 'Node copy', type: 'macos' }],
+    });
+    expect(devices.find((row) => row.id === 'manual-abc')).toEqual(manual);
+    expect(devices.map((row) => row.id).sort()).toEqual([
+      'mac-1',
+      'manual-abc',
+    ]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('manual-abc');
+    warn.mockRestore();
   });
 });
