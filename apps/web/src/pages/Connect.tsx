@@ -6,7 +6,6 @@ import {
   OS_KEYS,
   OS_STEPS,
   STEP_DATA,
-  SecretsCallout,
   fmt,
   type OsKey,
 } from '../components/ConnectSteps'
@@ -88,7 +87,6 @@ export default function Connect() {
   })
   const [probe, setProbe] = useState<{ ok: boolean; detail: string } | null>(null)
   const [checking, setChecking] = useState(false)
-  const [bridgeChoice, setBridgeChoice] = useState<'bridge' | 'skip'>('bridge')
 
   const persist = (next: Record<number, string>) => {
     try {
@@ -196,33 +194,7 @@ export default function Connect() {
         </div>
 
         <div className="mt-6">
-          {step.id === 6 && (
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => setBridgeChoice('bridge')}
-                className={`w-full rounded-[14px] px-5 py-4 text-left ${bridgeChoice === 'bridge' ? 'bg-mc-accent/10 ring-2 ring-mc-accent' : 'bg-mc-card ring-1 ring-mc-border'}`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[15.5px] font-semibold">Connect the bridge</span>
-                  <span className="rounded-full bg-mc-bluebg px-2 py-0.5 text-[11px] font-semibold text-mc-bluetext">Recommended</span>
-                </div>
-                <p className="mt-1 text-[12.5px] text-mc-sub2">bash install.sh schedules bridge/mc-bridge-sync.py. The default interval is 300 seconds. The token stays in the root .env.</p>
-                {bridgeChoice === 'bridge' && step.commands?.map((c) => <CodeBlock key={c.cmd} cmd={c.cmd} label={c.label} />)}
-              </button>
-              <button
-                type="button"
-                onClick={() => setBridgeChoice('skip')}
-                className={`w-full rounded-[14px] px-5 py-4 text-left ${bridgeChoice === 'skip' ? 'bg-mc-accent/10 ring-2 ring-mc-accent' : 'bg-mc-card ring-1 ring-mc-border'}`}
-              >
-                <span className="text-[15.5px] font-semibold">Skip for now and use demo data</span>
-                <p className="mt-1 text-[12.5px] text-mc-sub2">Run <code className="font-mono text-mc-text">npm run seed:demo</code> for labeled sample agents, jobs and tickets. Tickets work with no OpenClaw.</p>
-              </button>
-            </div>
-          )}
-
-          {step.id !== 6 && step.commands?.map((c) => <CodeBlock key={c.cmd} cmd={c.cmd} label={c.label} />)}
-          {step.secrets && step.vars && <SecretsCallout vars={step.vars} />}
+          {step.commands?.map((c) => <CodeBlock key={c.cmd} cmd={c.cmd} label={c.label} />)}
 
           {step.id === 7 && (
             <div className="mt-4 space-y-3">
@@ -243,7 +215,7 @@ export default function Connect() {
                 </div>
               </div>
               <CodeBlock cmd={osStep.cmd} />
-              <p className="text-[12.5px] text-mc-sub">{osStep.note}</p>
+              <p className="text-[12.5px] text-mc-sub">{fmt(osStep.note)}</p>
             </div>
           )}
 
@@ -259,9 +231,7 @@ export default function Connect() {
               )}
               {probe && !probe.ok && (
                 <p className="mt-1 text-[12.5px] text-mc-sub">
-                  {step.id === 7
-                    ? 'Keep the SSH session open, re-run the tunnel, then retry. Tailscale and Cloudflare use the tunnel port in the remote access guide. If the stack is not up, finish the earlier steps on the host.'
-                    : 'Start the stack on the host (steps 1 to 4), then retry.'}
+                  {step.id === 7 ? 'Keep the SSH session open, then retry.' : 'Start the stack on the host, then retry.'}
                 </p>
               )}
             </div>

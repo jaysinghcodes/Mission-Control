@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { API_PORT, WEB_PORT } from '../lib/ports'
-import { Chip, PillButton, SectionLabel } from './ui'
+import { WEB_PORT } from '../lib/ports'
+import { Chip, PillButton } from './ui'
 
 /**
  * ConnectSteps: the 8 step onboarding runbook for the /connect page.
@@ -24,11 +24,6 @@ export interface StepLink {
   external?: boolean
 }
 
-export interface StepVar {
-  name: string
-  desc: string
-}
-
 export interface ConnectStep {
   id: number // 1..8, matches ONBOARDING.md order. Do not renumber.
   title: string // ONBOARDING.md heading text, without a "Step N" prefix
@@ -36,9 +31,7 @@ export interface ConnectStep {
   phaseLabel: string
   body: string[] // short lines; `backticks` render as inline code
   commands?: StepCmd[]
-  secrets?: boolean // true renders SecretsCallout (step 3 only)
   probe?: 'health' // page injects a live probe zone (steps 5 and 7)
-  vars?: StepVar[]
   links?: StepLink[]
   confirmable: boolean // static steps get the "Mark done. I did this" chip
 }
@@ -48,7 +41,7 @@ export const INSTALL_GUIDE = 'https://github.com/jaysinghcodes/Mission-Control/b
 
 /** SSH to the configured owner port. The browser stays on that port. */
 export function sshTunnel(port: string): string {
-  return `ssh -L ${port}:127.0.0.1:${port} ubuntu@<your-server-ip>`
+  return `ssh -L ${port}:127.0.0.1:${port} ubuntu@your-server-ip`
 }
 
 /** Per-OS tunnel commands (existing record shape, labels kept). */
@@ -58,22 +51,22 @@ export function osSteps(port: string = WEB_PORT): Record<OsKey, { name: string; 
     mac: {
       name: 'macOS',
       cmd,
-      note: 'Open Terminal. Replace <your-server-ip> with your host. The port in the command is the configured web port.',
+      note: 'Open Terminal and replace `your-server-ip` with your host.',
     },
     windows: {
       name: 'Windows',
       cmd,
-      note: 'Open PowerShell. OpenSSH is built in. Replace <your-server-ip> with your host. The port in the command is the configured web port.',
+      note: 'Open PowerShell, which has OpenSSH built in, and replace `your-server-ip` with your host.',
     },
     linux: {
       name: 'Linux',
       cmd,
-      note: 'Open a terminal. Replace <your-server-ip> with your host. The port in the command is the configured web port.',
+      note: 'Open a terminal and replace `your-server-ip` with your host.',
     },
     other: {
       name: 'Other',
       cmd,
-      note: 'Open your terminal and run the command below. The port in the command is the configured web port.',
+      note: 'Open your terminal and replace `your-server-ip` with your host.',
     },
   }
 }
@@ -82,10 +75,15 @@ export const OS_STEPS: Record<OsKey, { name: string; cmd: string; note: string }
 
 export const OS_KEYS = Object.keys(OS_STEPS) as OsKey[]
 
+/** One docs section per step. Each step links to its own section with one short link. */
+export function stepDoc(slug: string): string {
+  return `${INSTALL_GUIDE}#${slug}`
+}
+
 /**
- * The eight steps, in ONBOARDING.md order. Titles are the doc's headings
- * verbatim; bodies stay doc-faithful in spirit. Step 3 mirrors the *merged*
- * doc (MC-215): root `.env` + `cp .env.example .env` + the full var list.
+ * The eight steps, in ONBOARDING.md order. Each step is a title, one or two
+ * short sentences, at most one command, and one link to the docs section that
+ * holds the rest. Every command copies as is: no prompt sign, no ending period.
  */
 export const STEP_DATA: ConnectStep[] = [
   {
@@ -93,18 +91,9 @@ export const STEP_DATA: ConnectStep[] = [
     title: 'Confirm prerequisites',
     phase: 'host',
     phaseLabel: 'ON THE HOST',
-    body: [
-      'Docker with the Compose plugin, git, curl, and bash. One command installs Mission Control. The browser uses one port.',
-      'No Docker? The installer says so and uses Node.js 20.17 or later and Postgres 16. Docker installs do not need Node on the host.',
-      // OpenClaw is optional. Tickets work without it, and seed:demo fills sample data.
-      'Optional: your OpenClaw instance running. It is the live data source (step 6). Without it, the tickets loop works and `npm run seed:demo` fills sample data.',
-    ],
-    commands: [
-      {
-        label: 'Check the tools',
-        cmd: 'git --version\ndocker compose version\ncurl --version',
-      },
-    ],
+    body: ['You need git, Docker with the Compose plugin, curl, and bash. Each line below prints a version.'],
+    commands: [{ cmd: 'git --version\ndocker compose version\ncurl --version' }],
+    links: [{ label: 'Prerequisites', to: stepDoc('connect-step-1-prerequisites'), external: true }],
     confirmable: true,
   },
   {
@@ -117,7 +106,6 @@ export const STEP_DATA: ConnectStep[] = [
     ],
     commands: [
       {
-        label: 'Clone and install',
         cmd: 'git clone https://github.com/jaysinghcodes/Mission-Control.git mission-control\ncd mission-control\nbash install.sh',
       },
     ],
@@ -132,57 +120,10 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      'If you ran the installer, the root `.env` already exists. Leave it. The tokens are already in that file.',
-      'Docker Compose reads exactly one env file: the **root** `.env` (next to `docker-compose.yml`). Copy the template only when `.env` is missing and you are not using `bash install.sh`. Never invent a secret (see the note below).',
+      'The installer already wrote the root `.env`, so leave it when it exists. Copy the template only when it is missing, and ask the owner for every real secret.',
     ],
-    commands: [{ label: 'Copy the env template', cmd: 'cp .env.example .env' }],
-    secrets: true,
-    vars: [
-      {
-        name: 'DATABASE_URL',
-        desc: 'Keep the template default. Compose’s Postgres matches it. Change it only if you override `POSTGRES_PASSWORD` in `.env`.',
-      },
-      {
-        name: 'INGEST_TOKEN',
-        desc: 'Shared secret for agent ingest: POST /events, register, heartbeat, and run writes. The dashboard does not send this header. `bash install.sh` writes a random value when `.env` is created and does not replace it later. You MAY generate one with `openssl rand -hex 24`. If it is blank and the API is on loopback, ingest stays open outside production and the API logs a warning. Production with no token returns 401 on ingest. If it is blank and the API binds anywhere else, the API refuses to start. Compose does not invent a token.',
-      },
-      {
-        name: 'DASHBOARD_PASSWORD_HASH',
-        desc: 'scrypt hash of the dashboard password. `bash install.sh` writes it and prints the password once, in the final summary. The file stores the hash only. A second run does not print or change it. `npm run password:reset` sets a new one and revokes every session. Under Compose that command is `docker compose exec api npm run password:reset`. Leave it blank on a loopback `npm run dev` and the dashboard stays open. Compose requires it because the API sees the Docker network, not loopback.',
-      },
-      {
-        name: 'SESSION_SECRET',
-        desc: 'Signs the session cookie. `bash install.sh` writes a random value. A second run does not replace it.',
-      },
-      {
-        name: 'SESSION_STATE_PATH',
-        desc: 'File that stores the session version and a changed password hash. Log out and a password change bump the version, so an old cookie returns 401 after a restart. Default is apps/api/data/session-state.json. Compose uses /data/auth/session-state.json on the mc-auth volume. When the file has a hash, it overrides DASHBOARD_PASSWORD_HASH on startup.',
-      },
-      {
-        name: 'LOGIN_FAIL_LIMIT',
-        desc: 'Wrong dashboard passwords allowed from one IP inside the window. Default 5. Loopback is not counted. Agent ingest is not counted.',
-      },
-      {
-        name: 'LOGIN_WINDOW_SECONDS',
-        desc: 'Window for those failures, in seconds. Default 60. The first wait after the limit matches this number.',
-      },
-      {
-        name: 'LOGIN_BACKOFF_MAX_SECONDS',
-        desc: 'Longest login wait, in seconds. Default 900, which is 15 minutes. Each later lockout doubles until it reaches this cap.',
-      },
-      {
-        name: 'TRUSTED_PROXY',
-        desc: 'Optional. Comma separated addresses of proxies whose X-Forwarded-For header is trusted for the login bucket only. Leave this blank. Do not set it to the Docker bridge. It does not skip login. Cloudflare Tunnel and Tailscale Serve do not need it. They use the tunnel port.',
-      },
-      {
-        name: 'WEB_ORIGIN',
-        desc: 'Template default covers `localhost` + `127.0.0.1`. Add your tunnel origin later if you access the dashboard remotely.',
-      },
-      {
-        name: 'GITHUB_TOKEN (optional)',
-        desc: 'Ask the human to paste this only if they want pull request merge from Approvals. Everything else works without it.',
-      },
-    ],
+    commands: [{ cmd: 'cp .env.example .env' }],
+    links: [{ label: 'Every variable', to: stepDoc('connect-step-3-the-root-env'), external: true }],
     confirmable: true,
   },
   {
@@ -191,14 +132,10 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'host',
     phaseLabel: 'ON THE HOST',
     body: [
-      `\`bash install.sh\` already starts Postgres, the API, and the web UI. The browser uses port ${WEB_PORT} (\`MC_WEB_PORT\`). Leave \`VITE_API_URL\` unset. nginx proxies \`/api\` and \`/socket.io\` to the API.`,
-      `The API loads the root \`.env\` and runs \`prisma migrate deploy\` before it listens. A native install listens on port ${API_PORT} (\`PORT\`, or \`MC_API_PORT\` when \`PORT\` is unset). Inside Compose the log line stays \`mission-control api listening on 0.0.0.0:3000\`. The host API port is \`MC_API_PORT\`.`,
-      'No Docker? The installer says so and uses Node.js 20.17 or later and Postgres 16. The advanced path is also in the README. No OpenClaw? `npm run seed:demo` fills sample data.',
+      'The installer already started Postgres, the API, and the web UI. Run this to start them again with Docker Compose.',
     ],
-    commands: [
-      { label: 'Build and start', cmd: 'docker compose up -d --build' },
-      { label: 'Service status', cmd: 'docker compose ps' },
-    ],
+    commands: [{ cmd: 'docker compose up -d --build' }],
+    links: [{ label: 'Ports and modes', to: stepDoc('connect-step-4-start-the-stack'), external: true }],
     confirmable: true,
   },
   {
@@ -207,11 +144,9 @@ export const STEP_DATA: ConnectStep[] = [
     phase: 'verify',
     phaseLabel: 'VERIFY',
     body: [
-      `Open \`http://localhost:${WEB_PORT}/#/tasks\`. The task board loads and the sidebar shows a green Connected dot when the live socket is up.`,
-      'The first open asks for a timezone, then whether to use the Mission Control crew or keep each agent\'s own name, then confirms the detected provider. Skip finishes that open. Change each one later under System, then Settings. Crew seats are saved by agent id. Open Tasks for the board and System for health.',
-      'Health on this same origin shows uptime, client count, and database state. Empty states show actions.',
-      'Dot stays red? The API is down, or this browser has no session. On Compose, sign in with the password from install. Reset it with docker compose exec api npm run password:reset. This install asks on this machine too.',
+      `Open \`http://localhost:${WEB_PORT}/#/tasks\` and sign in with the password from install. The task board loads and the sidebar shows a green Connected dot.`,
     ],
+    links: [{ label: 'If the dot stays red', to: stepDoc('connect-step-5-verify-the-dashboard'), external: true }],
     probe: 'health',
     confirmable: false,
   },
@@ -220,26 +155,11 @@ export const STEP_DATA: ConnectStep[] = [
     title: 'Connect your OpenClaw (the bridge)',
     phase: 'verify',
     phaseLabel: 'VERIFY',
-    // Ticket 3: copy now points at the vendored `bridge/` (mc-bridge-sync.py)
-    // instead of a private per-machine cron script. Text-only change.
     body: [
-      'Optional. Skip this step when OpenClaw is not installed. `bash install.sh` skips the bridge schedule in that case and that step still exits 0. `npm run seed:demo` does not need OpenClaw.',
-      'Paste `docs/PASTE_IN.md` into OpenClaw and say yes. That file runs `bash install.sh`, reports the URL the installer prints, then registers and sends a heartbeat. It also shows the POST /tickets and POST /runs calls. It does not start the OpenClaw gateway. The 401 line is in `docs/API.md`.',
-      'When the openclaw command is on PATH, `bash install.sh` installs the schedule: a systemd user timer on Linux, cron if that timer is not available, or launchd on macOS. The interval is `MC_BRIDGE_INTERVAL_SECONDS` (default 300). The job runs `bridge/mc-bridge-sync.py` with `MC_BRIDGE_REGISTER` (default 1). Remove it with `bash install.sh --uninstall-schedule`.',
-      'The bridge is `bridge/mc-bridge-sync.py` (Python 3, stdlib only). It reads OpenClaw through the openclaw command and POSTs agents, sessions, calendar, usage, approvals, models, and devices snapshots plus `run.*` events. Devices come from `openclaw devices list` and nodes from `openclaw nodes list`. Approvals stay empty until `MC_BRIDGE_APPROVALS_CMD` prints them. Models come from `~/.openclaw/openclaw.json`. When that file has no model, the bridge runs `openclaw models list`. Usage prices tokens from `config/prices.json`. A reported costUsd wins. The API URL comes from `MC_API_URL`, then `MC_API_PORT`, then `PORT`.',
-      'Under Compose the bridge checks the gateway at 127.0.0.1 on the configured port and posts gateway.snapshot with x-ingest-token. System shows Unknown when that report is missing or older than GATEWAY_STATUS_MAX_AGE_MS (default 600000). A future checkedAt is counted from the time the API stored the report. A native install, or an explicit OPENCLAW_GATEWAY_HOST, probes that host directly on OPENCLAW_GATEWAY_PORT (default 18789). Gateway logs are read from `OPENCLAW_LOG_DIR`. The default is `/tmp/openclaw`.',
-      'It reads `INGEST_TOKEN` from the **root `.env`** (step 3) and sends it as `x-ingest-token` on POST /events, register, heartbeat, and run writes. Dashboard routes use the session cookie instead. Set the token explicitly. The bridge refuses a blank token. `npm run doctor` fails when a schedule is installed and the last successful sync is older than `MC_BRIDGE_STALE_SECONDS` (default 600). With no schedule, that age is an info line. If doctor says this user lacks permission to use the Docker socket, add the user to the docker group and start a new login session.',
-      'Try `--dry-run` first, then a real sync. A 401 means the bridge and the API disagree on the token. Read `INGEST_TOKEN` from the root `.env`. The installer stores it there and does not print it.',
-      'Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (do not replace the whole file). The Mission Control starter is `agents.defaults.subagents.maxChildrenPerAgent` = 3 and `maxConcurrent` = 4. The api does not read these. They cap OpenClaw fan-out. The installer offers this merge and does not edit the file.',
+      'Optional. With OpenClaw on PATH, the first line previews a sync and the second sends one, and without it you can load demo data instead.',
     ],
-    commands: [
-      { label: 'Preview, then sync once', cmd: 'python3 bridge/mc-bridge-sync.py --dry-run\npython3 bridge/mc-bridge-sync.py' },
-    ],
-    links: [
-      { label: 'docs/PASTE_IN.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/docs/PASTE_IN.md', external: true },
-      { label: 'docs/API.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/docs/API.md#41-auth', external: true },
-      { label: 'bridge/README.md', to: 'https://github.com/jaysinghcodes/mission-control/blob/main/bridge/README.md', external: true },
-    ],
+    commands: [{ cmd: 'python3 bridge/mc-bridge-sync.py --dry-run\npython3 bridge/mc-bridge-sync.py' }],
+    links: [{ label: 'Bridge details', to: stepDoc('connect-step-6-the-openclaw-bridge'), external: true }],
     confirmable: true,
   },
   {
@@ -247,13 +167,10 @@ export const STEP_DATA: ConnectStep[] = [
     title: 'Connect from another machine (optional)',
     phase: 'here',
     phaseLabel: 'YOU ARE HERE',
-    body: [
-      'Three free ways from a laptop are in the remote access guide: SSH to the owner port, Tailscale Serve, and Cloudflare Tunnel. Login is required on a Compose install.',
-      `Run the SSH command for the OS you are on, replacing \`<your-server-ip>\` with your host. The owner port is ${WEB_PORT} (\`MC_WEB_PORT\`). Keep the SSH session open. The page calls the API on that same origin.`,
-      'Tailscale Serve and Cloudflare Tunnel point at `127.0.0.1` on the tunnel port. `MC_REMOTE_PORT` defaults to 3011. Leave `TRUSTED_PROXY` unset.',
-    ],
+    // The command forwards the owner port, MC_WEB_PORT. Tailscale Serve and Cloudflare Tunnel are in the guide.
+    body: [`On your laptop, forward port ${WEB_PORT} over SSH and keep the session open.`],
     links: [
-      { label: 'Remote access guide', to: 'https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md', external: true },
+      { label: 'Remote access guide', to: 'https://github.com/jaysinghcodes/Mission-Control/blob/main/docs/REMOTE.md#from-the-connect-page', external: true },
     ],
     probe: 'health',
     confirmable: false,
@@ -263,18 +180,10 @@ export const STEP_DATA: ConnectStep[] = [
     title: 'Smoke test',
     phase: 'here',
     phaseLabel: 'YOU ARE HERE',
-    // Say what works with no OpenClaw, and what needs the step 6 bridge.
     body: [
-      '**No OpenClaw needed:** Tickets. There is no ticket delete route. Create one, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.',
-      '**No OpenClaw needed:** after `npm run seed:demo`, Calendar / Team / Office / Live Activity show labelled sample data.',
-      '**Needs the step 6 bridge:** your real cron jobs on Calendar, the real roster on Team, Office bots moving on real `run.*` events, and live agent activity.',
+      'Create a ticket, move it across the board, and refresh to see it stay. Demo data fills Calendar, Team, and Office, and the bridge replaces it with your real agents.',
     ],
-    links: [
-      { label: 'Tickets', to: '/tickets' },
-      { label: 'Calendar', to: '/calendar' },
-      { label: 'Office', to: '/office' },
-      { label: 'Live Activity', to: '/activity' },
-    ],
+    links: [{ label: 'What to check', to: stepDoc('connect-step-8-smoke-test'), external: true }],
     confirmable: true,
   },
 ]
@@ -347,43 +256,6 @@ export function CodeBlock({ cmd, label }: { cmd: string; label?: string }) {
   )
 }
 
-/** Secrets callout for step 3. The root .env variables. */
-export function SecretsCallout({ vars }: { vars: StepVar[] }) {
-  return (
-    <div className="mt-4 rounded-r-lg border-l-2 border-mc-orange bg-mc-inner py-3 pl-4 pr-3">
-      <div className="flex items-start gap-2.5">
-        <span
-          aria-hidden
-          className="mt-px grid h-4 w-4 shrink-0 place-items-center rounded-full border border-mc-orange text-[10px] font-bold leading-none text-mc-orangetext"
-        >
-          !
-        </span>
-        <div>
-          <p className="text-[13px] font-semibold leading-snug text-mc-text">
-            Never invent or guess credentials. Ask the human who owns them.
-          </p>
-          <p className="mt-1 text-[12px] leading-relaxed text-mc-sub">
-            Pause and ask for every real secret; redact secrets in any echoed output; show the command before running it;
-            side-effecting actions stay approval-gated.
-          </p>
-        </div>
-      </div>
-      <div className="mt-3 border-t border-mc-border/60 pt-3">
-        <SectionLabel>Required vars, the root .env</SectionLabel>
-        <div className="mt-2.5 space-y-2.5">
-          {vars.map((v) => (
-            <div key={v.name}>
-              <div className="font-mono text-[12.5px] font-semibold text-mc-text [overflow-wrap:anywhere]">{v.name}</div>
-              <p className="mt-0.5 text-[12px] leading-relaxed text-mc-sub">{fmt(v.desc)}</p>
-            </div>
-          ))}
-        </div>
-        <p className="mt-2.5 text-[12px] text-mc-faint">{fmt('`.env` is git-ignored. Never commit it.')}</p>
-      </div>
-    </div>
-  )
-}
-
 /** One numbered step card. `children` = the page-injected dynamic zone (probe / OS switcher). */
 export function ConnectStepCard({
   step,
@@ -422,7 +294,6 @@ export function ConnectStepCard({
           ))}
         </div>
         {step.commands?.map((c, i) => <CodeBlock key={i} cmd={c.cmd} label={c.label} />)}
-        {step.secrets && step.vars && <SecretsCallout vars={step.vars} />}
         {step.links && (
           <div className="mt-3.5 flex flex-wrap items-center gap-2">
             {step.links.map((l) =>

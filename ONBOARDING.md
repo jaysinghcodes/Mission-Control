@@ -132,7 +132,7 @@ Optional. Three free ways are in [docs/REMOTE.md](docs/REMOTE.md). Login is requ
 SSH uses the owner web port only. The default is 5173. On the laptop:
 
 ```sh
-ssh -L 5173:127.0.0.1:5173 ubuntu@<your-server-ip>
+ssh -L 5173:127.0.0.1:5173 ubuntu@your-server-ip
 ```
 
 Keep the SSH session open. On the laptop, open `http://127.0.0.1:5173/#/tasks`. If the installer printed another web port, use that port in the command and in the URL. Tailscale Serve and Cloudflare Tunnel point at `127.0.0.1` on `MC_REMOTE_PORT` (default 3011). `/#/connect` repeats the SSH command per operating system and links to the guide. The Connection panel does too.

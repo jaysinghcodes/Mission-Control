@@ -25,7 +25,7 @@ test('settings, system, and the pair dialog link to the remote access guide', as
   assert.equal(system.includes('SSH tunnel'), false)
   assert.match(system, /Remote access guide/)
   assert.match(system, /Remote access/)
-  assert.match(connect, /ssh -L \$\{port\}:127\.0\.0\.1:\$\{port\} ubuntu@<your-server-ip>/)
+  assert.match(connect, /ssh -L \$\{port\}:127\.0\.0\.1:\$\{port\} ubuntu@your-server-ip/)
   assert.match(connect, /MC_WEB_PORT/)
   assert.match(connect, /localhost:\$\{WEB_PORT\}/)
   assert.doesNotMatch(connect, /-L 3000:127\.0\.0\.1:3000/)
