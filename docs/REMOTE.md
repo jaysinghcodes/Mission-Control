@@ -2,16 +2,16 @@
 
 ## Pick your setup
 
-Two setups work. Pick one, then follow its numbered steps. Default ports are 3000 for the API (`MC_API_PORT`), 5173 for the web app (`MC_WEB_PORT`), and 3011 for the tunnel (`MC_REMOTE_PORT`). Set any of them in `.env` to change it, and use your values in the commands below.
+Two setups work. Pick the one that fits you. Default ports are 3000 for the API (`MC_API_PORT`), 5173 for the web app (`MC_WEB_PORT`), and 3011 for the tunnel (`MC_REMOTE_PORT`). Set any of them in `.env` to change it, and use your values in the commands below.
 
 | Setup | Mission Control runs on | OpenClaw and the bridge run on | You open it from |
 | --- | --- | --- | --- |
-| A (recommended) | the VPS | the VPS | a laptop or phone, through a tunnel |
+| A | the VPS | the VPS | a laptop or phone, through a tunnel |
 | B | the laptop | the VPS | the laptop browser |
 
-### A. OpenClaw and Mission Control on the VPS (recommended)
+### A. OpenClaw and Mission Control on the VPS
 
-Everything is on one host. The bridge posts to the API on loopback, and nothing has to reach into your laptop.
+Everything is on one host. The bridge posts to the API on loopback.
 
 1. On the VPS, install OpenClaw first so the `openclaw` command is on PATH.
 2. On the VPS, install Mission Control. Save the password it prints.
@@ -20,7 +20,7 @@ Everything is on one host. The bridge posts to the API on loopback, and nothing 
    curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/install.sh | bash
    ```
 
-3. The installer sees `openclaw`, installs the bridge schedule, and runs the bridge once. The schedule then posts every 300 seconds (`MC_BRIDGE_INTERVAL_SECONDS`) to `http://127.0.0.1` on `MC_API_PORT`. To check it now, run this in the checkout:
+3. The installer sees `openclaw`, installs the bridge schedule, and runs the bridge once. The schedule then posts every 300 seconds (`MC_BRIDGE_INTERVAL_SECONDS`) to `http://127.0.0.1` on `MC_API_PORT`. To run it now, use this in the checkout:
 
    ```bash
    python3 bridge/mc-bridge-sync.py
@@ -39,58 +39,44 @@ The [SSH tunnel](#ssh-tunnel), [Tailscale Serve](#tailscale-serve), and [Cloudfl
 
 ### B. Mission Control on the laptop, OpenClaw on the VPS
 
-The laptop is the dashboard. The bridge has to run where OpenClaw runs, so it runs on the VPS and posts to the laptop API. The laptop must stay awake and online for new data to arrive.
+The laptop is the dashboard. The bridge has to run where OpenClaw runs, so it runs on the VPS and posts to the laptop API over Tailscale. The laptop must stay awake and online for new data to arrive.
 
 1. On the laptop, install Mission Control with the same command as A step 2, then open `http://localhost:5173/#/tasks`.
-2. On the laptop, read the ingest token from `.env` in the checkout. Keep it private.
+2. Install Tailscale on both the laptop and the VPS, and sign in to the same tailnet on both. Turn on MagicDNS so the laptop has a name such as `your-mac.tailnet.ts.net`.
+3. On the laptop, serve the API port on the tailnet and leave it running:
+
+   ```bash
+   tailscale serve --bg --http 3000 http://127.0.0.1:3000
+   ```
+
+   The bridge URL is then `http://your-mac.tailnet.ts.net:3000`. Use the MagicDNS name. The raw 100.x address of the laptop returns 404 here. If the laptop `MC_API_PORT` is not 3000, use it in place of the last 3000.
+
+4. On the laptop, read the ingest token from `.env` in the checkout. Keep it private. It stays in the laptop `.env`.
 
    ```bash
    grep '^INGEST_TOKEN=' .env
    ```
 
-3. Let the VPS reach the laptop API. Compose publishes that API on `127.0.0.1` only, so pick one of these and leave it running.
-
-   SSH reverse tunnel, run on the laptop. Port 3200 is an example of a free port on the VPS. The bridge URL is then `http://127.0.0.1:3200`.
+5. On the VPS, in a Mission Control checkout, run the bridge once with the laptop URL and token set for that run only:
 
    ```bash
-   ssh -N -R 3200:127.0.0.1:3000 ubuntu@your-vps
+   INGEST_TOKEN=paste-the-laptop-value MC_API_URL=http://your-mac.tailnet.ts.net:3000 MC_BRIDGE_REGISTER=1 python3 bridge/mc-bridge-sync.py
    ```
 
-   Tailscale, with both machines on one tailnet, run on the laptop. The bridge URL is then `http://your-laptop:3000`, using the laptop tailnet name or its 100.x address.
+   These values win over the VPS `.env` for this run and do not change it, so a VPS install from setup A keeps working.
 
-   ```bash
-   tailscale serve --bg --tcp 3000 tcp://127.0.0.1:3000
-   ```
+6. On the laptop, open Agents. Your OpenClaw agents are there.
 
-   If the laptop `MC_API_PORT` is not 3000, use it in place of the last 3000 in either command.
+Notes for setup B:
 
-4. On the VPS, open the Mission Control checkout. The bridge script lives there, so clone it with the same install command if the VPS has none. Set `INGEST_TOKEN` in its `.env` to the laptop value:
-
-   ```
-   INGEST_TOKEN=paste-the-laptop-value
-   ```
-
-5. On the VPS, install the schedule again with the laptop URL from step 3. The installer writes `MC_API_URL` to `.env`, puts it on the schedule, and runs the bridge once.
-
-   ```bash
-   MC_API_URL=http://127.0.0.1:3200 bash install.sh
-   ```
-
-   That run also starts a Mission Control stack on the VPS. Setup B does not use it. `docker compose down` in the VPS checkout stops it and leaves the schedule in place.
-
-6. Check it. On the VPS, run the bridge once by hand. It reads `MC_API_URL` and `INGEST_TOKEN` from `.env`.
-
-   ```bash
-   python3 bridge/mc-bridge-sync.py
-   ```
-
-   On the laptop, Agents now shows your OpenClaw agents. A 401 means the two tokens differ. A connection error means the tunnel from step 3 is not open.
-
-`npm run seed:demo` on the laptop still works in this setup and does not need OpenClaw.
+* `/health` and dashboard reads return 401 without a session cookie, so a 401 from a quick curl still means the laptop is reachable. The bridge signs in on `/events` with `x-ingest-token`.
+* A 401 in the bridge output means the token is not the laptop value.
+* A 404 on a run update for a run id that exists only in the VPS database is expected, because the two databases are separate.
+* `npm run seed:demo` on the laptop still works and does not need OpenClaw.
 
 ### FAQ
 
-**Does the install connect OpenClaw?** No. `bash install.sh` does not start OpenClaw or connect to it. When `openclaw` is on PATH on the same machine, the installer adds the bridge schedule, and the bridge is the link. When it is not, the installer prints a skip line and finishes. In setup B the laptop install never sees OpenClaw, so steps 3 to 5 make that link.
+**Does the install connect OpenClaw?** No. `bash install.sh` does not start OpenClaw or connect to it. When `openclaw` is on PATH on the same machine, the installer adds the bridge schedule, and the bridge is the link. When it is not, the installer prints a skip line and finishes. In setup B the laptop install never sees OpenClaw, so the bridge run from the VPS makes that link.
 
 **Why is Agents empty?** A fresh install has no agents and no sample data. Agents fills when the bridge runs, or after you load sample data from the checkout. On Compose this needs Node.js 20.17 or later on the host.
 

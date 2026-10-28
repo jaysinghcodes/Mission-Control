@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/
 
 Then open the URL the script prints. The default is **http://localhost:5173/#/tasks**. That URL uses `MC_WEB_PORT` (default 5173). A native install listens for the API on `PORT` (default 3000). `MC_API_PORT` is the Compose host port for the API (default 3000) and is also accepted on the native path when `PORT` is unset. When both are set, `PORT` is the native listen port. The container still listens on 3000.
 
-**Pick your setup.** OpenClaw and Mission Control together on a VPS is the recommended setup. Mission Control on a laptop with OpenClaw on a VPS works too. The install does not connect OpenClaw by itself, and Agents stays empty until the bridge runs or `npm run seed:demo` loads sample data. The numbered steps for both setups and a short FAQ are in [docs/REMOTE.md](docs/REMOTE.md#pick-your-setup).
+**Pick your setup.** Run OpenClaw and Mission Control together on a VPS, or run Mission Control on a laptop with OpenClaw on a VPS. The install does not connect OpenClaw by itself, and Agents stays empty until the bridge runs or `npm run seed:demo` loads sample data. The numbered steps for both setups and a short FAQ are in [docs/REMOTE.md](docs/REMOTE.md#pick-your-setup).
 
 The clip above is five frames from one local run of the API and the web app. `bridge/mc-bridge-sync.py` read fixture JSON, because this machine has no OpenClaw install. The stills and the captions are in [Screenshots](#screenshots).
 
