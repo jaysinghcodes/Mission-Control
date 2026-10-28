@@ -164,7 +164,7 @@ const CRON_JOBS = [
 ];
 
 // Statuses are the kanban columns in Tickets.tsx (todo/build/qa/review/done) + backlog.
-// Assignees are agent ids. A display name does not seat a bot.
+// Assignees are agent ids. The web resolves an id first, then one unique visible display name.
 const TICKETS = [
   { id: 'demo-ticket-1', key: 'DEMO-1', title: 'Draft onboarding checklist', status: 'todo', priority: 'med', assignee: demoAgentId('Atlas'), tags: ['docs'], points: 2 },
   { id: 'demo-ticket-2', key: 'DEMO-2', title: 'Add dark-mode screenshots', status: 'todo', priority: 'low', assignee: demoAgentId('Pixel'), tags: ['design'], points: 1 },

@@ -2,14 +2,15 @@
  * One live placement for Agents, Team, and Office.
  *
  * Precedence, first match wins:
- * 1. Active ticket. The assignee equals the agent id. A display name does
- *    not seat a bot. The ticket is in build, qa, or review (inprogress
+ * 1. Active ticket. The assignee resolves to this bot on the roster the
+ *    screen is placing (see resolveRosterLabel). The ticket is in build,
+ *    qa, or review (inprogress
  *    counts as build). The room is that stage. The subtitle is the ticket
  *    title. Several tickets: newest createdAt, then the later stage. A
  *    ticket in done does not seat its bot. The bot returns to Commons.
  *    Pipeline still counts that ticket in Deploy.
  * 2. Active run, when no active ticket applies. status is running or
- *    needs_approval, agent equals this bot's id, and ticketId points at a
+ *    needs_approval, agent resolves to this bot, and ticketId points at a
  *    ticket in build, qa, review, or done. The room is that ticket's
  *    stage. Deploy seats a bot only when this run points at a ticket in
  *    done. A run on a review ticket seats Ship. The subtitle is the
@@ -96,17 +97,46 @@ function timeMs(iso: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0
 }
 
+interface RosterEntry {
+  id: string
+  name?: string | null
+}
+
+function folded(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
 /**
- * Ticket assignees and run agents match the agent id.
- * A display name never seats a bot.
+ * Resolve a ticket assignee or run agent label against the roster the
+ * screen is placing (visible agents only). Rules, locked Oct 27 2026:
+ * 1. Trim. An empty label is unresolved.
+ * 2. An exact id match (trimmed, case sensitive) wins.
+ * 3. Otherwise a case insensitive match on the trimmed name. Exactly one
+ *    hit resolves. None or several stay unresolved, so an ambiguous name
+ *    seats nobody.
+ * Returns the agent id, or null when unresolved.
  */
-export function samePerson(
-  agent: { id: string; name?: string },
+export function resolveRosterLabel(
+  roster: readonly RosterEntry[],
   label: string | null | undefined,
-): boolean {
+): string | null {
   const raw = (label ?? '').trim()
-  if (!raw) return false
-  return raw === agent.id.trim()
+  if (!raw) return null
+  const byId = roster.find((entry) => entry.id.trim() === raw)
+  if (byId) return byId.id
+  const key = raw.toLowerCase()
+  const hits = roster.filter((entry) => folded(entry.name) === key)
+  return hits.length === 1 ? hits[0].id : null
+}
+
+/** True when the label resolves to this agent on the given roster. */
+export function samePerson(
+  agent: { id: string },
+  label: string | null | undefined,
+  roster: readonly RosterEntry[],
+): boolean {
+  const id = resolveRosterLabel(roster, label)
+  return id !== null && id === agent.id
 }
 
 function ticketSubtitle(ticket: LiveTicket): string {
@@ -121,9 +151,10 @@ export function deriveLiveWork(
   agent: LivePerson,
   tickets: readonly LiveTicket[],
   runs: readonly LiveRun[],
+  roster: readonly RosterEntry[],
 ): LiveWork {
   const assigned = tickets.filter(
-    (ticket) => samePerson(agent, ticket.assignee) && ticketSeats(ticket.status),
+    (ticket) => samePerson(agent, ticket.assignee, roster) && ticketSeats(ticket.status),
   )
   assigned.sort((a, b) => {
     const byTime = timeMs(b.createdAt) - timeMs(a.createdAt)
@@ -144,7 +175,7 @@ export function deriveLiveWork(
 
   const active = runs.filter((run) => {
     if (run.status !== 'running' && run.status !== 'needs_approval') return false
-    if (!samePerson(agent, run.agent)) return false
+    if (!samePerson(agent, run.agent, roster)) return false
     const linked = tickets.find((row) => row.id && run.ticketId && row.id === run.ticketId)
     return !!linked && !!stageRoom(linked.status)
   })
