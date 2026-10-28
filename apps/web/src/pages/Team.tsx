@@ -10,6 +10,7 @@ import { PageHeader, SoftCard, Btn, AgentName, Kicker, EmptyState, FieldError } 
 import { RosterRobot, SampleTag } from '../components/rosterMarks'
 import { OPERATOR_NAME } from '../config'
 import { formatZoneSaved } from '../lib/zone-day'
+import { useEscape } from '../lib/useEscape'
 import { deviceStatus } from '../lib/device-status'
 import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
@@ -368,6 +369,8 @@ function sortDevices(rows: DeviceRow[]): DeviceRow[] {
 }
 
 function Sheet({ title, children, onClose, closeButton = true }: { title: string; children: ReactNode; onClose: () => void; closeButton?: boolean }) {
+  // Esc closes, same as the backdrop and Cancel or Close.
+  useEscape(onClose)
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4" onClick={onClose}>
       <div className="mc-card w-full max-w-md px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}>

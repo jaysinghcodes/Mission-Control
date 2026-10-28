@@ -13,6 +13,7 @@ import { useRosterLive } from '../lib/useRosterLive'
 import { useWorkLive } from '../lib/useWorkLive'
 import { OFFLINE_LABEL, isRegisteredOffline, showSampleTag } from '../lib/sample-roster'
 import { useRosterView } from '../lib/useSampleRoster'
+import { AGENTS_NO_MATCH_TITLE, agentsNoMatchBody } from '../lib/agents-empty'
 
 /**
  * Agents — who is doing what right now. The old Team roster, as cards.
@@ -98,6 +99,11 @@ export default function Agents() {
           title="No agents yet"
           body="Connect the OpenClaw bridge, or run npm run seed:demo. This page stays empty on purpose until someone is on the roster."
         />
+      )}
+      {data && roster.length > 0 && visible.length === 0 && (
+        <div data-agents-no-match>
+          <EmptyState title={AGENTS_NO_MATCH_TITLE} body={agentsNoMatchBody(query, filter)} />
+        </div>
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {visible.map((agent) => {
