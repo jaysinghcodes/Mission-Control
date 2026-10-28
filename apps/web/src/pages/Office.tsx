@@ -114,7 +114,7 @@ export default function Office() {
 
   const floor = useMemo(() => {
     const blocked = new Set<string>()
-    const live = new Map(roster.map((agent) => [agent.id, deriveLiveWork(agent, ticketRows, runRows)]))
+    const live = new Map(roster.map((agent) => [agent.id, deriveLiveWork(agent, ticketRows, runRows, roster)]))
     for (const agent of roster) {
       if (!isRegisteredOffline(agent, now) && agentNeedsYou(agent, pending, ticketRows)) blocked.add(agent.id)
     }

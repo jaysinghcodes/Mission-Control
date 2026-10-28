@@ -147,7 +147,7 @@ export default function Calendar() {
     const who = ownerSticker(job.name)
     // Create is 201. 400 names the bad field. 404 is an unknown ticket.
     // A 200 body with an error key is a failure, same as any non 2xx.
-    // The run agent is the id. A display name does not seat the bot.
+    // The run agent is the id, the surest label for live placement.
     const res = await apiSend<{ run?: { id: string } }>('POST', '/runs', who?.matched ? { name: job.name, agent: who.agent.id } : { name: job.name })
     if (res.ok && res.status === 201 && res.data?.run?.id) {
       setRan('Queued on the pipeline')

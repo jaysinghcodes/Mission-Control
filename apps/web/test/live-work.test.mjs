@@ -31,6 +31,9 @@ await writeFile(new URL('board-live.js', gen), boardJs)
 const live = await import(new URL('live-work.js', gen))
 const board = await import(new URL('board-live.js', gen))
 
+/** Most cases place the bot on a roster of one. */
+const derive = (agent, tickets, runs, roster = [agent]) => live.deriveLiveWork(agent, tickets, runs, roster)
+
 const forge = { id: 'forge', name: 'Forge', role: 'engineer', status: 'working', currentTask: 'Ticket 4 · Projects' }
 
 test('the stage map matches the board', () => {
@@ -40,13 +43,13 @@ test('the stage map matches the board', () => {
 })
 
 test('an active ticket stage beats the run and the heartbeat, and role does not place the bot', () => {
-  const idle = live.deriveLiveWork(forge, [], [])
+  const idle = derive(forge, [], [])
   assert.equal(idle.room, 'commons')
   assert.equal(idle.source, 'heartbeat')
   assert.equal(idle.subtitle, 'Ticket 4 · Projects')
   assert.equal(idle.working, true)
 
-  const placed = live.deriveLiveWork(
+  const placed = derive(
     forge,
     [
       { id: 'old', title: 'Old build', status: 'build', assignee: 'Forge', createdAt: '2026-10-01T00:00:00Z' },
@@ -60,37 +63,113 @@ test('an active ticket stage beats the run and the heartbeat, and role does not 
   assert.equal(placed.working, true)
 })
 
-test('a display name does not seat a registered bot on a demo ticket', () => {
-  const registered = { id: 'reg_forge', name: 'Forge', status: 'idle', currentTask: '' }
-  const stolen = live.deriveLiveWork(
-    registered,
-    [{ id: 'demo-ticket-3', title: 'Wire calendar week view', status: 'build', assignee: 'Forge' }],
-    [{ id: 'demo-run-2', name: 'Wire calendar week view', agent: 'Forge', status: 'running', ticketId: 'demo-ticket-3' }],
-  )
-  assert.equal(stolen.room, 'commons')
-  assert.equal(stolen.source, 'heartbeat')
+test('an exact id seats the bot, and an id wins over a name another bot has', () => {
+  const forgeBot = { id: 'forge', name: 'Forge', status: 'idle', currentTask: '' }
+  const other = { id: 'Forge', name: 'Builder', status: 'idle', currentTask: '' }
+  const roster = [forgeBot, other]
+  const ticket = [{ id: 't', title: 'Wire calendar week view', status: 'build', assignee: 'Forge' }]
+  const byId = derive(other, ticket, [], roster)
+  assert.equal(byId.room, 'build')
+  assert.equal(byId.source, 'ticket')
+  const notForge = derive(forgeBot, ticket, [], roster)
+  assert.equal(notForge.source, 'heartbeat')
+  assert.equal(live.resolveRosterLabel(roster, '  forge  '), 'forge')
+  assert.equal(live.resolveRosterLabel(roster, 'Forge'), 'Forge')
+})
 
-  const demo = { id: 'forge', name: 'Forge', status: 'working', currentTask: 'Ticket 4 Projects' }
-  const byName = live.deriveLiveWork(
-    demo,
-    [{ id: 'demo-ticket-3', title: 'Wire calendar week view', status: 'build', assignee: 'Forge' }],
-    [],
+test('a unique display name seats the bot, ignoring case and spaces', () => {
+  const quill = { id: 'reg_quill', name: 'Quill', status: 'idle', currentTask: '' }
+  const roster = [quill, { id: 'reg_forge', name: 'Forge' }]
+  for (const label of ['Quill', 'quill', '  QUILL ']) {
+    const work = derive(quill, [{ id: 't', title: 'Release notes', status: 'qa', assignee: label }], [], roster)
+    assert.equal(work.room, 'qa', label)
+    assert.equal(work.subtitle, 'Release notes')
+    assert.equal(work.working, true)
+    assert.equal(work.source, 'ticket')
+  }
+  const run = derive(
+    quill,
+    [{ id: 't', title: 'Release notes', status: 'review', assignee: 'Someone' }],
+    [{ id: 'r', name: 'Ship notes', agent: 'quill', status: 'running', ticketId: 't' }],
+    roster,
   )
-  assert.equal(byName.room, 'commons')
-  assert.equal(byName.source, 'heartbeat')
+  assert.equal(run.room, 'ship')
+  assert.equal(run.source, 'run')
+})
 
-  const seated = live.deriveLiveWork(
-    demo,
-    [{ id: 'demo-ticket-3', title: 'Wire calendar week view', status: 'build', assignee: 'forge' }],
-    [{ id: 'demo-run-2', name: 'Wire calendar week view', agent: 'forge', status: 'running', ticketId: 'demo-ticket-3' }],
-  )
-  assert.equal(seated.room, 'build')
-  assert.equal(seated.subtitle, 'Wire calendar week view')
-  assert.equal(seated.source, 'ticket')
+test('a name two visible bots share seats nobody', () => {
+  const a = { id: 'reg_forge', name: 'Forge', status: 'idle', currentTask: '' }
+  const b = { id: 'forge_two', name: 'forge', status: 'idle', currentTask: '' }
+  const roster = [a, b]
+  const tickets = [{ id: 't', title: 'Wire calendar week view', status: 'build', assignee: 'Forge' }]
+  const runs = [{ id: 'r', name: 'Wire', agent: 'FORGE', status: 'running', ticketId: 't' }]
+  for (const bot of roster) {
+    const work = derive(bot, tickets, runs, roster)
+    assert.equal(work.room, 'commons')
+    assert.equal(work.source, 'heartbeat')
+    assert.equal(work.working, false)
+  }
+  assert.equal(live.resolveRosterLabel(roster, 'Forge'), null)
+  assert.equal(live.resolveRosterLabel(roster, 'Nobody'), null)
+})
+
+test('an empty or blank label seats nobody', () => {
+  const blank = { id: '', name: '', status: 'idle', currentTask: '' }
+  const quill = { id: 'q', name: 'Quill', status: 'idle', currentTask: '' }
+  const roster = [quill, blank]
+  for (const label of ['', '   ', null, undefined]) {
+    assert.equal(live.resolveRosterLabel(roster, label), null)
+    const work = derive(quill, [{ id: 't', title: 'Notes', status: 'qa', assignee: label }], [], roster)
+    assert.equal(work.source, 'heartbeat')
+    const ghost = derive(blank, [{ id: 't', title: 'Notes', status: 'qa', assignee: label }], [], roster)
+    assert.equal(ghost.source, 'heartbeat')
+  }
+})
+
+test('an OpenClaw ingest ticket with the display name seats the bot, then done is Idle', () => {
+  // OpenClaw registers with its own id and creates tickets through the
+  // ingest API with assignee set to the display name.
+  const quill = { id: 'oc-quill-7f3a', name: 'Quill', source: 'registered', status: 'idle', currentTask: '' }
+  const speedy = { id: 'oc-speedy-1b2c', name: 'Speedy', source: 'registered', status: 'working', currentTask: 'Planning' }
+  const roster = [speedy, quill]
+  const ingest = { id: 'tk_9', key: 'MC-9', title: 'Launch notes', assignee: 'Quill', createdAt: '2026-10-27T15:00:00Z' }
+  const inQa = derive(quill, [{ ...ingest, status: 'qa' }], [], roster)
+  assert.equal(inQa.room, 'qa')
+  assert.equal(inQa.subtitle, 'Launch notes')
+  assert.equal(inQa.working, true)
+  const done = derive(quill, [{ ...ingest, status: 'done' }], [], roster)
+  assert.equal(done.room, 'commons')
+  assert.equal(done.subtitle, 'Idle')
+  assert.equal(done.working, false)
+  const beat = derive(speedy, [{ ...ingest, status: 'qa' }], [], roster)
+  assert.equal(beat.source, 'heartbeat')
+  assert.equal(beat.subtitle, 'Planning')
+})
+
+test('hidden samples do not block a unique visible name, and sample tickets use the same rules', () => {
+  const sample = { id: 'forge', name: 'Forge', source: 'default', status: 'idle', currentTask: '' }
+  const real = { id: 'reg_forge', name: 'Forge', source: 'registered', status: 'idle', currentTask: '' }
+  const demoTicket = [{ id: 'demo-ticket-3', title: 'Wire calendar week view', status: 'build', assignee: 'forge' }]
+  const nameTicket = [{ id: 't', title: 'Real work', status: 'review', assignee: 'Forge' }]
+
+  // Samples hidden: the visible roster is only the real bot.
+  const visibleOnly = [real]
+  assert.equal(derive(real, nameTicket, [], visibleOnly).room, 'ship')
+  assert.equal(derive(real, demoTicket, [], visibleOnly).room, 'build')
+
+  // Samples shown: the id goes to the sample, the shared name seats nobody.
+  const both = [sample, real]
+  assert.equal(derive(sample, demoTicket, [], both).room, 'build')
+  assert.equal(derive(real, demoTicket, [], both).source, 'heartbeat')
+  assert.equal(derive(real, nameTicket, [], both).source, 'heartbeat')
+  assert.equal(derive(sample, nameTicket, [], both).source, 'heartbeat')
+
+  // Samples only: a demo ticket by id seats its sample bot.
+  assert.equal(derive(sample, demoTicket, [], [sample]).room, 'build')
 })
 
 test('todo, backlog, and done do not seat a bot, and pipeline still counts done', () => {
-  const todo = live.deriveLiveWork(
+  const todo = derive(
     { id: 'q', name: 'Quill', status: 'idle', currentTask: null },
     [{ id: 't', title: 'Notes', status: 'todo', assignee: 'q', createdAt: '2026-10-01T00:00:00Z' }],
     [],
@@ -99,7 +178,7 @@ test('todo, backlog, and done do not seat a bot, and pipeline still counts done'
   assert.equal(todo.subtitle, 'Idle')
   assert.equal(todo.working, false)
 
-  const done = live.deriveLiveWork(
+  const done = derive(
     { id: 'q', name: 'Quill', status: 'idle', currentTask: 'Keep me' },
     [{ id: 't', title: 'Notes', status: 'done', assignee: 'q' }],
     [],
@@ -113,7 +192,7 @@ test('todo, backlog, and done do not seat a bot, and pipeline still counts done'
 test('an active run on a done ticket seats Deploy, then Commons when the run finishes', () => {
   const quill = { id: 'q', name: 'Quill', status: 'idle', currentTask: '' }
   const ticket = { id: 't', title: 'Notes', status: 'done', assignee: 'q' }
-  const running = live.deriveLiveWork(
+  const running = derive(
     quill,
     [ticket],
     [{ id: 'r', name: 'Ship notes', agent: 'q', status: 'running', ticketId: 't' }],
@@ -122,7 +201,7 @@ test('an active run on a done ticket seats Deploy, then Commons when the run fin
   assert.equal(running.subtitle, 'Notes')
   assert.equal(running.source, 'run')
 
-  const approval = live.deriveLiveWork(
+  const approval = derive(
     quill,
     [ticket],
     [{ id: 'r', name: 'Ship notes', agent: 'q', status: 'needs_approval', ticketId: 't' }],
@@ -130,7 +209,7 @@ test('an active run on a done ticket seats Deploy, then Commons when the run fin
   assert.equal(approval.room, 'deploy')
   assert.equal(approval.source, 'run')
 
-  const finished = live.deriveLiveWork(
+  const finished = derive(
     quill,
     [ticket],
     [{ id: 'r', name: 'Ship notes', agent: 'q', status: 'done', ticketId: 't' }],
@@ -141,7 +220,7 @@ test('an active run on a done ticket seats Deploy, then Commons when the run fin
 })
 
 test('a review ticket outranks a run on a done ticket, and a review run seats Ship', () => {
-  const held = live.deriveLiveWork(
+  const held = derive(
     { id: 'q', name: 'Quill', status: 'idle' },
     [
       { id: 'done', title: 'Shipped', status: 'done', assignee: 'q', createdAt: '2026-10-03T00:00:00Z' },
@@ -153,7 +232,7 @@ test('a review ticket outranks a run on a done ticket, and a review run seats Sh
   assert.equal(held.subtitle, 'Still shipping')
   assert.equal(held.source, 'ticket')
 
-  const reviewRun = live.deriveLiveWork(
+  const reviewRun = derive(
     { id: 'forge', name: 'Forge', status: 'idle', currentTask: 'Heartbeat line' },
     [{ id: 'rev', title: 'Still shipping', status: 'review', assignee: 'Quill' }],
     [{ id: 'r', name: 'Ship notes', agent: 'forge', status: 'running', ticketId: 'rev' }],
@@ -183,7 +262,7 @@ test('register and delete snapshots refetch work, and a heartbeat snapshot does 
 })
 
 test('an active run uses the linked ticket stage when the bot is not the assignee', () => {
-  const work = live.deriveLiveWork(
+  const work = derive(
     { id: 'forge', name: 'Forge', status: 'idle', currentTask: 'Heartbeat line' },
     [{ id: 't', title: 'Ship the notes', status: 'review', assignee: 'Quill' }],
     [{ id: 'r', name: 'Write notes', agent: 'forge', status: 'running', ticketId: 't', createdAt: '2026-10-04T00:00:00Z' }],
@@ -192,7 +271,7 @@ test('an active run uses the linked ticket stage when the bot is not the assigne
   assert.equal(work.subtitle, 'Ship the notes')
   assert.equal(work.source, 'run')
 
-  const queued = live.deriveLiveWork(
+  const queued = derive(
     { id: 'forge', name: 'Forge', status: 'idle', currentTask: '' },
     [{ id: 't', title: 'Ship the notes', status: 'review', assignee: 'Quill' }],
     [{ id: 'r', name: 'Write notes', agent: 'forge', status: 'queued', ticketId: 't' }],
@@ -200,7 +279,7 @@ test('an active run uses the linked ticket stage when the bot is not the assigne
   assert.equal(queued.room, 'commons')
   assert.equal(queued.source, 'heartbeat')
 
-  const bare = live.deriveLiveWork(
+  const bare = derive(
     { id: 'forge', name: 'Forge', status: 'working', currentTask: 'Heartbeat line' },
     [],
     [{ id: 'r', name: 'Write notes', agent: 'forge', status: 'needs_approval' }],
@@ -211,7 +290,7 @@ test('an active run uses the linked ticket stage when the bot is not the assigne
 })
 
 test('a heartbeat currentTask is the subtitle only when no ticket or run supplies one', () => {
-  const beat = live.deriveLiveWork(
+  const beat = derive(
     { id: 'live_quill', name: 'Live Quill', status: 'working', currentTask: 'Writing the live notes' },
     [],
     [],
@@ -220,7 +299,7 @@ test('a heartbeat currentTask is the subtitle only when no ticket or run supplie
   assert.equal(beat.subtitle, 'Writing the live notes')
   assert.equal(beat.working, true)
 
-  const blank = live.deriveLiveWork(
+  const blank = derive(
     { id: 'live_quill', name: 'Live Quill', status: 'idle', currentTask: '   ' },
     [],
     [],
@@ -271,12 +350,12 @@ test('activity names the assignee by id and never the word system', () => {
   assert.notEqual(onlyName.id, 'rogue')
 })
 
-test('Agents, Team, and Office all read deriveLiveWork', async () => {
+test('Agents, Team, and Office all read deriveLiveWork with the visible roster', async () => {
   const agents = await readFile(new URL('../src/pages/Agents.tsx', import.meta.url), 'utf8')
   const team = await readFile(new URL('../src/pages/Team.tsx', import.meta.url), 'utf8')
   const officePage = await readFile(new URL('../src/pages/Office.tsx', import.meta.url), 'utf8')
   for (const page of [agents, team, officePage]) {
-    assert.match(page, /deriveLiveWork/)
+    assert.match(page, /deriveLiveWork\([^)]*, (roster|ticketRows, runRows, roster)\)/)
     assert.match(page, /data-live-room/)
     assert.match(page, /data-live-subtitle/)
   }

@@ -63,7 +63,7 @@ export default function Team() {
   const tickets = ticketsQ.data?.tickets ?? []
   const runs = runsQ.data?.runs ?? []
   const people = naming.order(roster)
-  const liveFor = (agent: (typeof roster)[number]) => deriveLiveWork(agent, tickets, runs)
+  const liveFor = (agent: (typeof roster)[number]) => deriveLiveWork(agent, tickets, runs, roster)
   const working = roster.filter((a) => liveFor(a).working && !isRegisteredOffline(a, now)).length
   const devices = devicesQ.data?.devices ?? []
   const mission = missionQ.data?.mission ?? ''

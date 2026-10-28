@@ -44,7 +44,7 @@ export default function Agents() {
   const pending = approvalsQ.data?.approvals ?? []
   const tickets = ticketsQ.data?.tickets ?? []
   const runs = runsQ.data?.runs ?? []
-  const liveFor = (agent: Agent) => deriveLiveWork(agent, tickets, runs)
+  const liveFor = (agent: Agent) => deriveLiveWork(agent, tickets, runs, roster)
   const shownTone = (agent: Agent) => (isRegisteredOffline(agent, now) ? 'gray' : tone(agent, pending, tickets, liveFor(agent).working))
 
   useRosterLive(events, refetch, connected)
