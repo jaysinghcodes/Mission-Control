@@ -4,6 +4,8 @@ This is the short guide. Paste [PASTE_IN.md](PASTE_IN.md) into OpenClaw. The ope
 
 The API reference, including the 401 line, is [API.md](API.md). OpenClaw is optional. `npm run seed:demo` runs without it. `npm run doctor` checks the local setup. The README opens with the one line installer. Longer install notes are in [INSTALL.md](INSTALL.md).
 
+The install does not connect OpenClaw by itself. The bridge is the link, and the installer adds its schedule only when `openclaw` is on PATH on the same machine. A fresh install shows no agents until the bridge runs, or until `npm ci` and `npm run seed:demo` load sample data. Show sample bots only reveals those seeded rows. To pick between OpenClaw and Mission Control together on a VPS, or Mission Control on a laptop with OpenClaw on a VPS, see [Pick your setup](REMOTE.md#pick-your-setup).
+
 Each heading below is an old anchor. The sentence under it points at the same section in the API reference.
 
 ## 1. What Mission Control is
