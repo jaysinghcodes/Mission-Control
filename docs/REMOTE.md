@@ -73,6 +73,8 @@ Notes for setup B:
 * A 401 in the bridge output means the token is not the laptop value.
 * A 404 on a run update for a run id that exists only in the VPS database is expected, because the two databases are separate.
 * `npm run seed:demo` on the laptop still works and does not need OpenClaw.
+* Always set `MC_API_URL` to the MagicDNS name, such as `http://your-mac.tailnet.ts.net:3000`. Do not use the raw 100.x address.
+* Agents posting tickets from the VPS use that same MagicDNS URL and the laptop token, as [How agents move tickets](#how-agents-move-tickets) says.
 
 ### FAQ
 
@@ -86,6 +88,104 @@ npm run seed:demo
 ```
 
 **Why does Show sample bots show nothing?** That switch only reveals rows that `npm run seed:demo` wrote. It does not create them. Run the seed first. Once a registered bot exists, sample bots stay hidden until you turn the switch on. `npm run seed:clear` removes them.
+
+## How agents move tickets
+
+Each OpenClaw agent reports as itself. Run these from the machine where the agent runs. Set `MC_API` to the API address, for example `export MC_API=http://127.0.0.1:3000` on the same host, or `export MC_API=http://your-mac.tailnet.ts.net:3000` in setup B. Use your `MC_API_PORT` if it is not 3000. Full request shapes are in [API.md](API.md#44-tickets-your-units-of-work) and [PASTE_IN.md](PASTE_IN.md#tickets-and-runs).
+
+1. Read the token from `.env` in the Mission Control checkout. Keep it private. In setup B, use the laptop value.
+
+   ```bash
+   export MC_TOKEN="$(grep '^INGEST_TOKEN=' .env | cut -d= -f2-)"
+   ```
+
+2. Register the agent once. Use its OpenClaw agent id as `id`. A new id answers 201. The same id again answers 200.
+
+   ```bash
+   curl -sS -X POST "$MC_API/agents/register" \
+     -H 'content-type: application/json' -H "x-ingest-token: $MC_TOKEN" \
+     -d '{"id":"forge","name":"Forge"}'
+   ```
+
+3. Send a heartbeat when work starts, and at least every 10 minutes while it runs. It answers 204. An agent with no heartbeat for 10 minutes shows as offline.
+
+   ```bash
+   curl -sS -X POST "$MC_API/agents/forge/heartbeat" \
+     -H 'content-type: application/json' -H "x-ingest-token: $MC_TOKEN" \
+     -d '{"status":"working","currentTask":"Build the login fix"}'
+   ```
+
+4. Create the ticket. Send `x-actor-id` with the id of the agent doing the write. Set `assignee` to an agent id. A new ticket starts in `backlog` or `todo` and answers 201. Keep `ticket.id` from the reply.
+
+   ```bash
+   curl -sS -X POST "$MC_API/tickets" \
+     -H 'content-type: application/json' -H "x-ingest-token: $MC_TOKEN" -H 'x-actor-id: forge' \
+     -d '{"title":"Login fix","status":"todo","assignee":"forge"}'
+   ```
+
+5. Move the ticket with PATCH and the same two headers. The order is `todo`, then `build`, then `qa`, then `review`, then `done`. Pipeline shows `build`, `qa`, `review`, and `done` as Build, QA, Ship, and Deploy.
+
+   ```bash
+   curl -sS -X PATCH "$MC_API/tickets/TICKET_ID" \
+     -H 'content-type: application/json' -H "x-ingest-token: $MC_TOKEN" -H 'x-actor-id: forge' \
+     -d '{"status":"build"}'
+   ```
+
+6. To hand off, PATCH the next status and the next agent as `assignee` in one call, for example `{"status":"qa","assignee":"sentinel"}`. From then on the next agent sends its own id in `x-actor-id`.
+7. When the work ships, PATCH `{"status":"done"}`, then send a heartbeat with `{"status":"idle"}`. The agent returns to Commons.
+
+Tips:
+
+* `x-actor-id` must be a registered agent id, and it must be the agent that is acting, not the one that filed the ticket. A missing or unknown id answers 400.
+* Use agent ids for `assignee`. A display name works only when exactly one visible agent has it.
+* A token may change `status`, `assignee`, `title`, and `description`. There is no ticket delete route.
+
+## Turn on agent handoffs in OpenClaw
+
+Agents hand work to each other with the OpenClaw `sessions_send` tool. Turn it on once per gateway, and prove it before a board run.
+
+1. Back up the config.
+
+   ```bash
+   cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak
+   ```
+
+2. In `~/.openclaw/openclaw.json`, set `tools.agentToAgent.enabled` to `true` and `tools.sessions.visibility` to `"all"`. Keep the other keys in `tools` as they are.
+
+   ```json
+   {
+     "tools": {
+       "agentToAgent": { "enabled": true },
+       "sessions": { "visibility": "all" }
+     }
+   }
+   ```
+
+   If `tools.agentToAgent.allow` is set, list every agent that takes part, both sender and target.
+
+3. Restart the gateway.
+
+   ```bash
+   openclaw gateway restart
+   ```
+
+4. Prove it. Ask the main agent to use `sessions_send` to send a short ping to the forge agent, and check that forge answers in its own session. Do this before you start a board run.
+5. Run the board. Each agent moves its ticket as [How agents move tickets](#how-agents-move-tickets) says, then sends the next agent a `sessions_send` message with the ticket key.
+
+Notes:
+
+* `sessions_send` is enough for handoffs. Each agent keeps its own session.
+* `sessions_spawn` may still only allow agentId `main`. Changing that is a separate OpenClaw setting. Handoffs do not need it.
+* To undo, copy `openclaw.json.bak` back and restart the gateway.
+
+## Auth at a glance
+
+1. Dashboard reads, such as `/health`, `/agents`, and `/tickets`, need the session cookie from signing in. Off loopback, including Compose and the tailnet, they answer 401 without it. A 401 there still means the API is reachable.
+2. Bridge and agent writes send `x-ingest-token` with the `INGEST_TOKEN` value from the `.env` of the Mission Control they post to. That covers `/events`, register, heartbeat, and runs.
+3. Ticket writes, `POST /tickets` and `PATCH /tickets/:id`, send `x-ingest-token` and also `x-actor-id` with the id of the agent that is acting.
+4. A 401 on a write means the token is wrong or the route is for the dashboard only. A 400 `actor must be a registered agent id` means `x-actor-id` is missing or not a registered agent. Register first.
+
+The full auth table is in [API.md](API.md#41-auth).
 
 ## Open it from a laptop or phone
 
