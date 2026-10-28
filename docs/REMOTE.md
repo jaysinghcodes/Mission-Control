@@ -41,7 +41,15 @@ The [SSH tunnel](#ssh-tunnel), [Tailscale Serve](#tailscale-serve), and [Cloudfl
 
 The laptop is the dashboard. The bridge has to run where OpenClaw runs, so it runs on the VPS and posts to the laptop API over Tailscale. The laptop must stay awake and online for new data to arrive.
 
-1. On the laptop, install Mission Control with the same command as A step 2, then open `http://localhost:5173/#/tasks`.
+Setup B needs the Docker install on the laptop. The installer picks Docker when `docker compose` works, and the native path only when it does not.
+
+1. On the laptop, install Docker Desktop and start it, so `docker compose version` works. Then install Mission Control with the same command as A step 2, and check the install mode in the checkout:
+
+   ```bash
+   grep '^MC_INSTALL_MODE=' .env
+   ```
+
+   It must print `MC_INSTALL_MODE=compose`. If it prints `native`, stop here and do not serve the API on the tailnet. Open `http://localhost:5173/#/tasks` and sign in.
 2. Install Tailscale on both the laptop and the VPS, and sign in to the same tailnet on both. Turn on MagicDNS so the laptop has a name such as `your-mac.tailnet.ts.net`.
 3. On the laptop, serve the API port on the tailnet and leave it running:
 
@@ -49,7 +57,11 @@ The laptop is the dashboard. The bridge has to run where OpenClaw runs, so it ru
    tailscale serve --bg --http 3000 http://127.0.0.1:3000
    ```
 
-   The bridge URL is then `http://your-mac.tailnet.ts.net:3000`. Use the MagicDNS name. The raw 100.x address of the laptop returns 404 here. If the laptop `MC_API_PORT` is not 3000, use it in place of the last 3000.
+   3000 is the default laptop `MC_API_PORT`, the Compose host port for the API. If you set another `MC_API_PORT` in `.env`, use that value in place of both 3000s here and in the bridge URL in step 5.
+
+   The bridge URL is then `http://your-mac.tailnet.ts.net:3000`. Use the MagicDNS name. The raw 100.x address of the laptop returns 404 here.
+
+   Run this step only on a Compose install. Serve reaches the API from `127.0.0.1`. Compose still sees that call off loopback, so login holds. A native install would treat it as loopback, and anyone on the tailnet would get the dashboard with no login.
 
 4. On the laptop, read the ingest token from `.env` in the checkout. Keep it private. It stays in the laptop `.env`.
 
@@ -66,15 +78,46 @@ The laptop is the dashboard. The bridge has to run where OpenClaw runs, so it ru
    These values win over the VPS `.env` for this run and do not change it, so a VPS install from setup A keeps working.
 
 6. On the laptop, open Agents. Your OpenClaw agents are there.
+7. Keep the laptop fed. Step 5 runs once. The VPS bridge schedule, the user systemd unit `mission-control-bridge.service` with its timer, still posts to the VPS API every 300 seconds, so laptop agents go stale. Point the unit at the laptop with a drop in file:
+
+   ```bash
+   mkdir -p ~/.config/systemd/user/mission-control-bridge.service.d
+   nano ~/.config/systemd/user/mission-control-bridge.service.d/split.conf
+   ```
+
+   Put this in `split.conf`, with the laptop MagicDNS name and the laptop token:
+
+   ```ini
+   [Service]
+   Environment="MC_API_URL=http://your-mac.tailnet.ts.net:3000"
+   Environment="INGEST_TOKEN=paste-the-laptop-value"
+   Environment="MC_BRIDGE_REGISTER=1"
+   ```
+
+8. Reload systemd, run the bridge once, and restart the timer:
+
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user start mission-control-bridge.service
+   systemctl --user restart mission-control-bridge.timer
+   ```
+
+   Every timer run now posts to the laptop. Agents on the laptop show a fresh last seen within 5 minutes.
+
+Notes for the schedule:
+
+* The drop in overrides the unit only. Leave the VPS `.env` as it is, unless you want split as your default for good.
+* While the drop in is there, the VPS board gets no new bridge data. To go back to setup A, delete `split.conf`, then run `systemctl --user daemon-reload` and restart the timer.
+* If you set `MC_BRIDGE_UNIT_NAME` at install, use that name in place of `mission-control-bridge`.
 
 Notes for setup B:
 
-* `/health` and dashboard reads return 401 without a session cookie, so a 401 from a quick curl still means the laptop is reachable. The bridge signs in on `/events` with `x-ingest-token`.
+* On the Compose install, `/health` and dashboard reads through the MagicDNS URL return 401 without a session cookie, so a 401 from a quick curl still means the laptop is reachable. The bridge signs in on `/events` with `x-ingest-token`.
 * A 401 in the bridge output means the token is not the laptop value.
 * A 404 on a run update for a run id that exists only in the VPS database is expected, because the two databases are separate.
 * `npm run seed:demo` on the laptop still works and does not need OpenClaw.
 * Always set `MC_API_URL` to the MagicDNS name, such as `http://your-mac.tailnet.ts.net:3000`. Do not use the raw 100.x address.
-* Agents posting tickets from the VPS use that same MagicDNS URL and the laptop token, as [How agents move tickets](#how-agents-move-tickets) says.
+* Agents posting tickets from the VPS use that same MagicDNS URL and the laptop token, as [How agents move tickets](#how-agents-move-tickets) says. Those calls are off loopback, so each ticket write needs `x-actor-id` too.
 
 ### FAQ
 
@@ -91,7 +134,7 @@ npm run seed:demo
 
 ## How agents move tickets
 
-Each OpenClaw agent reports as itself. Run these from the machine where the agent runs. Set `MC_API` to the API address, for example `export MC_API=http://127.0.0.1:3000` on the same host, or `export MC_API=http://your-mac.tailnet.ts.net:3000` in setup B. Use your `MC_API_PORT` if it is not 3000. Full request shapes are in [API.md](API.md#44-tickets-your-units-of-work) and [PASTE_IN.md](PASTE_IN.md#tickets-and-runs).
+Each OpenClaw agent reports as itself. Run these from the machine where the agent runs. Set `MC_API` to the API address, for example `export MC_API=http://127.0.0.1:3000` on the same host, or `export MC_API=http://your-mac.tailnet.ts.net:3000` in setup B. Use your `MC_API_PORT` if it is not 3000, or `PORT` on a native install. Full request shapes are in [API.md](API.md#44-tickets-your-units-of-work) and [PASTE_IN.md](PASTE_IN.md#tickets-and-runs).
 
 1. Read the token from `.env` in the Mission Control checkout. Keep it private. In setup B, use the laptop value.
 
@@ -136,7 +179,8 @@ Each OpenClaw agent reports as itself. Run these from the machine where the agen
 
 Tips:
 
-* `x-actor-id` must be a registered agent id, and it must be the agent that is acting, not the one that filed the ticket. A missing or unknown id answers 400.
+* `x-actor-id` must be a registered agent id, and it must be the agent that is acting, not the one that filed the ticket.
+* Off loopback, a missing or unknown id answers 400. That covers every Compose install and setup B. On a native install called from the same machine, the call is loopback, the headers are not checked, and no 400 fires. Send both headers anyway, so the same commands work on every setup.
 * Use agent ids for `assignee`. A display name works only when exactly one visible agent has it.
 * A token may change `status`, `assignee`, `title`, and `description`. There is no ticket delete route.
 
@@ -180,10 +224,11 @@ Notes:
 
 ## Auth at a glance
 
-1. Dashboard reads, such as `/health`, `/agents`, and `/tickets`, need the session cookie from signing in. Off loopback, including Compose and the tailnet, they answer 401 without it. A 401 there still means the API is reachable.
-2. Bridge and agent writes send `x-ingest-token` with the `INGEST_TOKEN` value from the `.env` of the Mission Control they post to. That covers `/events`, register, heartbeat, and runs.
-3. Ticket writes, `POST /tickets` and `PATCH /tickets/:id`, send `x-ingest-token` and also `x-actor-id` with the id of the agent that is acting.
-4. A 401 on a write means the token is wrong or the route is for the dashboard only. A 400 `actor must be a registered agent id` means `x-actor-id` is missing or not a registered agent. Register first.
+1. Dashboard reads, such as `/health`, `/agents`, and `/tickets`, need the session cookie from signing in when the caller is off loopback. On Compose every caller is off loopback, including the host, the tunnel port, and setup B through Tailscale Serve, so they answer 401 without it. A 401 there still means the API is reachable.
+2. On a native install, a call from `127.0.0.1` is loopback and stays open with no cookie. Tailscale Serve to the API port arrives from `127.0.0.1` too, so a native install must not serve the API port on the tailnet. That is why setup B needs Compose.
+3. Bridge and agent writes send `x-ingest-token` with the `INGEST_TOKEN` value from the `.env` of the Mission Control they post to. That covers `/events`, register, heartbeat, and runs.
+4. Ticket writes, `POST /tickets` and `PATCH /tickets/:id`, send `x-ingest-token` and also `x-actor-id` with the id of the agent that is acting.
+5. A 401 on a write means the token is wrong or the route is for the dashboard only. Off loopback, a 400 `actor must be a registered agent id` means `x-actor-id` is missing or not a registered agent. Register first. On true loopback the API does not check `x-actor-id`, as [API.md](API.md#41-auth) says.
 
 The full auth table is in [API.md](API.md#41-auth).
 
