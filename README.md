@@ -14,6 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/jaysinghcodes/Mission-Control/main/
 
 Then open the URL the script prints. The default is **http://localhost:5173/#/tasks**. That URL uses `MC_WEB_PORT` (default 5173). A native install listens for the API on `PORT` (default 3000). `MC_API_PORT` is the Compose host port for the API (default 3000) and is also accepted on the native path when `PORT` is unset. When both are set, `PORT` is the native listen port. The container still listens on 3000.
 
+**Pick your setup.** Run OpenClaw and Mission Control together on a VPS, or run Mission Control on a laptop with OpenClaw on a VPS. The laptop setup needs the Docker install. The install does not connect OpenClaw by itself, and Agents stays empty until the bridge runs or `npm run seed:demo` loads sample data. The numbered steps for both setups and a short FAQ are in [docs/REMOTE.md](docs/REMOTE.md#pick-your-setup). The same file shows [how agents move tickets](docs/REMOTE.md#how-agents-move-tickets), [how to turn on agent handoffs in OpenClaw](docs/REMOTE.md#turn-on-agent-handoffs-in-openclaw), and [auth at a glance](docs/REMOTE.md#auth-at-a-glance).
+
 The clip above is five frames from one local run of the API and the web app. `bridge/mc-bridge-sync.py` read fixture JSON, because this machine has no OpenClaw install. The stills and the captions are in [Screenshots](#screenshots).
 
 ## Works with any provider
@@ -292,7 +294,7 @@ docs/STACK.md                 Pages, models, scripts
 docs/PASTE_IN.md              Paste this into OpenClaw. The operator only says yes
 docs/OPENCLAW_ONBOARDING.md   Short guide. Old headings still resolve here
 docs/API.md                   API reference, including the 401 line
-docs/REMOTE.md                SSH, Tailscale Serve, and Cloudflare Tunnel
+docs/REMOTE.md                Pick your setup, agent tickets, handoffs, auth, and tunnels
 docs/screenshots/             Hero GIF and the stills above
 ```
 
