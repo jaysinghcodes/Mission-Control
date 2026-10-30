@@ -12,6 +12,7 @@ import { useBoardDrag } from '../lib/boardDrag'
 import { BoardDnd, CardDrag, ColumnDrop } from '../components/boardDnd'
 import { TicketRuns } from '../components/TicketRuns'
 import { runsForTicket, type LinkedRun } from '../lib/ticket-runs'
+import { useEscape } from '../lib/useEscape'
 
 /**
  * Tickets — full-page kanban, fully functional (review fix #9) + Option B (MC-214).
@@ -358,6 +359,8 @@ export default function Tickets() {
 
   const DOT: Record<string, string> = { todo: 'var(--mc-gray)', build: 'var(--mc-blue)', qa: 'var(--mc-orange)', review: 'var(--mc-teal)', done: 'var(--mc-green)' }
   const detail = tickets.find((t) => t.id === detailId) ?? null
+  // Esc closes the open ticket card, same as its Close button.
+  useEscape(() => setDetailId(null), detail !== null)
 
   function projectLabel(t: Ticket): string {
     const current = allProjects.find((p) => p.id === t.projectId) ?? null

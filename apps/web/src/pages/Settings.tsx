@@ -10,6 +10,7 @@ import { useNaming } from '../lib/naming'
 import { useSession } from '../lib/session'
 import { pluralize } from '../lib/pluralize'
 import type { Agent, AgentsResp } from '../types'
+import { useEscape } from '../lib/useEscape'
 
 /**
  * Settings. Timezone, agent names, and the detected provider.
@@ -40,6 +41,8 @@ export default function Settings() {
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const agents = agentsQ.data?.agents ?? []
+  // Esc closes the remove confirm, same as Cancel and the backdrop. Not while removing.
+  useEscape(() => setPending(null), pending !== null && !removing)
 
   async function removeAgent(agent: Agent) {
     setRemoving(true)
