@@ -113,7 +113,9 @@ describe('Runs (e2e)', () => {
   });
 
   async function createTicket(title: string) {
-    const res = await call().post('/tickets').send({ title, status: 'todo' });
+    const res = await call()
+      .post('/tickets')
+      .send({ title, status: 'backlog' });
     expect(res.status).toBe(201);
     tickets.push(ticketIdFrom(res));
     return ticketIdFrom(res);

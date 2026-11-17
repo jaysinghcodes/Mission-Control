@@ -6,8 +6,11 @@ import {
   plainActivity,
   runActivityName,
   stageName,
+  manualMovesName,
   ticketCreated,
   ticketMoved,
+  ticketOverride,
+  ticketPickedUp,
   ticketUpdated,
 } from './activity-text';
 
@@ -24,6 +27,16 @@ describe('activity text', () => {
     expect(ticketMoved('DEMO-7', 'backlog')).toBe('DEMO-7 moved to Backlog');
     expect(ticketCreated('MC-151')).toBe('MC-151 created');
     expect(ticketUpdated('MC-151')).toBe('MC-151 updated');
+  });
+
+  it('names a pickup, an override, and a Manual moves save', () => {
+    expect(ticketPickedUp('MC-151')).toBe('MC-151 picked up');
+    expect(ticketOverride('MC-151', 'qa')).toBe(
+      'MC-151 moved to QA by operator override',
+    );
+    expect(manualMovesName('On')).toBe('Manual moves set to On');
+    expect(manualMovesName('Off')).toBe('Manual moves set to Off');
+    expect(manualMovesName('Automatic')).toBe('Manual moves set to Automatic');
   });
 
   it('names runs and agent status in plain words', () => {

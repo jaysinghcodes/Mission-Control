@@ -64,7 +64,7 @@ npm run build
 
 On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
 
-* Tasks and the backlog view, from seeded tickets.
+* Tasks and the backlog view, from seeded tickets. With no registered agents the board stays fully manual. New task lands in To Do, and every drag and button move works. Sample tickets stay movable by hand.
 * Projects, including ticket counts, from seeded projects.
 * Pipeline, the same tickets as Build, QA, Ship, Deploy.
 * Memory notes, from seeded rows. Docs do not use the bridge. The seed writes sample markdown under `data/docs`.

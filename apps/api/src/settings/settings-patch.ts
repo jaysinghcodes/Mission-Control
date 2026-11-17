@@ -14,9 +14,17 @@ export interface SettingsPatch {
   /** Null clears a saved zone and returns to the server timezone. */
   timezone?: string | null;
   setupDone?: boolean;
+  /** true On, false Off, null Automatic. */
+  manualMoves?: boolean | null;
 }
 
-const ALLOWED = new Set(['namingMode', 'crewMap', 'timezone', 'setupDone']);
+const ALLOWED = new Set([
+  'namingMode',
+  'crewMap',
+  'timezone',
+  'setupDone',
+  'manualMoves',
+]);
 
 export function readSettingsPatch(
   body: unknown,
@@ -55,6 +63,13 @@ export function readSettingsPatch(
       throw new BadRequestException('setupDone must be true or false');
     }
     patch.setupDone = payload.setupDone;
+  }
+  if ('manualMoves' in payload) {
+    const value = payload.manualMoves;
+    if (value !== true && value !== false && value !== null) {
+      throw new BadRequestException('manualMoves must be true, false, or null');
+    }
+    patch.manualMoves = value;
   }
   return patch;
 }

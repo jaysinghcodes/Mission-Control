@@ -26,6 +26,10 @@ export interface SettingsResp {
   timezoneSaved: boolean
   setupDone: boolean
   offlineAfterMs: number
+  /** Saved value. null is Automatic. */
+  manualMoves: boolean | null
+  /** Effective value. True when people can move every column. */
+  manualMovesOn: boolean
   ts: number
 }
 
@@ -34,6 +38,7 @@ export interface SettingsWrite {
   crewMap?: Record<string, string>
   timezone?: string | null
   setupDone?: boolean
+  manualMoves?: boolean | null
 }
 
 interface NamingValue extends NamingState {
@@ -43,6 +48,8 @@ interface NamingValue extends NamingState {
   serverTimeZone: string
   setupDone: boolean
   offlineAfterMs: number
+  manualMoves: boolean | null
+  manualMovesOn: boolean
   reload: () => void
   save: (body: SettingsWrite) => Promise<string | null>
 }
@@ -57,6 +64,8 @@ const EMPTY: NamingValue = {
   serverTimeZone: 'UTC',
   setupDone: false,
   offlineAfterMs: 10 * 60 * 1000,
+  manualMoves: null,
+  manualMovesOn: true,
   reload: () => {},
   save: async () => 'Naming is not ready',
 }
@@ -104,6 +113,8 @@ export function NamingProvider({ children }: { children: ReactNode }) {
     serverTimeZone: data?.serverTimeZone ?? data?.timezone ?? 'UTC',
     setupDone: Boolean(data?.setupDone),
     offlineAfterMs: data?.offlineAfterMs ?? 10 * 60 * 1000,
+    manualMoves: data ? (data.manualMoves ?? null) : null,
+    manualMovesOn: data ? data.manualMovesOn !== false : true,
     reload: () => { void query.refetch() },
     save,
   }

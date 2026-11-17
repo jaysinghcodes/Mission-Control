@@ -15,6 +15,7 @@
  */
 import { useCallback, useRef, useState } from 'react'
 import { BOARD_COLUMNS, inColumn } from './board'
+import { boardMoveNotice } from './board-lock'
 
 const DROPPABLE_STATUSES = new Set(['todo', 'build', 'qa', 'review', 'done'])
 
@@ -31,21 +32,9 @@ function columnKey(status: string): string | null {
   return col ? col.status : null
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  backlog: 'Backlog',
-  todo: 'To-Do',
-  build: 'Build',
-  inprogress: 'Build',
-  qa: 'QA',
-  review: 'Review',
-  done: 'Done',
-}
-
-/** Same sentences the status buttons already show. */
+/** Same sentences the status buttons already show. A lock refusal uses the board note. */
 function moveFailureNotice(status: string, httpStatus: number, error: string): string {
-  if (httpStatus === 404) return 'That ticket no longer exists. The board has been refreshed.'
-  const what = STATUS_LABEL[status] ?? status
-  return `Couldn't move ticket to ${what}. ${error}`
+  return boardMoveNotice(status, httpStatus, error)
 }
 
 export type DragPatchResult<T> =

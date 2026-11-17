@@ -7,6 +7,18 @@ import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { resolveSticker } from '../lib/crew'
 import { ticketCreateQueue } from '../lib/serialQueue'
 import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
+import {
+  MANUAL_ON_NOTE,
+  backlogAddedNotice,
+  boardMoveNotice,
+  cardDraggable,
+  columnDroppable,
+  isSampleTicket,
+  moveButtons,
+  showWaitingChip,
+} from '../lib/board-lock'
+import { namingRefreshTs } from '../lib/crew'
+import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
 import { useBoardDrag } from '../lib/boardDrag'
 import { BoardDnd, CardDrag, ColumnDrop } from '../components/boardDnd'
@@ -54,9 +66,11 @@ function assigneeFace(assignee: string | null, roster: readonly Agent[]): { agen
 /** How long an inline notice stays up before fading on its own. */
 const NOTICE_MS = 6000
 
-/** Board columns → readable names for notices (`inprogress` = legacy Build). */
-const STATUS_LABEL: Record<string, string> = {
-  backlog: 'Backlog', todo: 'To-Do', build: 'Build', inprogress: 'Build', qa: 'QA', review: 'Review', done: 'Done',
+function buttonClass(button: { label: string; forward: boolean }): string {
+  if (!button.forward) return 'bg-mc-fill text-mc-graytext'
+  if (button.label === 'Review') return 'bg-mc-orangebg text-mc-orangetext'
+  if (button.label === 'Done') return 'bg-mc-greenbg text-mc-greentext'
+  return 'bg-mc-bluebg text-mc-bluetext'
 }
 
 export default function Tickets() {
@@ -79,7 +93,12 @@ export default function Tickets() {
   // Same roster Team uses, so an assignee's sticker matches their card.
   const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
   const roster = rosterQ.data?.agents ?? []
+  const naming = useNaming()
+  const locked = naming.ready && !naming.manualMovesOn
+  const registeredAgents = roster.some((agent) => agent.source === 'registered')
+  const showManualNote = naming.manualMoves === true && registeredAgents
   const { events } = useLiveActivity()
+  const seenBoard = useRef(0)
   const [title, setTitle] = useState('')
   const [titleError, setTitleError] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
@@ -96,6 +115,7 @@ export default function Tickets() {
   // Gentle inline notice for failed writes (400 invalid status, 404 deleted
   // ticket, API offline…). Auto-clears; never blocks the board.
   const [notice, setNotice] = useState<string | null>(null)
+  const [noticeTone, setNoticeTone] = useState<'ok' | 'warn'>('warn')
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Titles whose create failed and that the current notice is reporting.
   // Accumulated (not replaced) so a burst of failures — e.g. API went down
@@ -161,7 +181,8 @@ export default function Tickets() {
     failedCreates.current = []
   }
 
-  function showNotice(msg: string) {
+  function showNotice(msg: string, tone: 'ok' | 'warn' = 'warn') {
+    setNoticeTone(tone)
     setNotice(msg)
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
     noticeTimer.current = setTimeout(clearNotice, NOTICE_MS)
@@ -175,6 +196,14 @@ export default function Tickets() {
     if (events.some((e) => e.type.startsWith('run.') || e.type.includes('ticket'))) void refetch()
     if (events.some((e) => e.type.startsWith('run.'))) void refetchRuns()
   }, [events, refetch, refetchRuns])
+
+  const refetchRoster = rosterQ.refetch
+  useEffect(() => {
+    const next = namingRefreshTs(seenBoard.current, events)
+    if (next == null) return
+    seenBoard.current = next
+    void refetchRoster()
+  }, [events, refetchRoster])
 
   /**
    * "+ New ticket" (button or Enter). QA-1 #1 fix — every submit is either
@@ -222,14 +251,20 @@ export default function Tickets() {
     // queued job always resolves and we only need to branch on `r.ok`.
     // A selected project is sent with the create. The API rejects an
     // archived one with 400; the notice below shows that message.
+    const placeInBacklog = locked
     const body: { title: string; priority: string; status: string; projectId?: string } = {
-      title: t, priority: 'med', status: 'todo',
+      title: t, priority: 'med', status: placeInBacklog ? 'backlog' : 'todo',
     }
     if (projectFilter) body.projectId = projectFilter
     void ticketCreateQueue
       .run(() => apiSend<{ ticket: Ticket }>('POST', '/tickets', body))
       .then((r) => {
-        if (r.ok) return
+        if (r.ok) {
+          if (placeInBacklog) {
+            showNotice(backlogAddedNotice(r.data?.ticket?.key ?? 'Ticket'), 'ok')
+          }
+          return
+        }
         failedCreates.current.push(t)
         const names = failedCreates.current.map((x) => `"${x}"`).join(', ')
         showNotice(`Couldn't create ${names}. ${r.error}`)
@@ -275,12 +310,7 @@ export default function Tickets() {
       const updated = r.data.ticket
       mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.map((t) => (t.id === id ? updated : t)) } : prev))
     } else if (!r.ok) {
-      const what = STATUS_LABEL[status] ?? status
-      showNotice(
-        r.status === 404
-          ? 'That ticket no longer exists. The board has been refreshed.'
-          : `Couldn't move ticket to ${what}. ${r.error}`,
-      )
+      showNotice(boardMoveNotice(status, r.status, r.error ?? ''))
     }
     void refetch()
   }
@@ -415,29 +445,19 @@ export default function Tickets() {
         </div>
         {/* Status buttons are not drag handles, so a click cannot start a drag. */}
         <div className="mt-2.5 flex max-w-full flex-wrap items-center gap-2" onPointerDown={(e) => e.stopPropagation()}>
-          {t.status === 'todo' && (
-            <>
-              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">Start</button>
-              <button type="button" onClick={() => void move(t.id, 'backlog')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Backlog</button>
-            </>
-          )}
-          {(t.status === 'build' || t.status === 'inprogress') && (
-            <>
-              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-bluebg px-3 text-[10.5px] font-semibold text-mc-bluetext disabled:opacity-50">QA</button>
-              <button type="button" onClick={() => void move(t.id, 'todo')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">To-Do</button>
-            </>
-          )}
-          {t.status === 'qa' && (
-            <>
-              <button type="button" onClick={() => void move(t.id, 'review')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-orangebg px-3 text-[10.5px] font-semibold text-mc-orangetext disabled:opacity-50">Review</button>
-              <button type="button" onClick={() => void move(t.id, 'build')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">Build</button>
-            </>
-          )}
-          {t.status === 'review' && (
-            <>
-              <button type="button" onClick={() => void move(t.id, 'done')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-greenbg px-3 text-[10.5px] font-semibold text-mc-greentext disabled:opacity-50">Done</button>
-              <button type="button" onClick={() => void move(t.id, 'qa')} disabled={moving.has(t.id) || drag.busy.has(t.id)} className="h-6 shrink-0 whitespace-nowrap rounded-full bg-mc-fill px-3 text-[10.5px] font-semibold text-mc-graytext disabled:opacity-50">QA</button>
-            </>
+          {moveButtons(t.status, locked, isSampleTicket(t)).map((button) => (
+            <button
+              key={button.status}
+              type="button"
+              onClick={() => void move(t.id, button.status)}
+              disabled={moving.has(t.id) || drag.busy.has(t.id)}
+              className={`h-6 shrink-0 whitespace-nowrap rounded-full px-3 text-[10.5px] font-semibold disabled:opacity-50 ${buttonClass(button)}`}
+            >
+              {button.label}
+            </button>
+          ))}
+          {showWaitingChip(t.status, locked, isSampleTicket(t)) && (
+            <StatusChip label="Waiting for an agent" tone="gray" />
           )}
         </div>
       </SoftCard>
@@ -509,7 +529,7 @@ export default function Tickets() {
           Couldn't load tickets ({loadError}). {data ? 'Showing the last loaded board; retrying automatically.' : 'Retrying automatically.'}
         </Banner>
       )}
-      {notice && <Banner onDismiss={clearNotice}>{notice}</Banner>}
+      {notice && <Banner tone={noticeTone} onDismiss={clearNotice}>{notice}</Banner>}
 
       {data && tickets.length === 0 && !projectFilter && !query.trim() && (
         <div className="mb-4">
@@ -539,6 +559,17 @@ export default function Tickets() {
         </SoftCard>
       )}
 
+      {locked && (
+        <p className="mb-4 max-w-full break-words text-[13px] leading-snug text-mc-sub" data-board-lock="true">
+          Agents pick up tickets in To Do and move them from there. Turn on Manual moves in <Link to="/system/settings" className="font-semibold text-mc-accent-text">Settings</Link> to move them yourself.
+        </p>
+      )}
+      {showManualNote && (
+        <p className="mb-4 max-w-full break-words text-[13px] leading-snug text-mc-sub" data-board-manual="true">
+          {MANUAL_ON_NOTE}
+        </p>
+      )}
+
       <div className="overflow-x-auto pb-2">
         <BoardDnd
           onDrop={(id, status) => {
@@ -558,7 +589,7 @@ export default function Tickets() {
           {openCols.map((col) => {
             const rows = shown.filter((t) => inColumn(t.status, col))
             return (
-              <ColumnDrop key={col.title} status={col.status} className="w-[260px] shrink-0">
+              <ColumnDrop key={col.title} status={col.status} disabled={!columnDroppable(col.status, locked)} className="w-[260px] shrink-0">
                 <div className="mb-3 flex items-center gap-2 px-1">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: DOT[col.status] }} />
                   <span className="whitespace-nowrap text-[15px] font-semibold">{col.title}</span>
@@ -571,7 +602,7 @@ export default function Tickets() {
                     </div>
                   )}
                   {rows.map((t) => (
-                    <CardDrag key={t.id} id={t.id}>
+                    <CardDrag key={t.id} id={t.id} disabled={!cardDraggable(t.status, locked)}>
                       {openCard(t)}
                     </CardDrag>
                   ))}
@@ -579,7 +610,7 @@ export default function Tickets() {
               </ColumnDrop>
             )
           })}
-          <ColumnDrop status="done" className="w-[168px] shrink-0">
+          <ColumnDrop status="done" disabled={!columnDroppable('done', locked)} className="w-[168px] shrink-0">
             <div className="mb-3 flex items-center gap-2 px-1">
               <span className="h-2.5 w-2.5 rounded-full bg-mc-green" />
               <span className="text-[15px] font-semibold">Done</span>
@@ -595,7 +626,7 @@ export default function Tickets() {
             {showDone && (
               <div className="mt-3 space-y-2">
                 {doneRows.map((t) => (
-                  <CardDrag key={t.id} id={t.id}>
+                  <CardDrag key={t.id} id={t.id} disabled={!cardDraggable(t.status, locked)}>
                     {doneCard(t)}
                   </CardDrag>
                 ))}

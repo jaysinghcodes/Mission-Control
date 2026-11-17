@@ -93,6 +93,29 @@ describe('settings.changed', () => {
     });
   });
 
+  it('manualMoves accepts true, false, and null, and rejects anything else', async () => {
+    const { live, broadcast } = fakeLive();
+    const controller = new SettingsController(
+      fakePrisma([]) as unknown as PrismaService,
+      live,
+    );
+    const on = await controller.put({ manualMoves: true });
+    expect(on).toMatchObject({ manualMoves: true, manualMovesOn: true });
+    expect(broadcast).toHaveBeenCalledWith('settings.changed', {
+      fields: ['manualMoves'],
+    });
+    expect(broadcast).toHaveBeenCalledWith('board.moves', {
+      name: 'Manual moves set to On',
+    });
+    const off = await controller.put({ manualMoves: false });
+    expect(off).toMatchObject({ manualMoves: false, manualMovesOn: false });
+    const automatic = await controller.put({ manualMoves: null });
+    expect(automatic).toMatchObject({ manualMoves: null, manualMovesOn: true });
+    await expect(controller.put({ manualMoves: 'yes' })).rejects.toThrow(
+      'manualMoves must be true, false, or null',
+    );
+  });
+
   it('changedFields keeps a fixed order and skips absent keys', () => {
     expect(changedFields({ setupDone: false, namingMode: 'own' })).toEqual([
       'namingMode',

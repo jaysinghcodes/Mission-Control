@@ -1,5 +1,6 @@
 import { promiseFn } from '../../test/lint-helpers';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import type { Request } from 'express';
 import { TicketsController } from './tickets.controller';
 import { DEFAULT_CREATE_STATUS, TICKET_STATUSES } from './ticket-status';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -128,6 +129,7 @@ function makeFakePrisma() {
           ? [
               {
                 id: row.id,
+                key: row.key,
                 status: row.status,
                 assignee: row.assignee,
                 priority: row.priority,
@@ -614,6 +616,326 @@ describe('TicketsController', () => {
       await controller.create({ title: 'loose' });
       const { tickets } = await controller.list(undefined, 'does-not-exist');
       expect(tickets).toEqual([]);
+    });
+  });
+});
+
+const FORGE = { id: 'forge', name: 'Forge', source: 'registered' };
+const QUILL = { id: 'quill', name: 'Quill', source: 'registered' };
+const SNAP = { id: 'snap_bot', name: 'Snap', source: 'snapshot' };
+
+function asRequest(actor?: string): Request {
+  return {
+    headers: actor ? { 'x-actor-id': actor } : {},
+    socket: { remoteAddress: '127.0.0.1' },
+  } as unknown as Request;
+}
+
+function responseOf(err: unknown): Record<string, unknown> {
+  return (err as { getResponse: () => Record<string, unknown> }).getResponse();
+}
+
+function armBoard(
+  prisma: object,
+  agents: { id: string; name: string; source: string }[],
+  manualMoves: boolean | null,
+) {
+  const db = prisma as {
+    agent?: {
+      findMany: () => Promise<{ id: string; name: string; source: string }[]>;
+      findUnique: (query: {
+        where: { id: string };
+      }) => Promise<{ id: string; name: string; source: string } | null>;
+    };
+    setting?: {
+      findUnique: () => Promise<{ id: string; manualMoves: boolean | null }>;
+    };
+  };
+  db.agent = {
+    findMany: promiseFn(() => agents),
+    findUnique: promiseFn(
+      ({ where }: { where: { id: string } }) =>
+        agents.find((row) => row.id === where.id) ?? null,
+    ),
+  };
+  db.setting = {
+    findUnique: promiseFn(() => ({ id: 'default', manualMoves })),
+  };
+}
+
+describe('ticket ownership', () => {
+  it('locks creates in todo and refuses a human move past To Do', async () => {
+    const { controller, prisma, gateway } = makeController();
+    armBoard(prisma, [FORGE, SNAP], null);
+    await expect(
+      controller.create({ title: 'Ready', status: 'todo' }),
+    ).rejects.toMatchObject({ status: 409 });
+    try {
+      await controller.create({ title: 'Ready', status: 'todo' });
+    } catch (err) {
+      expect(responseOf(err)).toEqual({
+        statusCode: 409,
+        error: 'create in backlog',
+        message:
+          'New tickets start in Backlog while agents own the board. Move it to To Do when it is ready.',
+      });
+    }
+    const { ticket } = await controller.create({
+      title: 'Waiting',
+      status: 'backlog',
+    });
+    await expect(
+      controller.update(ticket.id, { status: 'build' }),
+    ).rejects.toMatchObject({ status: 409 });
+    try {
+      await controller.update(ticket.id, { status: 'build' });
+    } catch (err) {
+      expect(responseOf(err)).toMatchObject({
+        statusCode: 409,
+        error: 'agents own this move',
+        message:
+          'Agents move tickets past To Do. Turn on Manual moves in Settings to move it yourself.',
+      });
+    }
+    const moved = await controller.update(ticket.id, { status: 'todo' });
+    expect(moved.ticket.status).toBe('todo');
+    const titled = await controller.update(ticket.id, {
+      title: 'Still waiting',
+    });
+    expect(titled.ticket.title).toBe('Still waiting');
+    expect(gateway.broadcast).toHaveBeenCalled();
+    gateway.broadcast.mockClear();
+    await expect(
+      controller.update(ticket.id, { status: 'qa' }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(gateway.broadcast).not.toHaveBeenCalled();
+  });
+
+  it('follows agent rules on loopback when x-actor-id is set, and human rules when it is not', async () => {
+    const { controller, prisma, rows, gateway } = makeController();
+    armBoard(prisma, [FORGE, QUILL], null);
+    const { ticket } = await controller.create({
+      title: 'Claim me',
+      status: 'backlog',
+      assignee: 'Operator',
+    });
+    await controller.update(ticket.id, { status: 'todo' });
+    gateway.broadcast.mockClear();
+    prisma.activityEvent.create.mockClear();
+
+    const claimed = await controller.update(
+      ticket.id,
+      { status: 'build' },
+      asRequest('forge'),
+    );
+    expect(claimed.ticket).toMatchObject({
+      status: 'build',
+      assignee: 'forge',
+    });
+    expect(prisma.activityEvent.create).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcast).toHaveBeenCalledWith(
+      'run.progress',
+      expect.objectContaining({
+        name: `${ticket.key} picked up`,
+        agent: 'forge',
+        actor: 'forge',
+      }),
+    );
+
+    gateway.broadcast.mockClear();
+    prisma.activityEvent.create.mockClear();
+    const again = await controller.update(
+      ticket.id,
+      { status: 'build' },
+      asRequest('forge'),
+    );
+    expect(again.ticket.status).toBe('build');
+    expect(prisma.activityEvent.create).not.toHaveBeenCalled();
+    expect(gateway.broadcast).not.toHaveBeenCalled();
+
+    try {
+      await controller.update(ticket.id, { status: 'qa' }, asRequest('quill'));
+      throw new Error('quill should not move it');
+    } catch (err) {
+      expect(responseOf(err)).toEqual({
+        statusCode: 403,
+        error: 'not your ticket',
+        message: `${ticket.key} is assigned to forge.`,
+      });
+    }
+    expect(rows.get(ticket.id)?.status).toBe('build');
+
+    try {
+      await controller.update(
+        ticket.id,
+        { status: 'build' },
+        asRequest('quill'),
+      );
+    } catch (err) {
+      expect(responseOf(err)).toEqual({
+        statusCode: 409,
+        error: 'already claimed',
+        claimedBy: 'forge',
+        message: `${ticket.key} was picked up by forge.`,
+      });
+    }
+
+    const { ticket: fresh } = await controller.create({
+      title: 'Open',
+      status: 'backlog',
+    });
+    await controller.update(fresh.id, { status: 'todo' });
+    try {
+      await controller.update(
+        fresh.id,
+        { status: 'build', title: 'nope' },
+        asRequest('forge'),
+      );
+    } catch (err) {
+      expect((err as BadRequestException).message).toBe(
+        'a claim sends status only',
+      );
+    }
+
+    await controller.update(ticket.id, { status: 'qa' }, asRequest('forge'));
+    try {
+      await controller.update(ticket.id, { status: 'done' });
+    } catch (err) {
+      expect(responseOf(err)).toMatchObject({ error: 'agents own this move' });
+    }
+    const human = await controller.update(ticket.id, { priority: 'high' });
+    expect(human.ticket.priority).toBe('high');
+  });
+
+  it('returns the rule 7 bodies for refused agent moves and keeps sample tickets human', async () => {
+    const { controller, prisma, gateway, rows } = makeController();
+    armBoard(prisma, [FORGE, QUILL, SNAP], true);
+    const { ticket } = await controller.create({
+      title: 'Steps',
+      status: 'todo',
+      assignee: 'forge',
+    });
+    await controller.update(ticket.id, { status: 'build' }, asRequest('forge'));
+    try {
+      await controller.update(
+        ticket.id,
+        { status: 'done' },
+        asRequest('forge'),
+      );
+    } catch (err) {
+      expect(responseOf(err)).toEqual({
+        statusCode: 409,
+        error: 'move not allowed',
+        from: 'build',
+        to: 'done',
+        message: 'An agent may move a ticket in Build to QA, To Do.',
+      });
+    }
+    try {
+      await controller.update(
+        ticket.id,
+        { assignee: 'Snap' },
+        asRequest('forge'),
+      );
+    } catch (err) {
+      expect((err as BadRequestException).message).toBe(
+        'assignee must be a registered agent id',
+      );
+    }
+    const released = await controller.update(
+      ticket.id,
+      { status: 'todo' },
+      asRequest('forge'),
+    );
+    expect(released.ticket).toMatchObject({
+      status: 'todo',
+      assignee: 'Operator',
+    });
+    expect(gateway.broadcast).toHaveBeenCalledWith(
+      'run.progress',
+      expect.objectContaining({
+        name: `${ticket.key} moved to To Do`,
+        agent: 'forge',
+      }),
+    );
+
+    const { ticket: sample } = await controller.create({
+      title: 'Sample',
+      status: 'todo',
+    });
+    const stored = rows.get(sample.id);
+    expect(stored).toBeTruthy();
+    stored!.key = 'DEMO-1';
+    armBoard(prisma, [FORGE, QUILL, SNAP], false);
+    try {
+      await controller.update(
+        sample.id,
+        { status: 'build' },
+        asRequest('forge'),
+      );
+      throw new Error('an agent wrote a sample ticket');
+    } catch (err) {
+      expect(responseOf(err)).toEqual({
+        statusCode: 403,
+        error: 'sample ticket',
+        message: 'Sample tickets are moved by hand.',
+      });
+    }
+    const byHand = await controller.update(sample.id, { status: 'build' });
+    expect(byHand.ticket.status).toBe('build');
+  });
+
+  it('lists only claimable todo tickets for the calling agent', async () => {
+    const { controller, prisma, rows } = makeController();
+    const { ticket: high } = await controller.create({
+      title: 'High',
+      status: 'todo',
+      priority: 'high',
+      assignee: 'Operator',
+    });
+    const { ticket: low } = await controller.create({
+      title: 'Low',
+      status: 'todo',
+      priority: 'low',
+    });
+    const { ticket: named } = await controller.create({
+      title: 'Quill only',
+      status: 'todo',
+      priority: 'high',
+      assignee: 'quill',
+    });
+    const older = rows.get(high.id)!;
+    const newer = rows.get(low.id)!;
+    (older as { createdAt?: Date }).createdAt = new Date(
+      '2026-01-02T00:00:00.000Z',
+    );
+    (newer as { createdAt?: Date }).createdAt = new Date(
+      '2026-01-01T00:00:00.000Z',
+    );
+    (older as { priority?: string }).priority = 'med';
+    rows.set('demo-ticket-1', {
+      id: 'demo-ticket-1',
+      key: 'DEMO-1',
+      title: 'Sample',
+      status: 'todo',
+      priority: 'high',
+      assignee: 'Operator',
+      tags: [],
+      projectId: null,
+      description: '',
+    });
+    armBoard(prisma, [FORGE, QUILL], null);
+    await expect(controller.ready(asRequest())).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    const ready = await controller.ready(asRequest('forge'));
+    expect(ready.tickets.map((row) => row.id)).toEqual([high.id, low.id]);
+    expect(ready.tickets.some((row) => row.id === named.id)).toBe(false);
+    expect(ready.tickets.some((row) => row.key === 'DEMO-1')).toBe(false);
+    expect(ready.tickets[0]).toMatchObject({
+      id: high.id,
+      title: 'High',
+      priority: 'med',
     });
   });
 });

@@ -30,6 +30,18 @@ export function ticketMoved(key: string, status: string): string {
   return `${key} moved to ${stageName(status)}`;
 }
 
+export function ticketPickedUp(key: string): string {
+  return `${key} picked up`;
+}
+
+export function ticketOverride(key: string, status: string): string {
+  return `${key} moved to ${stageName(status)} by operator override`;
+}
+
+export function manualMovesName(which: 'On' | 'Off' | 'Automatic'): string {
+  return `Manual moves set to ${which}`;
+}
+
 export function ticketUpdated(key: string): string {
   return `${key} updated`;
 }

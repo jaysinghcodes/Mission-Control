@@ -1,7 +1,7 @@
 /**
  * Agent ingest keeps x-ingest-token. Everything else the dashboard can call
- * is a session route when the peer is not loopback, except ticket create
- * and ticket update, which also accept the ingest token.
+ * is a session route when the peer is not loopback, except ticket create,
+ * ticket update, and the ready list, which also accept the ingest token.
  *
  * Ingest is register, heartbeat, run create and update, and bridge sync
  * (POST /events). Delete of an agent is a dashboard write. There is no
@@ -30,17 +30,18 @@ export function isIngestWrite(
 }
 
 /**
- * Ticket create and a single ticket update. There is no DELETE /tickets
- * route. These are not ingest writes: loopback and a session cookie still
- * open them without the header.
+ * Ticket create, a single ticket update, and the ready list. There is no
+ * DELETE /tickets route. These are not ingest writes: loopback and a
+ * session cookie still open them without the header.
  */
-export function isAgentTicketWrite(
+export function isAgentTicketRoute(
   method: string,
   url: string | undefined,
 ): boolean {
   const m = method.toUpperCase();
   const path = requestPath(url);
   if (m === 'POST' && path === '/tickets') return true;
+  if (m === 'GET' && path === '/tickets/ready') return true;
   if (m === 'PATCH' && /^\/tickets\/[^/]+$/.test(path)) return true;
   return false;
 }

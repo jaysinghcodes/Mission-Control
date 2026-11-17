@@ -98,6 +98,7 @@ function makePrisma() {
           ? [
               {
                 id: row.id,
+                key: row.key,
                 status: row.status,
                 assignee: row.assignee,
                 priority: row.priority,
@@ -122,8 +123,12 @@ function makePrisma() {
         [...agents.values()].map((agent) => ({
           id: agent.id,
           name: agent.name,
+          source: agent.source,
         })),
       ),
+    },
+    setting: {
+      findUnique: promiseFn(() => null),
     },
     activityEvent: {
       create: promiseFn(
@@ -242,16 +247,22 @@ describe('agent ticket token on the compose path', () => {
 
   it('patches status, assignee, title, and description with the token', async () => {
     const id = [...tickets.values()][0].id;
+    const cookie = `mc_session=${encodeURIComponent(signSession(SECRET, 3600))}`;
+    const readied = await compose('patch', `/tickets/${id}`)
+      .set('Cookie', cookie)
+      .send({ status: 'todo' });
+    expect(readied.status).toBe(200);
     const moved = await compose('patch', `/tickets/${id}`)
       .set('x-ingest-token', TOKEN)
       .set('x-actor-id', ACTOR)
-      .send({ status: 'build', assignee: ACTOR });
+      .send({ status: 'build' });
     expect(moved.status).toBe(200);
     expect(
-      responseJson<{ ticket: { status: string } }>(moved).ticket.status,
-    ).toBe('build');
+      responseJson<{ ticket: { status: string; assignee: string } }>(moved)
+        .ticket,
+    ).toMatchObject({ status: 'build', assignee: ACTOR });
     expect(activity.at(-1)?.payload).toMatchObject({
-      name: 'MC-150 moved to Build',
+      name: 'MC-150 picked up',
       agent: ACTOR,
       actor: ACTOR,
     });

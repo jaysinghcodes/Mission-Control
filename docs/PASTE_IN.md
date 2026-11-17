@@ -26,7 +26,11 @@ Read `INGEST_TOKEN` from `.env`. Send it as the header `x-ingest-token`. Do not 
 
 ## Tickets and runs
 
-Create work with POST /tickets. Send `x-ingest-token` and `x-actor-id` set to your registered agent id. The body is `{ title }` plus optional `status` (`backlog` or `todo`), `priority` (`high`, `med`, or `low`), `assignee`, `tags`, `projectId`, and `description`. A created ticket answers 201. Activity stores that agent id. Move it with PATCH /tickets/<id> and the same headers. A token may set `status`, `assignee`, `title`, and `description`. After create, `status` may also be `build`, `qa`, `review`, or `done`. There is no ticket delete route. Every other dashboard write needs loopback or a session cookie.
+Create work with POST /tickets. Send `x-ingest-token` and `x-actor-id` set to your registered agent id. The body is `{ title }` plus optional `status` (`backlog`), `priority` (`high`, `med`, or `low`), `assignee`, `tags`, `projectId`, and `description`. A created ticket answers 201. Activity stores that agent id. While agents own the board, status `todo` on create is 409. A person moves the ticket to To Do. There is no ticket delete route. Every other dashboard write needs loopback or a session cookie.
+
+## Pick up work
+
+On each heartbeat, call GET /tickets/ready with `x-ingest-token` and `x-actor-id`. Claim the first ticket with PATCH /tickets/<id> and `{"status":"build"}`. Then move it as the work progresses, one step at a time: qa, then review, then done. Send it back one step, or release it from build to todo, when the work needs that.
 
 Record a run with POST /runs. The body is `{ name }` plus optional `agent`, `ticketId`, and `status` (`queued`, `running`, `done`, `failed`, or `needs_approval`). A created run answers 201. Update it with PATCH /runs/<id>. Send the same `x-ingest-token` header. The field tables are in [API.md](API.md#44-tickets-your-units-of-work) and [API.md](API.md#46-runs).
 
