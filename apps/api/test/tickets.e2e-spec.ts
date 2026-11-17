@@ -35,6 +35,8 @@ describe('Tickets (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   const created: string[] = [];
+  /** Restored after the file. Other e2e files register agents in this database. */
+  let savedManual: boolean | null = null;
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -104,6 +106,18 @@ describe('Tickets (e2e)', () => {
         'Tickets e2e needs Postgres at DATABASE_URL (see header comment)',
       );
     }
+    // Manual moves On keeps today's human creates and moves working when
+    // another suite has already registered an agent in this database.
+    const row = await prisma.setting.findUnique({ where: { id: 'default' } });
+    savedManual =
+      row?.manualMoves === true || row?.manualMoves === false
+        ? row.manualMoves
+        : null;
+    await prisma.setting.upsert({
+      where: { id: 'default' },
+      create: { id: 'default', mission: '', manualMoves: true },
+      update: { manualMoves: true },
+    });
   });
 
   afterAll(async () => {
@@ -135,6 +149,14 @@ describe('Tickets (e2e)', () => {
       } catch (err) {
         console.warn('[tickets.e2e] cleanup failed:', err);
       }
+    }
+    if (prisma) {
+      await prisma.setting
+        .update({
+          where: { id: 'default' },
+          data: { manualMoves: savedManual },
+        })
+        .catch(() => undefined);
     }
     if (app) await app.close();
   });

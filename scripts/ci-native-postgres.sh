@@ -13,6 +13,7 @@ wait_ready() {
     sleep 1
   done
   echo "Postgres did not accept connections on 127.0.0.1:5432." >&2
+  pg_lsclusters >&2 || true
   return 1
 }
 
@@ -43,6 +44,10 @@ else
     sudo apt-get update
   fi
   sudo apt-get install -y postgresql-16 postgresql-client-16
+  # Ubuntu 26 can install the package without creating the default cluster.
+  if ! pg_lsclusters --no-header 2>/dev/null | grep -Eq '^16[[:space:]]+main([[:space:]]|$)'; then
+    sudo pg_createcluster 16 main
+  fi
   sudo pg_ctlcluster 16 main start || true
 fi
 
