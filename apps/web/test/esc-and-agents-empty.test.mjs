@@ -37,12 +37,14 @@ test('Esc closes the remove confirm, the Team sheets, and the ticket card (issue
   assert.match(team, /<Sheet title="Invite a teammate" onClose=\{\(\) => setInvite\(false\)\}>/)
   assert.match(team, /<Sheet title="Pair a device" onClose=\{\(\) => setPair\(false\)\}/)
 
-  const tickets = await source('../src/pages/Tickets.tsx')
-  assert.match(tickets, /useEscape\(\(\) => setDetailId\(null\), detail !== null\)/)
-  assert.match(tickets, /onClick=\{\(\) => setDetailId\(null\)\}[^>]*>Close</)
+  const ticketSheet = await source('../src/components/TicketSheet.tsx')
+  assert.match(ticketSheet, /useEscape\(/)
+  assert.match(ticketSheet, /aria-label=\{CLOSE_TASK\}/)
+  assert.match(ticketSheet, /if \(confirming\)/)
+  assert.match(ticketSheet, /onClose\(\)/)
 
   // Tickets.tsx keeps older dashed comments; its new lines carry no UI copy.
-  for (const text of [hook, settings, team]) assert.equal(DASH.test(text), false)
+  for (const text of [hook, settings, team, ticketSheet]) assert.equal(DASH.test(text), false)
 })
 
 test('Agents shows a no match message for search and filter (issue 168)', async () => {

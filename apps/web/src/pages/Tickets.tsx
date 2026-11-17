@@ -4,6 +4,7 @@ import { useApi, apiSend } from '../hooks/useApi'
 import { useLiveActivity } from '../hooks/useLiveActivity'
 import { PageHeader, Segmented, SoftCard, StatusChip, Btn, Face, AgentName, Banner, SearchInput, FieldError, EmptyState } from '../components/shell'
 import type { Agent, AgentsResp, ProjectsResp } from '../types'
+import { PriorityChip, SortControl, TicketSheet, type SheetTicket } from '../components/TicketSheet'
 import { resolveSticker } from '../lib/crew'
 import { ticketCreateQueue } from '../lib/serialQueue'
 import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../lib/board'
@@ -24,9 +25,11 @@ import { useNaming } from '../lib/naming'
 import { pluralize } from '../lib/pluralize'
 import { useBoardDrag } from '../lib/boardDrag'
 import { BoardDnd, CardDrag, ColumnDrop } from '../components/boardDnd'
-import { TicketRuns } from '../components/TicketRuns'
 import { runsForTicket, type LinkedRun } from '../lib/ticket-runs'
-import { useEscape } from '../lib/useEscape'
+import { sortTickets } from '../lib/ticket-sort'
+import { useTicketSort } from '../lib/useTicketSort'
+import { deletedNotice, FIELD_PRIORITY, goneNotice, NEW_TASK_PRIORITY, PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_MEDIUM, savedNotice, ticketKeyLabel } from '../lib/ticket-edit'
+import { DELETE_REFUSAL } from '../lib/board-lock'
 
 /**
  * Tickets — full-page kanban, fully functional (review fix #9) + Option B (MC-214).
@@ -46,7 +49,7 @@ import { useEscape } from '../lib/useEscape'
  *    Each card can also move to a different project (at most one).
  */
 
-interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; projectId: string | null; createdAt: string }
+interface Ticket { id: string; key: string | null; title: string; description?: string | null; status: string; priority: string; assignee: string | null; tags: string[] | null; projectId: string | null; createdAt: string }
 interface TicketsResp { tickets: Ticket[] }
 interface RunsResp { runs: LinkedRun[] }
 
@@ -105,10 +108,15 @@ export default function Tickets() {
   const seenBoard = useRef(0)
   const [title, setTitle] = useState('')
   const [titleError, setTitleError] = useState<string | null>(null)
-  const [detailId, setDetailId] = useState<string | null>(null)
+  const [newPriority, setNewPriority] = useState<'high' | 'med' | 'low'>('med')
+  const ticketId = params.get('ticket')
+  const openerRef = useRef<HTMLElement | null>(null)
+  const lastKey = useRef<string | null>(null)
+  const closingSheet = useRef(false)
+  const { modeFor, setMode } = useTicketSort()
   // Linked runs for the open ticket. The list route filters by ticket id so
   // a run outside the global newest 50 still shows on its ticket.
-  const runsPath = detailId ? `/runs?ticketId=${encodeURIComponent(detailId)}` : '/runs'
+  const runsPath = ticketId ? `/runs?ticketId=${encodeURIComponent(ticketId)}` : '/runs'
   const runsQ = useApi<RunsResp>(runsPath, { pollMs: 15000 })
   // How many of THIS page's creates are queued or in flight. Display-only
   // (drives the "Saving…" button label) — it NEVER gates a submit. The old
@@ -282,8 +290,10 @@ export default function Tickets() {
     // A selected project is sent with the create. The API rejects an
     // archived one with 400; the notice below shows that message.
     const placeInBacklog = locked
+    const chosen = newPriority
+    setNewPriority('med')
     const body: { title: string; priority: string; status: string; projectId?: string } = {
-      title: t, priority: 'med', status: placeInBacklog ? 'backlog' : 'todo',
+      title: t, priority: chosen, status: placeInBacklog ? 'backlog' : 'todo',
     }
     if (projectFilter) body.projectId = projectFilter
     void ticketCreateQueue
@@ -346,40 +356,6 @@ export default function Tickets() {
     void refetch()
   }
 
-  /**
-   * Move a ticket onto a project, or off every project (`null`).
-   * Same one-write-at-a-time guard as column moves: the select and the
-   * move buttons share it, so two clicks cannot interleave on one card.
-   * The server rejects an archived target with 400; we show that message
-   * and refetch so the card snaps back to the project it still has.
-   */
-  async function assignProject(id: string, projectId: string | null) {
-    if (movingRef.current.has(id) || drag.busyRef.current.has(id)) return
-    movingRef.current.add(id)
-    setMoving(new Set(movingRef.current))
-    const r = await apiSend<{ ticket: Ticket }>('PATCH', `/tickets/${id}`, { projectId })
-    movingRef.current.delete(id)
-    setMoving(new Set(movingRef.current))
-    if (r.ok && r.data?.ticket) {
-      const updated = r.data.ticket
-      mutate((prev) => {
-        if (!prev) return prev
-        // Drop the card from a filtered board when it no longer belongs
-        // to the project on screen. The unfiltered board keeps it.
-        const next = prev.tickets.map((t) => (t.id === id ? updated : t))
-        const visible = projectFilter ? next.filter((t) => t.projectId === projectFilter) : next
-        return { ...prev, tickets: visible }
-      })
-    } else if (!r.ok) {
-      showNotice(
-        r.status === 404
-          ? (r.error ?? 'That ticket or project no longer exists. The board has been refreshed.')
-          : `Couldn't update the project. ${r.error}`,
-      )
-    }
-    void refetch()
-  }
-
   function setProjectFilter(id: string) {
     const next = new URLSearchParams(params)
     if (id) next.set('project', id)
@@ -388,22 +364,6 @@ export default function Tickets() {
   }
 
   const selectedProject = allProjects.find((p) => p.id === projectFilter) ?? null
-
-  /** Options for one card. Active projects, plus the card's current
-   *  project when that one is archived — so the select still shows the
-   *  truth instead of snapping to "No project". Archived projects are
-   *  not offered as new targets; the API would 400 them anyway. */
-  function optionsFor(ticketProjectId: string | null): { id: string; label: string }[] {
-    const opts = activeProjects.map((p) => ({ id: p.id, label: p.name }))
-    if (ticketProjectId && !opts.some((o) => o.id === ticketProjectId)) {
-      const found = allProjects.find((p) => p.id === ticketProjectId)
-      opts.push({
-        id: ticketProjectId,
-        label: found ? `${found.name} (archived)` : 'Archived project',
-      })
-    }
-    return opts
-  }
 
   const shown = tickets.filter((t) => {
     const q = query.trim().toLowerCase()
@@ -419,9 +379,59 @@ export default function Tickets() {
     : `${pluralize(openCount, 'open', 'open')}${needs ? ` · ${pluralize(needs, 'needs you', 'need you')}` : ''} · ${pluralize(doneRows.length, 'done', 'done')}`
 
   const DOT: Record<string, string> = { todo: 'var(--mc-gray)', build: 'var(--mc-blue)', qa: 'var(--mc-orange)', review: 'var(--mc-teal)', done: 'var(--mc-green)' }
-  const detail = tickets.find((t) => t.id === detailId) ?? null
-  // Esc closes the open ticket card, same as its Close button.
-  useEscape(() => setDetailId(null), detail !== null)
+  const openTicket = tickets.find((t) => t.id === ticketId) ?? null
+  const SORT_NAME: Record<string, string> = { todo: 'To Do', build: 'Build', qa: 'QA', review: 'Review', done: 'Done' }
+
+  function focusOpener(id: string | null) {
+    const button = id ? document.querySelector<HTMLElement>(`[data-ticket-open="${CSS.escape(id)}"]`) : null
+    ;(openerRef.current ?? button)?.focus()
+    openerRef.current = null
+  }
+
+  function closeTicket() {
+    closingSheet.current = true
+    lastKey.current = null
+    const next = new URLSearchParams(params)
+    next.delete('ticket')
+    setParams(next, { replace: true })
+    focusOpener(ticketId)
+  }
+
+  function openTicketFrom(id: string, el: HTMLElement) {
+    openerRef.current = el
+    const row = tickets.find((item) => item.id === id)
+    if (row?.key) lastKey.current = row.key
+    const next = new URLSearchParams(params)
+    next.set('ticket', id)
+    setParams(next, { replace: true })
+  }
+
+  function applyTicket(updated: Ticket) {
+    mutate((prev) => {
+      if (!prev) return prev
+      const next = prev.tickets.map((row) => (row.id === updated.id ? { ...row, ...updated } : row))
+      const visible = projectFilter ? next.filter((row) => row.projectId === projectFilter) : next
+      return { ...prev, tickets: visible }
+    })
+  }
+
+  useEffect(() => {
+    if (!data || !ticketId) {
+      closingSheet.current = false
+      return
+    }
+    if (openTicket) {
+      if (openTicket.key) lastKey.current = openTicket.key
+      return
+    }
+    if (closingSheet.current) return
+    const key = lastKey.current
+    lastKey.current = null
+    const next = new URLSearchParams(params)
+    next.delete('ticket')
+    setParams(next, { replace: true })
+    showNoticeRef.current(goneNotice(key))
+  }, [data, ticketId, openTicket, params, setParams])
 
   function projectLabel(t: Ticket): string {
     const current = allProjects.find((p) => p.id === t.projectId) ?? null
@@ -430,43 +440,17 @@ export default function Tickets() {
     return current.archivedAt ? `${current.name} (archived)` : current.name
   }
 
-  function projectControl(t: Ticket) {
-    const current = allProjects.find((p) => p.id === t.projectId) ?? null
-    if (t.projectId && !projectsQ.data) {
-      return <div className="text-[12px] text-mc-sub">Loading project…</div>
-    }
-    if (t.projectId && (current?.archivedAt || !current)) {
-      const label = current ? `${current.name} (archived)` : 'Archived project'
-      return (
-        <div className="text-[12px] text-mc-sub" aria-readonly="true" title="This project is archived. Unarchive it on Projects before reassigning.">
-          {label}
-        </div>
-      )
-    }
-    return (
-      <select
-        aria-label={`Project for ${t.key ?? t.title}`}
-        value={t.projectId ?? ''}
-        disabled={moving.has(t.id) || drag.busy.has(t.id)}
-        onChange={(e) => void assignProject(t.id, e.target.value || null)}
-        className="h-7 max-w-full rounded-lg bg-mc-ctl px-2 text-[11px] text-mc-text outline-none disabled:opacity-50"
-      >
-        <option value="">No project</option>
-        {optionsFor(t.projectId).filter((p) => !p.label.endsWith('(archived)')).map((p) => (
-          <option key={p.id} value={p.id}>{p.label}</option>
-        ))}
-      </select>
-    )
-  }
-
   function openCard(t: Ticket) {
     const face = assigneeFace(t.assignee, roster)
     const flagged = needsYou(t)
     return (
       <SoftCard className="px-3.5 py-3">
         {flagged && <StatusChip label="Needs you" tone="red" className="mb-2" />}
-        <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[14px] font-semibold leading-snug break-words">{t.title}</button>
-        <div className="mt-1 text-[11px] leading-snug break-words text-mc-sub">{projectLabel(t)}</div>
+        <button type="button" data-ticket-open={t.id} onClick={(event) => openTicketFrom(t.id, event.currentTarget)} className="text-left text-[14px] font-semibold leading-snug break-words">{t.title}</button>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] leading-snug break-words text-mc-sub">
+          <PriorityChip priority={t.priority} surface="card" />
+          <span className="min-w-0 break-words">{projectLabel(t)}</span>
+        </div>
         <div className="mt-3 flex items-center gap-2">
           <Face agent={face.agent} agents={face.agents} px={28} />
           <span className="min-w-0 flex-1">
@@ -498,8 +482,11 @@ export default function Tickets() {
   function doneCard(t: Ticket) {
     return (
       <SoftCard className="px-3 py-2">
-        <button type="button" onClick={() => setDetailId(t.id)} className="text-left text-[13px] font-semibold break-words">{t.title}</button>
-        <div className="mt-1 whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? ''}</div>
+        <button type="button" data-ticket-open={t.id} onClick={(event) => openTicketFrom(t.id, event.currentTarget)} className="text-left text-[13px] font-semibold break-words">{t.title}</button>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <PriorityChip priority={t.priority} surface="card" />
+          <span className="whitespace-nowrap text-[11px] text-mc-sub">{t.key ?? ''}</span>
+        </div>
       </SoftCard>
     )
   }
@@ -527,10 +514,24 @@ export default function Tickets() {
             placeholder="New task title…"
             aria-label="New task title"
             aria-invalid={!!titleError}
-            className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
+            className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-base outline-none sm:text-[13px]"
           />
           {titleError && <FieldError>{titleError}</FieldError>}
         </div>
+        <label className="flex items-center gap-2 text-[12.5px] text-mc-sub">
+          {FIELD_PRIORITY}
+          <select
+            aria-label={NEW_TASK_PRIORITY}
+            data-new-priority="board"
+            value={newPriority}
+            onChange={(event) => setNewPriority(event.target.value as 'high' | 'med' | 'low')}
+            className="h-8 max-w-full rounded-lg bg-mc-ctl px-3 text-base text-mc-text outline-none sm:text-[13px]"
+          >
+            <option value="high">{PRIORITY_HIGH}</option>
+            <option value="med">{PRIORITY_MEDIUM}</option>
+            <option value="low">{PRIORITY_LOW}</option>
+          </select>
+        </label>
         <label className="flex items-center gap-2 text-[12.5px] text-mc-sub">
           Project
           <select
@@ -573,23 +574,6 @@ export default function Tickets() {
         </div>
       )}
 
-      {detail && (
-        <SoftCard className="mb-4 px-4 py-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] text-mc-sub">{detail.key ?? 'Task'}</div>
-              <div className="text-[16px] font-semibold">{detail.title}</div>
-            </div>
-            <button type="button" onClick={() => setDetailId(null)} className="text-[13px] font-semibold text-mc-sub">Close</button>
-          </div>
-          <div className="mt-3 max-w-xs">
-            <div className="mb-1 text-[12px] font-semibold text-mc-sub">Project</div>
-            {projectControl(detail)}
-          </div>
-          <TicketRuns runs={runsForTicket(runsQ.data?.runs ?? [], detail.id)} />
-        </SoftCard>
-      )}
-
       {locked && (
         <p className="mb-4 max-w-full break-words text-[13px] leading-snug text-mc-sub" data-board-lock="true">
           Agents pick up tickets in To Do and move them from there. Turn on Manual moves in <Link to="/system/settings" className="font-semibold text-mc-accent-text">Settings</Link> to move them yourself.
@@ -618,13 +602,16 @@ export default function Tickets() {
         >
         <div className="flex w-max gap-4">
           {openCols.map((col) => {
-            const rows = shown.filter((t) => inColumn(t.status, col))
+            const rows = sortTickets(shown.filter((t) => inColumn(t.status, col)), modeFor(col.status))
             return (
               <ColumnDrop key={col.title} status={col.status} disabled={!columnDroppable(col.status, locked)} className="w-[260px] shrink-0">
-                <div className="mb-3 flex items-center gap-2 px-1">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: DOT[col.status] }} />
-                  <span className="whitespace-nowrap text-[15px] font-semibold">{col.title}</span>
-                  <span className="text-[13px] text-mc-sub">{rows.length}</span>
+                <div className="mb-3 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: DOT[col.status] }} />
+                    <span className="whitespace-nowrap text-[15px] font-semibold">{col.title}</span>
+                    <span className="text-[13px] text-mc-sub">{rows.length}</span>
+                  </div>
+                  <SortControl label={SORT_NAME[col.status] ?? col.title} mode={modeFor(col.status)} onChange={(mode) => setMode(col.status, mode)} />
                 </div>
                 <div className="space-y-3">
                   {rows.length === 0 && (
@@ -656,7 +643,8 @@ export default function Tickets() {
             </SoftCard>
             {showDone && (
               <div className="mt-3 space-y-2">
-                {doneRows.map((t) => (
+                <SortControl label="Done" mode={modeFor('done')} onChange={(mode) => setMode('done', mode)} />
+                {sortTickets(doneRows, modeFor('done')).map((t) => (
                   <CardDrag key={t.id} id={t.id} disabled={!cardDraggable(t.status, locked)}>
                     {doneCard(t)}
                   </CardDrag>
@@ -667,6 +655,49 @@ export default function Tickets() {
         </div>
         </BoardDnd>
       </div>
+      {openTicket && (
+        <TicketSheet
+          ticket={openTicket as SheetTicket}
+          roster={roster}
+          projects={allProjects}
+          projectsLoaded={Boolean(projectsQ.data)}
+          locked={locked}
+          runs={runsForTicket(runsQ.data?.runs ?? [], openTicket.id)}
+          onClose={closeTicket}
+          onSaved={(updated) => {
+            closingSheet.current = true
+            applyTicket(updated as Ticket)
+            lastKey.current = null
+            const next = new URLSearchParams(params)
+            next.delete('ticket')
+            setParams(next, { replace: true })
+            showNotice(savedNotice(ticketKeyLabel(updated.key)), 'ok')
+            focusOpener(updated.id)
+            void refetch()
+          }}
+          onDeleted={(row) => {
+            closingSheet.current = true
+            lastKey.current = null
+            mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.filter((item) => item.id !== row.id) } : prev))
+            const next = new URLSearchParams(params)
+            next.delete('ticket')
+            setParams(next, { replace: true })
+            showNotice(deletedNotice(ticketKeyLabel(row.key)), 'ok')
+            focusOpener(row.id)
+            void refetch()
+          }}
+          onMissing={(label) => {
+            closingSheet.current = true
+            lastKey.current = null
+            const next = new URLSearchParams(params)
+            next.delete('ticket')
+            setParams(next, { replace: true })
+            showNotice(goneNotice(label))
+            void refetch()
+          }}
+          onRefused={() => showNotice(DELETE_REFUSAL)}
+        />
+      )}
     </div>
   )
 }

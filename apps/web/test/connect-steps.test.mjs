@@ -153,7 +153,7 @@ test('the facts cut from the page live in the docs', async () => {
     'A future checkedAt is counted from the time the API stored the report.',
     'add the user to the docker group and start a new login session',
     '`maxConcurrent` to 4',
-    'There is no ticket delete route.',
+    'You can edit and delete a ticket from the board.',
     'Office bots that move on real `run.*` events',
   ]) {
     assert.ok(install.includes(fact), fact)

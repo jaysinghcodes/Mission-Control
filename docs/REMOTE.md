@@ -182,7 +182,7 @@ Tips:
 * `x-actor-id` must be a registered agent id, and it must be the agent that is acting, not the one that filed the ticket.
 * Off loopback, a missing or unknown id answers 400. That covers every Compose install and setup B. On a native install called from the same machine, a call with no actor stays a human write. A call that sends `x-actor-id` follows the agent rules on loopback too. Send both headers anyway, so the same commands work on every setup.
 * Use agent ids for `assignee`. A display name works only when exactly one visible agent has it.
-* A token may change `status`, `assignee`, `title`, and `description`. There is no ticket delete route.
+* A token may change `status`, `assignee`, `title`, and `description`. `DELETE /tickets/:id` is dashboard only.
 
 ## Turn on agent handoffs in OpenClaw
 

@@ -19,7 +19,7 @@ It is a turbo monorepo:
 Data reaches Mission Control two ways:
 
 1. **Snapshot and event intake:** `POST /events` with a shared token. This is how OpenClaw state (agents, sessions, cron, usage, approvals, memory) gets in. The bundled bridge does this for you.
-2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. Run writes use the same `x-ingest-token` header as `POST /events`. `POST /tickets` and `PATCH /tickets/:id` also accept that token. Project and model writes and every other dashboard write stay open on loopback and need a session cookie off loopback. There is no ticket delete route.
+2. **Direct REST calls:** tickets, projects, runs and models have their own routes. These are how you file and move work. Run writes use the same `x-ingest-token` header as `POST /events`. `POST /tickets` and `PATCH /tickets/:id` also accept that token. Project and model writes and every other dashboard write stay open on loopback and need a session cookie off loopback. `DELETE /tickets/:id` is dashboard only.
 
 Every event is stored in the `ActivityEvent` table and broadcast live over Socket.IO to open dashboards.
 
@@ -181,7 +181,8 @@ Which check applies:
 | --- | --- |
 | `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, `PATCH /runs/:id` | `x-ingest-token` when `INGEST_TOKEN` is set. A session cookie does not replace it. |
 | `POST /tickets`, `PATCH /tickets/:id`, `GET /tickets/ready` | Loopback, a session cookie, or `x-ingest-token`. A token call also names a registered agent. |
-| `POST /projects`, `PATCH /projects/:id`, `PUT /mission`, `PUT /settings`, `POST /models`, `DELETE /models/:id`, `POST /approvals/:id/decide`, custom tool writes, `DELETE /agents/:id`, and every other dashboard write | Loopback or a session cookie. A token does not open them. There is no ticket delete route. |
+| `DELETE /tickets/:id` | Loopback or a session cookie. A token does not open it. An actor on the call is refused. |
+| `POST /projects`, `PATCH /projects/:id`, `PUT /mission`, `PUT /settings`, `POST /models`, `DELETE /models/:id`, `POST /approvals/:id/decide`, custom tool writes, `DELETE /agents/:id`, and every other dashboard write | Loopback or a session cookie. A token does not open them. |
 | Dashboard reads, including `GET /sessions`, `GET /health`, `GET /tickets` | Loopback or a session cookie. |
 | `POST /auth/login`, `POST /auth/logout`, `POST /auth/login-reset`, `GET /auth/session` | Open, so a browser can sign in. Password reset is not an HTTP route. |
 
@@ -254,8 +255,33 @@ Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merg
 | `POST /tickets` | `{ title, status?, priority?, assignee?, tags?: string[], projectId?, description?, actor? }` | 201. `title` required. `status` only `backlog` (default) or `todo`. `priority` defaults `med` (high, med, low). `description` defaults empty. Key auto assigned as `MC-150`, `MC-151`... |
 | `GET /tickets/ready` | query `actor` optional | Todo tickets this registered agent may claim. Sorted high, med, low, then oldest. At most 20. Never a sample ticket (`DEMO-n`). 400 `actor must be a registered agent id` without one. 401 off loopback without a valid token. |
 | `PATCH /tickets/:id` | `{ status?, assignee?, title?, description?, priority?, projectId? }` | `:id` is the ticket id, not the key. Status must be one of `backlog`, `todo`, `build`, `qa`, `review`, `done` (`inprogress` is a legacy alias of `build`). `projectId: null` unassigns. A token may send `status`, `assignee`, `title`, and `description` only |
+| `DELETE /tickets/:id` | | 204 with an empty body. `:id` is the ticket id, not the key. Dashboard only. |
 
-Creating emits `run.queued`; each real PATCH emits `run.progress`, so ticket moves show up live. A refused write changes nothing and writes no activity. Loopback with no actor, and a session cookie, are human writes. A call that sends `x-actor-id` or `actor` is an agent write, including on loopback. An ingest token can call the ticket routes when that id is a registered agent, and Activity stores that id (section 4.1). There is no ticket delete route. A token cannot patch `priority`, `projectId`, or `tags`.
+Creating emits `run.queued`; each real PATCH emits `run.progress`, so ticket moves show up live. A refused write changes nothing and writes no activity. Loopback with no actor, and a session cookie, are human writes. A call that sends `x-actor-id` or `actor` is an agent write, including on loopback. An ingest token can call the ticket routes when that id is a registered agent, and Activity stores that id (section 4.1). `DELETE /tickets/:id` is dashboard only. A token cannot delete, and an agent gets 404 on a deleted ticket. A token cannot patch `priority`, `projectId`, or `tags`.
+
+Priority on create and update is `high`, `med`, or `low`. Omitted priority on create defaults to `med`. Anything else, including `High` and an empty string, is 400 `priority must be one of high, med, low`. A value that is not a string is 400 `priority must be a string`.
+
+Title is required after trim. Blank or missing is 400 `title is required`. A non string is 400 `title must be a string`. Over 120 characters after trim is 400 `title must be 120 characters or fewer`. Description is a string and may be empty. `null` or a non string is 400 `description must be a string`. Over 4000 characters is 400 `description must be 4000 characters or fewer`. Assignee over 100 characters is 400 `assignee must be 100 characters or fewer`. A field that is not sent is not checked, so an old long title does not block a priority edit. An empty PATCH is 400 `nothing to update. Send status, assignee, title, description, priority and/or projectId`. A human edit with no `status` is never 403 or 409. The sheet does not send `status`. A human field edit writes `{key} updated` with no `agent` field. An agent edit keeps its actor. A repeated identical PATCH writes nothing.
+
+`DELETE /tickets/:id` answers 204 with an empty body. Loopback with no actor, and a session cookie, can delete. Off loopback an ingest token alone is 401 `{"statusCode":401,"message":"unauthorized"}`. Any non blank `x-actor-id`, body `actor`, or query `actor` is 403, on loopback too, before the row is read:
+
+```json
+{"statusCode":403,"error":"agents cannot delete tickets","message":"Only the dashboard can delete a ticket."}
+```
+
+A missing id, and a second delete of the same id, are 404:
+
+```json
+{"statusCode":404,"message":"ticket <id> not found","error":"Not Found"}
+```
+
+Backlog, To Do, and Done can be deleted in every mode. Build, QA, and Review (`inprogress` counts as Build) can be deleted when the board is unlocked (Manual moves On, or no registered agent). Sample tickets (`DEMO-n`) can always be deleted by a human. While the board is locked, deleting a Build, QA, or Review ticket is 409, the row stays, and no activity event is written:
+
+```json
+{"statusCode":409,"error":"agents own this ticket","message":"Agents own this ticket. Turn on Manual moves in Settings to delete it."}
+```
+
+A delete removes the row. Activity history stays. Runs stay and `ticketId` becomes null. The ticket leaves `GET /tickets/ready`. A later PATCH is 404. There is no undo. Activity is `{key} deleted`, event type `run.progress`, with `name` and `ticket` set and no `agent`. A delete of a Build, QA, or Review ticket while Manual moves is saved On and an agent is registered is `{key} deleted by operator override` with `override: true`. A ticket with no key reads `Ticket deleted`. Deleting the current highest `MC-n` can hand that number out again. Deleting any other ticket does not reuse its number.
 
 `GET /settings` adds `manualMoves` (`true`, `false`, or `null`) and `manualMovesOn` (the effective boolean). `null` is Automatic: unlocked with no registered agent, locked once one exists. `true` is Manual moves On. `false` is Manual moves Off. `PUT /settings` accepts `manualMoves` as `true`, `false`, or `null`. Anything else is 400 `manualMoves must be true, false, or null`. It stays a dashboard write. A save broadcasts `settings.changed`. A real change also writes one `board.moves` event named `Manual moves set to On`, `Manual moves set to Off`, or `Manual moves set to Automatic`.
 
@@ -534,7 +560,7 @@ The operator paste is [PASTE_IN.md](PASTE_IN.md). It runs the installer, reports
    curl -s 'http://127.0.0.1:3000/activity?limit=5'
    ```
    Your event should be first. A checked call returned 200, and the first row was `run.completed` with name `onboarding check`. Ask your operator to open http://localhost:5173/#/office and look for that name in the activity list. The floor seats will not move because of this event.
-6. **File a test ticket and move it.** On loopback the calls below need no token. On Compose, add `x-ingest-token: $MC_TOKEN` and `x-actor-id: YOUR_AGENT_ID` (a registered agent id) on the claim. A token may set status, assignee, title, and description. Activity stores that agent id. There is no ticket delete route. Every other dashboard write still needs loopback or a session cookie. A 401 means the token is wrong, or that route is for the dashboard only. Create in backlog. A person moves it to todo. The agent claims it into build. Do not jump to done.
+6. **File a test ticket and move it.** On loopback the calls below need no token. On Compose, add `x-ingest-token: $MC_TOKEN` and `x-actor-id: YOUR_AGENT_ID` (a registered agent id) on the claim. A token may set status, assignee, title, and description. Activity stores that agent id. `DELETE /tickets/:id` is dashboard only. A token cannot delete. Every other dashboard write still needs loopback or a session cookie. A 401 means the token is wrong, or that route is for the dashboard only. Create in backlog. A person moves it to todo. The agent claims it into build. Do not jump to done.
    ```bash
    curl -sS -X POST http://127.0.0.1:3000/tickets \
      -H 'content-type: application/json' \

@@ -74,6 +74,12 @@ function makeFakePrisma() {
         return { ...row };
       },
     ),
+    delete: jest.fn(({ where }: { where: { id: string } }) => {
+      const row = rows.get(where.id);
+      if (!row) return null;
+      rows.delete(where.id);
+      return { ...row };
+    }),
     findMany: jest.fn(
       promiseFn(
         (args?: { where?: { status?: string; projectId?: string | null } }) => {
@@ -936,6 +942,304 @@ describe('ticket ownership', () => {
       id: high.id,
       title: 'High',
       priority: 'med',
+    });
+  });
+});
+
+function lastActivity(prisma: {
+  activityEvent: { create: { mock: { calls: unknown } } };
+}): { type: string; payload: Record<string, unknown> } {
+  const calls = prisma.activityEvent.create.mock.calls as {
+    data: { type: string; payload: Record<string, unknown> };
+  }[][];
+  const data = calls.at(-1)?.[0]?.data;
+  if (!data) throw new Error('no activity event');
+  return data;
+}
+
+async function expectBody(
+  run: Promise<unknown>,
+  body: Record<string, unknown>,
+) {
+  try {
+    await run;
+    throw new Error(`expected ${String(body.statusCode)}`);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('expected ')) throw err;
+    expect(responseOf(err)).toEqual(body);
+  }
+}
+
+describe('ticket fields and delete', () => {
+  it('rejects a priority that is not high, med, or low and defaults an omitted one', async () => {
+    const { controller } = makeController();
+    const created = await controller.create({ title: 'Default' });
+    expect(created.ticket.priority).toBe('med');
+    for (const priority of ['High', '', 'urgent']) {
+      await expectBody(controller.create({ title: 'Bad', priority }), {
+        statusCode: 400,
+        message: 'priority must be one of high, med, low',
+        error: 'Bad Request',
+      });
+      await expectBody(controller.update(created.ticket.id, { priority }), {
+        statusCode: 400,
+        message: 'priority must be one of high, med, low',
+        error: 'Bad Request',
+      });
+    }
+    await expectBody(controller.create({ title: 'Bad', priority: 1 }), {
+      statusCode: 400,
+      message: 'priority must be a string',
+      error: 'Bad Request',
+    });
+  });
+
+  it('rejects long title, description, and assignee on create and update', async () => {
+    const { controller, rows } = makeController();
+    const { ticket } = await controller.create({ title: 'Short' });
+    const longTitle = ` ${'t'.repeat(121)} `;
+    await expectBody(controller.create({ title: longTitle }), {
+      statusCode: 400,
+      message: 'title must be 120 characters or fewer',
+      error: 'Bad Request',
+    });
+    await expectBody(controller.update(ticket.id, { title: longTitle }), {
+      statusCode: 400,
+      message: 'title must be 120 characters or fewer',
+      error: 'Bad Request',
+    });
+    await expectBody(
+      controller.create({ title: 'x', description: 'd'.repeat(4001) }),
+      {
+        statusCode: 400,
+        message: 'description must be 4000 characters or fewer',
+        error: 'Bad Request',
+      },
+    );
+    await expectBody(
+      controller.update(ticket.id, { description: 'd'.repeat(4001) }),
+      {
+        statusCode: 400,
+        message: 'description must be 4000 characters or fewer',
+        error: 'Bad Request',
+      },
+    );
+    await expectBody(
+      controller.create({ title: 'x', assignee: 'a'.repeat(101) }),
+      {
+        statusCode: 400,
+        message: 'assignee must be 100 characters or fewer',
+        error: 'Bad Request',
+      },
+    );
+    await expectBody(
+      controller.update(ticket.id, { assignee: 'a'.repeat(101) }),
+      {
+        statusCode: 400,
+        message: 'assignee must be 100 characters or fewer',
+        error: 'Bad Request',
+      },
+    );
+    await expectBody(controller.create({ title: 4 }), {
+      statusCode: 400,
+      message: 'title must be a string',
+      error: 'Bad Request',
+    });
+    await expectBody(controller.create({ title: '   ' }), {
+      statusCode: 400,
+      message: 'title is required',
+      error: 'Bad Request',
+    });
+    await expectBody(controller.create({ title: 'x', description: null }), {
+      statusCode: 400,
+      message: 'description must be a string',
+      error: 'Bad Request',
+    });
+    rows.get(ticket.id)!.title = 'z'.repeat(200);
+    const saved = await controller.update(ticket.id, { priority: 'high' });
+    expect(saved.ticket.priority).toBe('high');
+    expect(saved.ticket.title).toHaveLength(200);
+  });
+
+  it('lets a human edit every column while locked and writes no agent on the event', async () => {
+    const { controller, prisma, rows, gateway } = makeController();
+    armBoard(prisma, [FORGE], null);
+    for (const status of [
+      'backlog',
+      'todo',
+      'build',
+      'qa',
+      'review',
+      'done',
+      'inprogress',
+    ]) {
+      const { ticket } = await controller.create({
+        title: status,
+        status: 'backlog',
+        description: 'keep',
+      });
+      rows.get(ticket.id)!.status = status;
+      gateway.broadcast.mockClear();
+      prisma.activityEvent.create.mockClear();
+      const saved = await controller.update(ticket.id, {
+        title: `${status} edited`,
+        description: 'notes',
+        priority: 'low',
+        assignee: 'Operator',
+      });
+      expect(saved.ticket).toMatchObject({
+        title: `${status} edited`,
+        description: 'notes',
+        priority: 'low',
+        status,
+      });
+      const payload = lastActivity(prisma).payload;
+      expect(payload).toMatchObject({
+        name: `${ticket.key} updated`,
+        ticket: ticket.key,
+      });
+      expect(payload.agent).toBeUndefined();
+    }
+    const { ticket } = await controller.create({
+      title: 'Claimed',
+      status: 'backlog',
+    });
+    await controller.update(ticket.id, { status: 'todo' });
+    await controller.update(ticket.id, { status: 'build' }, asRequest('forge'));
+    prisma.activityEvent.create.mockClear();
+    const agentEdit = await controller.update(
+      ticket.id,
+      { title: 'Held title', description: 'from the agent' },
+      asRequest('forge'),
+    );
+    expect(agentEdit.ticket.status).toBe('build');
+    expect(agentEdit.ticket.assignee).toBe('forge');
+    const credited = lastActivity(prisma).payload;
+    expect(credited).toMatchObject({
+      name: `${ticket.key} updated`,
+      agent: 'forge',
+      actor: 'forge',
+    });
+    prisma.activityEvent.create.mockClear();
+    gateway.broadcast.mockClear();
+    await controller.update(
+      ticket.id,
+      { title: 'Held title', description: 'from the agent' },
+      asRequest('forge'),
+    );
+    expect(prisma.activityEvent.create).not.toHaveBeenCalled();
+    expect(gateway.broadcast).not.toHaveBeenCalled();
+  });
+
+  it('deletes by stage and lock, and refuses every actor before reading', async () => {
+    const { controller, prisma, rows, gateway } = makeController();
+    armBoard(prisma, [FORGE], false);
+    const refused = await controller.create({
+      title: 'Busy',
+      status: 'backlog',
+    });
+    rows.get(refused.ticket.id)!.status = 'build';
+    gateway.broadcast.mockClear();
+    prisma.activityEvent.create.mockClear();
+    await expectBody(controller.remove(refused.ticket.id), {
+      statusCode: 409,
+      error: 'agents own this ticket',
+      message:
+        'Agents own this ticket. Turn on Manual moves in Settings to delete it.',
+    });
+    expect(rows.has(refused.ticket.id)).toBe(true);
+    expect(prisma.activityEvent.create).not.toHaveBeenCalled();
+    rows.get(refused.ticket.id)!.status = 'inprogress';
+    await expectBody(controller.remove(refused.ticket.id), {
+      statusCode: 409,
+      error: 'agents own this ticket',
+      message:
+        'Agents own this ticket. Turn on Manual moves in Settings to delete it.',
+    });
+
+    for (const status of ['backlog', 'todo', 'done']) {
+      const { ticket } = await controller.create({
+        title: status,
+        status: 'backlog',
+      });
+      rows.get(ticket.id)!.status = status;
+      prisma.activityEvent.create.mockClear();
+      await controller.remove(ticket.id);
+      expect(rows.has(ticket.id)).toBe(false);
+      const payload = lastActivity(prisma);
+      expect(payload.type).toBe('run.progress');
+      expect(payload.payload).toEqual({
+        name: `${ticket.key} deleted`,
+        ticket: ticket.key,
+      });
+    }
+
+    const sample = await controller.create({
+      title: 'Sample',
+      status: 'backlog',
+    });
+    rows.get(sample.ticket.id)!.key = 'DEMO-4';
+    rows.get(sample.ticket.id)!.status = 'qa';
+    await controller.remove(sample.ticket.id);
+    expect(rows.has(sample.ticket.id)).toBe(false);
+
+    armBoard(prisma, [FORGE], true);
+    const held = await controller.create({
+      title: 'Override',
+      status: 'backlog',
+    });
+    rows.get(held.ticket.id)!.status = 'review';
+    prisma.activityEvent.create.mockClear();
+    await controller.remove(held.ticket.id);
+    const override = lastActivity(prisma);
+    expect(override.payload).toEqual({
+      name: `${held.ticket.key} deleted by operator override`,
+      ticket: held.ticket.key,
+      override: true,
+    });
+
+    armBoard(prisma, [], null);
+    const open = await controller.create({
+      title: 'Open build',
+      status: 'backlog',
+    });
+    rows.get(open.ticket.id)!.status = 'build';
+    await controller.remove(open.ticket.id);
+    expect(rows.has(open.ticket.id)).toBe(false);
+
+    const missing = 'missing-ticket';
+    await expectBody(controller.remove(missing, { actor: 'forge' }), {
+      statusCode: 403,
+      error: 'agents cannot delete tickets',
+      message: 'Only the dashboard can delete a ticket.',
+    });
+    await expectBody(controller.remove(missing, {}, 'unknown'), {
+      statusCode: 403,
+      error: 'agents cannot delete tickets',
+      message: 'Only the dashboard can delete a ticket.',
+    });
+    await expectBody(
+      controller.remove(missing, {}, undefined, asRequest('nope')),
+      {
+        statusCode: 403,
+        error: 'agents cannot delete tickets',
+        message: 'Only the dashboard can delete a ticket.',
+      },
+    );
+    await expectBody(controller.remove(missing), {
+      statusCode: 404,
+      message: `ticket ${missing} not found`,
+      error: 'Not Found',
+    });
+    const twice = await controller.create({
+      title: 'Twice',
+      status: 'backlog',
+    });
+    await controller.remove(twice.ticket.id);
+    await expectBody(controller.remove(twice.ticket.id), {
+      statusCode: 404,
+      message: `ticket ${twice.ticket.id} not found`,
+      error: 'Not Found',
     });
   });
 });

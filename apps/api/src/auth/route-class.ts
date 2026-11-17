@@ -4,8 +4,8 @@
  * ticket update, and the ready list, which also accept the ingest token.
  *
  * Ingest is register, heartbeat, run create and update, and bridge sync
- * (POST /events). Delete of an agent is a dashboard write. There is no
- * ticket delete route.
+ * (POST /events). Delete of an agent is a dashboard write. Ticket delete
+ * is a dashboard write too. An ingest token does not open it.
  */
 
 function requestPath(url: string | undefined): string {
@@ -30,9 +30,9 @@ export function isIngestWrite(
 }
 
 /**
- * Ticket create, a single ticket update, and the ready list. There is no
- * DELETE /tickets route. These are not ingest writes: loopback and a
- * session cookie still open them without the header.
+ * Ticket create, a single ticket update, and the ready list. Ticket delete
+ * is not included. These are not ingest writes: loopback and a session
+ * cookie still open the create, update, and ready routes without the header.
  */
 export function isAgentTicketRoute(
   method: string,

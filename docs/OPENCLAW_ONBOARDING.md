@@ -42,7 +42,7 @@ The bridge also posts `devices.snapshot` from `openclaw devices list` and `openc
 
 ### 4.4 Tickets: your units of work
 
-POST /tickets and PATCH /tickets/<id> are the ticket calls. There is no ticket delete route. [PASTE_IN.md](PASTE_IN.md) shows them. See [API.md](API.md#44-tickets-your-units-of-work).
+POST /tickets and PATCH /tickets/<id> are the ticket calls. Humans delete tickets from the dashboard. A 404 on a ticket you hold means a human deleted it, so stop work on it. [PASTE_IN.md](PASTE_IN.md) shows the calls. See [API.md](API.md#44-tickets-your-units-of-work).
 
 ### 4.5 Projects
 

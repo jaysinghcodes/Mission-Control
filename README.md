@@ -261,7 +261,9 @@ The cases hit on a fresh clone, including 401, login lockout, and a bridge with 
 
 On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
 
-Tasks, projects, pipeline, memory, docs, team, custom tools, Office, Calendar, Approvals, and Usage all render from that seed. Sessions and gateway logs stay empty until a real bridge posts them. With no registered agents, Manual moves stays on Automatic and the board stays fully manual. New task lands in To Do, and every drag and button move works. The list is in [docs/STACK.md](docs/STACK.md#what-works-without-openclaw).
+Tasks, projects, pipeline, memory, docs, team, custom tools, Office, Calendar, Approvals, and Usage all render from that seed. Sessions and gateway logs stay empty until a real bridge posts them. With no registered agents, Manual moves stays on Automatic and the board stays fully manual. New task lands in To Do, and every drag and button move works. Editing a ticket and deleting it work by hand. The list is in [docs/STACK.md](docs/STACK.md#what-works-without-openclaw).
+
+Open a task from its title. The sheet edits the title, description, priority, assignee, and project. Priority is High, Medium, or Low. New task can set that priority. Delete asks you to confirm. Each column can sort by Priority, Newest, or Oldest. The browser stores that choice under `mc-ticket-sort`.
 
 ## Roadmap
 

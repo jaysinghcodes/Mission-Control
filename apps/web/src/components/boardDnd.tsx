@@ -82,6 +82,7 @@ export function ColumnDrop({
   return (
     <div
       ref={setNodeRef}
+      data-board-column={status}
       className={className}
       style={
         isOver
@@ -117,13 +118,14 @@ export function CardDrag({
     disabled,
     attributes: { role: 'group', tabIndex: -1 },
   })
+  const { 'aria-disabled': _ariaDisabled, ...handleAttributes } = attributes
   return (
     <div
       ref={setNodeRef}
       className={disabled ? undefined : isDragging ? 'cursor-grabbing opacity-40' : 'cursor-grab'}
       style={disabled ? undefined : { touchAction: 'pan-y' }}
       {...(disabled ? {} : listeners)}
-      {...attributes}
+      {...handleAttributes}
     >
       {children}
     </div>

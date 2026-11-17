@@ -112,6 +112,31 @@ export function showWaitingChip(status: string, locked: boolean, sample = false)
   return locked && !sample && status === 'todo'
 }
 
+export const DELETE_REFUSAL =
+  'Agents own this ticket. Turn on Manual moves in Settings to delete it.'
+
+/**
+ * Who may delete, matching planTicketDelete in move-rules.ts.
+ * inprogress counts as Build. Sample tickets are always allowed.
+ */
+export function ticketStage(status: string): 'backlog' | 'todo' | 'build' | 'qa' | 'review' | 'done' {
+  const key = status.trim().toLowerCase()
+  if (key === 'inprogress' || key === 'build') return 'build'
+  if (key === 'backlog' || key === 'todo' || key === 'qa' || key === 'review' || key === 'done') return key
+  return 'build'
+}
+
+export function ticketHeld(status: string): boolean {
+  const stage = ticketStage(status)
+  return stage === 'build' || stage === 'qa' || stage === 'review'
+}
+
+export function canDeleteTicket(status: string, locked: boolean, sample = false): boolean {
+  if (sample) return true
+  if (!ticketHeld(status)) return true
+  return !locked
+}
+
 const STATUS_LABEL: Record<string, string> = {
   backlog: 'Backlog',
   todo: 'To-Do',
@@ -182,6 +207,7 @@ const COPY = [
   manualMovesStateLine(true),
   manualMovesStateLine(false),
   backlogAddedNotice('MC-150'),
+  DELETE_REFUSAL,
 ]
 
 const DASH = /[\u2010\u2011\u2012\u2013\u2014\u2015→←⇒]| - /
