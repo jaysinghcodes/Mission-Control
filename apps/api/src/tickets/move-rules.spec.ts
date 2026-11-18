@@ -9,7 +9,10 @@ import {
   boardIsLocked,
   claimableBy,
   humanMoveAllowed,
+  agentsCannotDeleteBody,
+  agentsOwnTicketBody,
   isSampleTicket,
+  planTicketDelete,
   planTicketWrite,
   type RosterAgent,
   type WriteContext,
@@ -473,5 +476,87 @@ describe('planTicketWrite', () => {
     expect(CREATE_IN_BACKLOG_MESSAGE).toBe(
       'New tickets start in Backlog while agents own the board. Move it to To Do when it is ready.',
     );
+  });
+});
+
+describe('planTicketDelete', () => {
+  const locked = {
+    locked: true,
+    manualMoves: null as boolean | null,
+    registeredCount: 1,
+  };
+  const open = {
+    locked: false,
+    manualMoves: null as boolean | null,
+    registeredCount: 0,
+  };
+  const override = {
+    locked: false,
+    manualMoves: true as boolean | null,
+    registeredCount: 2,
+  };
+
+  it('allows backlog, todo, and done in every mode and refuses held columns while locked', () => {
+    for (const status of ['backlog', 'todo', 'done']) {
+      expect(planTicketDelete(ticket({ status }), locked)).toEqual({
+        ok: true,
+        override: false,
+      });
+    }
+    for (const status of ['build', 'qa', 'review', 'inprogress']) {
+      expect(planTicketDelete(ticket({ status }), locked)).toEqual({
+        ok: false,
+        status: 409,
+        body: agentsOwnTicketBody(),
+      });
+    }
+    expect(agentsOwnTicketBody()).toEqual({
+      statusCode: 409,
+      error: 'agents own this ticket',
+      message:
+        'Agents own this ticket. Turn on Manual moves in Settings to delete it.',
+    });
+    expect(agentsCannotDeleteBody()).toEqual({
+      statusCode: 403,
+      error: 'agents cannot delete tickets',
+      message: 'Only the dashboard can delete a ticket.',
+    });
+  });
+
+  it('allows held columns when the board is unlocked and marks the operator override', () => {
+    for (const status of ['build', 'qa', 'review', 'inprogress']) {
+      expect(planTicketDelete(ticket({ status }), open)).toEqual({
+        ok: true,
+        override: false,
+      });
+      expect(planTicketDelete(ticket({ status }), override).ok).toBe(true);
+      expect(planTicketDelete(ticket({ status }), override)).toMatchObject({
+        override: true,
+      });
+    }
+    expect(planTicketDelete(ticket({ status: 'done' }), override)).toEqual({
+      ok: true,
+      override: false,
+    });
+    expect(planTicketDelete(ticket({ status: 'todo' }), override)).toEqual({
+      ok: true,
+      override: false,
+    });
+  });
+
+  it('always allows a sample ticket, including a locked Build ticket', () => {
+    const sample = ticket({
+      id: 'demo-ticket-3',
+      key: 'DEMO-3',
+      status: 'build',
+    });
+    expect(planTicketDelete(sample, locked)).toEqual({
+      ok: true,
+      override: false,
+    });
+    expect(planTicketDelete(sample, override)).toMatchObject({
+      ok: true,
+      override: true,
+    });
   });
 });

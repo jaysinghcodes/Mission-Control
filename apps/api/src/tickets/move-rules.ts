@@ -32,6 +32,12 @@ export const CLAIM_FIELDS_MESSAGE = 'a claim sends status only';
 
 export const ASSIGNEE_MESSAGE = 'assignee must be a registered agent id';
 
+export const AGENTS_CANNOT_DELETE_MESSAGE =
+  'Only the dashboard can delete a ticket.';
+
+export const DELETE_OWNED_MESSAGE =
+  'Agents own this ticket. Turn on Manual moves in Settings to delete it.';
+
 export type BoardStage =
   'backlog' | 'todo' | 'build' | 'qa' | 'review' | 'done';
 
@@ -362,4 +368,49 @@ export function planTicketWrite(
   }
 
   return { ok: true, fields: next, claim: false, override: false };
+}
+
+const HELD_STAGES = new Set<BoardStage>(['build', 'qa', 'review']);
+
+export function agentsCannotDeleteBody(): Record<string, unknown> {
+  return {
+    statusCode: 403,
+    error: 'agents cannot delete tickets',
+    message: AGENTS_CANNOT_DELETE_MESSAGE,
+  };
+}
+
+export function agentsOwnTicketBody(): Record<string, unknown> {
+  return {
+    statusCode: 409,
+    error: 'agents own this ticket',
+    message: DELETE_OWNED_MESSAGE,
+  };
+}
+
+export type DeletePlan =
+  | { ok: true; override: boolean }
+  | { ok: false; status: 409; body: Record<string, unknown> };
+
+/**
+ * Decide a dashboard delete that already passed the actor check.
+ * Sample tickets are always allowed. Build, QA, and Review wait for an
+ * unlocked board. inprogress counts as Build.
+ */
+export function planTicketDelete(
+  before: TicketSnapshot,
+  ctx: {
+    locked: boolean;
+    manualMoves: boolean | null;
+    registeredCount: number;
+  },
+): DeletePlan {
+  const stage = canonicalStage(before.status);
+  const held = HELD_STAGES.has(stage);
+  const sample = isSampleTicket(before);
+  if (held && ctx.locked && !sample) {
+    return { ok: false, status: 409, body: agentsOwnTicketBody() };
+  }
+  const override = held && ctx.manualMoves === true && ctx.registeredCount > 0;
+  return { ok: true, override };
 }

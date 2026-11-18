@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   HttpCode,
@@ -22,6 +23,8 @@ import { isAgentSlug } from '../agents/agent-merge';
 import { KeyedMutex } from './keyed-mutex';
 import {
   ticketCreated,
+  ticketDeleted,
+  ticketDeletedOverride,
   ticketMoved,
   ticketOverride,
   ticketPickedUp,
@@ -30,13 +33,22 @@ import {
 import { loadAgentNames, resolveIngestAgent } from '../agents/agent-ref';
 import { SETTING_ID } from '../team/mission';
 import {
+  agentsCannotDeleteBody,
   boardIsLocked,
   claimableBy,
   createInBacklogBody,
   isSampleTicket,
+  planTicketDelete,
   planTicketWrite,
   type RosterAgent,
 } from './move-rules';
+import {
+  parseAssignee,
+  parseDescription,
+  parsePriority,
+  parseTitle,
+  type FieldResult,
+} from './ticket-fields';
 import {
   CREATE_STATUSES,
   DEFAULT_CREATE_STATUS,
@@ -116,6 +128,27 @@ function ticketWriteMode(
   return 'agent';
 }
 
+function textActor(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (!Array.isArray(value)) return '';
+  for (const item of value) {
+    if (typeof item === 'string' && item.trim()) return item.trim();
+  }
+  return '';
+}
+
+/** A non blank actor on a delete is refused before the ticket is read. */
+function deleteActorPresent(
+  req: Request | undefined,
+  bodyActor: unknown,
+  queryActor: unknown,
+): boolean {
+  const header = req?.headers?.['x-actor-id'];
+  return Boolean(
+    textActor(header) || textActor(bodyActor) || textActor(queryActor),
+  );
+}
+
 function createdMillis(value: Date | string | null | undefined): number {
   if (value == null) return 0;
   const n = new Date(value).getTime();
@@ -134,9 +167,10 @@ function refusePlan(status: number, body: Record<string, unknown>): never {
 
 /**
  * TicketsController — Kanban + Backlog backend.
- *  - GET   /tickets?status=&projectId=  → board, optionally one project
- *  - POST  /tickets                     → create (status ∈ CREATE_STATUSES, default DEFAULT_CREATE_STATUS)
- *  - PATCH /tickets/:id                 → move / update (any TICKET_STATUSES value, optional projectId)
+ *  GET    /tickets lists the board, optionally one project.
+ *  POST   /tickets creates a ticket (status in CREATE_STATUSES, default DEFAULT_CREATE_STATUS).
+ *  PATCH  /tickets/:id moves or updates a ticket.
+ *  DELETE /tickets/:id is a dashboard delete and answers 204. Agents cannot call it.
  *
  * Error contract (QA finding E on PR #20): failures are REAL HTTP errors via
  * Nest's HttpExceptions — never a 200/201 carrying `{ error }`:
@@ -238,10 +272,7 @@ export class TicketsController {
     // ── title: required, non-blank string ────────────────────────────────
     // Previously a missing title returned 201 + { error } (finding E), which
     // the web helper treated as success. Now it is a real 400.
-    const title = typeof body?.title === 'string' ? body.title.trim() : '';
-    if (!title) {
-      throw new BadRequestException('title is required');
-    }
+    const title = this.readField(parseTitle(body?.title));
 
     // ── status: optional, but if present must be a create-time status ────
     // Finding C: the old code silently coerced anything unknown (e.g. `done`)
@@ -252,12 +283,12 @@ export class TicketsController {
     const status = this.resolveCreateStatus(body?.status);
 
     // ── optional fields: type-check so junk cannot reach Prisma (→ 500) ──
-    const priority = this.optionalString(body?.priority, 'priority') ?? 'med';
+    const priority = this.readField(parsePriority(body?.priority)) ?? 'med';
     // Default assignee = the configured operator (OPERATOR_NAME env, neutral
     // "Operator" fallback). Previously hardcoded to the original author's
     // agent name, which leaked into every fresh clone (ticket 3).
     const assignee =
-      this.optionalString(body?.assignee, 'assignee') ?? operatorName();
+      this.readField(parseAssignee(body?.assignee)) ?? operatorName();
     const tags = this.optionalStringArray(body?.tags, 'tags') ?? [];
     // Omit and explicit null both mean "create with no project". A string
     // is checked inside the insert transaction (see lockAssignableProject)
@@ -265,7 +296,11 @@ export class TicketsController {
     const projectRef = this.parseProjectRef(body?.projectId);
     const projectId = projectRef.kind === 'id' ? projectRef.id : undefined;
     const description =
-      this.optionalString(body?.description, 'description') ?? '';
+      this.readField(
+        parseDescription(
+          body && 'description' in body ? body.description : undefined,
+        ),
+      ) ?? '';
     const mode = ticketWriteMode(req, body?.actor);
 
     // Queue synchronously, before any await, so parallel creates line up
@@ -342,8 +377,10 @@ export class TicketsController {
    *     `hashtext(...)` turns a readable name into the int key the function
    *     needs, so nobody has to remember a magic number.
    *  2. Read the highest existing `MC-<digits>` key (other prefixes such as
-   *     the demo seed's `DEMO-1` and NULL keys are ignored) and add 1. Using
-   *     MAX instead of COUNT means deleted tickets never cause a reuse.
+   *     the demo seed's `DEMO-1` and NULL keys are ignored) and add 1. MAX
+   *     ignores a deleted key that is not the current highest. Deleting the
+   *     current highest can hand that number out again. The allocator is
+   *     unchanged.
    *  3. Insert the row and COMMIT, which releases the lock; the next waiting
    *     create then reads our key as the new maximum.
    *
@@ -554,16 +591,88 @@ export class TicketsController {
         : fields.status
           ? ticketMoved(key, ticket.status)
           : ticketUpdated(key);
+    // A human field edit (no status) is not credited to the assignee.
+    const fieldEdit = ctx.mode === 'dashboard' && data.status === undefined;
     const moved = override
       ? {
           name: label,
           ...(ticket.key ? { ticket: ticket.key } : {}),
           override: true,
         }
-      : await this.activityPayload(ticket, label, ctx.actor);
+      : fieldEdit
+        ? {
+            name: label,
+            ...(ticket.key ? { ticket: ticket.key } : {}),
+          }
+        : await this.activityPayload(ticket, label, ctx.actor);
     await this.persist('run.progress', moved);
     this.gateway.broadcast('run.progress', moved);
     return { ticket, ts: Date.now() };
+  }
+
+  /**
+   * Dashboard delete. Any actor is refused before the row is read.
+   * The stage check runs under the per id queue and the row lock.
+   */
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(
+    @Param('id') id: string,
+    @Body() body?: { actor?: unknown },
+    @Query('actor') queryActor?: unknown,
+    @Req() req?: Request,
+  ): Promise<void> {
+    if (deleteActorPresent(req, body?.actor, queryActor)) {
+      throw new ForbiddenException(agentsCannotDeleteBody());
+    }
+    await this.writes.run(id, () => this.applyDelete(id));
+  }
+
+  private async applyDelete(id: string): Promise<void> {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<
+        {
+          id: string;
+          key: string | null;
+          status: string;
+          assignee: string | null;
+        }[]
+      >`
+        SELECT "id", "key", "status", "assignee"
+        FROM "Ticket" WHERE "id" = ${id} FOR UPDATE`;
+      if (locked.length === 0) {
+        throw new NotFoundException(`ticket ${id} not found`);
+      }
+      const before = locked[0];
+      const lock = await this.readLock();
+      const plan = planTicketDelete(
+        {
+          id: before.id,
+          key: before.key,
+          status: before.status,
+          assignee: before.assignee,
+        },
+        {
+          locked: lock.locked,
+          manualMoves: lock.manualMoves,
+          registeredCount: lock.registered,
+        },
+      );
+      if (!plan.ok) refusePlan(plan.status, plan.body);
+      await tx.ticket.delete({ where: { id } });
+      return { key: before.key, override: plan.override };
+    });
+    const labelKey = outcome.key?.trim() || 'Ticket';
+    const name = outcome.override
+      ? ticketDeletedOverride(labelKey)
+      : ticketDeleted(labelKey);
+    const payload: Record<string, unknown> = {
+      name,
+      ...(outcome.key?.trim() ? { ticket: outcome.key } : {}),
+      ...(outcome.override ? { override: true } : {}),
+    };
+    await this.persist('run.progress', payload);
+    this.gateway.broadcast('run.progress', payload);
   }
 
   /**
@@ -595,26 +704,20 @@ export class TicketsController {
       }
       data.status = status;
     }
-    const assignee = this.optionalString(body?.assignee, 'assignee');
-    if (assignee !== undefined) data.assignee = assignee;
-    const priority = this.optionalString(body?.priority, 'priority');
-    if (priority !== undefined) data.priority = priority;
+    if (body && 'assignee' in body && body.assignee !== undefined) {
+      const assignee = this.readField(parseAssignee(body.assignee));
+      if (assignee !== undefined) data.assignee = assignee;
+    }
+    if (body && 'priority' in body && body.priority !== undefined) {
+      const priority = this.readField(parsePriority(body.priority));
+      if (priority !== undefined) data.priority = priority;
+    }
     if (body && 'title' in body && body.title !== undefined) {
-      const title = this.optionalString(body.title, 'title') ?? '';
-      if (!title.trim()) {
-        throw new BadRequestException('title is required');
-      }
-      data.title = title.trim();
+      data.title = this.readField(parseTitle(body.title));
     }
     if (body && 'description' in body && body.description !== undefined) {
-      if (body.description === null) {
-        throw new BadRequestException('description must be a string');
-      }
-      const description = this.optionalString(body.description, 'description');
-      if (description === undefined) {
-        throw new BadRequestException('description must be a string');
-      }
-      data.description = description;
+      const description = this.readField(parseDescription(body.description));
+      if (description !== undefined) data.description = description;
     }
 
     // projectId is special: null is a real write (unassign), a string is a
@@ -706,6 +809,11 @@ export class TicketsController {
       );
     }
     return status;
+  }
+
+  private readField<T>(result: FieldResult<T>): T {
+    if (!result.ok) throw new BadRequestException(result.message);
+    return result.value;
   }
 
   /** undefined/null → undefined; string → string; anything else → 400. */

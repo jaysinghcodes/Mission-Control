@@ -6,6 +6,7 @@ import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { applyWriteToken } from './write-token';
 import { bodyMessage, responseJson } from './lint-helpers';
+import { hashPassword } from '../src/auth/password';
 
 /**
  * Tickets e2e — real Nest app + REAL Postgres (PR #20 QA findings A–E + QA-1).
@@ -544,6 +545,306 @@ describe('Tickets (e2e)', () => {
       expect(
         Array.isArray(responseJson<{ tickets?: unknown }>(allowed).tickets),
       ).toBe(true);
+    });
+  });
+
+  describe('field limits and delete', () => {
+    const actor = 'e2edelrace';
+
+    function expect400(
+      res: { status: number; body: unknown },
+      message: string,
+    ) {
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        statusCode: 400,
+        message,
+        error: 'Bad Request',
+      });
+    }
+
+    it('rejects bad priority and length on create and update', async () => {
+      const made = await createTicket({ title: 'e2e limits' });
+      expect(made.status).toBe(201);
+      expect(ticketOf(made).status).toBe('backlog');
+      const omitted = ticketFrom(made).ticket as { priority?: string };
+      expect(omitted.priority).toBe('med');
+      const id = ticketOf(made).id;
+
+      expect400(
+        await call().post('/tickets').send({ title: 'x', priority: 'High' }),
+        'priority must be one of high, med, low',
+      );
+      expect400(
+        await call().patch(`/tickets/${id}`).send({ priority: '' }),
+        'priority must be one of high, med, low',
+      );
+      expect400(
+        await call()
+          .post('/tickets')
+          .send({ title: 't'.repeat(121) }),
+        'title must be 120 characters or fewer',
+      );
+      expect400(
+        await call()
+          .patch(`/tickets/${id}`)
+          .send({ description: 'd'.repeat(4001) }),
+        'description must be 4000 characters or fewer',
+      );
+      expect400(
+        await call()
+          .post('/tickets')
+          .send({ title: 'x', assignee: 'a'.repeat(101) }),
+        'assignee must be 100 characters or fewer',
+      );
+      await prisma.ticket.update({
+        where: { id },
+        data: { title: 'z'.repeat(200) },
+      });
+      const priority = await call()
+        .patch(`/tickets/${id}`)
+        .send({ priority: 'low' });
+      expect(priority.status).toBe(200);
+      expect(
+        (priority.body as { ticket: { title: string; priority: string } })
+          .ticket,
+      ).toMatchObject({ priority: 'low', title: 'z'.repeat(200) });
+    });
+
+    it('deletes a ticket, keeps activity, and unlinks runs', async () => {
+      const made = await createTicket({
+        title: 'e2e delete me',
+        status: 'todo',
+        priority: 'high',
+      });
+      const ticket = ticketOf(made);
+      const run = await prisma.run.create({
+        data: { name: 'linked run', status: 'queued', ticketId: ticket.id },
+      });
+      const removed = await request(app.getHttpServer()).delete(
+        `/tickets/${ticket.id}`,
+      );
+      expect(removed.status).toBe(204);
+      expect(removed.text ?? '').toBe('');
+      expect(
+        await prisma.ticket.findUnique({ where: { id: ticket.id } }),
+      ).toBeNull();
+      const still = await prisma.run.findUnique({ where: { id: run.id } });
+      expect(still?.ticketId).toBeNull();
+      const events = await prisma.activityEvent.findMany({
+        where: { payload: { path: ['ticket'], equals: ticket.key } },
+      });
+      const names = events.map(
+        (row) => (row.payload as { name?: string } | null)?.name,
+      );
+      expect(names).toContain(`${ticket.key} created`);
+      expect(names).toContain(`${ticket.key} deleted`);
+      const again = await request(app.getHttpServer()).delete(
+        `/tickets/${ticket.id}`,
+      );
+      expect(again.status).toBe(404);
+      expect(again.body).toEqual({
+        statusCode: 404,
+        message: `ticket ${ticket.id} not found`,
+        error: 'Not Found',
+      });
+      const patched = await request(app.getHttpServer())
+        .patch(`/tickets/${ticket.id}`)
+        .send({ title: 'gone' });
+      expect(patched.status).toBe(404);
+      await prisma.agent.upsert({
+        where: { id: actor },
+        create: { id: actor, name: 'Delete Race', source: 'registered' },
+        update: { source: 'registered' },
+      });
+      const ready = await request(app.getHttpServer())
+        .get('/tickets/ready')
+        .set('x-actor-id', actor);
+      expect(ready.status).toBe(200);
+      const listed = (ready.body as { tickets: { id: string }[] }).tickets;
+      expect(listed.some((row) => row.id === ticket.id)).toBe(false);
+      await prisma.agent.deleteMany({ where: { id: actor } });
+      await prisma.run.delete({ where: { id: run.id } }).catch(() => undefined);
+    });
+
+    it('refuses an actor, a token off loopback, and a locked Build delete', async () => {
+      await prisma.agent.upsert({
+        where: { id: actor },
+        create: { id: actor, name: 'Delete Race', source: 'registered' },
+        update: { source: 'registered' },
+      });
+      const made = await createTicket({ title: 'e2e held', status: 'todo' });
+      const ticket = ticketOf(made);
+      const claimed = await request(app.getHttpServer())
+        .patch(`/tickets/${ticket.id}`)
+        .set('x-actor-id', actor)
+        .send({ status: 'build' });
+      expect(claimed.status).toBe(200);
+
+      const byActor = await request(app.getHttpServer())
+        .delete(`/tickets/${ticket.id}`)
+        .set('x-actor-id', actor);
+      expect(byActor.status).toBe(403);
+      expect(byActor.body).toEqual({
+        statusCode: 403,
+        error: 'agents cannot delete tickets',
+        message: 'Only the dashboard can delete a ticket.',
+      });
+      const byQuery = await request(app.getHttpServer()).delete(
+        `/tickets/${ticket.id}?actor=stranger`,
+      );
+      expect(byQuery.status).toBe(403);
+      expect(
+        await prisma.ticket.findUnique({ where: { id: ticket.id } }),
+      ).toMatchObject({ status: 'build' });
+
+      const deletedName = `${ticket.key} deleted`;
+      const deletedCount = async () => {
+        const events = await prisma.activityEvent.findMany({
+          where: { payload: { path: ['ticket'], equals: ticket.key } },
+        });
+        return events.filter(
+          (row) =>
+            (row.payload as { name?: string } | null)?.name === deletedName,
+        ).length;
+      };
+      const beforeDelete = await deletedCount();
+      await prisma.setting.update({
+        where: { id: 'default' },
+        data: { manualMoves: null },
+      });
+      const held = await request(app.getHttpServer()).delete(
+        `/tickets/${ticket.id}`,
+      );
+      expect(held.status).toBe(409);
+      expect(held.body).toEqual({
+        statusCode: 409,
+        error: 'agents own this ticket',
+        message:
+          'Agents own this ticket. Turn on Manual moves in Settings to delete it.',
+      });
+      expect(await deletedCount()).toBe(beforeDelete);
+
+      const edited = await request(app.getHttpServer())
+        .patch(`/tickets/${ticket.id}`)
+        .send({ title: 'Still here', priority: 'high' });
+      expect(edited.status).toBe(200);
+      expect(
+        (edited.body as { ticket: { title: string; status: string } }).ticket,
+      ).toMatchObject({ title: 'Still here', status: 'build' });
+
+      const saved = {
+        token: process.env.INGEST_TOKEN,
+        proxy: process.env.BUNDLED_PROXY,
+        hash: process.env.DASHBOARD_PASSWORD_HASH,
+        secret: process.env.SESSION_SECRET,
+      };
+      process.env.INGEST_TOKEN = 'e2e-delete-token';
+      process.env.BUNDLED_PROXY = '127.0.0.1';
+      process.env.DASHBOARD_PASSWORD_HASH = hashPassword('delete-e2e-password');
+      process.env.SESSION_SECRET = 'delete-e2e-secret';
+      try {
+        const spare = await createTicket({
+          title: 'e2e cookie delete',
+          status: 'backlog',
+        });
+        const spareId = ticketOf(spare).id;
+        const tokenOnly = await request(app.getHttpServer())
+          .delete(`/tickets/${spareId}`)
+          .set('x-mc-remote', '1')
+          .set('x-ingest-token', 'e2e-delete-token');
+        expect(tokenOnly.status).toBe(401);
+        expect(tokenOnly.body).toEqual({
+          statusCode: 401,
+          message: 'unauthorized',
+        });
+
+        const login = await request(app.getHttpServer())
+          .post('/auth/login')
+          .set('x-mc-remote', '1')
+          .send({ password: 'delete-e2e-password' });
+        expect(login.status).toBe(204);
+        const cookie = String(login.headers['set-cookie']).split(';')[0];
+        const withCookie = await request(app.getHttpServer())
+          .delete(`/tickets/${spareId}`)
+          .set('x-mc-remote', '1')
+          .set('Cookie', cookie);
+        expect(withCookie.status).toBe(204);
+      } finally {
+        if (saved.token === undefined) delete process.env.INGEST_TOKEN;
+        else process.env.INGEST_TOKEN = saved.token;
+        if (saved.proxy === undefined) delete process.env.BUNDLED_PROXY;
+        else process.env.BUNDLED_PROXY = saved.proxy;
+        if (saved.hash === undefined)
+          delete process.env.DASHBOARD_PASSWORD_HASH;
+        else process.env.DASHBOARD_PASSWORD_HASH = saved.hash;
+        if (saved.secret === undefined) delete process.env.SESSION_SECRET;
+        else process.env.SESSION_SECRET = saved.secret;
+        await prisma.setting
+          .update({ where: { id: 'default' }, data: { manualMoves: true } })
+          .catch(() => undefined);
+        await prisma.agent
+          .deleteMany({ where: { id: actor } })
+          .catch(() => undefined);
+      }
+    });
+
+    it('lets exactly one of delete or claim win, 20 times', async () => {
+      await prisma.setting.update({
+        where: { id: 'default' },
+        data: { manualMoves: true },
+      });
+      await prisma.agent.upsert({
+        where: { id: actor },
+        create: { id: actor, name: 'Delete Race', source: 'registered' },
+        update: { source: 'registered' },
+      });
+      const tickets: { id: string; key: string }[] = [];
+      for (let i = 0; i < 20; i += 1) {
+        const made = await createTicket({
+          title: `e2e race ${i}`,
+          status: 'todo',
+        });
+        expect(made.status).toBe(201);
+        tickets.push(ticketOf(made));
+      }
+      await prisma.setting.update({
+        where: { id: 'default' },
+        data: { manualMoves: null },
+      });
+      try {
+        for (const ticket of tickets) {
+          const [removed, claimed] = await Promise.all([
+            request(app.getHttpServer()).delete(`/tickets/${ticket.id}`),
+            request(app.getHttpServer())
+              .patch(`/tickets/${ticket.id}`)
+              .set('x-actor-id', actor)
+              .send({ status: 'build' }),
+          ]);
+          expect(removed.status).not.toBe(500);
+          expect(claimed.status).not.toBe(500);
+          const row = await prisma.ticket.findUnique({
+            where: { id: ticket.id },
+          });
+          const won =
+            (removed.status === 204 &&
+              claimed.status === 404 &&
+              row === null) ||
+            (claimed.status === 200 &&
+              removed.status === 409 &&
+              row?.status === 'build' &&
+              row.assignee === actor);
+          expect(won).toBe(true);
+          if (row) created.push(row.id);
+        }
+      } finally {
+        await prisma.setting
+          .update({ where: { id: 'default' }, data: { manualMoves: true } })
+          .catch(() => undefined);
+        await prisma.agent
+          .deleteMany({ where: { id: actor } })
+          .catch(() => undefined);
+      }
     });
   });
 });

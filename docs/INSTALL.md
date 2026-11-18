@@ -201,7 +201,7 @@ Merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json`, and do no
 
 ### Connect step 8: smoke test
 
-Tickets need no OpenClaw. There is no ticket delete route. Create a ticket on `/#/tickets`, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.
+Tickets need no OpenClaw. You can edit and delete a ticket from the board. Create a ticket on `/#/tickets`, then move it from Backlog to To Do, Build, QA, Review, and Done. Every move persists and survives a refresh.
 
 After `npm run seed:demo`, Calendar, Team, Office, and Live Activity show labeled sample data with no OpenClaw. Open them at `/#/calendar`, `/#/team`, `/#/office`, and `/#/activity`.
 

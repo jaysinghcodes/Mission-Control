@@ -214,6 +214,22 @@ describe('seed:clear (e2e)', () => {
         where: { id: { in: [...DEMO_TICKET_IDS] } },
       }),
     ).toBe(DEMO_TICKET_IDS.length);
+
+    await prisma.ticket.delete({ where: { id: 'demo-ticket-8' } });
+    await prisma.ticket.update({
+      where: { id: 'demo-ticket-1' },
+      data: { title: 'Edited sample title' },
+    });
+    const reseed = await run('npm', ['run', 'seed:demo'], childEnv);
+    expect(reseed.code).toBe(0);
+    const restored = await prisma.ticket.findUnique({
+      where: { id: 'demo-ticket-8' },
+    });
+    const keptEdit = await prisma.ticket.findUnique({
+      where: { id: 'demo-ticket-1' },
+    });
+    expect(restored?.title).toBe('Office floor ambient animations');
+    expect(keptEdit?.title).toBe('Edited sample title');
     expect(
       await prisma.agent.count({
         where: { id: { in: [...DEMO_AGENT_IDS] }, source: 'default' },

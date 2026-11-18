@@ -138,14 +138,20 @@ test('CI runs Compose and native installs and the fixture bridge', () => {
   assert.match(readme, /macOS runs the native install only/)
 })
 
-test('the ticket auth table does not list a delete route', () => {
+test('the ticket auth table lists delete as dashboard only', () => {
   const api = readFileSync(path.join(root, 'docs/API.md'), 'utf8')
-  assert.doesNotMatch(api, /Ticket delete/)
-  assert.match(api, /There is no ticket delete route/)
+  assert.doesNotMatch(api, /There is no ticket delete route/)
+  assert.match(api, /`DELETE \/tickets\/:id` is dashboard only/)
   const tickets = api.split('### 4.4 Tickets')[1].split('### 4.5')[0]
   assert.match(tickets, /`POST \/tickets`/)
   assert.match(tickets, /`PATCH \/tickets\/:id`/)
-  assert.doesNotMatch(tickets, /DELETE \/tickets/)
+  assert.match(tickets, /`DELETE \/tickets\/:id`/)
+  assert.match(tickets, /priority must be one of high, med, low/)
+  assert.match(tickets, /title must be 120 characters or fewer/)
+  assert.match(tickets, /description must be 4000 characters or fewer/)
+  assert.match(tickets, /assignee must be 100 characters or fewer/)
+  assert.match(tickets, /Only the dashboard can delete a ticket/)
+  assert.match(tickets, /Agents own this ticket/)
 })
 
 test('the fresh install fixture dry run maps devices, nodes, approvals, and the gateway', () => {

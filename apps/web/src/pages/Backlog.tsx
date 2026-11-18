@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useApi, apiSend } from '../hooks/useApi'
-import { Card, Chip } from '../components/ui'
+import { useLiveActivity } from '../hooks/useLiveActivity'
+import { Card } from '../components/ui'
 import { Btn, PageHeader, Segmented, Banner } from '../components/shell'
+import { PriorityChip, SortControl, TicketSheet, type SheetTicket } from '../components/TicketSheet'
+import type { Agent, AgentsResp, ProjectsResp } from '../types'
 import { pluralize } from '../lib/pluralize'
 import { ticketCreateQueue } from '../lib/serialQueue'
+import { runsForTicket, type LinkedRun } from '../lib/ticket-runs'
+import { sortTickets } from '../lib/ticket-sort'
+import { useTicketSort } from '../lib/useTicketSort'
+import { DELETE_REFUSAL } from '../lib/board-lock'
+import { useNaming } from '../lib/naming'
+import { deletedNotice, FIELD_PRIORITY, goneNotice, NEW_TASK_PRIORITY, PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_MEDIUM, savedNotice, ticketKeyLabel } from '../lib/ticket-edit'
 
 /**
  * Backlog — real backlog tickets from the API, ranked table with create CTA.
@@ -19,14 +28,8 @@ import { ticketCreateQueue } from '../lib/serialQueue'
  * - Creates are QUEUED, never dropped (QA-1 #1): see create().
  */
 
-interface Ticket { id: string; key: string | null; title: string; status: string; priority: string; assignee: string | null; tags: string[] | null; createdAt: string }
+interface Ticket { id: string; key: string | null; title: string; description?: string | null; status: string; priority: string; assignee: string | null; tags: string[] | null; projectId?: string | null; createdAt: string }
 interface TicketsResp { tickets: Ticket[] }
-
-const PRIO: Record<string, { bg: string; fg: string }> = {
-  high: { bg: 'var(--mc-orangebg)', fg: 'var(--mc-orangetext)' },
-  med: { bg: 'var(--mc-orangebg)', fg: 'var(--mc-orangetext)' },
-  low: { bg: 'var(--mc-inner)', fg: 'var(--mc-sub)' },
-}
 
 /** How long an inline notice stays up before fading on its own. */
 const NOTICE_MS = 6000
@@ -36,7 +39,21 @@ export default function Backlog() {
   // `loading`/`errorMessage` (QA-1 polish item 1): distinguish "not loaded yet"
   // and "load failed" from a genuinely empty backlog.
   const { data, loading, errorMessage: loadError, refetch, mutate } = useApi<TicketsResp>('/tickets?status=backlog', { pollMs: 15000 })
+  const projectsQ = useApi<ProjectsResp>('/projects?archived=all', { pollMs: 30000 })
+  const rosterQ = useApi<AgentsResp>('/agents', { pollMs: 30000 })
+  const roster = rosterQ.data?.agents ?? []
+  const naming = useNaming()
+  const locked = naming.ready && !naming.manualMovesOn
   const [title, setTitle] = useState('')
+  const [newPriority, setNewPriority] = useState<'high' | 'med' | 'low'>('med')
+  const ticketId = params.get('ticket')
+  const openerRef = useRef<HTMLElement | null>(null)
+  const lastKey = useRef<string | null>(null)
+  const closingSheet = useRef(false)
+  const { modeFor, setMode } = useTicketSort()
+  const runsPath = ticketId ? `/runs?ticketId=${encodeURIComponent(ticketId)}` : '/runs'
+  const runsQ = useApi<{ runs: LinkedRun[] }>(runsPath, { pollMs: 15000 })
+  const { events } = useLiveActivity()
   // How many of THIS page's creates are queued or in flight. Display-only
   // (drives the "Saving…" button label) — it NEVER gates a submit. The old
   // `busy` flag did (`if (!title || busy) return`), which is how a second
@@ -53,7 +70,9 @@ export default function Backlog() {
   // queued) names EVERY lost title instead of each failure overwriting the
   // last one's notice a few ms later. Reset when the notice goes away.
   const failedCreates = useRef<string[]>([])
-  const rows = data?.tickets ?? []
+  const rows = sortTickets(data?.tickets ?? [], modeFor('backlog'))
+  const openTicket = rows.find((row) => row.id === ticketId) ?? null
+  const showNoticeRef = useRef<(text: string, tone: 'ok' | 'warn') => void>(() => {})
 
   /** Hide the notice and forget the failed-create titles it was listing. */
   function clearNotice() {
@@ -66,7 +85,32 @@ export default function Backlog() {
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
     noticeTimer.current = setTimeout(clearNotice, NOTICE_MS)
   }
+  showNoticeRef.current = showNotice
   useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
+
+  const refetchRuns = runsQ.refetch
+  useEffect(() => {
+    if (events.some((event) => event.type.startsWith('run.') || event.type.includes('ticket'))) void refetch()
+    if (events.some((event) => event.type.startsWith('run.'))) void refetchRuns()
+  }, [events, refetch, refetchRuns])
+
+  useEffect(() => {
+    if (!data || !ticketId) {
+      closingSheet.current = false
+      return
+    }
+    if (openTicket) {
+      if (openTicket.key) lastKey.current = openTicket.key
+      return
+    }
+    if (closingSheet.current) return
+    const key = lastKey.current
+    lastKey.current = null
+    const next = new URLSearchParams(params)
+    next.delete('ticket')
+    setParams(next, { replace: true })
+    showNoticeRef.current(goneNotice(key), 'warn')
+  }, [data, ticketId, openTicket, params, setParams])
 
   /**
    * "+ New ticket" (button or Enter). QA-1 #1 fix — every submit is either
@@ -91,12 +135,14 @@ export default function Backlog() {
     const t = title.trim()
     if (!t) return
     setTitle('') // clear ONLY what we're submitting
+    const chosen = newPriority
+    setNewPriority('med')
     setSaving((n) => n + 1)
     // Explicit status: 'backlog' — matches today's API default, but stays
     // correct even if DEFAULT_CREATE_STATUS changes (see header comment).
     // apiSend never throws, so the queued job always resolves; branch on r.ok.
     void ticketCreateQueue
-      .run(() => apiSend<{ ticket: Ticket }>('POST', '/tickets', { title: t, priority: 'med', status: 'backlog' }))
+      .run(() => apiSend<{ ticket: Ticket }>('POST', '/tickets', { title: t, priority: chosen, status: 'backlog' }))
       .then((r) => {
         if (r.ok) return
         failedCreates.current.push(t)
@@ -140,6 +186,30 @@ export default function Backlog() {
     void refetch()
   }
 
+  function focusOpener(id: string | null) {
+    const button = id ? document.querySelector<HTMLElement>(`[data-ticket-open="${CSS.escape(id)}"]`) : null
+    ;(openerRef.current ?? button)?.focus()
+    openerRef.current = null
+  }
+
+  function closeTicket() {
+    closingSheet.current = true
+    lastKey.current = null
+    const next = new URLSearchParams(params)
+    next.delete('ticket')
+    setParams(next, { replace: true })
+    focusOpener(ticketId)
+  }
+
+  function openTicketFrom(id: string, el: HTMLElement) {
+    openerRef.current = el
+    const row = rows.find((item) => item.id === id)
+    if (row?.key) lastKey.current = row.key
+    const next = new URLSearchParams(params)
+    next.set('ticket', id)
+    setParams(next, { replace: true })
+  }
+
   function openBoard() {
     const next = new URLSearchParams(params)
     next.delete('view')
@@ -165,8 +235,23 @@ export default function Backlog() {
           onKeyDown={(e) => e.key === 'Enter' && create()}
           placeholder="New backlog item…"
           aria-label="New backlog item"
-          className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-[13px] outline-none"
+          className="h-8 w-64 max-w-full rounded-lg bg-mc-ctl px-3 text-base outline-none sm:text-[13px]"
         />
+        <label className="flex items-center gap-2 text-[12.5px] text-mc-sub">
+          {FIELD_PRIORITY}
+          <select
+            aria-label={NEW_TASK_PRIORITY}
+            data-new-priority="backlog"
+            value={newPriority}
+            onChange={(event) => setNewPriority(event.target.value as 'high' | 'med' | 'low')}
+            className="h-8 max-w-full rounded-lg bg-mc-ctl px-3 text-base text-mc-text outline-none sm:text-[13px]"
+          >
+            <option value="high">{PRIORITY_HIGH}</option>
+            <option value="med">{PRIORITY_MEDIUM}</option>
+            <option value="low">{PRIORITY_LOW}</option>
+          </select>
+        </label>
+        <SortControl label="Backlog" mode={modeFor('backlog')} onChange={(mode) => setMode('backlog', mode)} />
       </div>
 
       {/* Load failure (QA-1 polish item 1). useApi keeps the last good board
@@ -212,9 +297,11 @@ export default function Backlog() {
           <div key={row.id} className="flex items-center px-[18px] min-h-16 py-2 border-t border-mc-border2">
             <div className="font-mono text-[11.5px] font-semibold text-mc-faint shrink-0" style={{ width: 140 }}>{row.key ?? row.id.slice(0, 8)}</div>
             {/* Full title, wrapped inside the column. The row grows with it. */}
-            <div className="text-[13px] font-medium break-words" style={{ width: 320 }}>{row.title}</div>
+            <div className="text-[13px] font-medium break-words" style={{ width: 320 }}>
+              <button type="button" data-ticket-open={row.id} onClick={(event) => openTicketFrom(row.id, event.currentTarget)} className="text-left break-words">{row.title}</button>
+            </div>
             <div style={{ width: 140 }}>
-              <Chip label={row.priority.toUpperCase()} bg={PRIO[row.priority]?.bg ?? PRIO.med.bg} fg={PRIO[row.priority]?.fg ?? PRIO.med.fg} h={19} fs="text-[10px]" />
+              <PriorityChip priority={row.priority} surface="backlog" />
             </div>
             <div className="text-[12px] text-mc-sub" style={{ width: 140 }}>{row.status}</div>
             <div className="text-[12px] text-mc-faint" style={{ width: 140 }}>{new Date(row.createdAt).toLocaleDateString()}</div>
@@ -233,6 +320,49 @@ export default function Backlog() {
         ))}
         </div>
       </Card>
+      {openTicket && (
+        <TicketSheet
+          ticket={{ ...openTicket, projectId: openTicket.projectId ?? null } satisfies SheetTicket}
+          roster={roster as Agent[]}
+          projects={projectsQ.data?.projects ?? []}
+          projectsLoaded={Boolean(projectsQ.data)}
+          locked={locked}
+          runs={runsForTicket(runsQ.data?.runs ?? [], openTicket.id)}
+          onClose={closeTicket}
+          onSaved={(updated) => {
+            closingSheet.current = true
+            mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)) } : prev))
+            lastKey.current = null
+            const next = new URLSearchParams(params)
+            next.delete('ticket')
+            setParams(next, { replace: true })
+            showNotice(savedNotice(ticketKeyLabel(updated.key)), 'ok')
+            focusOpener(updated.id)
+            void refetch()
+          }}
+          onDeleted={(row) => {
+            closingSheet.current = true
+            lastKey.current = null
+            mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.filter((item) => item.id !== row.id) } : prev))
+            const next = new URLSearchParams(params)
+            next.delete('ticket')
+            setParams(next, { replace: true })
+            showNotice(deletedNotice(ticketKeyLabel(row.key)), 'ok')
+            focusOpener(row.id)
+            void refetch()
+          }}
+          onMissing={(label) => {
+            closingSheet.current = true
+            lastKey.current = null
+            const next = new URLSearchParams(params)
+            next.delete('ticket')
+            setParams(next, { replace: true })
+            showNotice(goneNotice(label), 'warn')
+            void refetch()
+          }}
+          onRefused={() => showNotice(DELETE_REFUSAL, 'warn')}
+        />
+      )}
     </div>
   )
 }

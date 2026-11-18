@@ -46,6 +46,14 @@ export function ticketUpdated(key: string): string {
   return `${key} updated`;
 }
 
+export function ticketDeleted(key: string): string {
+  return `${key} deleted`;
+}
+
+export function ticketDeletedOverride(key: string): string {
+  return `${key} deleted by operator override`;
+}
+
 export function runActivityName(status: string): string {
   if (status === 'running') return 'Run started';
   if (status === 'done') return 'Run finished';

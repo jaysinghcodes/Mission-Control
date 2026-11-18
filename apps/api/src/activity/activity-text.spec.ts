@@ -8,6 +8,8 @@ import {
   stageName,
   manualMovesName,
   ticketCreated,
+  ticketDeleted,
+  ticketDeletedOverride,
   ticketMoved,
   ticketOverride,
   ticketPickedUp,
@@ -27,6 +29,11 @@ describe('activity text', () => {
     expect(ticketMoved('DEMO-7', 'backlog')).toBe('DEMO-7 moved to Backlog');
     expect(ticketCreated('MC-151')).toBe('MC-151 created');
     expect(ticketUpdated('MC-151')).toBe('MC-151 updated');
+    expect(ticketDeleted('MC-151')).toBe('MC-151 deleted');
+    expect(ticketDeleted('Ticket')).toBe('Ticket deleted');
+    expect(ticketDeletedOverride('MC-151')).toBe(
+      'MC-151 deleted by operator override',
+    );
   });
 
   it('names a pickup, an override, and a Manual moves save', () => {
