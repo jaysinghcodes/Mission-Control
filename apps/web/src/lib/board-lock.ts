@@ -122,12 +122,51 @@ const STATUS_LABEL: Record<string, string> = {
   done: 'Done',
 }
 
-/** The banner for a failed board move. A lock refusal replaces the generic line. */
-export function boardMoveNotice(targetStatus: string, httpStatus: number, error: string): string {
-  if (error === AGENTS_OWN_API_MESSAGE) return REFUSED_MOVE_NOTICE
+/**
+ * The banner for a failed board move.
+ * The lock sentence is used only while the board is actually locked.
+ * Any other refusal keeps the server reason and does not mention Manual moves.
+ */
+export function boardMoveNotice(
+  targetStatus: string,
+  httpStatus: number,
+  error: string,
+  locked = false,
+): string {
   if (httpStatus === 404) return 'That ticket no longer exists. The board has been refreshed.'
   const what = STATUS_LABEL[targetStatus] ?? targetStatus
+  if (error === AGENTS_OWN_API_MESSAGE) {
+    if (locked) return REFUSED_MOVE_NOTICE
+    return `Couldn't move ticket to ${what}.`
+  }
   return `Couldn't move ticket to ${what}. ${error}`
+}
+
+/**
+ * Next banner after a move, or after Manual moves / the lock changes.
+ * A lock refusal is cleared when the setting changes, when the lock changes,
+ * and when a later move succeeds.
+ */
+export function boardNoticeAfter(
+  notice: string | null,
+  event:
+    | { type: 'move'; ok: true }
+    | {
+        type: 'move'
+        ok: false
+        targetStatus: string
+        httpStatus: number
+        error: string
+        locked: boolean
+      }
+    | { type: 'board'; savedChanged: boolean; lockChanged: boolean },
+): string | null {
+  if (event.type === 'board') {
+    if (notice === REFUSED_MOVE_NOTICE && (event.savedChanged || event.lockChanged)) return null
+    return notice
+  }
+  if (event.ok) return notice === REFUSED_MOVE_NOTICE ? null : notice
+  return boardMoveNotice(event.targetStatus, event.httpStatus, event.error, event.locked)
 }
 
 const COPY = [

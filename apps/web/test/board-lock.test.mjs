@@ -95,13 +95,46 @@ test('draggable, droppable, and buttons follow the column and the mode', () => {
   )
 })
 
-test('a refused move notice replaces the generic failure', () => {
+test('a refused move notice replaces the generic failure only while the board is locked', () => {
   assert.equal(
-    lock.boardMoveNotice('qa', 409, lock.AGENTS_OWN_API_MESSAGE),
+    lock.boardMoveNotice('qa', 409, lock.AGENTS_OWN_API_MESSAGE, true),
     lock.REFUSED_MOVE_NOTICE,
   )
+  const unlocked = lock.boardMoveNotice('build', 409, lock.AGENTS_OWN_API_MESSAGE, false)
+  assert.equal(unlocked, "Couldn't move ticket to Build.")
+  assert.equal(unlocked.includes('Turn on Manual moves'), false)
   assert.equal(
-    lock.boardMoveNotice('qa', 503, 'Request failed (HTTP 503)'),
+    lock.boardMoveNotice('qa', 503, 'Request failed (HTTP 503)', false),
     "Couldn't move ticket to QA. Request failed (HTTP 503)",
   )
+  assert.equal(
+    lock.boardMoveNotice('qa', 409, 'already claimed', false),
+    "Couldn't move ticket to QA. already claimed",
+  )
+})
+
+test('a lock refusal clears when Manual moves turns on and a later move stays clear', () => {
+  let notice = lock.boardNoticeAfter(null, {
+    type: 'move',
+    ok: false,
+    targetStatus: 'build',
+    httpStatus: 409,
+    error: lock.AGENTS_OWN_API_MESSAGE,
+    locked: true,
+  })
+  assert.equal(notice, lock.REFUSED_MOVE_NOTICE)
+  notice = lock.boardNoticeAfter(notice, {
+    type: 'board',
+    savedChanged: true,
+    lockChanged: true,
+  })
+  assert.equal(notice, null)
+  notice = lock.boardNoticeAfter(notice, { type: 'move', ok: true })
+  assert.equal(notice, null)
+  const other = lock.boardNoticeAfter('MC-4 added to Backlog. Move it to To Do when it is ready for agents.', {
+    type: 'board',
+    savedChanged: true,
+    lockChanged: false,
+  })
+  assert.equal(other, 'MC-4 added to Backlog. Move it to To Do when it is ready for agents.')
 })

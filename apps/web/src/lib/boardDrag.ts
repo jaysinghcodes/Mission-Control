@@ -32,9 +32,9 @@ function columnKey(status: string): string | null {
   return col ? col.status : null
 }
 
-/** Same sentences the status buttons already show. A lock refusal uses the board note. */
-function moveFailureNotice(status: string, httpStatus: number, error: string): string {
-  return boardMoveNotice(status, httpStatus, error)
+/** Same sentences the status buttons already show. A lock refusal uses the board note only while locked. */
+function moveFailureNotice(status: string, httpStatus: number, error: string, locked: boolean): string {
+  return boardMoveNotice(status, httpStatus, error, locked)
 }
 
 export type DragPatchResult<T> =
@@ -119,6 +119,7 @@ function settleDrag<T extends { id: string; status: string }>(
   id: string,
   seq: number,
   result: DragPatchResult<T>,
+  locked: boolean,
 ): SettleResult<T> {
   const list = state.pending.get(id) ?? []
   const index = list.findIndex((move) => move.seq === seq)
@@ -175,7 +176,7 @@ function settleDrag<T extends { id: string; status: string }>(
     known: true,
     authoritative: true,
     snappedBack,
-    notice: moveFailureNotice(move.nextStatus, result.httpStatus, result.error),
+    notice: moveFailureNotice(move.nextStatus, result.httpStatus, result.error, locked),
     idle: !stillInFlight,
   }
 }
@@ -185,6 +186,10 @@ export interface BoardDragOptions {
   onSettled?: () => void
   /** Fires when a ticket gains or loses an in-flight drag. */
   onBusy?: (id: string, busy: boolean) => void
+  /** Called when the newest drag saved. Clears a stale lock refusal. */
+  onSuccess?: () => void
+  /** Current board lock, read when the drag settles. */
+  lockedRef?: { current: boolean }
   /**
    * Shared with the status-button path so a button response that loses the
    * race does not repaint over a newer drag (and the reverse).
@@ -218,10 +223,14 @@ export function useBoardDrag<T extends { id: string; status: string }>(
   const onErrorRef = useRef(opts?.onError)
   const onSettledRef = useRef(opts?.onSettled)
   const onBusyRef = useRef(opts?.onBusy)
+  const onSuccessRef = useRef(opts?.onSuccess)
+  const lockedFlag = useRef(opts?.lockedRef)
   patchRef.current = patch
   onErrorRef.current = opts?.onError
   onSettledRef.current = opts?.onSettled
   onBusyRef.current = opts?.onBusy
+  onSuccessRef.current = opts?.onSuccess
+  lockedFlag.current = opts?.lockedRef
 
   let display = state
   if (server !== seen) {
@@ -265,12 +274,16 @@ export function useBoardDrag<T extends { id: string; status: string }>(
     }
     // A newer drag may have replaced this ticket's queue while we waited.
     // settleDrag drops a response that is no longer the newest pending one.
-    const settled = settleDrag(stateRef.current, id, seq, result)
+    const locked = lockedFlag.current?.current ?? false
+    const settled = settleDrag(stateRef.current, id, seq, result, locked)
     if (!settled.known) return
     commit(settled.state)
     // An earlier drag that fails after a newer one already failed must not
     // replace that notice. The newest issued seq is the drag the user sees.
-    if (settled.notice && seqRef.current.get(id) === seq) onErrorRef.current?.(settled.notice)
+    if (seqRef.current.get(id) === seq) {
+      if (result.ok && settled.authoritative) onSuccessRef.current?.()
+      else if (settled.notice) onErrorRef.current?.(settled.notice)
+    }
     if (settled.idle) {
       busyRef.current.delete(id)
       onBusyRef.current?.(id, false)

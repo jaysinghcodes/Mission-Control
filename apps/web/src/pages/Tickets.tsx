@@ -10,7 +10,9 @@ import { BOARD_COLUMNS, inColumn, ticketNeedsYou, type ApprovalLike } from '../l
 import {
   MANUAL_ON_NOTE,
   backlogAddedNotice,
+  REFUSED_MOVE_NOTICE,
   boardMoveNotice,
+  boardNoticeAfter,
   cardDraggable,
   columnDroppable,
   isSampleTicket,
@@ -95,6 +97,8 @@ export default function Tickets() {
   const roster = rosterQ.data?.agents ?? []
   const naming = useNaming()
   const locked = naming.ready && !naming.manualMovesOn
+  const lockedRef = useRef(locked)
+  lockedRef.current = locked
   const registeredAgents = roster.some((agent) => agent.source === 'registered')
   const showManualNote = naming.manualMoves === true && registeredAgents
   const { events } = useLiveActivity()
@@ -150,8 +154,10 @@ export default function Tickets() {
     },
     {
       onError: (msg) => showNoticeRef.current(msg),
+      onSuccess: () => clearRefusalRef.current(),
       onSettled: () => { void refetch() },
       moveSeq,
+      lockedRef,
     },
   )
   const [showDone, setShowDone] = useState(false)
@@ -180,6 +186,30 @@ export default function Tickets() {
     setNotice(null)
     failedCreates.current = []
   }
+
+  const clearRefusalRef = useRef<() => void>(() => {})
+  function clearRefusal() {
+    setNotice((cur) => (cur === REFUSED_MOVE_NOTICE ? null : cur))
+  }
+  clearRefusalRef.current = clearRefusal
+
+  const savedMoves = naming.manualMoves
+  const noticeRef = useRef(notice)
+  noticeRef.current = notice
+  const boardWatch = useRef<{ saved: boolean | null; locked: boolean } | null>(null)
+  useEffect(() => {
+    const prev = boardWatch.current
+    boardWatch.current = { saved: savedMoves, locked }
+    if (!prev) return
+    const next = boardNoticeAfter(noticeRef.current, {
+      type: 'board',
+      savedChanged: prev.saved !== savedMoves,
+      lockChanged: prev.locked !== locked,
+    })
+    if (next === noticeRef.current) return
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    setNotice(next)
+  }, [savedMoves, locked])
 
   function showNotice(msg: string, tone: 'ok' | 'warn' = 'warn') {
     setNoticeTone(tone)
@@ -309,8 +339,9 @@ export default function Tickets() {
     if (r.ok && isLatest && r.data?.ticket) {
       const updated = r.data.ticket
       mutate((prev) => (prev ? { ...prev, tickets: prev.tickets.map((t) => (t.id === id ? updated : t)) } : prev))
+      clearRefusal()
     } else if (!r.ok) {
-      showNotice(boardMoveNotice(status, r.status, r.error ?? ''))
+      showNotice(boardMoveNotice(status, r.status, r.error ?? '', lockedRef.current))
     }
     void refetch()
   }

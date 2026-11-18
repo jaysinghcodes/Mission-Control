@@ -471,6 +471,49 @@ describe('Tickets (e2e)', () => {
       expect(listed.some((row) => row.id === ticket.id)).toBe(true);
     });
 
+    it('refuses a human move while Automatic is locked, then allows the same move once Manual moves is On', async () => {
+      await prisma.setting.update({
+        where: { id: 'default' },
+        data: { manualMoves: null },
+      });
+      try {
+        const createdTicket = await createTicket({
+          title: 'e2e lock then unlock',
+          status: 'backlog',
+        });
+        const ticket = ticketOf(createdTicket);
+        const readied = await request(app.getHttpServer())
+          .patch(`/tickets/${ticket.id}`)
+          .send({ status: 'todo' });
+        expect(readied.status).toBe(200);
+
+        const refused = await request(app.getHttpServer())
+          .patch(`/tickets/${ticket.id}`)
+          .send({ status: 'build' });
+        expect(refused.status).toBe(409);
+        expect(bodyMessage(refused)).toBe(
+          'Agents move tickets past To Do. Turn on Manual moves in Settings to move it yourself.',
+        );
+
+        await prisma.setting.update({
+          where: { id: 'default' },
+          data: { manualMoves: true },
+        });
+        const moved = await request(app.getHttpServer())
+          .patch(`/tickets/${ticket.id}`)
+          .send({ status: 'build' });
+        expect(moved.status).toBe(200);
+        expect(
+          (moved.body as { ticket: { status: string } }).ticket.status,
+        ).toBe('build');
+      } finally {
+        await prisma.setting.update({
+          where: { id: 'default' },
+          data: { manualMoves: true },
+        });
+      }
+    });
+
     it('requires a registered actor on loopback and a token off loopback', async () => {
       const missing = await request(app.getHttpServer()).get('/tickets/ready');
       expect(missing.status).toBe(400);
