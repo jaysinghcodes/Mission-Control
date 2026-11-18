@@ -1,6 +1,6 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
-import { isAgentTicketWrite, skipsSession } from './route-class';
+import { isAgentTicketRoute, skipsSession } from './route-class';
 import { requestLoopback, validSession } from './session';
 import { configuredWriteToken, tokensMatch } from './write-token';
 
@@ -12,10 +12,11 @@ import { configuredWriteToken, tokensMatch } from './write-token';
  * Any other peer needs a session cookie. Agent ingest and the login
  * routes skip this check.
  *
- * POST /tickets and PATCH /tickets/:id also accept x-ingest-token when
- * the caller is not loopback and has no session. A session is checked
- * first, so a valid cookie still works when the header is wrong. Ticket
- * delete and every other dashboard write stay loopback or session only.
+ * POST /tickets, PATCH /tickets/:id, and GET /tickets/ready also accept
+ * x-ingest-token when the caller is not loopback and has no session. A
+ * session is checked first, so a valid cookie still works when the header
+ * is wrong. Ticket delete and every other dashboard write stay loopback
+ * or session only.
  */
 @Injectable()
 export class SessionAuthMiddleware implements NestMiddleware {
@@ -34,7 +35,7 @@ export class SessionAuthMiddleware implements NestMiddleware {
       next();
       return;
     }
-    if (isAgentTicketWrite(method, url) && agentTicketToken(req)) {
+    if (isAgentTicketRoute(method, url) && agentTicketToken(req)) {
       next();
       return;
     }

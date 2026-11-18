@@ -293,7 +293,11 @@ export function latestWorkEventTs(
     const action = typeof event.action === 'string' ? event.action : ''
     const rosterWrite =
       event.type === 'agents.snapshot' && (action === 'register' || action === 'delete')
-    const work = event.type.startsWith('run.') || event.type === 'agent.status' || rosterWrite
+    const work =
+      event.type.startsWith('run.') ||
+      event.type === 'agent.status' ||
+      event.type === 'board.moves' ||
+      rosterWrite
     if (work && event.ts > latest) latest = event.ts
   }
   return latest

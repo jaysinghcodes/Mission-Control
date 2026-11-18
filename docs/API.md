@@ -173,14 +173,14 @@ Agent ingest is unchanged. `x-ingest-token` is not counted by the login limit.
 
 **Agent ingest.** When `INGEST_TOKEN` is set, send header `x-ingest-token: <INGEST_TOKEN>` on `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, and `PATCH /runs/:id`. A session cookie does not replace that header.
 
-`POST /tickets` and `PATCH /tickets/:id` accept that same header when the caller is not loopback and has no session. Send `x-actor-id`, or JSON `actor`, with a registered agent id. Activity stores that id. A token PATCH may set `status`, `assignee`, `title`, and `description` only. Loopback and a session cookie still open those two routes without the header.
+`POST /tickets`, `PATCH /tickets/:id`, and `GET /tickets/ready` accept that same header when the caller is not loopback and has no session. Send `x-actor-id`, or JSON `actor` (query `actor` on the ready route), with a registered agent id. Activity stores that id. A token PATCH may set `status`, `assignee`, `title`, and `description` only. A loopback call with no actor, and a session cookie, still open those routes without the header. A loopback call that sends `x-actor-id` or `actor` follows the agent rules.
 
 Which check applies:
 
 | Routes | Auth |
 | --- | --- |
 | `POST /events`, `POST /agents/register`, `POST /agents/:id/heartbeat`, `POST /runs`, `PATCH /runs/:id` | `x-ingest-token` when `INGEST_TOKEN` is set. A session cookie does not replace it. |
-| `POST /tickets`, `PATCH /tickets/:id` | Loopback, a session cookie, or `x-ingest-token`. A token write also names a registered agent. |
+| `POST /tickets`, `PATCH /tickets/:id`, `GET /tickets/ready` | Loopback, a session cookie, or `x-ingest-token`. A token call also names a registered agent. |
 | `POST /projects`, `PATCH /projects/:id`, `PUT /mission`, `PUT /settings`, `POST /models`, `DELETE /models/:id`, `POST /approvals/:id/decide`, custom tool writes, `DELETE /agents/:id`, and every other dashboard write | Loopback or a session cookie. A token does not open them. There is no ticket delete route. |
 | Dashboard reads, including `GET /sessions`, `GET /health`, `GET /tickets` | Loopback or a session cookie. |
 | `POST /auth/login`, `POST /auth/logout`, `POST /auth/login-reset`, `GET /auth/session` | Open, so a browser can sign in. Password reset is not an HTTP route. |
@@ -252,9 +252,58 @@ Also merge `bridge/openclaw.starter.json` into `~/.openclaw/openclaw.json` (merg
 | --- | --- | --- |
 | `GET /tickets?status=&projectId=` | | Newest 100. `projectId=none` gives unassigned |
 | `POST /tickets` | `{ title, status?, priority?, assignee?, tags?: string[], projectId?, description?, actor? }` | 201. `title` required. `status` only `backlog` (default) or `todo`. `priority` defaults `med` (high, med, low). `description` defaults empty. Key auto assigned as `MC-150`, `MC-151`... |
+| `GET /tickets/ready` | query `actor` optional | Todo tickets this registered agent may claim. Sorted high, med, low, then oldest. At most 20. Never a sample ticket (`DEMO-n`). 400 `actor must be a registered agent id` without one. 401 off loopback without a valid token. |
 | `PATCH /tickets/:id` | `{ status?, assignee?, title?, description?, priority?, projectId? }` | `:id` is the ticket id, not the key. Status must be one of `backlog`, `todo`, `build`, `qa`, `review`, `done` (`inprogress` is a legacy alias of `build`). `projectId: null` unassigns. A token may send `status`, `assignee`, `title`, and `description` only |
 
-Creating emits `run.queued`; each PATCH emits `run.progress`, so ticket moves show up live. Loopback and a session cookie can call both routes. An ingest token can too, when `x-actor-id` or `actor` is a registered agent id, and Activity stores that id (section 4.1). There is no ticket delete route. A token cannot patch `priority`, `projectId`, or `tags`. A checked create with `{"title":"Onboarding check","status":"todo"}` on loopback returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
+Creating emits `run.queued`; each real PATCH emits `run.progress`, so ticket moves show up live. A refused write changes nothing and writes no activity. Loopback with no actor, and a session cookie, are human writes. A call that sends `x-actor-id` or `actor` is an agent write, including on loopback. An ingest token can call the ticket routes when that id is a registered agent, and Activity stores that id (section 4.1). There is no ticket delete route. A token cannot patch `priority`, `projectId`, or `tags`.
+
+`GET /settings` adds `manualMoves` (`true`, `false`, or `null`) and `manualMovesOn` (the effective boolean). `null` is Automatic: unlocked with no registered agent, locked once one exists. `true` is Manual moves On. `false` is Manual moves Off. `PUT /settings` accepts `manualMoves` as `true`, `false`, or `null`. Anything else is 400 `manualMoves must be true, false, or null`. It stays a dashboard write. A save broadcasts `settings.changed`. A real change also writes one `board.moves` event named `Manual moves set to On`, `Manual moves set to Off`, or `Manual moves set to Automatic`.
+
+While the board is locked, a human may move between `backlog` and `todo` only. A human move into or out of `build`, `qa`, `review`, or `done` is 409:
+
+```json
+{"statusCode":409,"error":"agents own this move","message":"Agents move tickets past To Do. Turn on Manual moves in Settings to move it yourself."}
+```
+
+A create with status `todo` while locked is 409, so every pickup starts from a human move to To Do. Backlog creates still succeed. Unlocked creates behave as before.
+
+```json
+{"statusCode":409,"error":"create in backlog","message":"New tickets start in Backlog while agents own the board. Move it to To Do when it is ready."}
+```
+
+Human edits of title, description, assignee, priority, and project still succeed in every column. Sample tickets (`DEMO-n`, seed ids `demo-ticket-1` through `demo-ticket-8`) stay human movable in every mode and are never offered to agents.
+
+With no registered agents, or with Manual moves On, a checked loopback create `{"title":"Onboarding check","status":"todo"}` returned 201, and PATCH `{"status":"done"}` returned 200 with status `done`.
+
+An agent claims a To Do ticket with PATCH `{"status":"build"}` and no other field. The API sets status `build` and `assignee` to that agent id. Activity is `{key} picked up`. Any other field on that claim is 400 `a claim sends status only`. The same agent repeating the claim gets 200 and no second event. A different agent gets 409:
+
+```json
+{"statusCode":409,"error":"already claimed","claimedBy":"<agent id>","message":"{key} was picked up by <agent id>."}
+```
+
+When the stored assignee resolves to one agent, only that agent sees it on `GET /tickets/ready` and may claim it. A blank assignee, the operator name, an unknown name, or a name two agents share is open to any registered agent.
+
+After the claim, that agent may move one step forward (`build` to `qa`, `qa` to `review`, `review` to `done`), send it back (`qa` to `build`, `review` to `qa`, `review` to `build`), or release it (`build` to `todo`). Release sets `assignee` back to the operator name and the ticket shows up on `GET /tickets/ready` again. Activity for those moves is `{key} moved to {Stage}`, credited to the agent who sent the PATCH. `inprogress` counts as `build`. The holder may set `assignee` to another registered agent id in the same PATCH or on its own. Any other assignee is 400 `assignee must be a registered agent id`.
+
+Anything else an agent tries is refused. A move outside that table is 409:
+
+```json
+{"statusCode":409,"error":"move not allowed","from":"<status>","to":"<status>","message":"An agent may move a ticket in {From} to {allowed list}."}
+```
+
+A ticket that resolves to another agent, including a claim, is 403:
+
+```json
+{"statusCode":403,"error":"not your ticket","message":"{key} is assigned to <agent id>."}
+```
+
+An agent write to a sample ticket is 403:
+
+```json
+{"statusCode":403,"error":"sample ticket","message":"Sample tickets are moved by hand."}
+```
+
+A human move into or out of Build, QA, Review, or Done while Manual moves is saved On and an agent is registered is logged as `{key} moved to {Stage} by operator override`, with `override: true` and no `agent` field. Claims stay protected in every mode. Snapshot agents and the seeded sample crew do not lock the board and cannot claim.
 
 ### 4.5 Projects
 
@@ -438,7 +487,7 @@ That prints `204`, or `404` when the id is gone.
 
 ## 5. Adapting your workflow
 
-* **Every piece of work is a ticket.** Create it in `backlog` or `todo`, attach it to a project with `projectId`, and move it with PATCH as you go: `todo` when ready, `build` when you start, `qa` when it is under test, `review` when it is waiting to ship, `done` when merged. Pipeline shows these as Build, QA, Ship, Deploy. Office seats the bot that `assignee` resolves to in Build, QA, or Ship. The agent id is the surest label. A display name also seats when exactly one visible bot has it, ignoring case. A done ticket stays in the Deploy count and does not seat the bot. An active run seats Deploy when `agent` resolves to that bot, until the run finishes, then the bot returns to Commons. Those names match `apps/web/src/lib/board.ts` and `apps/web/src/lib/live-work.ts`. To-Do and Backlog are not pipeline stages. A bot with no ticket in a stage and no active run sits in Commons.
+* **Every piece of work is a ticket.** Create it in `backlog` and attach it to a project with `projectId`. A person moves it to `todo` when it is ready. Agents do not put new tickets in `todo`. An agent claims a todo ticket into `build`, then moves one step: `qa`, then `review`, then `done`. The holder can send it back one step, or release it from `build` to `todo`. Pipeline shows these as Build, QA, Ship, Deploy. Office seats the bot that `assignee` resolves to in Build, QA, or Ship. The agent id is the surest label. A display name also seats when exactly one visible bot has it, ignoring case. A done ticket stays in the Deploy count and does not seat the bot. An active run seats Deploy when `agent` resolves to that bot, until the run finishes, then the bot returns to Commons. Those names match `apps/web/src/lib/board.ts` and `apps/web/src/lib/live-work.ts`. To-Do and Backlog are not pipeline stages. A bot with no ticket in a stage and no active run sits in Commons.
 * **Group work by project.** Create one project per product or repo and reuse it.
 * **Make runs visible.** For a longer job, `POST /runs` with an optional `status`, or create the run queued and `PATCH` it to `running`, then send progress and `done` or `failed`. You can also post `run.*` events. Pass `ticketId` when the run belongs to a ticket so Pipeline can show that run's start time. The curls in section 4.6 do both.
 * **Ask, do not act, on gated work.** Put anything that needs your operator in an approval (via `approvals.snapshot`) and wait for the decision.
@@ -453,7 +502,7 @@ That prints `204`, or `404` when the id is gone.
 * Approvals from OpenClaw are opt in: set `MC_BRIDGE_APPROVALS_CMD` to a command that prints a JSON array of `{kind, tag, desc, meta?}`. OpenClaw has no stable pending approvals command.
 * A run with no `ticketId` is not linked to a ticket. Pipeline then uses the ticket `createdAt` for Started. Seeded demo runs can carry a `ticketId`. `POST /runs` and `PATCH /runs/:id` store one only when you send it. An unknown `ticketId` is 404. The bridge retries that 404 once without `ticketId`, logs a warning, and still records the run. The ticket detail and the open Pipeline row list runs whose `ticketId` matches.
 * Devices cannot be edited in place. Delete the row and add it again (section 4.11).
-* Do not publish port 3000 on a non loopback address without `INGEST_TOKEN` and a dashboard password. The API refuses that start. With the ingest token set, an ingest call that omits `x-ingest-token` is 401. A dashboard call off loopback without a session cookie is also 401, except `POST /tickets` and `PATCH /tickets/:id` when the ingest token and a registered agent id are sent.
+* Do not publish port 3000 on a non loopback address without `INGEST_TOKEN` and a dashboard password. The API refuses that start. With the ingest token set, an ingest call that omits `x-ingest-token` is 401. A dashboard call off loopback without a session cookie is also 401, except `POST /tickets`, `PATCH /tickets/:id`, and `GET /tickets/ready` when the ingest token and a registered agent id are sent.
 
 ## 7. First read checklist
 
@@ -485,14 +534,18 @@ The operator paste is [PASTE_IN.md](PASTE_IN.md). It runs the installer, reports
    curl -s 'http://127.0.0.1:3000/activity?limit=5'
    ```
    Your event should be first. A checked call returned 200, and the first row was `run.completed` with name `onboarding check`. Ask your operator to open http://localhost:5173/#/office and look for that name in the activity list. The floor seats will not move because of this event.
-6. **File a test ticket and move it.** On loopback the calls below need no token. On Compose, add `x-ingest-token: $MC_TOKEN` and `x-actor-id: YOUR_AGENT_ID` (a registered agent id). A token may set status, assignee, title, and description. Activity stores that agent id. There is no ticket delete route. Every other dashboard write still needs loopback or a session cookie. A 401 means the token is wrong, or that route is for the dashboard only.
+6. **File a test ticket and move it.** On loopback the calls below need no token. On Compose, add `x-ingest-token: $MC_TOKEN` and `x-actor-id: YOUR_AGENT_ID` (a registered agent id) on the claim. A token may set status, assignee, title, and description. Activity stores that agent id. There is no ticket delete route. Every other dashboard write still needs loopback or a session cookie. A 401 means the token is wrong, or that route is for the dashboard only. Create in backlog. A person moves it to todo. The agent claims it into build. Do not jump to done.
    ```bash
    curl -sS -X POST http://127.0.0.1:3000/tickets \
      -H 'content-type: application/json' \
-     -d '{"title":"Onboarding check","status":"todo","assignee":"YOUR_AGENT_ID"}'
+     -d '{"title":"Onboarding check","status":"backlog","assignee":"YOUR_AGENT_ID"}'
    curl -sS -X PATCH http://127.0.0.1:3000/tickets/<id from above> \
      -H 'content-type: application/json' \
-     -d '{"status":"done"}'
+     -d '{"status":"todo"}'
+   curl -sS -X PATCH http://127.0.0.1:3000/tickets/<id from above> \
+     -H 'content-type: application/json' \
+     -H "x-actor-id: YOUR_AGENT_ID" \
+     -d '{"status":"build"}'
    ```
-   Confirm it lands in Done on http://localhost:5173/#/tasks. A checked loopback create returned 201 and the following PATCH returned status `done`. Use the agent id for `assignee`. A display name seats the bot only when no other visible bot shares it.
+   Confirm it lands in Build on http://localhost:5173/#/tasks. A checked loopback create returned 201, the move to todo returned 200, and the claim returned status `build`. Use the agent id for `assignee`. A display name seats the bot only when no other visible bot shares it. `GET /tickets/ready` lists what that agent can claim.
 7. **Schedule the bridge** every 5 minutes, then tell your operator what you set up.

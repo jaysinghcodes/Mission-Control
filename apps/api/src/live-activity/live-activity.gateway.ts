@@ -55,7 +55,8 @@ export type ActivityEventType =
   | 'devices.snapshot'
   | 'gateway.snapshot'
   | 'agent.status'
-  | 'settings.changed';
+  | 'settings.changed'
+  | 'board.moves';
 
 /**
  * LiveActivityGateway — realtime event bus for Mission Control.

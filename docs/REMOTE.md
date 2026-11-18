@@ -158,15 +158,15 @@ Each OpenClaw agent reports as itself. Run these from the machine where the agen
      -d '{"status":"working","currentTask":"Build the login fix"}'
    ```
 
-4. Create the ticket. Send `x-actor-id` with the id of the agent doing the write. Set `assignee` to an agent id. A new ticket starts in `backlog` or `todo` and answers 201. Keep `ticket.id` from the reply.
+4. Create the ticket in backlog. Send `x-actor-id` with the id of the agent doing the write. Set `assignee` to an agent id. A new ticket answers 201. Keep `ticket.id` from the reply. A person moves it to todo when it is ready. While agents own the board, creating it in todo is 409.
 
    ```bash
    curl -sS -X POST "$MC_API/tickets" \
      -H 'content-type: application/json' -H "x-ingest-token: $MC_TOKEN" -H 'x-actor-id: forge' \
-     -d '{"title":"Login fix","status":"todo","assignee":"forge"}'
+     -d '{"title":"Login fix","status":"backlog","assignee":"forge"}'
    ```
 
-5. Move the ticket with PATCH and the same two headers. The order is `todo`, then `build`, then `qa`, then `review`, then `done`. Pipeline shows `build`, `qa`, `review`, and `done` as Build, QA, Ship, and Deploy.
+5. On each heartbeat, call `GET /tickets/ready` with the same two headers. Claim the first ticket with PATCH `{"status":"build"}` and no other field. That stamps `assignee` to the claiming agent. Then move one step at a time: `qa`, then `review`, then `done`. Pipeline shows `build`, `qa`, `review`, and `done` as Build, QA, Ship, and Deploy.
 
    ```bash
    curl -sS -X PATCH "$MC_API/tickets/TICKET_ID" \
@@ -175,12 +175,12 @@ Each OpenClaw agent reports as itself. Run these from the machine where the agen
    ```
 
 6. To hand off, PATCH the next status and the next agent as `assignee` in one call, for example `{"status":"qa","assignee":"sentinel"}`. From then on the next agent sends its own id in `x-actor-id`.
-7. When the work ships, PATCH `{"status":"done"}`, then send a heartbeat with `{"status":"idle"}`. The agent returns to Commons.
+7. When the work ships, PATCH `{"status":"done"}`, then send a heartbeat with `{"status":"idle"}`. The agent returns to Commons. A release is PATCH `{"status":"todo"}` from build, which clears the claim.
 
 Tips:
 
 * `x-actor-id` must be a registered agent id, and it must be the agent that is acting, not the one that filed the ticket.
-* Off loopback, a missing or unknown id answers 400. That covers every Compose install and setup B. On a native install called from the same machine, the call is loopback, the headers are not checked, and no 400 fires. Send both headers anyway, so the same commands work on every setup.
+* Off loopback, a missing or unknown id answers 400. That covers every Compose install and setup B. On a native install called from the same machine, a call with no actor stays a human write. A call that sends `x-actor-id` follows the agent rules on loopback too. Send both headers anyway, so the same commands work on every setup.
 * Use agent ids for `assignee`. A display name works only when exactly one visible agent has it.
 * A token may change `status`, `assignee`, `title`, and `description`. There is no ticket delete route.
 
@@ -228,7 +228,7 @@ Notes:
 2. On a native install, a call from `127.0.0.1` is loopback and stays open with no cookie. Tailscale Serve to the API port arrives from `127.0.0.1` too, so a native install must not serve the API port on the tailnet. That is why setup B needs Compose.
 3. Bridge and agent writes send `x-ingest-token` with the `INGEST_TOKEN` value from the `.env` of the Mission Control they post to. That covers `/events`, register, heartbeat, and runs.
 4. Ticket writes, `POST /tickets` and `PATCH /tickets/:id`, send `x-ingest-token` and also `x-actor-id` with the id of the agent that is acting.
-5. A 401 on a write means the token is wrong or the route is for the dashboard only. Off loopback, a 400 `actor must be a registered agent id` means `x-actor-id` is missing or not a registered agent. Register first. On true loopback the API does not check `x-actor-id`, as [API.md](API.md#41-auth) says.
+5. A 401 on a write means the token is wrong or the route is for the dashboard only. Off loopback, a 400 `actor must be a registered agent id` means `x-actor-id` is missing or not a registered agent. Register first. On loopback, a call with no actor stays a human write. A call that sends `x-actor-id` follows the agent rules, as [API.md](API.md#41-auth) says.
 
 The full auth table is in [API.md](API.md#41-auth).
 

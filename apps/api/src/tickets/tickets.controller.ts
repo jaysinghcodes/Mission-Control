@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   NotFoundException,
@@ -21,9 +23,20 @@ import { KeyedMutex } from './keyed-mutex';
 import {
   ticketCreated,
   ticketMoved,
+  ticketOverride,
+  ticketPickedUp,
   ticketUpdated,
 } from '../activity/activity-text';
 import { loadAgentNames, resolveIngestAgent } from '../agents/agent-ref';
+import { SETTING_ID } from '../team/mission';
+import {
+  boardIsLocked,
+  claimableBy,
+  createInBacklogBody,
+  isSampleTicket,
+  planTicketWrite,
+  type RosterAgent,
+} from './move-rules';
 import {
   CREATE_STATUSES,
   DEFAULT_CREATE_STATUS,
@@ -84,15 +97,39 @@ interface TicketPatch {
 type TicketWriteMode = 'dashboard' | 'agent';
 
 /**
- * Loopback and a session cookie are dashboard writes. A request that
- * reached this controller any other way was allowed by the ingest token.
- * Unit tests call the methods with no request, and those stay dashboard.
+ * A non blank x-actor-id or body actor is an agent write, including on
+ * loopback. With no actor, loopback and a session cookie are dashboard
+ * writes. Anything else was allowed by the ingest token. Unit tests call
+ * the methods with no request, and those stay dashboard.
  */
-function ticketWriteMode(req: Request | undefined): TicketWriteMode {
+function ticketWriteMode(
+  req: Request | undefined,
+  bodyActor: unknown,
+): TicketWriteMode {
   if (!req?.headers) return 'dashboard';
+  const header = req.headers['x-actor-id'];
+  const headerId = typeof header === 'string' ? header.trim() : '';
+  const fromBody = typeof bodyActor === 'string' ? bodyActor.trim() : '';
+  if (headerId || fromBody) return 'agent';
   if (requestLoopback(req)) return 'dashboard';
   if (validSession(req.headers.cookie)) return 'dashboard';
   return 'agent';
+}
+
+function createdMillis(value: Date | string | null | undefined): number {
+  if (value == null) return 0;
+  const n = new Date(value).getTime();
+  return Number.isFinite(n) ? n : 0;
+}
+
+function refusePlan(status: number, body: Record<string, unknown>): never {
+  if (status === 400) {
+    throw new BadRequestException(
+      typeof body.message === 'string' ? body.message : 'bad request',
+    );
+  }
+  if (status === 403) throw new ForbiddenException(body);
+  throw new ConflictException(body);
 }
 
 /**
@@ -156,6 +193,45 @@ export class TicketsController {
     return { tickets, ts: Date.now() };
   }
 
+  /**
+   * Todo tickets this registered agent may claim. Priority high, med, low,
+   * then oldest. At most 20. Sample tickets are never listed.
+   */
+  @Get('ready')
+  async ready(@Req() req: Request, @Query('actor') actor?: string) {
+    const id = await this.requireRegisteredActor(req, actor);
+    const roster = await this.loadRoster();
+    const operator = operatorName();
+    const rows = await this.prisma.ticket.findMany({
+      where: { status: 'todo' },
+    });
+    const rank: Record<string, number> = { high: 0, med: 1, low: 2 };
+    const tickets = rows
+      .filter(
+        (row) =>
+          !isSampleTicket(row) &&
+          claimableBy(row.assignee, id, roster, operator),
+      )
+      .sort((a, b) => {
+        const byPriority = (rank[a.priority] ?? 3) - (rank[b.priority] ?? 3);
+        if (byPriority !== 0) return byPriority;
+        return createdMillis(a.createdAt) - createdMillis(b.createdAt);
+      })
+      .slice(0, 20)
+      .map((row) => ({
+        id: row.id,
+        key: row.key,
+        title: row.title,
+        description: row.description ?? '',
+        priority: row.priority,
+        assignee: row.assignee,
+        projectId: row.projectId,
+        tags: row.tags,
+        createdAt: row.createdAt,
+      }));
+    return { tickets, ts: Date.now() };
+  }
+
   @Post()
   @HttpCode(201)
   async create(@Body() body: CreateTicketBody, @Req() req?: Request) {
@@ -190,7 +266,7 @@ export class TicketsController {
     const projectId = projectRef.kind === 'id' ? projectRef.id : undefined;
     const description =
       this.optionalString(body?.description, 'description') ?? '';
-    const mode = ticketWriteMode(req);
+    const mode = ticketWriteMode(req, body?.actor);
 
     // Queue synchronously, before any await, so parallel creates line up
     // in receive order and only the head opens a transaction.
@@ -199,6 +275,10 @@ export class TicketsController {
         mode === 'agent' && req
           ? await this.requireRegisteredActor(req, body?.actor)
           : undefined;
+      const lock = await this.readLock();
+      if (status === 'todo' && lock.locked) {
+        throw new ConflictException(createInBacklogBody());
+      }
       return this.insertCreatedTicket(
         {
           title,
@@ -371,77 +451,116 @@ export class TicketsController {
     // up to its first `await`, and there is none before `writes.run(...)`.
     // It also turns validation throws into rejected promises (uniform for
     // callers/tests); Nest maps both to the same HTTP response.
-    const mode = ticketWriteMode(req);
+    const mode = ticketWriteMode(req, body?.actor);
     const data = this.validateUpdate(body, mode);
     return this.writes.run(id, async () => {
       const actor =
         mode === 'agent' && req
           ? await this.requireRegisteredActor(req, body?.actor)
           : undefined;
-      return this.applyUpdate(id, data, actor);
+      return this.applyUpdate(id, data, { mode, actor });
     });
   }
 
   /** The serialized part of PATCH — only ever runs one-at-a-time per id. */
-  private async applyUpdate(id: string, data: TicketPatch, actor?: string) {
-    const { ticket, changed } = await this.prisma.$transaction(async (tx) => {
-      // Row lock: blocks any other transaction that wants this row until we
-      // commit. Table/column names are quoted because Prisma created them
-      // with PascalCase ("Ticket"). `${id}` is a bound parameter (tagged
-      // template), not string concatenation — safe from SQL injection.
-      // QA-1 #3: we also read the CURRENT values under the lock so we can
-      // tell a real change from a repeat of what is already stored.
-      // projectId is in the same SELECT so "assign the project it already
-      // has" is a no-op (no second activity event), same as a repeated move.
-      const locked = await tx.$queryRaw<
-        {
-          id: string;
-          status: string;
-          assignee: string | null;
-          priority: string;
-          projectId: string | null;
-          title: string;
-          description: string;
-        }[]
-      >`
-        SELECT "id", "status", "assignee", "priority", "projectId", "title", "description"
+  private async applyUpdate(
+    id: string,
+    data: TicketPatch,
+    ctx: { mode: TicketWriteMode; actor?: string },
+  ) {
+    const roster = await this.loadRoster();
+    const lock = await this.readLock(roster);
+    let claim = false;
+    let override = false;
+    const { ticket, changed, fields } = await this.prisma.$transaction(
+      async (tx) => {
+        // Row lock: blocks any other transaction that wants this row until we
+        // commit. Table/column names are quoted because Prisma created them
+        // with PascalCase ("Ticket"). `${id}` is a bound parameter (tagged
+        // template), not string concatenation — safe from SQL injection.
+        // QA-1 #3: we also read the CURRENT values under the lock so we can
+        // tell a real change from a repeat of what is already stored.
+        // projectId is in the same SELECT so "assign the project it already
+        // has" is a no-op (no second activity event), same as a repeated move.
+        const locked = await tx.$queryRaw<
+          {
+            id: string;
+            key: string | null;
+            status: string;
+            assignee: string | null;
+            priority: string;
+            projectId: string | null;
+            title: string;
+            description: string;
+          }[]
+        >`
+        SELECT "id", "key", "status", "assignee", "priority", "projectId", "title", "description"
         FROM "Ticket" WHERE "id" = ${id} FOR UPDATE`;
-      if (locked.length === 0) {
-        // Finding E: this used to be a 200 { error }. Throwing inside the
-        // transaction rolls it back and Prisma rethrows our exception as-is.
-        throw new NotFoundException(`ticket ${id} not found`);
-      }
-      // Assigning to a project locks THAT row too, before we write. If it
-      // was archived (or never existed) we throw and the ticket lock rolls
-      // back — the previous projectId stays. Unassign (null) skips this.
-      if (typeof data.projectId === 'string') {
-        await this.lockAssignableProject(tx, data.projectId);
-      }
-      const before = locked[0];
-      // A field counts as changed only if it was SENT and differs from the
-      // locked (i.e. current, committed) value.
-      const changed = (Object.keys(data) as (keyof typeof data)[]).some(
-        (field) => data[field] !== before[field],
-      );
-      // The write itself is still issued even for a no-op (cheap, and it
-      // returns the full committed row for the response in one place).
-      const row = await tx.ticket.update({ where: { id }, data });
-      return { ticket: row, changed };
-    });
+        if (locked.length === 0) {
+          // Finding E: this used to be a 200 { error }. Throwing inside the
+          // transaction rolls it back and Prisma rethrows our exception as-is.
+          throw new NotFoundException(`ticket ${id} not found`);
+        }
+        // Assigning to a project locks THAT row too, before we write. If it
+        // was archived (or never existed) we throw and the ticket lock rolls
+        // back — the previous projectId stays. Unassign (null) skips this.
+        if (typeof data.projectId === 'string') {
+          await this.lockAssignableProject(tx, data.projectId);
+        }
+        const before = locked[0];
+        const plan = planTicketWrite(
+          {
+            id: before.id,
+            key: before.key,
+            status: before.status,
+            assignee: before.assignee,
+          },
+          data,
+          {
+            mode: ctx.mode,
+            actor: ctx.actor,
+            operator: operatorName(),
+            locked: lock.locked,
+            manualMoves: lock.manualMoves,
+            registeredCount: lock.registered,
+            roster,
+          },
+        );
+        if (!plan.ok) refusePlan(plan.status, plan.body);
+        claim = plan.claim;
+        override = plan.override;
+        const fields = plan.fields;
+        // A field counts as changed only if it was SENT and differs from the
+        // locked (i.e. current, committed) value.
+        const changed = (Object.keys(fields) as (keyof typeof fields)[]).some(
+          (field) => fields[field] !== before[field],
+        );
+        // The write itself is still issued even for a no-op (cheap, and it
+        // returns the full committed row for the response in one place).
+        const row = await tx.ticket.update({ where: { id }, data: fields });
+        return { ticket: row, changed, fields };
+      },
+    );
 
-    // QA-1 #3: a double-clicked "▶ Start" sends two identical PATCHes. The
-    // per-ticket queue runs them one after the other, so the second one finds
-    // the ticket ALREADY in `build`. It still answers 200 with the row
-    // (idempotent PUT-like semantics — the client's intent is satisfied), but
-    // it must not persist/broadcast a second `run.progress` "→ build" event:
-    // nothing happened, and the activity feed should only show real moves.
+    // A repeated identical PATCH still answers 200. It must not persist a
+    // second activity event, because nothing changed.
     if (!changed) return { ticket, ts: Date.now() };
 
     const key = ticket.key ?? 'Ticket';
-    const label = data.status
-      ? ticketMoved(key, ticket.status)
-      : ticketUpdated(key);
-    const moved = await this.activityPayload(ticket, label, actor);
+    const label = claim
+      ? ticketPickedUp(key)
+      : override
+        ? ticketOverride(key, ticket.status)
+        : fields.status
+          ? ticketMoved(key, ticket.status)
+          : ticketUpdated(key);
+    const moved = override
+      ? {
+          name: label,
+          ...(ticket.key ? { ticket: ticket.key } : {}),
+          override: true,
+        }
+      : await this.activityPayload(ticket, label, ctx.actor);
     await this.persist('run.progress', moved);
     this.gateway.broadcast('run.progress', moved);
     return { ticket, ts: Date.now() };
@@ -636,6 +755,61 @@ export class TicketsController {
       name,
       ...(ticket.key ? { ticket: ticket.key } : {}),
       ...(agent ? { agent } : {}),
+    };
+  }
+
+  private async loadRoster(): Promise<RosterAgent[]> {
+    const agent = (
+      this.prisma as unknown as {
+        agent?: {
+          findMany?: (query: {
+            select: { id: true; name: true; source: true };
+          }) => Promise<RosterAgent[]>;
+        };
+      }
+    ).agent;
+    if (typeof agent?.findMany !== 'function') return [];
+    try {
+      const rows = await agent.findMany({
+        select: { id: true, name: true, source: true },
+      });
+      return Array.isArray(rows) ? rows : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async readLock(roster?: RosterAgent[]): Promise<{
+    manualMoves: boolean | null;
+    registered: number;
+    locked: boolean;
+  }> {
+    const rows = roster ?? (await this.loadRoster());
+    const registered = rows.filter((row) => row.source === 'registered').length;
+    let manualMoves: boolean | null = null;
+    const setting = (
+      this.prisma as unknown as {
+        setting?: {
+          findUnique?: (query: {
+            where: { id: string };
+          }) => Promise<{ manualMoves?: boolean | null } | null>;
+        };
+      }
+    ).setting;
+    if (typeof setting?.findUnique === 'function') {
+      try {
+        const row = await setting.findUnique({ where: { id: SETTING_ID } });
+        if (row?.manualMoves === true || row?.manualMoves === false) {
+          manualMoves = row.manualMoves;
+        }
+      } catch {
+        manualMoves = null;
+      }
+    }
+    return {
+      manualMoves,
+      registered,
+      locked: boardIsLocked(manualMoves, registered),
     };
   }
 

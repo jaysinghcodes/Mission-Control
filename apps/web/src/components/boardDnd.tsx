@@ -70,13 +70,15 @@ export function BoardDnd({
 export function ColumnDrop({
   status,
   className,
+  disabled = false,
   children,
 }: {
   status: string
   className?: string
+  disabled?: boolean
   children: ReactNode
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `col:${status}` })
+  const { setNodeRef, isOver } = useDroppable({ id: `col:${status}`, disabled })
   return (
     <div
       ref={setNodeRef}
@@ -101,17 +103,26 @@ export function ColumnDrop({
  * keyboard sequence so the status buttons tab the way they did before.
  * `pan-y` lets a vertical swipe scroll the page; a horizontal move drags.
  */
-export function CardDrag({ id, children }: { id: string; children: ReactNode }) {
+export function CardDrag({
+  id,
+  disabled = false,
+  children,
+}: {
+  id: string
+  disabled?: boolean
+  children: ReactNode
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id,
+    disabled,
     attributes: { role: 'group', tabIndex: -1 },
   })
   return (
     <div
       ref={setNodeRef}
-      className={isDragging ? 'cursor-grabbing opacity-40' : 'cursor-grab'}
-      style={{ touchAction: 'pan-y' }}
-      {...listeners}
+      className={disabled ? undefined : isDragging ? 'cursor-grabbing opacity-40' : 'cursor-grab'}
+      style={disabled ? undefined : { touchAction: 'pan-y' }}
+      {...(disabled ? {} : listeners)}
       {...attributes}
     >
       {children}

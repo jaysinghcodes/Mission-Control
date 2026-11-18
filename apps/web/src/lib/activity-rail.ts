@@ -21,6 +21,7 @@ export interface RailPayload extends ActivityPayload {
   action?: string | null
   status?: string | null
   agents?: unknown
+  override?: boolean
 }
 
 export interface RailEvent {
@@ -122,7 +123,8 @@ export function activityRailLine(
   const action = textOf(payload?.action)
   const refresh = Array.isArray(payload?.agents) || action === 'heartbeat'
   if (refresh && !stored) return null
-  const actor = activityActor(payload, roster, tickets, runs)
+  const skipCredit = payload?.override === true
+  const actor = skipCredit ? null : activityActor(payload, roster, tickets, runs)
   const known = actor != null && roster.some((agent) => agent.id.trim() === actor.id.trim())
   const presented = actor ? seatedName(actor, naming) : ''
   const fromSeat = actor != null && presented !== actor.name

@@ -36,6 +36,8 @@ These are the failures hit while bringing up a fresh clone. Commands were run fr
 
 **`POST /tickets` returns 400 `title is required`.** The title was missing or blank. Create status must be `backlog` or `todo` if you send one.
 
+**`POST /tickets` returns 409 when status is todo.** New tickets start in Backlog while agents own the board. Move the ticket to To Do when it is ready.
+
 **`npm ci` warns that install scripts are not covered by allowScripts.** Seen for `@prisma/engines`, `prisma`, and `unrs-resolver` on npm 11.17.0. Until `(cd apps/api && npx prisma generate)`, `npm test` and `npm run build` fail with `Cannot find module '.prisma/client/default'`. Generate succeeds after the warning. If generate cannot find query engines, allow those scripts (`npm approve-scripts` in the npm 11 docs) and generate again.
 
 **`npm run lint` exits 1.** oxlint or eslint found an error. The command does not rewrite files. Run `npm run lint:fix` for the automatic fixes, then fix anything it still reports.

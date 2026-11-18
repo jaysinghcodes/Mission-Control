@@ -13,6 +13,7 @@ wait_ready() {
     sleep 1
   done
   echo "Postgres did not accept connections on 127.0.0.1:5432." >&2
+  pg_lsclusters >&2 || true
   return 1
 }
 
@@ -43,6 +44,27 @@ else
     sudo apt-get update
   fi
   sudo apt-get install -y postgresql-16 postgresql-client-16
+  # Ubuntu 26 keeps a stopped Postgres 18 cluster on port 5432.
+  # The native install connects to that port, so Postgres 16 has to own it.
+  clusters=$(pg_lsclusters --no-header 2>/dev/null || true)
+  while read -r ver name port status owner rest; do
+    if [ -z "${ver:-}" ]; then
+      continue
+    fi
+    if [ "$ver" != "16" ]; then
+      sudo pg_dropcluster --stop "$ver" "$name"
+    fi
+  done <<EOF
+$clusters
+EOF
+  port=$(pg_lsclusters --no-header 2>/dev/null | awk '$1 == 16 && $2 == "main" { print $3; exit }')
+  if [ -n "$port" ] && [ "$port" != "5432" ]; then
+    sudo pg_dropcluster --stop 16 main
+    port=""
+  fi
+  if [ -z "$port" ]; then
+    sudo pg_createcluster --port=5432 16 main
+  fi
   sudo pg_ctlcluster 16 main start || true
 fi
 

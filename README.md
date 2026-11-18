@@ -227,6 +227,8 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE "http://127.0.0.1:3000/agent
 
 `204` is the native loopback result. On Compose the same command returns 401, because the API does not see loopback. Delete the agent from the UI, or send a session cookie. Settings can remove any agent. A snapshot agent comes back only when a later snapshot includes it. If register returns 401, run `npm run doctor` and send the token that check is using. Field tables: [docs/API.md](docs/API.md#410-register-heartbeat-and-delete). The same heading still resolves in [docs/OPENCLAW_ONBOARDING.md](docs/OPENCLAW_ONBOARDING.md#410-register-heartbeat-and-delete).
 
+Humans create tickets and move them to To Do when the work is ready. Once a registered agent exists, Automatic locks the board and agents own Build, QA, Review, and Done. Settings has Manual moves. Automatic locks when the first agent registers and unlocks when the last one is removed. On lets you move every column. Off keeps the lock with no agents. An agent polls `GET /tickets/ready` and claims the first ticket with PATCH `{"status":"build"}`. That agent then moves it one step at a time. A board with no registered agents stays fully manual.
+
 Once any registered or snapshot bot exists, unclaimed defaults hide on Agents, Office, and Team. Turn on Show sample bots on System to bring them back. Counts follow the visible bots. While sample bots are hidden, the Office Pipeline card and room ticket list skip tickets assigned to a hidden sample bot, and a System model card counts only visible bots. Sample bots that are on screen show the Sample tag. A registered bot with no heartbeat for 10 minutes shows Offline, and the idle robot is dimmed. The row is not deleted.
 
 Optional bridge, with no `openclaw` binary on `PATH`:
@@ -259,7 +261,7 @@ The cases hit on a fresh clone, including 401, login lockout, and a bridge with 
 
 On the Compose path, run `npm ci` in the checkout before `npm run seed:demo` or `npm run seed:clear`. Without that install, prisma is not found and the seed command fails. `npm run seed:demo` fills the dashboard with no bridge and no OpenClaw CLI. Nothing seeds that data for you. `npm run seed:clear` removes it again and leaves live rows in place.
 
-Tasks, projects, pipeline, memory, docs, team, custom tools, Office, Calendar, Approvals, and Usage all render from that seed. Sessions and gateway logs stay empty until a real bridge posts them. The list is in [docs/STACK.md](docs/STACK.md#what-works-without-openclaw).
+Tasks, projects, pipeline, memory, docs, team, custom tools, Office, Calendar, Approvals, and Usage all render from that seed. Sessions and gateway logs stay empty until a real bridge posts them. With no registered agents, Manual moves stays on Automatic and the board stays fully manual. New task lands in To Do, and every drag and button move works. The list is in [docs/STACK.md](docs/STACK.md#what-works-without-openclaw).
 
 ## Roadmap
 

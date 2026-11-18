@@ -236,6 +236,8 @@ model Setting {
   timezone         String?
   /// True after the first open is finished or skipped.
   setupDone        Boolean  @default(false)
+  /// null is Automatic. true is Manual moves On. false is Manual moves Off.
+  manualMoves      Boolean?
   updatedAt        DateTime @updatedAt
 }
 

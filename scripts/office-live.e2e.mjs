@@ -47,10 +47,12 @@ function headers(json = false) {
   return out
 }
 
-async function apiSend(method, pathname, body) {
+async function apiSend(method, pathname, body, extra) {
+  const hdrs = headers(body !== undefined)
+  if (extra) Object.assign(hdrs, extra)
   const res = await fetch(`${api}${pathname}`, {
     method,
-    headers: headers(body !== undefined),
+    headers: hdrs,
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const text = await res.text()
@@ -181,8 +183,9 @@ async function stablePipelines(page) {
   throw new Error(`pipeline counts did not settle (${last})`)
 }
 
-async function move(id, status) {
-  const res = await apiSend('PATCH', `/tickets/${id}`, { status })
+async function move(id, status, actor) {
+  const extra = actor ? { 'x-actor-id': actor } : undefined
+  const res = await apiSend('PATCH', `/tickets/${id}`, { status }, extra)
   if (res.status !== 200) throw new Error(`PATCH ${status} returned ${res.status} ${res.text}`)
 }
 
@@ -316,17 +319,18 @@ async function main() {
     const created = await apiSend('POST', '/tickets', {
       title,
       assignee: agentId,
-      status: 'todo',
+      status: 'backlog',
     })
     if (created.status !== 201) throw new Error(`create ticket returned ${created.status} ${created.text}`)
     const ticket = created.json?.ticket
     if (!ticket?.id) throw new Error('create ticket did not return an id')
     state.ticketId = ticket.id
     state.ticketKey = ticket.key || ''
+    await move(ticket.id, 'todo')
 
     const [buildBefore, qaBefore, shipBefore, deployBefore] = await stablePipelines(office)
 
-    await move(ticket.id, 'build')
+    await move(ticket.id, 'build', agentId)
     await expectAll(pages, 'build', title, 10000)
     const inBuild = await cardText(office)
     if (!inBuild.includes('Build') || !inBuild.includes(title) || !inBuild.includes('1 in progress')) {
@@ -338,7 +342,7 @@ async function main() {
     await office.locator('[data-activity-agent="Live Quill"]').first().waitFor({ timeout: 10000 })
 
     const stay = await loadsOf(pages)
-    await move(ticket.id, 'qa')
+    await move(ticket.id, 'qa', agentId)
     await expectAll(pages, 'qa', title, 10000)
     if (!sameLoads(stay, await loadsOf(pages))) throw new Error('a page reloaded while the ticket moved')
     const inQa = await cardText(office)
@@ -360,7 +364,7 @@ async function main() {
     const teamText = await bot(team).innerText()
     if (!teamText.includes(title)) throw new Error(`team did not show the live subtitle (${teamText})`)
 
-    await move(ticket.id, 'review')
+    await move(ticket.id, 'review', agentId)
     await expectAll(pages, 'ship', title, 10000)
     const inShip = await cardText(office)
     if (!inShip.includes('Ship') || !inShip.includes('1 ready')) {
@@ -368,7 +372,7 @@ async function main() {
     }
     if ((await pipelineCount(office, 'ship')) !== shipBefore + 1) throw new Error('ship pipeline count did not increase')
 
-    await move(ticket.id, 'done')
+    await move(ticket.id, 'done', agentId)
     await expectAll(pages, 'commons', 'Idle', 2000)
     if (!sameLoads(stay, await loadsOf(pages))) throw new Error('a page reloaded when the ticket moved to Done')
     const inCommons = await cardText(office)

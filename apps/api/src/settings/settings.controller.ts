@@ -9,6 +9,8 @@ import {
 import { LiveActivityGateway } from '../live-activity/live-activity.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { offlineAfterMs } from '../time/runtime';
+import { manualMovesName } from '../activity/activity-text';
+import { boardIsLocked } from '../tickets/move-rules';
 import { SETTING_ID } from '../team/mission';
 import { resolveTimeZone, serverTimeZone } from '../usage/zone-time';
 import { mergeNamedCrewMap, withCrewLock } from './crew-map';
@@ -55,7 +57,7 @@ export class SettingsController {
     const row = await this.prisma.setting.findUnique({
       where: { id: SETTING_ID },
     });
-    return this.present(row);
+    return this.present(row, await this.registeredCount());
   }
 
   @Put('/')
@@ -104,7 +106,10 @@ export class SettingsController {
         patch.setupDone !== undefined
           ? patch.setupDone
           : (existing?.setupDone ?? false);
-      return tx.setting.upsert({
+      const previousManual = savedManual(existing?.manualMoves);
+      const nextManual =
+        patch.manualMoves !== undefined ? patch.manualMoves : previousManual;
+      const saved = await tx.setting.upsert({
         where: { id: SETTING_ID },
         create: {
           id: SETTING_ID,
@@ -113,6 +118,9 @@ export class SettingsController {
           crewMap,
           timezone,
           setupDone,
+          ...(patch.manualMoves !== undefined
+            ? { manualMoves: patch.manualMoves }
+            : {}),
         },
         update: {
           ...(patch.namingMode !== undefined
@@ -123,13 +131,28 @@ export class SettingsController {
           ...(patch.setupDone !== undefined
             ? { setupDone: patch.setupDone }
             : {}),
+          ...(patch.manualMoves !== undefined
+            ? { manualMoves: patch.manualMoves }
+            : {}),
         },
       });
+      return { saved, previousManual, nextManual };
     });
     this.live?.broadcast('settings.changed', {
       fields: changedFields(patch),
     });
-    return this.present(row);
+    if (row.previousManual !== row.nextManual) {
+      const which =
+        row.nextManual === true
+          ? 'On'
+          : row.nextManual === false
+            ? 'Off'
+            : 'Automatic';
+      const name = manualMovesName(which);
+      await this.persistBoardMoves(name);
+      this.live?.broadcast('board.moves', { name });
+    }
+    return this.present(row.saved, await this.registeredCount());
   }
 
   private present(
@@ -138,9 +161,12 @@ export class SettingsController {
       crewMap?: unknown;
       timezone?: string | null;
       setupDone?: boolean | null;
+      manualMoves?: boolean | null;
     } | null,
+    registeredCount: number,
   ) {
     const seats = readCrew();
+    const manualMoves = savedManual(row?.manualMoves);
     return settingsBody(
       readStoredMode(row?.namingMode),
       readStoredMap(row?.crewMap),
@@ -150,7 +176,34 @@ export class SettingsController {
       Boolean(row?.timezone),
       Boolean(row?.setupDone),
       offlineAfterMs(),
+      manualMoves,
+      !boardIsLocked(manualMoves, registeredCount),
     );
+  }
+
+  private async registeredCount(): Promise<number> {
+    try {
+      const rows = await this.prisma.agent.findMany({
+        select: { source: true },
+      });
+      return rows.filter((row) => row.source === 'registered').length;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async persistBoardMoves(name: string): Promise<void> {
+    try {
+      await this.prisma.activityEvent.create({
+        data: {
+          type: 'board.moves',
+          payload: { name },
+          source: 'api',
+        },
+      });
+    } catch {
+      // A missing activity table must not fail the settings save.
+    }
   }
 }
 
@@ -160,9 +213,22 @@ export function changedFields(patch: {
   crewMap?: unknown;
   timezone?: unknown;
   setupDone?: unknown;
+  manualMoves?: unknown;
 }): string[] {
-  const order = ['namingMode', 'crewMap', 'timezone', 'setupDone'] as const;
+  const order = [
+    'namingMode',
+    'crewMap',
+    'timezone',
+    'setupDone',
+    'manualMoves',
+  ] as const;
   return order.filter((key) => patch[key] !== undefined);
+}
+
+function savedManual(value: unknown): boolean | null {
+  if (value === true) return true;
+  if (value === false) return false;
+  return null;
 }
 
 function settingsBody(
@@ -174,6 +240,8 @@ function settingsBody(
   timezoneSaved: boolean,
   setupDone: boolean,
   offlineAfterMsValue: number,
+  manualMoves: boolean | null,
+  manualMovesOn: boolean,
 ) {
   return {
     namingMode,
@@ -184,6 +252,8 @@ function settingsBody(
     timezoneSaved,
     setupDone,
     offlineAfterMs: offlineAfterMsValue,
+    manualMoves,
+    manualMovesOn,
     ts: Date.now(),
   };
 }

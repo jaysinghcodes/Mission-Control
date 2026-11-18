@@ -42,13 +42,16 @@ async function compile(srcRel, outName) {
       target: ts.ScriptTarget.ES2022,
     },
   })
-  const js = outputText.replaceAll("from './board'", "from './board.js'")
+  const js = outputText
+    .replaceAll("from './board'", "from './board.js'")
+    .replaceAll("from './board-lock'", "from './board-lock.js'")
   const out = new URL(outName, gen)
   await writeFile(out, js)
   return out
 }
 
 await compile('../src/lib/board.ts', 'board.js')
+await compile('../src/lib/board-lock.ts', 'board-lock.js')
 await compile('../src/lib/boardDrag.ts', 'boardDrag.js')
 
 const { createElement: h, useState } = await import('react')

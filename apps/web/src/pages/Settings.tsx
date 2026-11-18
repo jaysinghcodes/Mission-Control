@@ -5,7 +5,14 @@ import { Card, PillButton, SectionLabel } from '../components/ui'
 import { NamingChoice } from '../components/NamingChoice'
 import { ProviderStatus, type DetectedModel } from '../components/ProviderStatus'
 import { TimezoneSelect } from '../components/TimezoneSelect'
-import { Btn } from '../components/shell'
+import { Btn, Segmented } from '../components/shell'
+import {
+  BOARD_SECTION,
+  MANUAL_MOVES_HELP,
+  MANUAL_MOVES_LABEL,
+  MANUAL_MOVES_OPTIONS,
+  manualMovesStateLine,
+} from '../lib/board-lock'
 import { useNaming } from '../lib/naming'
 import { useSession } from '../lib/session'
 import { pluralize } from '../lib/pluralize'
@@ -40,6 +47,9 @@ export default function Settings() {
   const [pending, setPending] = useState<Agent | null>(null)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
+  const [movesError, setMovesError] = useState<string | null>(null)
+  const [movesBusy, setMovesBusy] = useState(false)
+  const movesIndex = naming.manualMoves === true ? 1 : naming.manualMoves === false ? 2 : 0
   const agents = agentsQ.data?.agents ?? []
   // Esc closes the remove confirm, same as Cancel and the backdrop. Not while removing.
   useEscape(() => setPending(null), pending !== null && !removing)
@@ -58,6 +68,16 @@ export default function Settings() {
       prev ? { ...prev, agents: prev.agents.filter((row) => row.id !== agent.id) } : prev
     ))
     agentsQ.refetch()
+  }
+
+  async function saveMoves(index: number) {
+    if (movesBusy || index === movesIndex) return
+    const value = index === 1 ? true : index === 2 ? false : null
+    setMovesBusy(true)
+    setMovesError(null)
+    const message = await naming.save({ manualMoves: value })
+    setMovesBusy(false)
+    if (message) setMovesError(message)
   }
 
   async function saveZone() {
@@ -120,6 +140,27 @@ export default function Settings() {
             ))}
           </ul>
         )}
+      </Card>
+
+      <Card className="mt-4 px-5 py-4">
+        <div data-settings-board="true">
+        <SectionLabel>{BOARD_SECTION}</SectionLabel>
+        <div className="mt-3 text-[13px] font-semibold">{MANUAL_MOVES_LABEL}</div>
+        <div className="mt-3 max-w-full">
+          <Segmented
+            labels={[...MANUAL_MOVES_OPTIONS]}
+            active={movesIndex}
+            onChange={(index) => { void saveMoves(index) }}
+            ariaLabel={MANUAL_MOVES_LABEL}
+            fit
+          />
+        </div>
+        <p className="mt-3 break-words text-[13px] text-mc-sub">{MANUAL_MOVES_HELP}</p>
+        <p className="mt-2 break-words text-[13px] text-mc-text" data-manual-moves-state="true">
+          {manualMovesStateLine(naming.manualMovesOn)}
+        </p>
+        {movesError && <p className="mt-3 break-words text-[13px] text-mc-orangetext">{movesError}</p>}
+        </div>
       </Card>
 
       <Card className="mt-4 px-5 py-4" data-settings-timezone="true">

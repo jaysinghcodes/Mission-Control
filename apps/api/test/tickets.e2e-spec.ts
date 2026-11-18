@@ -5,7 +5,7 @@ import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { applyWriteToken } from './write-token';
-import { bodyMessage } from './lint-helpers';
+import { bodyMessage, responseJson } from './lint-helpers';
 
 /**
  * Tickets e2e — real Nest app + REAL Postgres (PR #20 QA findings A–E + QA-1).
@@ -35,6 +35,8 @@ describe('Tickets (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   const created: string[] = [];
+  /** Restored after the file. Other e2e files register agents in this database. */
+  let savedManual: boolean | null = null;
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -104,6 +106,18 @@ describe('Tickets (e2e)', () => {
         'Tickets e2e needs Postgres at DATABASE_URL (see header comment)',
       );
     }
+    // Manual moves On keeps today's human creates and moves working when
+    // another suite has already registered an agent in this database.
+    const row = await prisma.setting.findUnique({ where: { id: 'default' } });
+    savedManual =
+      row?.manualMoves === true || row?.manualMoves === false
+        ? row.manualMoves
+        : null;
+    await prisma.setting.upsert({
+      where: { id: 'default' },
+      create: { id: 'default', mission: '', manualMoves: true },
+      update: { manualMoves: true },
+    });
   });
 
   afterAll(async () => {
@@ -135,6 +149,14 @@ describe('Tickets (e2e)', () => {
       } catch (err) {
         console.warn('[tickets.e2e] cleanup failed:', err);
       }
+    }
+    if (prisma) {
+      await prisma.setting
+        .update({
+          where: { id: 'default' },
+          data: { manualMoves: savedManual },
+        })
+        .catch(() => undefined);
     }
     if (app) await app.close();
   });
@@ -306,6 +328,222 @@ describe('Tickets (e2e)', () => {
       const keys = settled.map((r) => ticketOf(r).key);
       expect(new Set(keys).size).toBe(10);
       for (const key of keys) expect(key).toMatch(/^MC-[0-9]+$/);
+    });
+  });
+
+  describe('claims and the ready route', () => {
+    const stamp =
+      `${process.env.JEST_WORKER_ID ?? '0'}${Date.now().toString(36)}`.replace(
+        /[^a-z0-9]/g,
+        '',
+      );
+    const agentIds = Array.from({ length: 10 }, (_, i) =>
+      `c${i}${stamp}`.slice(0, 64),
+    );
+    const savedEnv = {
+      token: process.env.INGEST_TOKEN,
+      proxy: process.env.BUNDLED_PROXY,
+    };
+    let previousManual: boolean | null = null;
+
+    beforeAll(async () => {
+      const row = await prisma.setting.findUnique({ where: { id: 'default' } });
+      previousManual =
+        row?.manualMoves === true || row?.manualMoves === false
+          ? row.manualMoves
+          : null;
+      await prisma.setting.upsert({
+        where: { id: 'default' },
+        create: { id: 'default', mission: '', manualMoves: true },
+        update: { manualMoves: true },
+      });
+      for (const [index, id] of agentIds.entries()) {
+        await prisma.agent.upsert({
+          where: { id },
+          create: {
+            id,
+            name: `Claim ${index}`,
+            source: 'registered',
+            position: 800 + index,
+          },
+          update: { source: 'registered', name: `Claim ${index}` },
+        });
+      }
+    });
+
+    afterAll(async () => {
+      if (savedEnv.token === undefined) delete process.env.INGEST_TOKEN;
+      else process.env.INGEST_TOKEN = savedEnv.token;
+      if (savedEnv.proxy === undefined) delete process.env.BUNDLED_PROXY;
+      else process.env.BUNDLED_PROXY = savedEnv.proxy;
+      await prisma.agent.deleteMany({ where: { id: { in: agentIds } } });
+      await prisma.setting
+        .update({
+          where: { id: 'default' },
+          data: { manualMoves: previousManual },
+        })
+        .catch(() => undefined);
+    });
+
+    it('gives one of ten parallel claims the ticket and nine an already claimed 409', async () => {
+      const createdTicket = await createTicket({
+        title: 'e2e claim race',
+        status: 'backlog',
+      });
+      const ticket = ticketOf(createdTicket);
+      const readied = await request(app.getHttpServer())
+        .patch(`/tickets/${ticket.id}`)
+        .send({ status: 'todo' });
+      expect(readied.status).toBe(200);
+
+      const results = await Promise.all(
+        agentIds.map((id) =>
+          request(app.getHttpServer())
+            .patch(`/tickets/${ticket.id}`)
+            .set('x-actor-id', id)
+            .send({ status: 'build' }),
+        ),
+      );
+      const won = results.filter((res) => res.status === 200);
+      const lost = results.filter((res) => res.status === 409);
+      expect(won).toHaveLength(1);
+      expect(lost).toHaveLength(9);
+      const winner = (won[0].body as { ticket: { assignee: string } }).ticket
+        .assignee;
+      expect(agentIds).toContain(winner);
+      for (const res of lost) {
+        expect(res.body).toMatchObject({
+          statusCode: 409,
+          error: 'already claimed',
+          claimedBy: winner,
+        });
+        expect(bodyMessage(res)).toBe(
+          `${ticket.key} was picked up by ${winner}.`,
+        );
+      }
+      const picked = await prisma.activityEvent.findMany({
+        where: {
+          type: 'run.progress',
+          payload: { path: ['ticket'], equals: ticket.key },
+        },
+      });
+      const claims = picked.filter((row) => {
+        const payload = row.payload as { name?: string } | null;
+        return payload?.name === `${ticket.key} picked up`;
+      });
+      expect(claims).toHaveLength(1);
+
+      const again = await request(app.getHttpServer())
+        .patch(`/tickets/${ticket.id}`)
+        .set('x-actor-id', winner)
+        .send({ status: 'build' });
+      expect(again.status).toBe(200);
+      const after = await prisma.activityEvent.findMany({
+        where: {
+          type: 'run.progress',
+          payload: { path: ['ticket'], equals: ticket.key },
+        },
+      });
+      expect(
+        after.filter((row) => {
+          const payload = row.payload as { name?: string } | null;
+          return payload?.name === `${ticket.key} picked up`;
+        }),
+      ).toHaveLength(1);
+
+      const released = await request(app.getHttpServer())
+        .patch(`/tickets/${ticket.id}`)
+        .set('x-actor-id', winner)
+        .send({ status: 'todo' });
+      expect(released.status).toBe(200);
+      const releasedBody = released.body as {
+        ticket: { status: string; assignee: string };
+      };
+      expect(releasedBody.ticket.status).toBe('todo');
+      expect(releasedBody.ticket.assignee).not.toBe(winner);
+
+      const other = agentIds.find((id) => id !== winner) ?? agentIds[0];
+      const ready = await request(app.getHttpServer())
+        .get('/tickets/ready')
+        .set('x-actor-id', other);
+      expect(ready.status).toBe(200);
+      const listed = (ready.body as { tickets: { id: string }[] }).tickets;
+      expect(listed.some((row) => row.id === ticket.id)).toBe(true);
+    });
+
+    it('refuses a human move while Automatic is locked, then allows the same move once Manual moves is On', async () => {
+      await prisma.setting.update({
+        where: { id: 'default' },
+        data: { manualMoves: null },
+      });
+      try {
+        const createdTicket = await createTicket({
+          title: 'e2e lock then unlock',
+          status: 'backlog',
+        });
+        const ticket = ticketOf(createdTicket);
+        const readied = await request(app.getHttpServer())
+          .patch(`/tickets/${ticket.id}`)
+          .send({ status: 'todo' });
+        expect(readied.status).toBe(200);
+
+        const refused = await request(app.getHttpServer())
+          .patch(`/tickets/${ticket.id}`)
+          .send({ status: 'build' });
+        expect(refused.status).toBe(409);
+        expect(bodyMessage(refused)).toBe(
+          'Agents move tickets past To Do. Turn on Manual moves in Settings to move it yourself.',
+        );
+
+        await prisma.setting.update({
+          where: { id: 'default' },
+          data: { manualMoves: true },
+        });
+        const moved = await request(app.getHttpServer())
+          .patch(`/tickets/${ticket.id}`)
+          .send({ status: 'build' });
+        expect(moved.status).toBe(200);
+        expect(
+          (moved.body as { ticket: { status: string } }).ticket.status,
+        ).toBe('build');
+      } finally {
+        await prisma.setting.update({
+          where: { id: 'default' },
+          data: { manualMoves: true },
+        });
+      }
+    });
+
+    it('requires a registered actor on loopback and a token off loopback', async () => {
+      const missing = await request(app.getHttpServer()).get('/tickets/ready');
+      expect(missing.status).toBe(400);
+      expect(bodyMessage(missing)).toBe('actor must be a registered agent id');
+
+      const loopback = await request(app.getHttpServer())
+        .get('/tickets/ready')
+        .set('x-actor-id', agentIds[0]);
+      expect(loopback.status).toBe(200);
+      expect(
+        Array.isArray(responseJson<{ tickets?: unknown }>(loopback).tickets),
+      ).toBe(true);
+
+      process.env.INGEST_TOKEN = 'e2e-ready-token';
+      process.env.BUNDLED_PROXY = '127.0.0.1';
+      const denied = await request(app.getHttpServer())
+        .get('/tickets/ready')
+        .set('x-mc-remote', '1')
+        .set('x-actor-id', agentIds[0]);
+      expect(denied.status).toBe(401);
+
+      const allowed = await request(app.getHttpServer())
+        .get('/tickets/ready')
+        .set('x-mc-remote', '1')
+        .set('x-ingest-token', 'e2e-ready-token')
+        .set('x-actor-id', agentIds[0]);
+      expect(allowed.status).toBe(200);
+      expect(
+        Array.isArray(responseJson<{ tickets?: unknown }>(allowed).tickets),
+      ).toBe(true);
     });
   });
 });
